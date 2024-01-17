@@ -1,13 +1,21 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
 
-const UtsavDb = sequelize.define(
-  'UtsavDb',
+const UtsavPackagesDb = sequelize.define(
+  'UtsavPackagesDb',
   {
     id: {
       type: DataTypes.INTEGER,
       primaryKey: true,
       autoIncrement: true
+    },
+    utsavid: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'utsav_db',
+        key: 'id'
+      }
     },
     name: {
       type: DataTypes.STRING,
@@ -21,21 +29,15 @@ const UtsavDb = sequelize.define(
       type: DataTypes.DATEONLY,
       allowNull: false
     },
-    max_guests: {
-      type: DataTypes.BIGINT,
+    amount: {
+      type: DataTypes.INTEGER,
       allowNull: false
-    },
-    status: {
-      type: DataTypes.ENUM,
-      allowNull: true,
-      values: ['open', 'closed'],
-      defaultValue: 'open'
     }
   },
   {
-    tableName: 'utsav_db',
+    tableName: 'utsav_packages_db',
     timestamps: true
   }
 );
 
-export default UtsavDb;
+export default UtsavPackagesDb;

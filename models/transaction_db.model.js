@@ -1,6 +1,8 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
 
+/* DEPRECATED TABLE */
+
 const TransactionDb = sequelize.define(
   'TransactionDb',
   {
@@ -34,22 +36,6 @@ const TransactionDb = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
-    // roombookingid: {
-    //   type: DataTypes.STRING,
-    //   allowNull: true,
-    //   references: {
-    //     model: 'guest_stay',
-    //     key: 'bookingid'
-    //   }
-    // },
-    // travelbookingid: {
-    //   type: DataTypes.STRING,
-    //   allowNull: true,
-    //   references: {
-    //     model: 'travel_db',
-    //     key: 'bookingid'
-    //   }
-    // },
     status: {
       type: DataTypes.ENUM,
       allowNull: true,

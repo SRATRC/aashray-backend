@@ -151,7 +151,7 @@ export const CancelTravel = async (req, res) => {
   if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
     travelBookingTransaction.status = STATUS_CANCELLED;
     await travelBookingTransaction.save({ transaction: t });
-  } else {
+  } else if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
     travelBookingTransaction.status = STATUS_AWAITING_REFUND;
     await travelBookingTransaction.save({ transaction: t });
   }

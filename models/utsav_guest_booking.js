@@ -30,6 +30,14 @@ const UtsavGuestBooking = sequelize.define(
         key: 'cardno'
       }
     },
+    packageid: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'utsav_packages_db',
+        key: 'id'
+      }
+    },
     name: {
       type: DataTypes.STRING,
       allowNull: false
@@ -39,15 +47,27 @@ const UtsavGuestBooking = sequelize.define(
       allowNull: false,
       values: ['M', 'F']
     },
-    age: {
-      type: DataTypes.INTEGER,
-      allowNull: false
+    dob: {
+      type: DataTypes.DATEONLY,
+      allowNull: true
     },
     mobno: {
       type: DataTypes.BIGINT,
       allowNull: false
     },
     email: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    idType: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    idNo: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    address: {
       type: DataTypes.STRING,
       allowNull: false
     },

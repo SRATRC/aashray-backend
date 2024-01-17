@@ -22,6 +22,14 @@ const UtsavBooking = sequelize.define(
         key: 'id'
       }
     },
+    packageid: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'utsav_packages_db',
+        key: 'id'
+      }
+    },
     cardno: {
       type: DataTypes.STRING,
       allowNull: false,

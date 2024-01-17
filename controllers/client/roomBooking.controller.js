@@ -260,7 +260,7 @@ export const CancelBooking = async (req, res) => {
   if (roomBookingTransaction.status == STATUS_PAYMENT_PENDING) {
     roomBookingTransaction.status = STATUS_CANCELLED;
     await roomBookingTransaction.save({ transaction: t });
-  } else {
+  } else if (roomBookingTransaction.status == STATUS_PAYMENT_COMPLETED) {
     roomBookingTransaction.status = STATUS_AWAITING_REFUND;
     await roomBookingTransaction.save({ transaction: t });
   }
