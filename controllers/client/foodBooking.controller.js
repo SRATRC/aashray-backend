@@ -1,69 +1,74 @@
-import { RoomBooking, FoodDb, GuestFoodDb } from '../../models/associations.js';
+import {
+  RoomBooking,
+  FlatBooking,
+  FoodDb,
+  GuestFoodDb
+} from '../../models/associations.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
+import ApiError from '../../utils/ApiError.js';
 
+// FIXME: check the whole codebase and optimise it
 export const RegisterFood = async (req, res) => {
-  const t = await database.transaction();
-  try {
-    // food is already booked then it wont register
-    if (await isFoodBooked(req)) {
-      return res
-        .status(200)
-        .send({ message: 'Food Already booked on one on more of the dates' });
-    }
-
-    // if room is not booked on thoese dates then it'll not let user's register
-    if (await isRoomBooked(req)) {
-      return res.status(200).send({
-        message: 'You do not have a room booked on one or more dates selected'
-      });
-    }
-
-    const startDate = new Date(req.body.start_date);
-    const endDate = new Date(req.body.end_date);
-
-    const allDates = getDates(startDate, endDate);
-
-    for (var date of allDates) {
-      const temp = await FoodDb.create(
-        {
-          cardno: req.user.cardno,
-          date: date,
-          breakfast: req.body.breakfast,
-          lunch: req.body.lunch,
-          dinner: req.body.dinner,
-          hightea: req.body.high_tea,
-          spicy: req.body.spicy,
-          plateissued: 0
-        },
-        { transaction: t }
-      );
-
-      if (temp.dataValues == undefined) {
-        await t.rollback();
-        return res.status(500).send({ message: 'Failed to book food' });
-      }
-    }
-
-    await t.commit();
-
-    return res.status(200).send({
-      message: 'Food Booked successfully'
-    });
-  } catch (err) {
-    await t.rollback();
+  if (await isFoodBooked(req)) {
     return res
-      .status(404)
-      .send({ error: err.message, message: 'An error Occurred' });
+      .status(200)
+      .send({ message: 'Food Already booked on one on more of the dates' });
   }
+
+  if (
+    !(
+      (await isRoomBooked(
+        req.body.start_date,
+        req.body.end_date,
+        req.user.cardno
+      )) ||
+      (await isFlatBooked(
+        req.body.start_date,
+        req.body.end_date,
+        req.user.cardno
+      ))
+    )
+  ) {
+    throw new ApiError(
+      403,
+      'You do not have a room booked on one or more dates selected'
+    );
+  }
+
+  const startDate = new Date(req.body.start_date);
+  const endDate = new Date(req.body.end_date);
+  const allDates = getDates(startDate, endDate);
+
+  var food_data = [];
+  for (var date of allDates) {
+    food_data.push({
+      cardno: req.user.cardno,
+      date: date,
+      breakfast: req.body.breakfast,
+      lunch: req.body.lunch,
+      dinner: req.body.dinner,
+      hightea: req.body.high_tea,
+      spicy: req.body.spicy,
+      plateissued: 0
+    });
+  }
+
+  await FoodDb.bulkCreate(food_data);
+
+  return res.status(200).send({
+    message: 'Food Booked successfully'
+  });
 };
 
 export const RegisterForGuest = async (req, res) => {
   const t = await database.transaction();
+  req.transaction = t;
+
   try {
-    // TODO: all add a check if user has booked food on dates of guest booking
+    // TODO: add a check if user has booked food on dates of guest booking
     for (let i = 0; i < req.body.guests; i++) {
       for (var data of req.body.bookings) {
         const temp = await GuestFoodDb.create(
@@ -207,8 +212,6 @@ export const CancelGuestFood = async (req, res) => {
   }
 };
 
-// TODO: Passbook might not be needed
-
 async function isFoodBooked(req) {
   const startDate = new Date(req.body.start_date);
   const endDate = new Date(req.body.end_date);
@@ -225,28 +228,72 @@ async function isFoodBooked(req) {
   else return false;
 }
 
-async function isRoomBooked(req) {
-  const startDate = new Date(req.body.start_date);
-  const endDate = new Date(req.body.end_date);
-
-  const allDates = getDates(startDate, endDate);
-
-  const user_bookings = await RoomBooking.findAll({
+async function isRoomBooked(checkin, checkout, cardno) {
+  const result = await RoomBooking.findAll({
     where: {
-      cardno: req.body.cardno || req.user.cardno,
-      status: { [Sequelize.Op.in]: ['checkedin', 'waiting'] }
+      [Sequelize.Op.or]: [
+        {
+          checkin: {
+            [Sequelize.Op.gte]: checkin,
+            [Sequelize.Op.lt]: checkout
+          }
+        },
+        {
+          checkout: {
+            [Sequelize.Op.gt]: checkin,
+            [Sequelize.Op.lte]: checkout
+          }
+        }
+      ],
+      cardno: cardno,
+      status: {
+        [Sequelize.Op.in]: [
+          STATUS_WAITING,
+          ROOM_STATUS_CHECKEDIN,
+          ROOM_STATUS_PENDING_CHECKIN
+        ]
+      }
     }
   });
 
-  for (var booking of user_bookings) {
-    var chk_in = new Date(booking.dataValues.checkin);
-    var chk_out = new Date(booking.dataValues.checkout);
-    for (var date of allDates) {
-      var dt3 = new Date(date);
-      if (chk_in <= dt3 && chk_out >= dt3) {
-        return false;
+  if (result.length > 0) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+async function isFlatBooked(checkin, checkout, cardno) {
+  const result = await FlatBooking.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          checkin: {
+            [Sequelize.Op.gte]: checkin,
+            [Sequelize.Op.lt]: checkout
+          }
+        },
+        {
+          checkout: {
+            [Sequelize.Op.gt]: checkin,
+            [Sequelize.Op.lte]: checkout
+          }
+        }
+      ],
+      cardno: cardno,
+      status: {
+        [Sequelize.Op.in]: [
+          STATUS_WAITING,
+          ROOM_STATUS_CHECKEDIN,
+          ROOM_STATUS_PENDING_CHECKIN
+        ]
       }
     }
+  });
+
+  if (result.length > 0) {
+    return true;
+  } else {
+    return false;
   }
-  return true;
 }
