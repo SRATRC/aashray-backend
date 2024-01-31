@@ -3,6 +3,8 @@ import ShibirDb from './shibir_db.model.js';
 import GateRecord from './gate_record.model.js';
 import FoodDb from './food_db.model.js';
 import GuestFoodDb from './guest_food_db.model.js';
+import FlatDb from './flatdb.model.js';
+import FlatBooking from './flat_booking.model.js';
 import RoomBooking from './room_booking.model.js';
 import RoomBookingTransaction from './room_booking_transaction.model.js';
 import RoomDb from './roomdb.model.js';
@@ -19,6 +21,9 @@ import UtsavBookingTransaction from './utsav_booking_transaction.model.js';
 import UtsavGuestBookingTransaction from './utsav_guest_guest_transaction.model.js';
 import UtsavDb from './utsav_db.model.js';
 import UtsavPackagesDb from './utsav_packages.model.js';
+import AdminUsers from './admin_users.model.js';
+import AdminRoles from './admin_roles.model.js';
+import Roles from './roles.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -41,6 +46,18 @@ CardDb.hasMany(GuestFoodDb, {
 });
 CardDb.hasMany(ShibirBookingDb, {
   foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(FlatBooking, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(FlatDb, {
+  foreignKey: 'owner',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -140,6 +157,26 @@ RoomBooking.hasMany(RoomBookingTransaction, {
 RoomBooking.belongsTo(RoomDb, {
   foreignKey: 'roomno',
   targetKey: 'roomno'
+});
+
+// Flat
+FlatDb.belongsTo(CardDb, {
+  foreignKey: 'owner',
+  targetKey: 'cardno'
+});
+FlatBooking.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+FlatDb.hasMany(FlatBooking, {
+  foreignKey: 'flatno',
+  targetKey: 'flatno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+FlatBooking.belongsTo(FlatDb, {
+  foreignKey: 'flatno',
+  targetKey: 'flatno'
 });
 
 // Shibir
@@ -304,6 +341,29 @@ UtsavPackagesDb.hasMany(UtsavGuestBooking, {
   onUpdate: 'CASCADE'
 });
 
+// Admin Roles
+AdminUsers.hasMany(AdminRoles, {
+  foreignKey: 'user_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+AdminRoles.belongsTo(AdminUsers, {
+  foreignKey: 'user_id',
+  targetKey: 'id'
+});
+
+Roles.hasMany(AdminRoles, {
+  foreignKey: 'role_name',
+  sourceKey: 'name',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+AdminRoles.belongsTo(Roles, {
+  foreignKey: 'role_name',
+  targetKey: 'name'
+});
+
 export {
   CardDb,
   ShibirDb,
@@ -316,6 +376,8 @@ export {
   RoomBooking,
   RoomBookingTransaction,
   RoomDb,
+  FlatDb,
+  FlatBooking,
   TransactionDb,
   TravelDb,
   TravelBookingTransaction,
@@ -325,5 +387,8 @@ export {
   UtsavGuestBooking,
   UtsavBookingTransaction,
   UtsavGuestBookingTransaction,
-  UtsavPackagesDb
+  UtsavPackagesDb,
+  AdminRoles,
+  AdminUsers,
+  Roles
 };
