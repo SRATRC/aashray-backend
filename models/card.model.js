@@ -1,5 +1,12 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import {
+  STATUS_ONPREM,
+  STATUS_OFFPREM,
+  STATUS_RESIDENT,
+  STATUS_MUMUKSHU,
+  STATUS_SEVA_KUTIR
+} from '../config/constants.js';
 
 const CardDb = sequelize.define(
   'CardDb',
@@ -24,6 +31,7 @@ const CardDb = sequelize.define(
     },
     mobno: {
       type: DataTypes.BIGINT,
+      unique: true,
       allowNull: false
     },
     email: {
@@ -66,12 +74,12 @@ const CardDb = sequelize.define(
     status: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['onprem', 'offprem']
+      values: [STATUS_ONPREM, STATUS_OFFPREM]
     },
     res_status: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['MUMUKSHU', 'PR']
+      values: [STATUS_MUMUKSHU, STATUS_RESIDENT, STATUS_SEVA_KUTIR]
     }
   },
   {
