@@ -1,11 +1,11 @@
 import {
   RoomDb,
   RoomBooking,
-  RoomBookingTransaction
+  RoomBookingTransaction,
+  FlatDb,
+  FlatBooking,
+  CardDb
 } from '../../models/associations.js';
-import getDates from '../../utils/getDates.js';
-import database from '../../config/database.js';
-import SendMail from '../../utils/sendMail.js';
 import {
   ROOM_STATUS_AVAILABLE,
   STATUS_WAITING,
@@ -19,9 +19,18 @@ import {
   STATUS_AWAITING_REFUND,
   STATUS_PAYMENT_COMPLETED
 } from '../../config/constants.js';
+import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
+import moment from 'moment';
+import {
+  checkRoomAlreadyBooked,
+  checkFlatAlreadyBooked,
+  calculateNights
+} from '../helper.js';
 import ApiError from '../../utils/ApiError.js';
+import SendMail from '../../utils/sendMail.js';
+import getDates from '../../utils/getDates.js';
 
 export const AvailabilityCalender = async (req, res) => {
   const availabilityCalender = await checkBedAvailability(req);
@@ -32,12 +41,32 @@ export const BookingForMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  if (await checkAlreadyBooked(req)) {
+  if (
+    await checkRoomAlreadyBooked(
+      req.body.checkin_date,
+      req.body.checkout_date,
+      req.user.cardno
+    )
+  ) {
     throw new ApiError(200, 'Already Booked');
   }
 
+  const today = moment().format('YYYY-MM-DD');
+  const checkinDate = new Date(req.body.checkin_date);
+  const checkoutDate = new Date(req.body.checkout_date);
+  if (
+    today > req.body.checkin_date ||
+    today > req.body.checkout_date ||
+    checkinDate > checkoutDate
+  ) {
+    throw new ApiError(200, 'Invalid Date');
+  }
+
   const gender = req.body.gender || req.user.gender;
-  const nights = await calculateNights(req);
+  const nights = await calculateNights(
+    req.body.checkin_date,
+    req.body.checkout_date
+  );
   var roomno = undefined;
   var booking = undefined;
 
@@ -84,7 +113,7 @@ export const BookingForMumukshu = async (req, res) => {
       { transaction: t }
     );
 
-    if (booking == undefined) {
+    if (!booking) {
       throw new ApiError(200, 'Failed to book a bed');
     }
 
@@ -99,11 +128,9 @@ export const BookingForMumukshu = async (req, res) => {
       { transaction: t }
     );
 
-    if (transaction == undefined) {
+    if (!transaction) {
       throw new ApiError(200, 'Failed to book a bed');
     }
-
-    await t.commit();
   } else {
     roomno = await RoomDb.findOne({
       where: {
@@ -130,10 +157,12 @@ export const BookingForMumukshu = async (req, res) => {
       { transaction: t }
     );
 
-    if (booking == undefined) {
+    if (!booking) {
       throw new ApiError(200, 'Failed to book a bed');
     }
   }
+
+  await t.commit();
 
   const message = `
       Dear ${req.user.issuedto},<br><br>
@@ -161,52 +190,84 @@ export const BookingForMumukshu = async (req, res) => {
   return res.status(201).send({ message: 'booked successfully' });
 };
 
-// TODO: flat booking button should only be shown on frontend if the person is a PR
-export const FlatBooking = async (req, res) => {
-  if (await checkAlreadyBooked(req)) {
+export const FlatBookingForMumukshu = async (req, res) => {
+  const ownFlat = await FlatDb.findOne({
+    where: {
+      flatno: req.body.flat_no,
+      owner: req.user.cardno
+    }
+  });
+  if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
+
+  const user_data = await CardDb.findOne({
+    where: {
+      mobno: req.body.mobno
+    }
+  });
+  if (!user_data) throw new ApiError(404, 'user not found');
+
+  if (
+    await checkFlatAlreadyBooked(
+      req.body.checkin_date,
+      req.body.checkout_date,
+      user_data.dataValues.cardno
+    )
+  ) {
     throw new ApiError(200, 'Already Booked');
   }
 
-  const nights = await calculateNights(req);
+  const today = moment().format('YYYY-MM-DD');
+  const checkinDate = new Date(req.body.checkin_date);
+  const checkoutDate = new Date(req.body.checkout_date);
+  if (
+    today > req.body.checkin_date ||
+    today > req.body.checkout_date ||
+    checkinDate > checkoutDate
+  ) {
+    throw new ApiError(200, 'Invalid Date');
+  }
 
-  const booking = await RoomBooking.create({
+  const nights = await calculateNights(
+    req.body.checkin_date,
+    req.body.checkout_date
+  );
+
+  const booking = await FlatBooking.create({
     bookingid: uuidv4(),
-    cardno: req.user.cardno,
-    roomno: req.body.flat_no,
+    cardno: user_data.dataValues.cardno,
+    flatno: req.body.flat_no,
     checkin: req.body.checkin_date,
     checkout: req.body.checkout_date,
     nights: nights,
-    roomtype: req.body.room_type,
-    status: ROOM_STATUS_PENDING_CHECKIN,
-    gender: gender
+    status: ROOM_STATUS_PENDING_CHECKIN
   });
 
-  if (booking == undefined) {
-    throw new ApiError(200, 'Failed to book your flat');
+  if (!booking) {
+    throw new ApiError(500, 'Failed to book your flat');
   }
 
-  const message = `
-      Dear ${booking.dataValues.guest_name},<br><br>
+  // const message = `
+  //     Dear ${req.user.issuedto},<br><br>
 
-			We are pleased to confirm your Flat booking as per following details:<br><br>
-			
-			<b>Booking id:</b> ${booking.dataValues.id}<br>
-			<b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
-			<b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
-			
-			Your Room Number will be provided from office upon checkin.<br><br>
+  // 		We are pleased to confirm your Flat booking as per following details:<br><br>
 
-			<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
-			We hope you have a spiritually blissful stay. <br><br>
-			
-			Research Centre Admin office, <br>
-			7875432613 / 9004273512`;
+  // 		<b>Booking id:</b> ${booking.dataValues.id}<br>
+  // 		<b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
+  // 		<b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
 
-  SendMail({
-    email: req.user.email,
-    subject: `Your Booking Confirmation for Stay at SRATRC`,
-    message
-  });
+  // 		Your Room Number will be provided from office upon checkin.<br><br>
+
+  // 		<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
+  // 		We hope you have a spiritually blissful stay. <br><br>
+
+  // 		Research Centre Admin office, <br>
+  // 		7875432613 / 9004273512`;
+
+  // SendMail({
+  //   email: req.user.email,
+  //   subject: `Your Booking Confirmation for Stay at SRATRC`,
+  //   message
+  // });
 
   return res.status(201).send({ message: 'booked successfully' });
 };
@@ -232,7 +293,7 @@ export const CancelBooking = async (req, res) => {
   req.transaction = t;
 
   const booking = await RoomBooking.findOne({
-    where: { bookingid: req.body.bookingid }
+    where: { bookingid: req.body.bookingid, cardno: req.user.cardno }
   });
 
   if (booking == undefined) {
@@ -286,11 +347,31 @@ export const CancelBooking = async (req, res) => {
 };
 
 export const AddWaitlist = async (req, res) => {
-  if (await checkAlreadyBooked(req)) {
+  if (
+    await checkRoomAlreadyBooked(
+      req.body.checkin_date,
+      req.body.checkout_date,
+      req.user.cardno
+    )
+  ) {
     return res.status(200).send({ message: 'Already Booked' });
   }
 
-  const nights = await calculateNights(req);
+  const today = moment().format('YYYY-MM-DD');
+  const checkinDate = new Date(req.body.checkin_date);
+  const checkoutDate = new Date(req.body.checkout_date);
+  if (
+    today > req.body.checkin_date ||
+    today > req.body.checkout_date ||
+    checkinDate > checkoutDate
+  ) {
+    throw new ApiError(200, 'Invalid Date');
+  }
+
+  const nights = await calculateNights(
+    req.body.checkin_date,
+    req.body.checkout_date
+  );
 
   const booking = await RoomBooking.create({
     cardno: req.user.cardno,
@@ -369,44 +450,4 @@ async function checkBedAvailability(req) {
     });
   }
   return { total_beds: total_beds, beds_occupied: beds_occupied };
-}
-
-async function checkAlreadyBooked(req) {
-  const startDate = new Date(req.body.checkin_date);
-  const endDate = new Date(req.body.checkout_date);
-  if (startDate != endDate) endDate.setDate(endDate.getDate() - 1);
-
-  const allDates = getDates(startDate, endDate);
-
-  const user_bookings = await RoomBooking.findAll({
-    where: {
-      cardno: req.body.cardno || req.user.cardno,
-      status: {
-        [Sequelize.Op.in]: [ROOM_STATUS_CHECKEDIN, ROOM_STATUS_PENDING_CHECKIN]
-      }
-    }
-  });
-
-  for (var booking of user_bookings) {
-    var chk_in = new Date(booking.dataValues.checkin);
-    var chk_out = new Date(booking.dataValues.checkout);
-    for (var date of allDates) {
-      var dt3 = new Date(date);
-      if (chk_in <= dt3 && chk_out > dt3) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-async function calculateNights(req) {
-  const date1 = new Date(req.body.checkin_date);
-  const date2 = new Date(req.body.checkout_date);
-
-  // Calculate the difference in days
-  const timeDifference = date2.getTime() - date1.getTime();
-  const nights = Math.ceil(timeDifference / (1000 * 3600 * 24));
-
-  return nights;
 }

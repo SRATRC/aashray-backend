@@ -4,7 +4,7 @@ import {
   AvailabilityCalender,
   BookingForMumukshu,
   ViewAllBookings,
-  FlatBooking,
+  FlatBookingForMumukshu,
   CancelBooking,
   AddWaitlist
 } from '../../controllers/client/roomBooking.controller.js';
@@ -18,8 +18,8 @@ router.post(
   CheckDatesBlocked,
   CatchAsync(BookingForMumukshu)
 );
-router.post('/flat', validateCard, CatchAsync(FlatBooking));
-router.post('/cancel/:cardno', validateCard, CatchAsync(CancelBooking)); // TODO: secure endpoint: users can cancel only their bookings
+router.post('/flat', validateCard, CatchAsync(FlatBookingForMumukshu));
+router.post('/cancel/:cardno', validateCard, CatchAsync(CancelBooking));
 router.post('/waitlist', validateCard, CatchAsync(AddWaitlist));
 router.get('/history/:cardno', validateCard, CatchAsync(ViewAllBookings));
 
