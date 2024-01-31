@@ -1,5 +1,6 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import { STATUS_ONPREM, STATUS_OFFPREM } from '../config/constants.js';
 
 const GateRecord = sequelize.define(
   'GateRecord',
@@ -18,8 +19,9 @@ const GateRecord = sequelize.define(
       }
     },
     status: {
-      type: DataTypes.STRING,
-      allowNull: false
+      type: DataTypes.ENUM,
+      allowNull: false,
+      values: [STATUS_ONPREM, STATUS_OFFPREM]
     }
   },
   {
