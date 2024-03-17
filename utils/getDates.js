@@ -1,6 +1,9 @@
-const getDates = (startDate, endDate) => {
+const getDates = (start_date, end_date) => {
+  const startDate = new Date(start_date);
+  const endDate = new Date(end_date);
+
   const dateArray = [];
-  let currentDate = new Date(startDate);
+  let currentDate = startDate;
 
   const formatDate = (date) => {
     const year = date.getFullYear();
@@ -16,5 +19,9 @@ const getDates = (startDate, endDate) => {
 
   return dateArray;
 };
+
+// TO GET NO OF DAYS
+// const days = moment(end_date).diff(moment(start_date), 'days');
+// console.log(days);
 
 export default getDates;

@@ -1,17 +1,30 @@
 import {
-  RoomBooking,
-  FlatBooking,
   FoodDb,
-  GuestFoodDb
+  GuestFoodDb,
+  GuestFoodTransactionDb
 } from '../../models/associations.js';
+import {
+  BREAKFAST_PRICE,
+  LUNCH_PRICE,
+  DINNER_PRICE,
+  TYPE_EXPENSE
+} from '../../config/constants.js';
+import {
+  checkRoomAlreadyBooked,
+  checkFlatAlreadyBooked,
+  isFoodBooked,
+  validateDate
+} from '../helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
+import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 
-// FIXME: check the whole codebase and optimise it
 export const RegisterFood = async (req, res) => {
+  validateDate(req.body.start_date, req.body.end_date);
+
   if (await isFoodBooked(req)) {
     return res
       .status(200)
@@ -20,12 +33,12 @@ export const RegisterFood = async (req, res) => {
 
   if (
     !(
-      (await isRoomBooked(
+      (await checkRoomAlreadyBooked(
         req.body.start_date,
         req.body.end_date,
         req.user.cardno
       )) ||
-      (await isFlatBooked(
+      (await checkFlatAlreadyBooked(
         req.body.start_date,
         req.body.end_date,
         req.user.cardno
@@ -38,9 +51,7 @@ export const RegisterFood = async (req, res) => {
     );
   }
 
-  const startDate = new Date(req.body.start_date);
-  const endDate = new Date(req.body.end_date);
-  const allDates = getDates(startDate, endDate);
+  const allDates = getDates(req.body.start_date, req.body.end_date);
 
   var food_data = [];
   for (var date of allDates) {
@@ -58,242 +69,212 @@ export const RegisterFood = async (req, res) => {
 
   await FoodDb.bulkCreate(food_data);
 
-  return res.status(200).send({
+  return res.status(201).send({
     message: 'Food Booked successfully'
   });
 };
 
 export const RegisterForGuest = async (req, res) => {
+  const { start_date, end_date, guest_count, breakfast, lunch, dinner } =
+    req.body;
+
+  validateDate(start_date, end_date);
+
   const t = await database.transaction();
   req.transaction = t;
 
-  try {
-    // TODO: add a check if user has booked food on dates of guest booking
-    for (let i = 0; i < req.body.guests; i++) {
-      for (var data of req.body.bookings) {
-        const temp = await GuestFoodDb.create(
-          {
-            cardno: req.body.cardno,
-            date: data.date,
-            breakfast: data.breakfast,
-            lunch: data.lunch,
-            dinner: data.dinner
-          },
-          { transaction: t }
-        );
-        if (temp.dataValues == undefined) {
-          await t.rollback();
-          return res
-            .status(500)
-            .send({ message: 'Failed to book food for guests' });
-        }
-      }
-    }
+  const allDates = getDates(start_date, end_date);
+  const days = allDates.length;
 
-    // TODO: ask if you should directly add the expnse for guest food to transaction db
-
-    await t.commit();
-
-    return res
-      .status(200)
-      .send({ message: 'Food Booked for guests successfully' });
-  } catch (err) {
-    await t.rollback();
-    return res
-      .status(404)
-      .send({ error: err.message, message: 'An error Occurred' });
+  var food_data = [];
+  const bookingid = uuidv4();
+  for (var date of allDates) {
+    food_data.push({
+      bookingid: bookingid,
+      cardno: req.user.cardno,
+      date: date,
+      guest_count: guest_count,
+      breakfast: req.body.breakfast,
+      lunch: req.body.lunch,
+      dinner: req.body.dinner
+    });
   }
+
+  await GuestFoodDb.bulkCreate(food_data, { transaction: t });
+
+  const food_cost =
+    (breakfast ? BREAKFAST_PRICE : 0) +
+    (lunch ? LUNCH_PRICE : 0) +
+    (dinner ? DINNER_PRICE : 0);
+  const amount = food_cost * guest_count * days;
+
+  await GuestFoodTransactionDb.create(
+    {
+      cardno: req.user.cardno,
+      bookingid: bookingid,
+      type: TYPE_EXPENSE,
+      amount: amount,
+      description: `Food Booking for ${guest_count} guests`
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+
+  return res.status(201).send({ message: 'successfully booked guest food' });
 };
 
 export const FetchFoodBookings = async (req, res) => {
-  try {
-    const page = req.body.page || 1;
-    const pageSize = req.body.page_size || 10;
-    const offset = (page - 1) * pageSize;
+  const page = req.body.page || 1;
+  const pageSize = req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
 
-    const today = moment().format('YYYY-MM-DD');
+  const today = moment().format('YYYY-MM-DD');
 
-    const data = await FoodDb.findAll({
-      where: {
-        cardno: req.body.cardno,
-        date: {
-          [Sequelize.Op.gte]: today
-        }
-      },
-      order: [['date', 'ASC']],
-      offset,
-      limit: pageSize
-    });
-    return res.status(200).send({ message: 'fetched results', data: data });
-  } catch (err) {
-    return res
-      .status(404)
-      .send({ error: err.message, message: 'An error Occurred' });
-  }
+  const data = await FoodDb.findAll({
+    where: {
+      cardno: req.body.cardno,
+      date: {
+        [Sequelize.Op.gte]: today
+      }
+    },
+    order: [['date', 'ASC']],
+    offset,
+    limit: pageSize
+  });
+  return res.status(200).send({ message: 'fetched results', data: data });
 };
 
 export const FetchGuestFoodBookings = async (req, res) => {
-  try {
-    const page = req.body.page || 1;
-    const pageSize = req.body.page_size || 10;
-    const offset = (page - 1) * pageSize;
+  const page = req.body.page || 1;
+  const pageSize = req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
 
-    const today = moment().format('YYYY-MM-DD');
+  const today = moment().format('YYYY-MM-DD');
 
-    const data = await GuestFoodDb.findAll({
-      attributes: [
-        'date',
-        [Sequelize.fn('COUNT', Sequelize.literal('*')), 'count']
-      ],
-      where: {
-        cardno: req.body.cardno,
-        date: {
-          [Sequelize.Op.gte]: today
-        }
-      },
-      group: ['date'],
-      order: [['date', 'ASC']],
-      offset,
-      limit: pageSize
-    });
-    return res.status(200).send({ message: 'fetched results', data: data });
-  } catch (err) {
-    return res
-      .status(404)
-      .send({ error: err.message, message: 'An error Occurred' });
-  }
+  const data = await GuestFoodDb.findAll({
+    // attributes: ['date', 'guest_count', 'breakfast', 'lunch', 'dinner'],
+    where: {
+      cardno: req.body.cardno,
+      date: {
+        [Sequelize.Op.gte]: today
+      }
+    },
+    order: [['date', 'ASC']],
+    offset,
+    limit: pageSize
+  });
+  return res.status(200).send({ message: 'fetched results', data: data });
 };
 
 export const CancelFood = async (req, res) => {
+  const updateData = req.body.food_data;
+
   const t = await database.transaction();
-  try {
-    for (var id of req.body.ids) {
-      var temp = await FoodDb.destroy(
-        {
-          where: { id: id }
-        },
-        { transaction: t }
-      );
-      if (temp != 1) {
-        return res.status(404).send({ error: 'There was an error deleting' });
+
+  for (let i = 0; i < updateData.length; i++) {
+    const isAvailable = await FoodDb.findOne({
+      where: {
+        cardno: req.user.cardno,
+        date: req.body.food_data[i].date
       }
+    });
+    if (isAvailable) {
+      isAvailable.breakfast = req.body.food_data[i].breakfast;
+      isAvailable.lunch = req.body.food_data[i].lunch;
+      isAvailable.dinner = req.body.food_data[i].dinner;
+      await isAvailable.save({ transaction: t });
     }
-    await t.commit();
-    return res.status(200).send({ message: 'Successfully deleted' });
-  } catch (err) {
-    await t.rollback();
-    return res
-      .status(404)
-      .send({ error: err.message, message: 'An error Occurred' });
   }
+
+  await FoodDb.destroy({
+    where: {
+      breakfast: false,
+      lunch: false,
+      dinner: false
+    },
+    transaction: t
+  });
+
+  await t.commit();
+  return res
+    .status(200)
+    .send({ message: 'Successfully Canceled Food Booking' });
 };
 
 export const CancelGuestFood = async (req, res) => {
+  const updateData = req.body.food_data;
+
   const t = await database.transaction();
-  try {
-    for (var id of req.body.ids) {
-      var temp = await GuestFoodDb.destroy(
-        {
-          where: { id: id }
+
+  for (let i = 0; i < updateData.length; i++) {
+    const isAvailable = await GuestFoodDb.findOne({
+      where: {
+        cardno: req.body.cardno,
+        bookingid: req.body.food_data[i].bookingid,
+        date: req.body.food_data[i].date
+      }
+    });
+    if (!isAvailable) continue;
+
+    await GuestFoodDb.update(
+      {
+        guest_count: updateData[i].guest_count,
+        breakfast: updateData[i].breakfast,
+        lunch: updateData[i].lunch,
+        dinner: updateData[i].dinner,
+        updatedBy: 'user'
+      },
+      {
+        where: {
+          id: updateData[i].id
         },
-        { transaction: t }
-      );
-      if (temp != 1) {
-        return res.status(404).send({ error: 'There was an error deleting' });
+        transaction: t
+      }
+    );
+  }
+
+  await GuestFoodDb.destroy({
+    where: {
+      breakfast: false,
+      lunch: false,
+      dinner: false
+    },
+    transaction: t
+  });
+
+  await t.commit();
+
+  const revisedPayments = await GuestFoodDb.findAll({
+    where: {
+      bookingid: updateData[0].bookingid
+    }
+  });
+
+  var total = 0;
+
+  for (let data of revisedPayments) {
+    total +=
+      data.dataValues.guest_count *
+      ((data.dataValues.breakfast ? BREAKFAST_PRICE : 0) +
+        (data.dataValues.lunch ? LUNCH_PRICE : 0) +
+        (data.dataValues.dinner ? DINNER_PRICE : 0));
+  }
+
+  const makeTransaction = await GuestFoodTransactionDb.update(
+    {
+      amount: total,
+      updatedBy: 'user'
+    },
+    {
+      where: {
+        bookingid: updateData[0].bookingid
       }
     }
-    await t.commit();
-    return res.status(200).send({ message: 'Successfully deleted' });
-  } catch (err) {
-    await t.rollback();
-    return res
-      .status(404)
-      .send({ error: err.message, message: 'An error Occurred' });
-  }
+  );
+
+  if (makeTransaction != 1)
+    throw new ApiError(500, 'Error occured while updating transaction');
+
+  return res.status(200).send({ message: 'Successfully deleted' });
 };
-
-async function isFoodBooked(req) {
-  const startDate = new Date(req.body.start_date);
-  const endDate = new Date(req.body.end_date);
-
-  const allDates = getDates(startDate, endDate);
-  const food_bookings = await FoodDb.findAll({
-    where: {
-      cardno: req.body.cardno || req.user.cardno,
-      date: { [Sequelize.Op.in]: allDates }
-    }
-  });
-
-  if (food_bookings.length > 0) return true;
-  else return false;
-}
-
-async function isRoomBooked(checkin, checkout, cardno) {
-  const result = await RoomBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          checkin: {
-            [Sequelize.Op.gte]: checkin,
-            [Sequelize.Op.lt]: checkout
-          }
-        },
-        {
-          checkout: {
-            [Sequelize.Op.gt]: checkin,
-            [Sequelize.Op.lte]: checkout
-          }
-        }
-      ],
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
-    }
-  });
-
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
-}
-
-async function isFlatBooked(checkin, checkout, cardno) {
-  const result = await FlatBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          checkin: {
-            [Sequelize.Op.gte]: checkin,
-            [Sequelize.Op.lt]: checkout
-          }
-        },
-        {
-          checkout: {
-            [Sequelize.Op.gt]: checkin,
-            [Sequelize.Op.lte]: checkout
-          }
-        }
-      ],
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
-    }
-  });
-
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
-}

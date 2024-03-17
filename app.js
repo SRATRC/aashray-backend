@@ -19,9 +19,12 @@ import maintenanceRoutes from './routes/client/maintenaneRequest.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
-import CardManagementRoutes from './routes/admin/cardManagement.routes.js';
-import GateManagementRoutes from './routes/admin/gateManagement.routes.js';
-import RoomManagementRoutes from './routes/admin/roomManagement.routes.js';
+import adminControlRoutes from './routes/admin/adminControls.routes.js';
+import adhyayanManagementRoutes from './routes/admin/adhyayanManagement.routes.js';
+import cardManagementRoutes from './routes/admin/cardManagement.routes.js';
+import foodManagementRoutes from './routes/admin/foodManagement.routes.js';
+import gateManagementRoutes from './routes/admin/gateManagement.routes.js';
+import roomManagementRoutes from './routes/admin/roomManagement.routes.js';
 
 (async () => {
   try {
@@ -59,20 +62,23 @@ app.get('/', (_req, res) => {
   res.status(200).send({ data: 'API is up and running... 🚀', status: 200 });
 });
 
-app.use('/api/gate', gateRoutes);
-app.use('/api/wifi', wifiRoutes);
-app.use('/api/room', roomRoutes);
-app.use('/api/food', foodRoutes);
-app.use('/api/travel', travelRoutes);
-app.use('/api/adhyayan', adhyayanRoutes);
-app.use('/api/utsav', utsavBookingRoutes);
-app.use('/api/maintenance', maintenanceRoutes);
+app.use('/api/v1/gate', gateRoutes);
+app.use('/api/v1/wifi', wifiRoutes);
+app.use('/api/v1/stay', roomRoutes);
+app.use('/api/v1/food', foodRoutes);
+app.use('/api/v1/travel', travelRoutes);
+app.use('/api/v1/adhyayan', adhyayanRoutes);
+app.use('/api/v1/utsav', utsavBookingRoutes);
+app.use('/api/v1/maintenance', maintenanceRoutes);
 
 // Admin Routes
-app.use('/api/admin/auth', authRoutes);
-app.use('/api/admin/card', CardManagementRoutes);
-app.use('/api/admin/gate', GateManagementRoutes);
-app.use('/api/admin/room', RoomManagementRoutes);
+app.use('/api/v1/admin/sudo', adminControlRoutes);
+app.use('/api/v1/admin/auth', authRoutes);
+app.use('/api/v1/admin/adhyayan', adhyayanManagementRoutes);
+app.use('/api/v1/admin/card', cardManagementRoutes);
+app.use('/api/v1/admin/food', foodManagementRoutes);
+app.use('/api/v1/admin/gate', gateManagementRoutes);
+app.use('/api/v1/admin/stay', roomManagementRoutes);
 
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {

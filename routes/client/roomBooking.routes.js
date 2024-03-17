@@ -11,16 +11,13 @@ import {
 import CatchAsync from '../../utils/CatchAsync.js';
 import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
 
+router.use(validateCard);
+
 router.get('/availablity', CatchAsync(AvailabilityCalender));
-router.post(
-  '/mumukshu',
-  validateCard,
-  CheckDatesBlocked,
-  CatchAsync(BookingForMumukshu)
-);
-router.post('/flat', validateCard, CatchAsync(FlatBookingForMumukshu));
-router.post('/cancel/:cardno', validateCard, CatchAsync(CancelBooking));
-router.post('/waitlist', validateCard, CatchAsync(AddWaitlist));
-router.get('/history/:cardno', validateCard, CatchAsync(ViewAllBookings));
+router.post('/room', CheckDatesBlocked, CatchAsync(BookingForMumukshu));
+router.post('/room/:cardno', CatchAsync(CancelBooking));
+router.post('/flat', CatchAsync(FlatBookingForMumukshu));
+router.post('/room/waitlist', CatchAsync(AddWaitlist));
+router.get('/bookings/:cardno', CatchAsync(ViewAllBookings));
 
 export default router;

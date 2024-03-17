@@ -32,6 +32,11 @@ const UtsavPackagesDb = sequelize.define(
     amount: {
       type: DataTypes.INTEGER,
       allowNull: false
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

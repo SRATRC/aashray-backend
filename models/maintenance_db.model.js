@@ -46,6 +46,11 @@ const MaintenanceDb = sequelize.define(
     finished_at: {
       type: DataTypes.INTEGER,
       allowNull: true
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

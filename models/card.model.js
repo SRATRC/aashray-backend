@@ -11,10 +11,15 @@ import {
 const CardDb = sequelize.define(
   'CardDb',
   {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
     cardno: {
       type: DataTypes.STRING,
       allowNull: false,
-      primaryKey: true
+      unique: true
     },
     issuedto: {
       type: DataTypes.STRING,
@@ -80,6 +85,11 @@ const CardDb = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: false,
       values: [STATUS_MUMUKSHU, STATUS_RESIDENT, STATUS_SEVA_KUTIR]
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

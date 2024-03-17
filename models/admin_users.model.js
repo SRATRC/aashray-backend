@@ -12,6 +12,7 @@ const AdminUsers = sequelize.define(
     },
     username: {
       type: DataTypes.STRING,
+      unique: true,
       allowNull: false
     },
     password: {
@@ -23,6 +24,11 @@ const AdminUsers = sequelize.define(
       allowNull: true,
       values: [STATUS_ACTIVE, STATUS_INACTIVE],
       defaultValue: STATUS_ACTIVE
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'SUPER ADMIN'
     }
   },
   {

@@ -15,45 +15,24 @@ import {
   ROOM_PRICE,
   STATUS_PAYMENT_PENDING,
   ROOM_BLOCKED,
-  ROOM_STATUS_AVAILABLE
+  ROOM_STATUS_AVAILABLE,
+  STATUS_INACTIVE,
+  STATUS_WAITING,
+  STATUS_CANCELLED
 } from '../../config/constants.js';
 import {
   checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
-  calculateNights
+  calculateNights,
+  validateDate
 } from '../helper.js';
+import getDates from '../../utils/getDates.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import SendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-
-export const occupancyReport = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  const result = await RoomBooking.findAll({
-    attributes: ['bookingid', 'roomno', 'checkin', 'checkout', 'nights'],
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'centre'],
-        where: {
-          res_status: STATUS_MUMUKSHU
-        }
-      }
-    ],
-    where: {
-      status: ROOM_STATUS_CHECKEDIN
-    },
-    offset,
-    limit: pageSize
-  });
-
-  return res.status(200).send({ message: 'Success', data: result });
-};
 
 export const manualCheckin = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -72,6 +51,7 @@ export const manualCheckin = async (req, res) => {
   }
 
   booking.status = ROOM_STATUS_CHECKEDIN;
+  booking.updatedBy = req.user.username;
   await booking.save();
 
   return res.status(200).send({ message: 'User Checked in', data: booking });
@@ -97,11 +77,13 @@ export const manualCheckout = async (req, res) => {
     booking.checkout = today;
     booking.nights = nights;
     booking.status = ROOM_STATUS_CHECKEDOUT;
+    booking.updatedBy = req.user.username;
     await booking.save({ transaction: t });
 
     const [transactionItemsUpdated] = await RoomBookingTransaction.update(
       {
-        amount: ROOM_PRICE * nights
+        amount: ROOM_PRICE * nights,
+        updatedBy: req.user.username
       },
       {
         where: {
@@ -116,6 +98,7 @@ export const manualCheckout = async (req, res) => {
     }
   } else {
     booking.status = ROOM_STATUS_CHECKEDOUT;
+    booking.updatedBy = req.user.username;
     await booking.save({ transaction: t });
   }
 
@@ -124,42 +107,22 @@ export const manualCheckout = async (req, res) => {
 };
 
 export const roomBooking = async (req, res) => {
+  validateDate(req.body.checkin_date, req.body.checkout_date);
+
   const t = await database.transaction();
   req.transaction = t;
-
-  const user_data = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email'],
-    where: {
-      mobno: req.params.mobno
-    }
-  });
-
-  if (!user_data) {
-    throw new ApiError(404, 'User not found');
-  }
 
   if (
     await checkRoomAlreadyBooked(
       req.body.checkin_date,
       req.body.checkout_date,
-      user_data.dataValues.cardno
+      req.user.cardno
     )
   ) {
     throw new ApiError(200, 'Already Booked');
   }
 
-  const today = moment().format('YYYY-MM-DD');
-  const checkinDate = new Date(req.body.checkin_date);
-  const checkoutDate = new Date(req.body.checkout_date);
-  if (
-    today > req.body.checkin_date ||
-    today > req.body.checkout_date ||
-    checkinDate > checkoutDate
-  ) {
-    throw new ApiError(200, 'Invalid Date');
-  }
-
-  const gender = user_data.dataValues.gender;
+  const gender = req.user.gender;
   const nights = await calculateNights(
     req.body.checkin_date,
     req.body.checkout_date
@@ -198,14 +161,15 @@ export const roomBooking = async (req, res) => {
     booking = await RoomBooking.create(
       {
         bookingid: uuidv4(),
-        cardno: user_data.dataValues.cardno,
+        cardno: req.user.cardno,
         roomno: roomno.dataValues.roomno,
         checkin: req.body.checkin_date,
         checkout: req.body.checkout_date,
         nights: nights,
         roomtype: req.body.room_type,
         status: ROOM_STATUS_CHECKEDIN,
-        gender: gender
+        gender: gender,
+        updatedBy: req.user.username
       },
       { transaction: t }
     );
@@ -216,11 +180,13 @@ export const roomBooking = async (req, res) => {
 
     const transaction = await RoomBookingTransaction.create(
       {
-        cardno: user_data.dataValues.cardno,
+        cardno: req.user.cardno,
         bookingid: booking.dataValues.bookingid,
         type: TYPE_EXPENSE,
         amount: ROOM_PRICE * nights,
-        status: STATUS_PAYMENT_PENDING
+        description: `Room Booked for ${nights} nights`,
+        status: STATUS_PAYMENT_PENDING,
+        updatedBy: req.user.username
       },
       { transaction: t }
     );
@@ -242,14 +208,15 @@ export const roomBooking = async (req, res) => {
     booking = await RoomBooking.create(
       {
         bookingid: uuidv4(),
-        cardno: user_data.dataValues.cardno,
+        cardno: req.user.cardno,
         roomno: roomno.dataValues.roomno,
         checkin: req.body.checkin_date,
         checkout: req.body.checkout_date,
         nights: nights,
         roomtype: req.body.room_type,
         status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender
+        gender: gender,
+        updatedBy: req.user.username
       },
       { transaction: t }
     );
@@ -262,7 +229,7 @@ export const roomBooking = async (req, res) => {
   await t.commit();
 
   const message = `
-      Dear ${user_data.dataValues.issuedto},<br><br>
+      Dear ${req.user.issuedto},<br><br>
 
     	We are pleased to confirm your booking for ${booking.dataValues.roomtype} room as per following details:<br><br>
 
@@ -279,7 +246,7 @@ export const roomBooking = async (req, res) => {
     	7875432613 / 9004273512`;
 
   SendMail({
-    email: user_data.dataValues.email,
+    email: req.user.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
     message
   });
@@ -288,6 +255,8 @@ export const roomBooking = async (req, res) => {
 };
 
 export const flatBooking = async (req, res) => {
+  validateDate(req.body.checkin_date, req.body.checkout_date);
+
   const user_data = await CardDb.findOne({
     attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email'],
     where: {
@@ -307,17 +276,6 @@ export const flatBooking = async (req, res) => {
     )
   ) {
     throw new ApiError(200, 'Already Booked');
-  }
-
-  const today = moment().format('YYYY-MM-DD');
-  const checkinDate = new Date(req.body.checkin_date);
-  const checkoutDate = new Date(req.body.checkout_date);
-  if (
-    today > req.body.checkin_date ||
-    today > req.body.checkout_date ||
-    checkinDate > checkoutDate
-  ) {
-    throw new ApiError(200, 'Invalid Date');
   }
 
   const nights = await calculateNights(
@@ -363,25 +321,6 @@ export const flatBooking = async (req, res) => {
   });
 
   return res.status(201).send({ message: 'booked successfully' });
-};
-
-// TODO: Deprecate this as update booking exists
-export const manualRoomAllocation = async (req, res) => {
-  const booking = await RoomBooking.findOne({
-    where: {
-      cardno: req.params.cardno,
-      status: ROOM_STATUS_CHECKEDIN
-    }
-  });
-
-  if (!booking) {
-    throw new ApiError(404, 'booking not found');
-  }
-
-  booking.roomno = req.body.roomno;
-  await booking.save();
-
-  return res.status(200).send({ message: 'Updated roomno' });
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
@@ -505,6 +444,7 @@ export const updateRoomBooking = async (req, res) => {
     }
   });
 
+  // TODO: check if roomno is not taken
   if (!room_no) throw new ApiError(404, 'unable to find room with that number');
   if (room_no == ROOM_BLOCKED)
     throw new ApiError(403, 'selected room is blocked');
@@ -513,7 +453,8 @@ export const updateRoomBooking = async (req, res) => {
     {
       roomno: roomno,
       roomtype: room_no.dataValues.roomtype,
-      status: status
+      status: status,
+      updatedBy: req.user.username
     },
     { where: { bookingid: bookingid, cardno: cardno }, transaction: t }
   );
@@ -562,6 +503,7 @@ export const updateFlatBooking = async (req, res) => {
   booking.checkout = checkout_date;
   booking.nights = nights;
   booking.status = status;
+  booking.updatedBy = req.user.username;
   await booking.save();
 
   return res.status(201).send({ message: 'booking updated successfully' });
@@ -620,7 +562,8 @@ export const blockRoom = async (req, res) => {
   if (isBlocked.dataValues.roomstatus == ROOM_BLOCKED) {
     return res.status(200).send({ message: 'blocked room successfully' });
   } else {
-    isBlocked.dataValues.roomstatus = ROOM_BLOCKED;
+    isBlocked.roomstatus = ROOM_BLOCKED;
+    isBlocked.updatedBy = req.user.username;
     await isBlocked.save();
   }
 
@@ -636,7 +579,8 @@ export const unblockRoom = async (req, res) => {
   if (isunBlocked.dataValues.roomstatus == ROOM_STATUS_AVAILABLE) {
     return res.status(200).send({ message: 'unblocking room successfully' });
   } else {
-    isunBlocked.dataValues.roomstatus = ROOM_STATUS_AVAILABLE;
+    isunBlocked.roomstatus = ROOM_STATUS_AVAILABLE;
+    isunBlocked.updatedBy = req.user.username;
     await isunBlocked.save();
   }
 
@@ -644,10 +588,21 @@ export const unblockRoom = async (req, res) => {
 };
 
 export const blockRC = async (req, res) => {
+  const alreadyBlocked = await BlockDates.findOne({
+    where: {
+      checkin: req.body.checkin_date,
+      checkout: req.body.checkout_date
+    }
+  });
+
+  if (alreadyBlocked)
+    throw new ApiError(500, 'Already blocked on mentioned dates');
+
   const block = await BlockDates.create({
     checkin: req.body.checkin_date,
     checkout: req.body.checkout_date,
-    comments: req.body.comments
+    comments: req.body.comments,
+    updatedBy: req.user.username
   });
 
   if (!block) {
@@ -658,15 +613,179 @@ export const blockRC = async (req, res) => {
 };
 
 export const unblockRC = async (req, res) => {
-  const blocked = await BlockDates.destroy({
+  const blocked = await BlockDates.findByPk(req.params.id);
+  blocked.updatedBy = req.user.username;
+  blocked.status = STATUS_INACTIVE;
+  await blocked.save();
+  return res.status(200).send({ message: 'Unblocked RC' });
+};
+
+export const occupancyReport = async (req, res) => {
+  const page = req.body.page || 1;
+  const pageSize = req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
+
+  const result = await RoomBooking.findAll({
+    attributes: ['bookingid', 'roomno', 'checkin', 'checkout', 'nights'],
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'centre'],
+        where: {
+          res_status: STATUS_MUMUKSHU
+        }
+      }
+    ],
     where: {
-      id: req.params.id
-    }
+      status: ROOM_STATUS_CHECKEDIN
+    },
+    offset,
+    limit: pageSize
   });
 
-  if (blocked != 1) {
-    throw new ApiError(500, 'Error in unblocking RC');
-  }
+  return res.status(200).send({ message: 'Success', data: result });
+};
 
-  return res.status(200).send({ message: 'Unblocked RC' });
+export const ReservationReport = async (req, res) => {
+  const { start_date, end_date } = req.query;
+
+  const reservations = await RoomBooking.findAll({
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'roomno',
+      'checkin',
+      'checkout',
+      'status',
+      'nights'
+    ],
+    where: {
+      checkin: { [Sequelize.Op.between]: [start_date, end_date] },
+      status: { [Sequelize.Op.not]: STATUS_WAITING }
+    },
+    order: [
+      ['checkin', 'ASC'],
+      ['roomno', 'ASC']
+    ],
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'centre'],
+        required: true
+      }
+    ]
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'fetched room reservation report', data: reservations });
+};
+
+export const CancellationReport = async (req, res) => {
+  const { start_date, end_date } = req.query;
+
+  const cancellations = await RoomBooking.findAll({
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'checkin',
+      'checkout',
+      'status',
+      'nights',
+      'updatedAt'
+    ],
+    where: {
+      checkin: { [Sequelize.Op.between]: [start_date, end_date] },
+      status: { [Sequelize.Op.eq]: STATUS_CANCELLED }
+    },
+    order: [['checkin', 'ASC']],
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'centre'],
+        required: true
+      }
+    ]
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'fetched room cancellation report', data: cancellations });
+};
+
+export const WaitlistReport = async (req, res) => {
+  const { start_date, end_date } = req.query;
+
+  const waiting = await RoomBooking.findAll({
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'checkin',
+      'checkout',
+      'status',
+      'nights'
+    ],
+    where: {
+      checkin: { [Sequelize.Op.between]: [start_date, end_date] },
+      status: { [Sequelize.Op.eq]: STATUS_WAITING }
+    },
+    order: [['checkin', 'ASC']],
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'centre'],
+        required: true
+      }
+    ]
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'fetched room waiting report', data: waiting });
+};
+
+export const dayWiseGuestCountReport = async (req, res) => {
+  const { start_date, end_date } = req.query;
+  const allDates = getDates(start_date, end_date);
+
+  var data = [];
+
+  for (let i of allDates) {
+    const daywise_report = await RoomBooking.findAll({
+      attributes: [
+        [
+          Sequelize.fn(
+            'SUM',
+            Sequelize.literal(`CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END`)
+          ),
+          'nac'
+        ],
+        [
+          Sequelize.fn(
+            'SUM',
+            Sequelize.literal(`CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END`)
+          ),
+          'ac'
+        ]
+      ],
+      where: {
+        checkin: { [Sequelize.Op.lte]: i },
+        checkout: { [Sequelize.Op.gt]: i },
+        status: {
+          [Sequelize.Op.in]: ['pending checkin', 'checkedin', 'checkedout']
+        }
+      },
+      group: 'checkin'
+    });
+    if (daywise_report[0]) {
+      data.push({
+        date: i,
+        nac: daywise_report[0].dataValues.nac,
+        ac: daywise_report[0].dataValues.ac
+      });
+    }
+  }
+  return res
+    .status(200)
+    .send({ message: 'fetched daywise report', data: data });
 };

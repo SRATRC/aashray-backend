@@ -42,6 +42,11 @@ const ShibirDb = sequelize.define(
       allowNull: true,
       values: ['open', 'closed'],
       defaultValue: 'open'
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

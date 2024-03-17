@@ -30,6 +30,11 @@ const ShibirBookingDb = sequelize.define(
       allowNull: true,
       values: ['waiting', 'confirmed', 'cancelled', 'admin canceled'],
       defaultValue: 'confirmed'
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

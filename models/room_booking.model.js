@@ -57,6 +57,11 @@ const RoomBooking = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: false,
       values: ['M', 'F', 'SCM', 'SCF']
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

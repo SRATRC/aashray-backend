@@ -10,32 +10,12 @@ import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
-router.get(
-  '/total',
-  auth,
-  authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN),
-  CatchAsync(fetchTotal)
-);
+router.use(auth);
+router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN));
 
-router.get(
-  '/totalPR',
-  auth,
-  authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN),
-  CatchAsync(fetchPR)
-);
-
-router.get(
-  '/totalMumukshu',
-  auth,
-  authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN),
-  CatchAsync(fetchMumukshu)
-);
-
-router.get(
-  '/totalSeva',
-  auth,
-  authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN),
-  CatchAsync(fetchSevaKutir)
-);
+router.get('/total', CatchAsync(fetchTotal));
+router.get('/totalPR', CatchAsync(fetchPR));
+router.get('/totalMumukshu', CatchAsync(fetchMumukshu));
+router.get('/totalSeva', CatchAsync(fetchSevaKutir));
 
 export default router;

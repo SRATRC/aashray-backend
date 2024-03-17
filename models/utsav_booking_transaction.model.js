@@ -42,6 +42,10 @@ const UtsavBookingTransaction = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
+    description: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
     status: {
       type: DataTypes.ENUM,
       allowNull: false,
@@ -52,6 +56,11 @@ const UtsavBookingTransaction = sequelize.define(
         STATUS_AWAITING_REFUND
       ],
       defaultValue: STATUS_PAYMENT_PENDING
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

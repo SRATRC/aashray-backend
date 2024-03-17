@@ -3,6 +3,8 @@ import ShibirDb from './shibir_db.model.js';
 import GateRecord from './gate_record.model.js';
 import FoodDb from './food_db.model.js';
 import GuestFoodDb from './guest_food_db.model.js';
+import GuestFoodTransactionDb from './guest_food_transaction.model.js';
+import FoodPhysicalPlate from './food_physical_plate.model.js';
 import FlatDb from './flatdb.model.js';
 import FlatBooking from './flat_booking.model.js';
 import RoomBooking from './room_booking.model.js';
@@ -11,14 +13,13 @@ import RoomDb from './roomdb.model.js';
 import ShibirBookingDb from './shibir_booking_db.model.js';
 import Departments from './departments.model.js';
 import MaintenanceDb from './maintenance_db.model.js';
-import TransactionDb from './transaction_db.model.js';
 import TravelDb from './travel_db.model.js';
-import TravelBookingTransaction from './travel_booking.model.js';
+import TravelBookingTransaction from './travel_booking_transaction.model.js';
 import WifiDb from './wifi.model.js';
 import UtsavBooking from './utsav_boking.model.js';
 import UtsavGuestBooking from './utsav_guest_booking.js';
 import UtsavBookingTransaction from './utsav_booking_transaction.model.js';
-import UtsavGuestBookingTransaction from './utsav_guest_guest_transaction.model.js';
+import UtsavGuestBookingTransaction from './utsav_guest_booking_transaction.model.js';
 import UtsavDb from './utsav_db.model.js';
 import UtsavPackagesDb from './utsav_packages.model.js';
 import AdminUsers from './admin_users.model.js';
@@ -39,6 +40,12 @@ CardDb.hasMany(FoodDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(GuestFoodDb, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(GuestFoodTransactionDb, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -81,12 +88,6 @@ CardDb.hasMany(RoomBookingTransaction, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(TravelBookingTransaction, {
-  foreignKey: 'cardno',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-CardDb.hasMany(TransactionDb, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -136,7 +137,20 @@ GuestFoodDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-
+// GuestFoodDb.hasMany(GuestFoodTransactionDb, {
+//   foreignKey: 'bookingid',
+//   sourceKey: 'bookingid',
+//   onDelete: 'CASCADE',
+//   onUpdate: 'CASCADE'
+// });
+// GuestFoodTransactionDb.belongsTo(GuestFoodDb, {
+//   foreignKey: 'bookingid',
+//   targetKey: 'bookingid'
+// });
+GuestFoodTransactionDb.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
 // Room
 RoomDb.hasMany(RoomBooking, {
   foreignKey: 'roomno',
@@ -373,12 +387,13 @@ export {
   GateRecord,
   FoodDb,
   GuestFoodDb,
+  GuestFoodTransactionDb,
+  FoodPhysicalPlate,
   RoomBooking,
   RoomBookingTransaction,
   RoomDb,
   FlatDb,
   FlatBooking,
-  TransactionDb,
   TravelDb,
   TravelBookingTransaction,
   WifiDb,

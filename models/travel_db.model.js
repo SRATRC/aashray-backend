@@ -46,6 +46,11 @@ const TravelDb = sequelize.define(
       allowNull: true,
       values: ['waiting', 'confirmed', 'cancelled', 'admin canceled'],
       defaultValue: 'waiting'
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

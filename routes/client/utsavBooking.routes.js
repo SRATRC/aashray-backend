@@ -12,22 +12,18 @@ import {
 import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
-router.get('/upcoming', CatchAsync(FetchUpcoming));
-router.post('/book', validateCard, CatchAsync(BookUtsav));
-router.post('/guestbooking', validateCard, CatchAsync(BookGuestUtsav));
-router.get('/viewbooking/:cardno', validateCard, CatchAsync(ViewUtsavBookings));
+router.get('/upcoming', validateCard, CatchAsync(FetchUpcoming));
+router.get('/booking/:cardno', validateCard, CatchAsync(ViewUtsavBookings));
+router.post('/booking', validateCard, CatchAsync(BookUtsav));
 router.delete(
-  '/cancel/:utsavid/:cardno',
+  '/booking/:utsavid/:cardno',
   validateCard,
   CatchAsync(CancelUtsavBooking)
 );
-router.get(
-  '/viewGuestbooking/:cardno',
-  validateCard,
-  CatchAsync(ViewUtsavGuestBookings)
-);
+router.get('/guest/:cardno', validateCard, CatchAsync(ViewUtsavGuestBookings));
+router.post('/guest', validateCard, CatchAsync(BookGuestUtsav));
 router.delete(
-  '/cancelGuest/:utsavid/:cardno',
+  '/guest/:utsavid/:cardno',
   validateCard,
   CatchAsync(CancelUtsavGuestBooking)
 );

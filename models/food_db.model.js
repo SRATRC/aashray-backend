@@ -20,25 +20,42 @@ const FoodDb = sequelize.define(
       type: DataTypes.BOOLEAN,
       allowNull: false
     },
+    breakfast_plate_issued: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: 0
+    },
     lunch: {
       type: DataTypes.BOOLEAN,
       allowNull: false
+    },
+    lunch_plate_issued: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: 0
     },
     dinner: {
       type: DataTypes.BOOLEAN,
       allowNull: false
     },
-    hightea: {
+    dinner_plate_issued: {
       type: DataTypes.BOOLEAN,
-      allowNull: false
+      allowNull: false,
+      defaultValue: 0
+    },
+    hightea: {
+      type: DataTypes.ENUM,
+      allowNull: true,
+      values: ['TEA', 'COFFEE']
     },
     spicy: {
       type: DataTypes.BOOLEAN,
       allowNull: false
     },
-    plateissued: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

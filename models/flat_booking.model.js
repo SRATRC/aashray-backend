@@ -48,6 +48,11 @@ const FlatBooking = sequelize.define(
         'checkedin',
         'pending checkin'
       ]
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

@@ -4,11 +4,13 @@ import {
   STATUS_PAYMENT_PENDING,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
-  STATUS_AWAITING_REFUND
+  STATUS_AWAITING_REFUND,
+  TYPE_EXPENSE,
+  TYPE_REFUND
 } from '../config/constants.js';
 
-const RoomBookingTransaction = sequelize.define(
-  'RoomBookingTransaction',
+const GuestFoodTransactionDb = sequelize.define(
+  'GuestFoodTransactionDb',
   {
     id: {
       type: DataTypes.INTEGER,
@@ -25,16 +27,12 @@ const RoomBookingTransaction = sequelize.define(
     },
     bookingid: {
       type: DataTypes.STRING,
-      allowNull: false,
-      references: {
-        model: 'room_booking',
-        key: 'bookingid'
-      }
+      allowNull: false
     },
     type: {
       type: DataTypes.STRING,
       allowNull: false,
-      values: ['expense', 'refund']
+      values: [TYPE_EXPENSE, TYPE_REFUND]
     },
     amount: {
       type: DataTypes.INTEGER,
@@ -62,9 +60,9 @@ const RoomBookingTransaction = sequelize.define(
     }
   },
   {
-    tableName: 'room_booking_transaction',
+    tableName: 'guest_food_transaction',
     timestamps: true
   }
 );
 
-export default RoomBookingTransaction;
+export default GuestFoodTransactionDb;

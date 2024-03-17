@@ -50,6 +50,11 @@ const TravelBookingTransaction = sequelize.define(
         STATUS_AWAITING_REFUND
       ],
       defaultValue: STATUS_PAYMENT_PENDING
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

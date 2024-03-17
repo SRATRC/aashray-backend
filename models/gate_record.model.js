@@ -22,6 +22,11 @@ const GateRecord = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: false,
       values: [STATUS_ONPREM, STATUS_OFFPREM]
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

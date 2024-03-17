@@ -42,6 +42,10 @@ const UtsavGuestBookingTransaction = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
+    description: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
     status: {
       type: DataTypes.ENUM,
       allowNull: false,

@@ -11,6 +11,11 @@ const FoodRate = sequelize.define(
     rate: {
       type: DataTypes.INTEGER,
       allowNull: false
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

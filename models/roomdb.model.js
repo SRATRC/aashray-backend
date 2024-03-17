@@ -33,6 +33,11 @@ const RoomDb = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: false,
       values: ['available', 'blocked']
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

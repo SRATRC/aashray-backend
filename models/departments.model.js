@@ -16,6 +16,11 @@ const Departments = sequelize.define(
     dept_email: {
       type: DataTypes.STRING,
       allowNull: false
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

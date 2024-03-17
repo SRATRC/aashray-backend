@@ -42,6 +42,11 @@ const UtsavBooking = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: true,
       values: [STATUS_CONFIRMED, STATUS_CANCELLED, STATUS_WAITING]
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

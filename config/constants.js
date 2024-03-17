@@ -1,6 +1,13 @@
 export const TYPE_EXPENSE = 'expense';
 export const TYPE_REFUND = 'refund';
 
+// PRICES
+export const BREAKFAST_PRICE = 120;
+export const LUNCH_PRICE = 80;
+export const DINNER_PRICE = 50;
+export const ROOM_PRICE = 400;
+export const TRAVEL_PRICE = 350;
+
 // STATUS
 export const STATUS_WAITING = 'waiting';
 export const STATUS_CONFIRMED = 'confirmed';
@@ -23,7 +30,6 @@ export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
-export const ROOM_PRICE = 400;
 export const ROOM_WL = 'WL';
 export const ROOM_STATUS_PENDING_CHECKIN = 'pending checkin';
 export const ROOM_STATUS_CHECKEDIN = 'checkedin';
@@ -33,9 +39,8 @@ export const ROOM_BLOCKED = 'blocked';
 
 // TRAVEL
 export const TRAVEL_DETAIL = 'Travel Booking';
-export const TRAVEL_PRICE = 350;
 
-// Admin Roles
+// ADMIN ROLES
 export const ROLE_SUPER_ADMIN = 'superAdmin';
 export const ROLE_OFFICE_ADMIN = 'officeAdmin';
 export const ROLE_ADHYAYAN_ADMIN = 'adhyayanAdmin';

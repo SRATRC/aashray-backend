@@ -16,6 +16,11 @@ const FlatDb = sequelize.define(
         model: 'card_db',
         key: 'cardno'
       }
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {

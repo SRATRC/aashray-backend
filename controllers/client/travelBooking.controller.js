@@ -22,6 +22,11 @@ export const BookTravel = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  const today = moment().format('YYYY-MM-DD');
+  if (req.body.date < today) {
+    throw new ApiError(400, 'Invalid Date');
+  }
+
   const isBooked = await TravelDb.findOne({
     where: {
       cardno: req.body.cardno,

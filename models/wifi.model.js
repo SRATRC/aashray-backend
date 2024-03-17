@@ -35,6 +35,11 @@ const WifiPwd = sequelize.define(
       allowNull: false,
       values: ['active', 'inactive'],
       defaultValue: 'active'
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'ADMIN'
     }
   },
   {
