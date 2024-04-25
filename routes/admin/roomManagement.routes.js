@@ -6,7 +6,6 @@ import {
   manualCheckout,
   roomBooking,
   flatBooking,
-  manualRoomAllocation,
   fetchAllRoomBookings,
   fetchAllFlatBookings,
   fetchRoomBookingsByCard,
@@ -36,7 +35,6 @@ router.put('/checkin/:cardno', CatchAsync(manualCheckin));
 router.put('/checkout/:cardno', CatchAsync(manualCheckout));
 router.post('/bookForMumukshu/:mobno', CatchAsync(roomBooking));
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));
-router.put('/room_change/:cardno', CatchAsync(manualRoomAllocation));
 router.get('/fetch_room_bookings', CatchAsync(fetchAllRoomBookings));
 router.get('/fetch_flat_bookings', CatchAsync(fetchAllFlatBookings));
 router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
