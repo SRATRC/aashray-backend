@@ -1,18 +1,21 @@
 import { Sequelize } from 'sequelize';
+import fs from 'fs';
 
 const sequelize = new Sequelize(
-  process.env.DB_NAME,
-  process.env.DB_USERNAME,
-  process.env.DB_PASSWORD,
+  process.env.AIVEN_DATABASE_NAME,
+  process.env.AIVEN_USERNAME,
+  process.env.AIVEN_PASSWORD,
   {
-    host: 'localhost',
+    host: process.env.AIVEN_HOST,
+    port: process.env.AIVEN_PORT,
     dialect: 'mysql',
-    pool: {
-      max: 30,
-      min: 5,
-      acquire: 30000,
-      idle: 10000
-    }
+    dialectOptions: {
+      ssl: {
+        ca: fs.readFileSync('/home/ubuntu/app/config/aiven_ca.pem')
+      }
+    },
+    pool: { maxConnections: 5, maxIdleTime: 30 },
+    language: 'en'
   }
 );
 
