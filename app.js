@@ -10,6 +10,7 @@ import gateRoutes from './routes/gate/gate.routes.js';
 import wifiRoutes from './routes/wifi/wifi.routes.js';
 
 // Client Route Imports
+import clientAuthRoutes from './routes/client/auth.routes.js';
 import roomRoutes from './routes/client/roomBooking.routes.js';
 import foodRoutes from './routes/client/foodBooking.routes.js';
 import travelRoutes from './routes/client/travelBooking.routes.js';
@@ -62,6 +63,7 @@ app.get('/', (_req, res) => {
   res.status(200).send({ data: 'API is up and running... 🚀', status: 200 });
 });
 
+app.use('/api/v1/client', clientAuthRoutes);
 app.use('/api/v1/gate', gateRoutes);
 app.use('/api/v1/wifi', wifiRoutes);
 app.use('/api/v1/stay', roomRoutes);
