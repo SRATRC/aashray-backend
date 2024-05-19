@@ -1,5 +1,5 @@
 import { Sequelize } from 'sequelize';
-import fs from 'fs';
+const { private_key } = JSON.parse(process.env.AIVEN_CA_CERT);
 
 const sequelize = new Sequelize(
   process.env.AIVEN_DATABASE_NAME,
@@ -11,7 +11,7 @@ const sequelize = new Sequelize(
     dialect: 'mysql',
     dialectOptions: {
       ssl: {
-        ca: fs.readFileSync('/home/ubuntu/app/config/aiven_ca.pem')
+        ca: private_key
       }
     },
     pool: { maxConnections: 5, maxIdleTime: 30 },
