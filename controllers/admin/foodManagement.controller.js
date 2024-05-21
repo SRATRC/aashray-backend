@@ -44,7 +44,7 @@ export const issuePlate = async (req, res) => {
         food_booking.breakfast_plate_issued = 1;
         await food_booking.save();
       } else {
-        throw new ApiError(200, 'Plate already issued');
+        throw new ApiError(400, 'Plate already issued');
       }
     } else {
       throw new ApiError(404, 'Breakfast not booked');
@@ -58,7 +58,7 @@ export const issuePlate = async (req, res) => {
         food_booking.lunch_plate_issued = 1;
         await food_booking.save();
       } else {
-        throw new ApiError(200, 'Plate already issued');
+        throw new ApiError(400, 'Plate already issued');
       }
     } else {
       throw new ApiError(404, 'Lunch not booked');
@@ -69,7 +69,7 @@ export const issuePlate = async (req, res) => {
         food_booking.dinner_plate_issued = 1;
         await food_booking.save();
       } else {
-        throw new ApiError(200, 'Plate already issued');
+        throw new ApiError(400, 'Plate already issued');
       }
     } else {
       throw new ApiError(404, 'Dinner not booked');

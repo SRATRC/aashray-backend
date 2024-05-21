@@ -78,7 +78,7 @@ export const BookUtsav = async (req, res) => {
     }
   });
   if (isBooked) {
-    throw new ApiError(200, 'Already booked');
+    throw new ApiError(400, 'Already booked');
   }
 
   var status = STATUS_WAITING;

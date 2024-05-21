@@ -68,7 +68,7 @@ export const generatePassword = async (req, res) => {
       message: 'Your wifi password has been generated'
     });
   } else {
-    throw new ApiError(200, 'Cannot generate more than 3 passwords');
+    throw new ApiError(400, 'Cannot generate more than 3 passwords');
   }
 };
 

@@ -35,7 +35,7 @@ export const BookTravel = async (req, res) => {
     }
   });
   if (isBooked) {
-    throw new ApiError(200, 'Already booked on the selected date');
+    throw new ApiError(400, 'Already booked on the selected date');
   }
 
   const booking = await TravelDb.create(

@@ -44,7 +44,7 @@ export const RegisterShibir = CatchAsync(async (req, res) => {
   });
 
   if (isBooked) {
-    throw new APIError(200, 'Shibir already booked');
+    throw new APIError(400, 'Shibir already booked');
   }
 
   const shibir = await ShibirDb.findOne({

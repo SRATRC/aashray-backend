@@ -119,7 +119,7 @@ export const roomBooking = async (req, res) => {
       req.user.cardno
     )
   ) {
-    throw new ApiError(200, 'Already Booked');
+    throw new ApiError(400, 'Already Booked');
   }
 
   const gender = req.user.gender;
@@ -155,7 +155,7 @@ export const roomBooking = async (req, res) => {
       limit: 1
     });
     if (roomno == undefined) {
-      throw new ApiError(200, 'No Beds Available');
+      throw new ApiError(400, 'No Beds Available');
     }
 
     booking = await RoomBooking.create(
@@ -175,7 +175,7 @@ export const roomBooking = async (req, res) => {
     );
 
     if (booking == undefined) {
-      throw new ApiError(200, 'Failed to book a bed');
+      throw new ApiError(400, 'Failed to book a bed');
     }
 
     const transaction = await RoomBookingTransaction.create(
@@ -192,7 +192,7 @@ export const roomBooking = async (req, res) => {
     );
 
     if (transaction == undefined) {
-      throw new ApiError(200, 'Failed to book a bed');
+      throw new ApiError(400, 'Failed to book a bed');
     }
   } else {
     roomno = await RoomDb.findOne({
@@ -222,7 +222,7 @@ export const roomBooking = async (req, res) => {
     );
 
     if (booking == undefined) {
-      throw new ApiError(200, 'Failed to book a bed');
+      throw new ApiError(400, 'Failed to book a bed');
     }
   }
 
@@ -275,7 +275,7 @@ export const flatBooking = async (req, res) => {
       user_data.dataValues.cardno
     )
   ) {
-    throw new ApiError(200, 'Already Booked');
+    throw new ApiError(400, 'Already Booked');
   }
 
   const nights = await calculateNights(
@@ -294,7 +294,7 @@ export const flatBooking = async (req, res) => {
   });
 
   if (booking == undefined) {
-    throw new ApiError(200, 'Failed to book your flat');
+    throw new ApiError(400, 'Failed to book your flat');
   }
 
   const message = `
@@ -473,7 +473,7 @@ export const updateFlatBooking = async (req, res) => {
     req.body;
 
   if (await checkFlatAlreadyBooked(req, cardno)) {
-    throw new ApiError(200, 'Already Booked');
+    throw new ApiError(400, 'Already Booked');
   }
 
   const today = moment().format('YYYY-MM-DD');
@@ -484,7 +484,7 @@ export const updateFlatBooking = async (req, res) => {
     today > req.body.checkout_date ||
     checkinDate > checkoutDate
   ) {
-    throw new ApiError(200, 'Invalid Date');
+    throw new ApiError(400, 'Invalid Date');
   }
 
   const nights = await calculateNights(
