@@ -100,7 +100,7 @@ export const BookingForMumukshu = async (req, res) => {
       req.user.cardno
     )
   ) {
-    throw new ApiError(200, 'Already Booked');
+    throw new ApiError(400, 'Already Booked');
   }
 
   validateDate(req.body.checkin_date, req.body.checkout_date);
@@ -138,7 +138,7 @@ export const BookingForMumukshu = async (req, res) => {
       limit: 1
     });
     if (roomno == undefined) {
-      throw new ApiError(200, 'No Beds Available');
+      throw new ApiError(400, 'No Beds Available');
     }
 
     booking = await RoomBooking.create(
@@ -157,7 +157,7 @@ export const BookingForMumukshu = async (req, res) => {
     );
 
     if (!booking) {
-      throw new ApiError(200, 'Failed to book a bed');
+      throw new ApiError(400, 'Failed to book a bed');
     }
 
     const transaction = await RoomBookingTransaction.create(
@@ -173,7 +173,7 @@ export const BookingForMumukshu = async (req, res) => {
     );
 
     if (!transaction) {
-      throw new ApiError(200, 'Failed to book a bed');
+      throw new ApiError(400, 'Failed to book a bed');
     }
   } else {
     roomno = await RoomDb.findOne({
@@ -202,7 +202,7 @@ export const BookingForMumukshu = async (req, res) => {
     );
 
     if (!booking) {
-      throw new ApiError(200, 'Failed to book a bed');
+      throw new ApiError(400, 'Failed to book a bed');
     }
   }
 
@@ -257,7 +257,7 @@ export const FlatBookingForMumukshu = async (req, res) => {
       user_data.dataValues.cardno
     )
   ) {
-    throw new ApiError(200, 'Already Booked');
+    throw new ApiError(400, 'Already Booked');
   }
 
   validateDate(req.body.checkin_date, req.body.checkout_date);
