@@ -178,10 +178,7 @@ export const BookingForMumukshu = async (req, res) => {
   } else {
     roomno = await RoomDb.findOne({
       where: {
-        roomno: { [Sequelize.Op.like]: 'NA%' },
-        roomtype: req.body.room_type,
-        gender: req.body.floor_pref + gender,
-        roomstatus: ROOM_STATUS_AVAILABLE
+        roomno: { [Sequelize.Op.eq]: 'NA' }
       },
       attributes: ['roomno']
     });
@@ -194,7 +191,7 @@ export const BookingForMumukshu = async (req, res) => {
         checkin: req.body.checkin_date,
         checkout: req.body.checkout_date,
         nights: nights,
-        roomtype: req.body.room_type,
+        roomtype: 'NA',
         status: ROOM_STATUS_PENDING_CHECKIN,
         gender: gender
       },

@@ -17,17 +17,12 @@ const RoomDb = sequelize.define(
     roomtype: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['ac', 'nac']
+      values: ['ac', 'nac', 'NA']
     },
     gender: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['M', 'F', 'SCM', 'SCF']
-    },
-    type: {
-      type: DataTypes.ENUM,
-      allowNull: false,
-      values: ['room', 'flat']
+      values: ['M', 'F', 'SCM', 'SCF', 'NA']
     },
     roomstatus: {
       type: DataTypes.ENUM,
