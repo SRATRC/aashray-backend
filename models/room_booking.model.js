@@ -19,7 +19,7 @@ const RoomBooking = sequelize.define(
     },
     roomno: {
       type: DataTypes.STRING,
-      allowNull: true,
+      allowNull: false,
       references: {
         model: 'roomdb',
         key: 'roomno'

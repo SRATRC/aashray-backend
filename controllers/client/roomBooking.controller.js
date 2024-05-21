@@ -105,7 +105,7 @@ export const BookingForMumukshu = async (req, res) => {
 
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
-  const gender = req.body.gender || req.user.gender;
+  const gender = req.body.floor_pref + req.user.gender;
   const nights = await calculateNights(
     req.body.checkin_date,
     req.body.checkout_date
@@ -127,7 +127,7 @@ export const BookingForMumukshu = async (req, res) => {
         },
         roomstatus: 'available',
         roomtype: req.body.room_type,
-        gender: req.body.floor_pref + gender
+        gender: gender
       },
       order: [
         Sequelize.literal(
@@ -141,6 +141,7 @@ export const BookingForMumukshu = async (req, res) => {
       throw new ApiError(400, 'No Beds Available');
     }
 
+    console.log('gender: ' + gender);
     booking = await RoomBooking.create(
       {
         bookingid: uuidv4(),
