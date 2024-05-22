@@ -105,7 +105,9 @@ export const BookingForMumukshu = async (req, res) => {
 
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
-  const gender = req.body.gender || req.user.gender;
+  const gender = req.body.floor_pref
+    ? req.body.floor_pref + req.user.gender
+    : req.user.gender;
   const nights = await calculateNights(
     req.body.checkin_date,
     req.body.checkout_date
@@ -127,7 +129,7 @@ export const BookingForMumukshu = async (req, res) => {
         },
         roomstatus: 'available',
         roomtype: req.body.room_type,
-        gender: req.body.floor_pref + gender
+        gender: gender
       },
       order: [
         Sequelize.literal(
@@ -178,10 +180,7 @@ export const BookingForMumukshu = async (req, res) => {
   } else {
     roomno = await RoomDb.findOne({
       where: {
-        roomno: { [Sequelize.Op.like]: 'NA%' },
-        roomtype: req.body.room_type,
-        gender: req.body.floor_pref + gender,
-        roomstatus: ROOM_STATUS_AVAILABLE
+        roomno: { [Sequelize.Op.eq]: 'NA' }
       },
       attributes: ['roomno']
     });
@@ -194,7 +193,7 @@ export const BookingForMumukshu = async (req, res) => {
         checkin: req.body.checkin_date,
         checkout: req.body.checkout_date,
         nights: nights,
-        roomtype: req.body.room_type,
+        roomtype: 'NA',
         status: ROOM_STATUS_PENDING_CHECKIN,
         gender: gender
       },

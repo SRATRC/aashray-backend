@@ -19,7 +19,7 @@ const RoomBooking = sequelize.define(
     },
     roomno: {
       type: DataTypes.STRING,
-      allowNull: true,
+      allowNull: false,
       references: {
         model: 'roomdb',
         key: 'roomno'
@@ -40,7 +40,7 @@ const RoomBooking = sequelize.define(
     roomtype: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['ac', 'nac']
+      values: ['ac', 'nac', 'NA']
     },
     status: {
       type: DataTypes.ENUM,

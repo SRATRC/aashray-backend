@@ -122,7 +122,7 @@ export function validateDate(start_date, end_date) {
   const today = moment().format('YYYY-MM-DD');
   const checkinDate = new Date(start_date);
   const checkoutDate = new Date(end_date);
-  if (today > start_date || today > end_date || checkinDate >= checkoutDate) {
+  if (today > start_date || today > end_date || checkinDate > checkoutDate) {
     throw new ApiError(400, 'Invalid Date');
   }
 }
