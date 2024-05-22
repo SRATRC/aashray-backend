@@ -144,7 +144,6 @@ export const BookingForMumukshu = async (req, res) => {
       throw new ApiError(400, 'No Beds Available');
     }
 
-    console.log('gender: ' + gender);
     booking = await RoomBooking.create(
       {
         bookingid: uuidv4(),
