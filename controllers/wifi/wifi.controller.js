@@ -1,5 +1,4 @@
 import { RoomBooking, WifiDb } from '../../models/associations.js';
-import SendMail from '../../utils/sendMail.js';
 import {
   ROOM_STATUS_CHECKEDIN,
   STATUS_ACTIVE,
@@ -44,24 +43,24 @@ export const generatePassword = async (req, res) => {
       throw new ApiError(404, 'Error updating the status');
     }
 
-    const message = `Dear ${req.user.issuedto},<br><br>
+    // const message = `Dear ${req.user.issuedto},<br><br>
 
-      Your Access code for WiFi at Ashram for the duration of your stay is: ${updatedRow.password}<br><br>
+    //   Your Access code for WiFi at Ashram for the duration of your stay is: ${updatedRow.password}<br><br>
 
-      Please note that you can use this wifi code on one device only. The code is valid for 15 days. 
-      
-      For more details on how to connect and use WiFi, please watch <a href='https://rebrand.ly/SRATRCvisitorsWiFi' target='_blank'>THIS VIDEO</a><br><br>
+    //   Please note that you can use this wifi code on one device only. The code is valid for 15 days.
 
-      For any issues with wifi connectivity, kindly contact Research Centre Office.<br><br>
+    //   For more details on how to connect and use WiFi, please watch <a href='https://rebrand.ly/SRATRCvisitorsWiFi' target='_blank'>THIS VIDEO</a><br><br>
 
-      Research Centre Admin office, <br>
-      7875432613 / 9004273512`;
+    //   For any issues with wifi connectivity, kindly contact Research Centre Office.<br><br>
 
-    await SendMail({
-      email: req.user.email,
-      subject: `Your wifi password: ${updatedRow.password}`,
-      message
-    });
+    //   Research Centre Admin office, <br>
+    //   7875432613 / 9004273512`;
+
+    // await sendMail({
+    //   email: req.user.email,
+    //   subject: `Your wifi password: ${updatedRow.password}`,
+    //   message
+    // });
 
     return res.status(200).send({
       data: updatedRow,

@@ -7,7 +7,7 @@ import database from '../../config/database.js';
 import { ROOM_STATUS_CHECKEDIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import APIError from '../../utils/ApiError.js';
-import SendMail from '../../utils/sendMail.js';
+import sendMail from '../../utils/sendMail.js';
 
 export const CreateRequest = CatchAsync(async (req, res) => {
   const t = await database.transaction();
@@ -47,24 +47,17 @@ export const CreateRequest = CatchAsync(async (req, res) => {
     throw new APIError(400, 'Department not found');
   }
 
-  const message = `Dear ${req.user.issuedto},<br><br>
-
-  Jai Sadguru Dev Vandan! We have received your request for maintenance as per following details:<br><br>
-
-  Requestor phone number: ${req.user.mobno}<br>
-  Request detail:<br><br> ${req.body.work_detail}<br>
-  Place of work: ${req.body.area_of_work}<br><br>
-  
-  We will review your request and update the status on the portal. <br><br>
-  
-  Regards,<br>
-  Mainenance department,`;
-
-  SendMail({
+  sendMail({
     email: req.user.email,
     cc: dept_email.dataValues.dept_email,
-    subject: `Your Booking Confirmation for Stay at SRATRC`,
-    message
+    subject: 'New Maintenance Request Received',
+    template: 'maintainanceRequest',
+    context: {
+      name: req.user.issuedto,
+      mobno: req.user.mobno,
+      detail: req.body.work_detail,
+      work: req.body.area_of_work
+    }
   });
 
   return res.status(201).send({

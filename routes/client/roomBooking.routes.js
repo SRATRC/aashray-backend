@@ -15,9 +15,9 @@ router.use(validateCard);
 
 router.get('/availablity', CatchAsync(AvailabilityCalender));
 router.post('/room', CheckDatesBlocked, CatchAsync(BookingForMumukshu));
-router.post('/room/:cardno', CatchAsync(CancelBooking));
+router.post('/cancel', CatchAsync(CancelBooking));
 router.post('/flat', CatchAsync(FlatBookingForMumukshu));
-router.post('/room/waitlist', CatchAsync(AddWaitlist));
-router.get('/bookings/:cardno', CatchAsync(ViewAllBookings));
+router.post('/waitlist', CatchAsync(AddWaitlist));
+router.get('/bookings', CatchAsync(ViewAllBookings));
 
 export default router;

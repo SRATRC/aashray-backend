@@ -28,7 +28,7 @@ import {
   validateDate
 } from '../helper.js';
 import ApiError from '../../utils/ApiError.js';
-import SendMail from '../../utils/sendMail.js';
+import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';
 
 export const AvailabilityCalender = async (req, res) => {
@@ -121,6 +121,7 @@ export const BookingForMumukshu = async (req, res) => {
       where: {
         roomno: {
           [Sequelize.Op.notLike]: 'NA%',
+          [Sequelize.Op.notLike]: 'WL%',
           [Sequelize.Op.notIn]: Sequelize.literal(`(
                     SELECT roomno 
                     FROM room_booking 
@@ -207,27 +208,16 @@ export const BookingForMumukshu = async (req, res) => {
 
   await t.commit();
 
-  const message = `
-      Dear ${req.user.issuedto},<br><br>
-
-    	We are pleased to confirm your booking for ${booking.dataValues.roomtype} room as per following details:<br><br>
-
-    	<b>Booking id:</b> ${booking.dataValues.bookingid}<br>
-    	<b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
-    	<b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
-
-    	Your Room Number will be provided from office upon checkin.<br><br>
-
-    	<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
-    	We hope you have a spiritually blissful stay. <br><br>
-
-    	Research Centre Admin office, <br>
-    	7875432613 / 9004273512`;
-
-  SendMail({
+  sendMail({
     email: req.user.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
-    message
+    template: 'rajSharan',
+    context: {
+      name: req.user.issuedto,
+      bookingid: booking.dataValues.bookingid,
+      checkin: booking.dataValues.checkin,
+      checkout: booking.dataValues.checkout
+    }
   });
 
   return res.status(201).send({ message: 'booked successfully' });
@@ -280,27 +270,16 @@ export const FlatBookingForMumukshu = async (req, res) => {
     throw new ApiError(500, 'Failed to book your flat');
   }
 
-  const message = `
-      Dear ${req.user.issuedto},<br><br>
-
-  		We are pleased to confirm your Flat booking as per following details:<br><br>
-
-  		<b>Booking id:</b> ${booking.dataValues.id}<br>
-  		<b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
-  		<b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
-
-  		Your Room Number will be provided from office upon checkin.<br><br>
-
-  		<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
-  		We hope you have a spiritually blissful stay. <br><br>
-
-  		Research Centre Admin office, <br>
-  		7875432613 / 9004273512`;
-
-  SendMail({
+  sendMail({
     email: req.user.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
-    message
+    template: 'rajSharan',
+    context: {
+      name: req.user.issuedto,
+      bookingid: booking.dataValues.id,
+      checkin: booking.dataValues.checkin,
+      checkout: booking.dataValues.checkout
+    }
   });
 
   return res.status(201).send({ message: 'booked successfully' });
@@ -362,19 +341,16 @@ export const CancelBooking = async (req, res) => {
 
   await t.commit();
 
-  var message = `Dear ${req.user.issuedto},<br><br>
-  Your booking for stay at Research Center as per following details has been canceled:<br><br>
-  <b>Booking id:</b> ${booking.dataValues.bookingid}<br>
-  <b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
-  <b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
-
-  Research Centre Admin office, <br>
-  7875432613 / 9004273512`;
-
-  SendMail({
+  sendMail({
     email: req.user.email,
     subject: `Your Booking for Stay at SRATRC has been Canceled`,
-    message
+    template: 'rajSharanCancellation',
+    context: {
+      name: req.user.issuedto,
+      bookingid: booking.dataValues.bookingid,
+      checkin: booking.dataValues.checkin,
+      checkout: booking.dataValues.checkout
+    }
   });
 
   res.status(200).send({ message: 'booking canceled' });
@@ -398,11 +374,20 @@ export const AddWaitlist = async (req, res) => {
     req.body.checkout_date
   );
 
+  const roomno = await RoomDb.findOne({
+    attributes: ['roomno'],
+    where: {
+      roomtype: req.body.room_type,
+      gender: req.user.gender,
+      roomno: { [Sequelize.Op.like]: ROOM_WL + '%' }
+    }
+  });
+
   const booking = await RoomBooking.create({
     cardno: req.user.cardno,
     guest_name: req.user.issuedto,
     centre: req.user.centre,
-    roomno: ROOM_WL,
+    roomno: roomno.dataValues.roomno,
     checkin: req.body.checkin_date,
     checkout: req.body.checkout_date,
     nights: nights,
@@ -412,28 +397,17 @@ export const AddWaitlist = async (req, res) => {
     bookingid: uuidv4()
   });
 
-  const message = `
-      Dear ${booking.dataValues.guest_name},<br><br>
-
-			You have been added to <b>waitlist</b> as per following details:<br><br>
-			
-			<b>Booking id:</b> ${booking.dataValues.bookingid}<br>
-			<b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
-			<b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
-			
-			Your Room Number will be provided from office upon checkin.<br><br>
-
-			<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
-			We hope you have a spiritually blissful stay. <br><br>
-			
-			Research Centre Admin office, <br>
-			7875432613 / 9004273512`;
-
-  SendMail({
+  sendMail({
     email: req.user.email,
-    subject: `You have been added to waitlist for your stay at SRATRC`,
-    message
+    subject: `You have been added to Waitlist for Stay at SRATRC`,
+    template: 'rajSharanWaitlist',
+    context: {
+      name: req.user.issuedto,
+      bookingid: booking.dataValues.bookingid,
+      checkin: booking.dataValues.checkin,
+      checkout: booking.dataValues.checkout
+    }
   });
 
-  return res.status(200).send({ message: 'booked successfully' });
+  return res.status(200).send({ message: 'waitlist added' });
 };

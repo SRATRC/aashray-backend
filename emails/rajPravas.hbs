@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Travel Booking Request Confirmation</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            color: #333333;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            padding: 20px 0;
+        }
+        .header img {
+            width: 120px;
+        }
+        .content {
+            padding: 0 20px;
+        }
+        .content h1 {
+            color: #333333;
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .content p {
+            margin: 10px 0;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        .details {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .details p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .section h2 {
+            font-size: 18px;
+            color: #555;
+            margin-bottom: 10px;
+        }
+        .section ul {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+        .section ul li {
+            margin-bottom: 5px;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px 0;
+            font-size: 14px;
+            color: #999999;
+        }
+        .link {
+            color: #1a73e8;
+            text-decoration: none;
+        }
+        .link:hover {
+            text-decoration: underline;
+        }
+        .highlight {
+            color: #d9534f;
+            font-weight: bold;
+        }
+        .steps {
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        .steps p {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
+        </div>
+        <div class="content">
+            <h1>Travel Booking Request Confirmed!</h1>
+            <p>Dear {{name}},</p>
+            <p>Jai Sadguru Dev Vandan! We have received your travel booking request for the following details:</p>
+            <div class="details">
+                <p><strong>Booking ID:</strong> {{bookingid}}</p>
+                <p><strong>Travel Date:</strong> {{date}}</p>
+                <p><strong>Pick-up Location:</strong> {{pickup}}</p>
+                <p><strong>Drop-off Location:</strong> {{dropoff}}</p>
+            </div>
+
+            <div class="section">
+                <h2>Standard Pickup Locations and Timings from Mumbai to Research Centre:</h2>
+                <ul>
+                    <li>Dadar Swaminarayan Temple - 8:00 am</li>
+                    <li>Amar Mahal - Chembur / Ghatkopar - 8:20 am</li>
+                    <li>Mulund - Airoli Junction - 8:40 am</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>Standard Pickup Location and Timing from Research Centre to Mumbai:</h2>
+                <ul>
+                    <li>Reception Area at 1:00 pm</li>
+                </ul>
+            </div>
+
+            <div class="steps">
+                <h2>Next Steps</h2>
+                <p>We will review your travel request and update the status on the portal.</p>
+                <p>Please read the Raj Pravas guidelines carefully: <a class="link" href="https://drive.google.com/file/d/1kodGs34F8W3m8GHfm3bMzROaUGNoIVav/view?usp=sharing">Click here for guidelines</a></p>
+                <p>You can view the status of your request under "View/Cancel My Booking" by <a class="link" href="http://datachef.in/sratrc/rajpravas/cancel_via_phone.php">clicking here</a>.</p>
+            </div>
+
+            <div class="steps">
+                <h2>Payment Instructions</h2>
+                <p>Once your travel booking status is <span class="highlight">Approved, pending payment confirmation</span>, please pay the amount shown on the screen under "View/Cancel My Booking" using the UPI ID <b>sratrc@ibl</b>. You can copy & paste the UPI ID (sratrc@ibl) in Google Pay, Amazon Pay, Paytm, PhonePe, FreeCharge, MobiKwik, etc. to make the payment.</p>
+                <p>Post payment, please share a screenshot of the payment along with your booking ID with the Raj Pravas Team.</p>
+            </div>
+
+            <div class="steps">
+                <h2>Travel Confirmation</h2>
+                <p>Once your travel is confirmed, you can coordinate with Sandeep Driver at <b>+919769975704</b> only on the date of your travel.</p>
+            </div>
+
+            <p>Regards,<br>Raj Pravas Admin<br>Virag Shah (9769644960)<br>Siddhi Shah (9831632801)</p>
+        </div>
+        <div class="footer">
+            &copy; 2024 SRATRC. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>

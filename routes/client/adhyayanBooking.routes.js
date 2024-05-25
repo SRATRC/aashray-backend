@@ -12,7 +12,7 @@ router.use(validateCard);
 
 router.get('/getall', FetchAllShibir);
 router.post('/register', RegisterShibir);
-router.get('/getbooked/:cardno', FetchBookedShibir);
+router.get('/getbooked', FetchBookedShibir);
 router.delete('/cancel', CancelShibir);
 
 export default router;

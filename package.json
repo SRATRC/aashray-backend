@@ -20,6 +20,7 @@
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.9.7",
     "nodemailer": "^6.9.7",
+    "nodemailer-express-handlebars": "^6.1.2",
     "sequelize": "^6.34.0",
     "uuid": "^9.0.1"
   },

@@ -7,8 +7,10 @@ import {
 } from '../../controllers/client/maintenanceRequest.controller.js';
 import { validateCard } from '../../middleware/validate.js';
 
-router.post('/request', validateCard, CreateRequest);
-router.get('/get/:cardno', validateCard, ViewRequest);
-router.get('/departments', validateCard, FetchDepartments);
+router.use(validateCard);
+
+router.post('/request', CreateRequest);
+router.get('/get', ViewRequest);
+router.get('/departments', FetchDepartments);
 
 export default router;

@@ -22,7 +22,6 @@ import {
 } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import { v4 as uuidv4 } from 'uuid';
-import SendMail from '../../utils/sendMail.js';
 
 // TODO: sending mails
 

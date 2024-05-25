@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Maintenance Request Confirmation</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            color: #333333;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            padding: 20px 0;
+        }
+        .header img {
+            width: 120px;
+        }
+        .content {
+            padding: 0 20px;
+            text-align: center;
+        }
+        .content h1 {
+            color: #333333;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .content p {
+            margin: 10px 0;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        .details {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .details p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .note {
+            background-color: #87CEEB;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .note p {
+            margin: 5px 0;
+            font-size: 14px;
+            color: #cc0000;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px 0;
+            font-size: 14px;
+            color: #999999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
+        </div>
+        <div class="content">
+            <h1>Maintenance Request Confirmed!</h1>
+            <p>Dear {{name}},</p>
+            <p>Jai Sadguru Dev Vandan! We have received your request for maintenance as per following details:</p>
+            <div class="details">
+                <p><strong>Requestor Phone Number:</strong> {{mobno}}</p>
+                <p><strong>Request Detail:</strong> {{detail}}</p>
+                <p><strong>Place of Work:</strong> {{work}}</p>
+            </div>
+            <p>We will review your request and update the status on the portal.</p>
+            <p>If you have any questions or need further assistance, please feel free to contact us at <b>7875432613 / 9004273512</b></p>
+        </div>
+        <div class="footer">
+            &copy; 2024 SRATRC. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>

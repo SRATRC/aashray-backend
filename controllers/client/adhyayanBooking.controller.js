@@ -89,27 +89,17 @@ export const RegisterShibir = CatchAsync(async (req, res) => {
 
   await t.commit();
 
-  const message = `Dear ${req.user.issuedto},<br><br>
-
-  We are pleased to confirm your booking for ".$shibir_name." adhyayan as per the following details:<br><br>
-  
-  Adhyayan name: ${shibir.dataValues.name}<br>
-  Adhyayan start Date: ${shibir.dataValues.start_date}<br>
-  Adhyayan end Date: ${shibir.dataValues.end_date}<br><br>
-
-  You have to register for Raj sharan separately. <a href='http://datachef.in/sratrc/rajsharan/' target='_blank'>Click Here</a> to book your stay if not booked yet.<br>
-
-  * Please note that the shibir committee has right to cancel your booking within 7 days if you do not qualify as per the shibir criteria.<br><br>
-
-  <a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
-  We hope you have a spiritually blissful stay. <br><br>
-  
-  Research Centre Admin office, <br>
-  7875432613 / 9004273512`;
   sendMail({
     email: req.user.email,
-    subject: 'Shibir Booking Confirmation',
-    message
+    subject: `Shibir Booking Confirmation`,
+    template: 'rajAdhyayan',
+    context: {
+      name: req.user.issuedto,
+      adhyayanName: shibir.dataValues.name,
+      speaker: shibir.dataValues.speaker,
+      startDate: shibir.dataValues.start_date,
+      endDate: shibir.dataValues.end_date
+    }
   });
 
   return res.status(201).send({ message: 'Shibir booking successful' });
@@ -177,16 +167,14 @@ export const CancelShibir = CatchAsync(async (req, res) => {
 
   await t.commit();
 
-  const message = `Dear Mumukshu,<br><br>
-
-  This is a confirmation email for Adhyayan cancellation. Your booking for shibir - <b>${update_shibir.dataValues.name}</b> is now cancelled.<br><br>
-  
-  Research Centre Admin office, <br>
-  7875432613 / 9004273512`;
   sendMail({
     email: req.user.email,
-    subject: 'Shibir Booking Cancellation',
-    message
+    subject: `Shibir Booking Cancellation`,
+    template: 'rajAdhyayanCancellation',
+    context: {
+      name: req.user.issuedto,
+      adhyayanName: update_shibir.dataValues.name
+    }
   });
 
   return res.status(200).send({ message: 'Shibir booking cancelled' });
