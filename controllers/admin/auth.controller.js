@@ -1,5 +1,5 @@
 import { AdminUsers, AdminRoles } from '../../models/associations.js';
-import { STATUS_INACTIVE } from '../../config/constants.js';
+import { STATUS_ACTIVE, STATUS_INACTIVE } from '../../config/constants.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import ApiError from '../../utils/ApiError.js';
@@ -17,6 +17,12 @@ export const login = async (req, res) => {
     throw new ApiError(404, 'Invalid Username');
   }
 
+  const roles = await AdminRoles.findAll({
+    attributes: ['role_name'],
+    where: { user_id: admin.dataValues.id, status: STATUS_ACTIVE }
+  });
+  const admin_roles = roles.map((role) => role.dataValues.role_name);
+
   const result = await bcrypt.compare(password, admin.password);
   if (result) {
     const token = jwt.sign(
@@ -30,7 +36,7 @@ export const login = async (req, res) => {
       },
       process.env.SECRET
     );
-    return res.status(200).send({ token: token });
+    return res.status(200).send({ token: token, roles: admin_roles });
   } else {
     throw new ApiError(401, 'Incorrect password');
   }
