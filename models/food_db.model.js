@@ -46,7 +46,6 @@ const FoodDb = sequelize.define(
     hightea: {
       type: DataTypes.ENUM,
       allowNull: false,
-      defaultValue: 'NONE',
       values: ['TEA', 'COFFEE', 'NONE']
     },
     spicy: {
