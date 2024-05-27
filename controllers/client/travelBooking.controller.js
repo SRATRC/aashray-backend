@@ -18,6 +18,7 @@ import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 
+// TODO: will add the transaction when the status is updated to confirmed
 export const BookTravel = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
@@ -51,20 +52,20 @@ export const BookTravel = async (req, res) => {
     { transaction: t }
   );
 
-  const bookingTransaction = await TravelBookingTransaction.create(
-    {
-      cardno: req.user.cardno,
-      bookingid: booking.dataValues.bookingid,
-      type: TYPE_EXPENSE,
-      amount: TRAVEL_PRICE,
-      status: STATUS_PAYMENT_PENDING
-    },
-    { transaction: t }
-  );
+  // const bookingTransaction = await TravelBookingTransaction.create(
+  //   {
+  //     cardno: req.user.cardno,
+  //     bookingid: booking.dataValues.bookingid,
+  //     type: TYPE_EXPENSE,
+  //     amount: TRAVEL_PRICE,
+  //     status: STATUS_PAYMENT_PENDING
+  //   },
+  //   { transaction: t }
+  // );
 
-  if (booking == undefined || bookingTransaction == undefined) {
-    throw new ApiError(500, 'Failed to book travel');
-  }
+  // if (booking == undefined || bookingTransaction == undefined) {
+  //   throw new ApiError(500, 'Failed to book travel');
+  // }
 
   sendMail({
     email: req.user.email,
@@ -123,12 +124,14 @@ export const CancelTravel = async (req, res) => {
     }
   });
 
-  if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
-    travelBookingTransaction.status = STATUS_CANCELLED;
-    await travelBookingTransaction.save({ transaction: t });
-  } else if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
-    travelBookingTransaction.status = STATUS_AWAITING_REFUND;
-    await travelBookingTransaction.save({ transaction: t });
+  if (travelBookingTransaction) {
+    if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
+      travelBookingTransaction.status = STATUS_CANCELLED;
+      await travelBookingTransaction.save({ transaction: t });
+    } else if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
+      travelBookingTransaction.status = STATUS_AWAITING_REFUND;
+      await travelBookingTransaction.save({ transaction: t });
+    }
   }
 
   await t.commit();
