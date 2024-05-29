@@ -1,5 +1,11 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import {
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CANCELLED,
+  STATUS_CONFIRMED,
+  STATUS_WAITING
+} from '../config/constants.js';
 
 const TravelDb = sequelize.define(
   'TravelDb',
@@ -44,7 +50,12 @@ const TravelDb = sequelize.define(
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
-      values: ['waiting', 'confirmed', 'cancelled', 'admin canceled'],
+      values: [
+        STATUS_WAITING,
+        STATUS_CONFIRMED,
+        STATUS_CANCELLED,
+        STATUS_ADMIN_CANCELLED
+      ],
       defaultValue: 'waiting'
     },
     updatedBy: {

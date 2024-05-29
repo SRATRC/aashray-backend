@@ -4,7 +4,8 @@ import {
   STATUS_PAYMENT_PENDING,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
-  STATUS_AWAITING_REFUND
+  STATUS_AWAITING_REFUND,
+  STATUS_ADMIN_CANCELLED
 } from '../config/constants.js';
 
 const TravelBookingTransaction = sequelize.define(
@@ -47,6 +48,7 @@ const TravelBookingTransaction = sequelize.define(
         STATUS_PAYMENT_PENDING,
         STATUS_PAYMENT_COMPLETED,
         STATUS_CANCELLED,
+        STATUS_ADMIN_CANCELLED,
         STATUS_AWAITING_REFUND
       ],
       defaultValue: STATUS_PAYMENT_PENDING
