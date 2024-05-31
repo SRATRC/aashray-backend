@@ -14,8 +14,8 @@ import sendMail from '../../utils/sendMail.js';
 export const FetchAllShibir = CatchAsync(async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = req.query.page || 1;
+  const pageSize = req.query.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const shibirs = await ShibirDb.findAll({
