@@ -1,6 +1,7 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
 
+// TODO: make a shibir booking transaction
 const ShibirDb = sequelize.define(
   'ShibirDb',
   {
@@ -34,6 +35,10 @@ const ShibirDb = sequelize.define(
       allowNull: false
     },
     available_seats: {
+      type: DataTypes.INTEGER,
+      allowNull: false
+    },
+    charge: {
       type: DataTypes.INTEGER,
       allowNull: false
     },
