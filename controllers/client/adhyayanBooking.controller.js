@@ -28,7 +28,25 @@ export const FetchAllShibir = CatchAsync(async (req, res) => {
     limit: pageSize,
     order: [['start_date', 'ASC']]
   });
-  return res.status(200).send({ message: 'fetched results', data: shibirs });
+
+  const groupedByMonth = shibirs.reduce((acc, event) => {
+    const month = event.month;
+    if (!acc[month]) {
+      acc[month] = [];
+    }
+    acc[month].push(event);
+    return acc;
+  }, {});
+
+  const formattedResponse = {
+    message: 'fetched results',
+    data: Object.keys(groupedByMonth).map((month) => ({
+      title: month,
+      data: groupedByMonth[month]
+    }))
+  };
+
+  return res.status(200).send(formattedResponse);
 });
 
 export const RegisterShibir = CatchAsync(async (req, res) => {

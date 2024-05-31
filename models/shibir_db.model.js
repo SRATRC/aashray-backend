@@ -17,6 +17,10 @@ const ShibirDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
+    month: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
     start_date: {
       type: DataTypes.DATEONLY,
       allowNull: false
