@@ -7,12 +7,13 @@ import {
   CancelShibir
 } from '../../controllers/client/adhyayanBooking.controller.js';
 import { validateCard } from '../../middleware/validate.js';
+import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(validateCard);
 
-router.get('/getall', FetchAllShibir);
-router.post('/register', RegisterShibir);
-router.get('/getbooked', FetchBookedShibir);
-router.delete('/cancel', CancelShibir);
+router.get('/getall', CatchAsync(FetchAllShibir));
+router.post('/register', CatchAsync(RegisterShibir));
+router.get('/getbooked', CatchAsync(FetchBookedShibir));
+router.delete('/cancel', CatchAsync(CancelShibir));
 
 export default router;

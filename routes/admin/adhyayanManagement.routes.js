@@ -7,7 +7,8 @@ import {
   updateAdhyayan,
   adhyayanReport,
   adhyayanWaitlist,
-  confirmWaiting
+  adhyayanStatusUpdate,
+  openCloseAdhyayan
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -21,8 +22,9 @@ router.use(authorizeRoles(ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN));
 router.get('/fetch', CatchAsync(fetchAllAdhyayan));
 router.post('/create', CatchAsync(createAdhyayan));
 router.put('/update/:id', CatchAsync(updateAdhyayan));
-router.post('/report', CatchAsync(adhyayanReport));
+router.post('/report/:id', CatchAsync(adhyayanReport));
 router.get('/waitlist', CatchAsync(adhyayanWaitlist));
-router.put('/confirm/:id', CatchAsync(confirmWaiting));
+router.put('/status', CatchAsync(adhyayanStatusUpdate));
+router.put('/:id/:activate', CatchAsync(openCloseAdhyayan));
 
 export default router;
