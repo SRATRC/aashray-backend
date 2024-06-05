@@ -1,5 +1,4 @@
 import CardDb from './card.model.js';
-import ShibirDb from './shibir_db.model.js';
 import GateRecord from './gate_record.model.js';
 import FoodDb from './food_db.model.js';
 import GuestFoodDb from './guest_food_db.model.js';
@@ -10,7 +9,9 @@ import FlatBooking from './flat_booking.model.js';
 import RoomBooking from './room_booking.model.js';
 import RoomBookingTransaction from './room_booking_transaction.model.js';
 import RoomDb from './roomdb.model.js';
+import ShibirDb from './shibir_db.model.js';
 import ShibirBookingDb from './shibir_booking_db.model.js';
+import ShibirBookingTransaction from './shibir_booking_transaction.model.js';
 import Departments from './departments.model.js';
 import MaintenanceDb from './maintenance_db.model.js';
 import TravelDb from './travel_db.model.js';
@@ -52,6 +53,12 @@ CardDb.hasMany(GuestFoodTransactionDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(ShibirBookingDb, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(ShibirBookingTransaction, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -207,6 +214,20 @@ ShibirBookingDb.belongsTo(ShibirDb, {
 ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
+});
+ShibirBookingDb.hasMany(ShibirBookingTransaction, {
+  foreignKey: 'bookingid',
+  sourceKey: 'bookingid',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+ShibirBookingTransaction.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+ShibirBookingTransaction.belongsTo(ShibirBookingDb, {
+  foreignKey: 'bookingid',
+  targetKey: 'bookingid'
 });
 
 // Maintenance
@@ -382,6 +403,7 @@ export {
   CardDb,
   ShibirDb,
   ShibirBookingDb,
+  ShibirBookingTransaction,
   Departments,
   MaintenanceDb,
   GateRecord,

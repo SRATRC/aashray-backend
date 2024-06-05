@@ -26,6 +26,7 @@ import cardManagementRoutes from './routes/admin/cardManagement.routes.js';
 import foodManagementRoutes from './routes/admin/foodManagement.routes.js';
 import gateManagementRoutes from './routes/admin/gateManagement.routes.js';
 import roomManagementRoutes from './routes/admin/roomManagement.routes.js';
+import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 
 (async () => {
   try {
@@ -81,6 +82,7 @@ app.use('/api/v1/admin/card', cardManagementRoutes);
 app.use('/api/v1/admin/food', foodManagementRoutes);
 app.use('/api/v1/admin/gate', gateManagementRoutes);
 app.use('/api/v1/admin/stay', roomManagementRoutes);
+app.use('/api/v1/admin/travel', travelManagementRoutes);
 
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {

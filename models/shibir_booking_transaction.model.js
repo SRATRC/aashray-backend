@@ -5,11 +5,13 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
   STATUS_AWAITING_REFUND,
+  TYPE_EXPENSE,
+  TYPE_REFUND,
   STATUS_ADMIN_CANCELLED
 } from '../config/constants.js';
 
-const TravelBookingTransaction = sequelize.define(
-  'TravelBookingTransaction',
+const ShibirBookingTransaction = sequelize.define(
+  'ShibirBookingTransaction',
   {
     id: {
       type: DataTypes.INTEGER,
@@ -28,18 +30,32 @@ const TravelBookingTransaction = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       references: {
-        model: 'travel_db',
+        model: 'shibir_booking_db',
         key: 'bookingid'
       }
     },
     type: {
-      type: DataTypes.STRING,
+      type: DataTypes.ENUM,
       allowNull: false,
-      values: ['expense', 'refund']
+      values: [TYPE_EXPENSE, TYPE_REFUND]
     },
     amount: {
       type: DataTypes.INTEGER,
       allowNull: false
+    },
+    discount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    upi_ref: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'NA'
+    },
+    description: {
+      type: DataTypes.STRING,
+      allowNull: true
     },
     status: {
       type: DataTypes.ENUM,
@@ -48,21 +64,19 @@ const TravelBookingTransaction = sequelize.define(
         STATUS_PAYMENT_PENDING,
         STATUS_PAYMENT_COMPLETED,
         STATUS_CANCELLED,
-        STATUS_ADMIN_CANCELLED,
-        STATUS_AWAITING_REFUND
-      ],
-      defaultValue: STATUS_PAYMENT_PENDING
+        STATUS_AWAITING_REFUND,
+        STATUS_ADMIN_CANCELLED
+      ]
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'USER'
+      allowNull: false
     }
   },
   {
-    tableName: 'travel_booking_transaction',
+    tableName: 'shibir_booking_transaction',
     timestamps: true
   }
 );
 
-export default TravelBookingTransaction;
+export default ShibirBookingTransaction;

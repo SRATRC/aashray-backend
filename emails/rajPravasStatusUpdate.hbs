@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Travel Booking Status Update</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            color: #333333;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            padding: 20px 0;
+        }
+        .header img {
+            width: 120px;
+        }
+        .content {
+            padding: 0 20px;
+        }
+        .content h1 {
+            color: #333333;
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .content p {
+            margin: 10px 0;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        .details {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .details p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .highlight {
+            color: #d9534f;
+            font-weight: bold;
+        }
+        .steps {
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        .steps p {
+            margin: 10px 0;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px 0;
+            font-size: 14px;
+            color: #999999;
+        }
+        .link {
+            color: #1a73e8;
+            text-decoration: none;
+        }
+        .link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
+        </div>
+        <div class="content">
+            <h1>Travel Booking Status Update</h1>
+            <p>Dear {{name}},</p>
+            <p>Jai Sadguru Dev Vandan! The status on your travel booking request has changed from Mumbai To Research Centre to <strong>{{status}}</strong>:</p>
+            <div class="details">
+                <p><strong>Booking id: </strong>{{bookingid}}</p>
+                <p><strong>Travel Date: </strong>{{date}}</p>
+                <p><strong>Pick-up location: </strong>{{pickup}}</p>
+                <p><strong>Drop-off location: </strong>{{drop}}</p>
+            </div>
+            <p>You can view the status of your request under view/cancel my booking by <a class="link" href="http://datachef.in/sratrc/rajpravas/cancel_via_phone.php" target="_blank">Clicking here</a></p>
+            <p>If your travel booking status is <strong>Approved, pending payment confirmation</strong>, please pay the amount shown on the screen under view/cancel my booking using the UPI id <strong>sratrc@ibl</strong>. You can copy & paste the UPI ID link (sratrc@ibl) in Google Pay, Amazon Pay, Paytm, PhonePay, FreeCharge, MobiKwik etc to make the payment.</p>
+            <p>Post payment, please share a screenshot of the payment along with your booking id to the Raj Pravas Team.</p>
+            <p>Once your travel is confirmed, you can coordinate with Sandeep Driver on <strong>+919769975704</strong> only on the date of your travel.</p>
+            <p>Regards,</p>
+            <p>Raj Pravas Admin,</p>
+            <p>Virag Shah (9769644960)<br>Siddhi Shah (9831632801)</p>
+        </div>
+        <div class="footer">
+            &copy; 2024 SRATRC. All rights reserved.
+        </div>
+    </div>
+</body>
+</html>

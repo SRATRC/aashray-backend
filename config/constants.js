@@ -46,3 +46,4 @@ export const ROLE_OFFICE_ADMIN = 'officeAdmin';
 export const ROLE_ADHYAYAN_ADMIN = 'adhyayanAdmin';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
+export const ROLE_TRAVEL_ADMIN = 'travelAdmin';

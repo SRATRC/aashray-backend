@@ -1,5 +1,6 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import { STATUS_CLOSED, STATUS_OPEN } from '../config/constants.js';
 
 const ShibirDb = sequelize.define(
   'ShibirDb',
@@ -14,6 +15,10 @@ const ShibirDb = sequelize.define(
       allowNull: false
     },
     speaker: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    month: {
       type: DataTypes.STRING,
       allowNull: false
     },
@@ -33,6 +38,10 @@ const ShibirDb = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
+    amount: {
+      type: DataTypes.INTEGER,
+      allowNull: false
+    },
     comments: {
       type: DataTypes.STRING,
       allowNull: true
@@ -40,8 +49,8 @@ const ShibirDb = sequelize.define(
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
-      values: ['open', 'closed'],
-      defaultValue: 'open'
+      values: [STATUS_OPEN, STATUS_CLOSED],
+      defaultValue: STATUS_OPEN
     },
     updatedBy: {
       type: DataTypes.STRING,

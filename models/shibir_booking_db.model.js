@@ -1,13 +1,20 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import {
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CANCELLED,
+  STATUS_CONFIRMED,
+  STATUS_PAYMENT_PENDING,
+  STATUS_WAITING
+} from '../config/constants.js';
 
 const ShibirBookingDb = sequelize.define(
   'ShibirBookingDb',
   {
-    id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true
+    bookingid: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      primaryKey: true
     },
     shibir_id: {
       type: DataTypes.INTEGER,
@@ -28,8 +35,14 @@ const ShibirBookingDb = sequelize.define(
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
-      values: ['waiting', 'confirmed', 'cancelled', 'admin canceled'],
-      defaultValue: 'confirmed'
+      values: [
+        STATUS_WAITING,
+        STATUS_CONFIRMED,
+        STATUS_CANCELLED,
+        STATUS_ADMIN_CANCELLED,
+        STATUS_PAYMENT_PENDING
+      ],
+      defaultValue: STATUS_PAYMENT_PENDING
     },
     updatedBy: {
       type: DataTypes.STRING,
