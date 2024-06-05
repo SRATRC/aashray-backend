@@ -1,5 +1,6 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import { STATUS_CLOSED, STATUS_OPEN } from '../config/constants.js';
 
 const UtsavDb = sequelize.define(
   'UtsavDb',
@@ -28,8 +29,8 @@ const UtsavDb = sequelize.define(
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
-      values: ['open', 'closed'],
-      defaultValue: 'open'
+      values: [STATUS_OPEN, STATUS_CLOSED],
+      defaultValue: STATUS_OPEN
     }
   },
   {

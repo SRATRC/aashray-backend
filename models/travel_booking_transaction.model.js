@@ -5,7 +5,9 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
   STATUS_AWAITING_REFUND,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  TYPE_EXPENSE,
+  TYPE_REFUND
 } from '../config/constants.js';
 
 const TravelBookingTransaction = sequelize.define(
@@ -35,7 +37,7 @@ const TravelBookingTransaction = sequelize.define(
     type: {
       type: DataTypes.STRING,
       allowNull: false,
-      values: ['expense', 'refund']
+      values: [TYPE_EXPENSE, TYPE_REFUND]
     },
     amount: {
       type: DataTypes.INTEGER,

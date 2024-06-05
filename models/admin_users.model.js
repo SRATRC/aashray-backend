@@ -27,8 +27,7 @@ const AdminUsers = sequelize.define(
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'SUPER ADMIN'
+      allowNull: false
     }
   },
   {

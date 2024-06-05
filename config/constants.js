@@ -13,6 +13,7 @@ export const STATUS_WAITING = 'waiting';
 export const STATUS_CONFIRMED = 'confirmed';
 export const STATUS_CANCELLED = 'cancelled';
 export const STATUS_PENDING = 'pending';
+export const STATUS_REJECTED = 'rejected';
 export const STATUS_ACTIVE = 'active';
 export const STATUS_INACTIVE = 'inactive';
 export const STATUS_OPEN = 'open';

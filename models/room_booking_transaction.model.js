@@ -4,7 +4,9 @@ import {
   STATUS_PAYMENT_PENDING,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
-  STATUS_AWAITING_REFUND
+  STATUS_AWAITING_REFUND,
+  TYPE_EXPENSE,
+  TYPE_REFUND
 } from '../config/constants.js';
 
 const RoomBookingTransaction = sequelize.define(
@@ -34,7 +36,7 @@ const RoomBookingTransaction = sequelize.define(
     type: {
       type: DataTypes.STRING,
       allowNull: false,
-      values: ['expense', 'refund']
+      values: [TYPE_EXPENSE, TYPE_REFUND]
     },
     amount: {
       type: DataTypes.INTEGER,

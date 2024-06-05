@@ -56,7 +56,7 @@ const TravelDb = sequelize.define(
         STATUS_CANCELLED,
         STATUS_ADMIN_CANCELLED
       ],
-      defaultValue: 'waiting'
+      defaultValue: STATUS_WAITING
     },
     updatedBy: {
       type: DataTypes.STRING,

@@ -1,5 +1,13 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import {
+  ROOM_STATUS_CHECKEDIN,
+  ROOM_STATUS_CHECKEDOUT,
+  ROOM_STATUS_PENDING_CHECKIN,
+  STATUS_CANCELLED,
+  STATUS_REJECTED,
+  STATUS_WAITING
+} from '../config/constants.js';
 
 const FlatBooking = sequelize.define(
   'FlatBooking',
@@ -41,12 +49,12 @@ const FlatBooking = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: false,
       values: [
-        'checkedout',
-        'cancelled',
-        'waiting',
-        'rejected',
-        'checkedin',
-        'pending checkin'
+        ROOM_STATUS_CHECKEDOUT,
+        STATUS_CANCELLED,
+        STATUS_WAITING,
+        STATUS_REJECTED,
+        ROOM_STATUS_CHECKEDIN,
+        ROOM_STATUS_PENDING_CHECKIN
       ]
     },
     updatedBy: {

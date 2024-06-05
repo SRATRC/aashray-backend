@@ -1,5 +1,6 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import { ROOM_BLOCKED, ROOM_STATUS_AVAILABLE } from '../config/constants.js';
 
 const RoomDb = sequelize.define(
   'RoomDb',
@@ -27,12 +28,11 @@ const RoomDb = sequelize.define(
     roomstatus: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['available', 'blocked']
+      values: [ROOM_STATUS_AVAILABLE, ROOM_BLOCKED]
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'ADMIN'
+      allowNull: false
     }
   },
   {
