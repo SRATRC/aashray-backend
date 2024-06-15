@@ -5,7 +5,8 @@ import {
   STATUS_OFFPREM,
   STATUS_RESIDENT,
   STATUS_MUMUKSHU,
-  STATUS_SEVA_KUTIR
+  STATUS_SEVA_KUTIR,
+  STATUS_GUEST
 } from '../config/constants.js';
 
 const CardDb = sequelize.define(
@@ -84,7 +85,12 @@ const CardDb = sequelize.define(
     res_status: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: [STATUS_MUMUKSHU, STATUS_RESIDENT, STATUS_SEVA_KUTIR]
+      values: [
+        STATUS_MUMUKSHU,
+        STATUS_RESIDENT,
+        STATUS_SEVA_KUTIR,
+        STATUS_GUEST
+      ]
     },
     updatedBy: {
       type: DataTypes.STRING,

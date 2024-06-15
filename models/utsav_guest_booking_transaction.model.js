@@ -34,7 +34,7 @@ const UtsavGuestBookingTransaction = sequelize.define(
       }
     },
     type: {
-      type: DataTypes.STRING,
+      type: DataTypes.ENUM,
       allowNull: false,
       values: [TYPE_EXPENSE, TYPE_REFUND]
     },

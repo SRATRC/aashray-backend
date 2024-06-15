@@ -286,13 +286,13 @@ export const FlatBookingForMumukshu = async (req, res) => {
 };
 
 export const ViewAllBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
   const user_bookings = await RoomBooking.findAll({
     where: {
-      cardno: req.params.cardno
+      cardno: req.query.cardno
     },
     offset,
     limit: pageSize,

@@ -16,6 +16,8 @@ export const STATUS_PENDING = 'pending';
 export const STATUS_REJECTED = 'rejected';
 export const STATUS_ACTIVE = 'active';
 export const STATUS_INACTIVE = 'inactive';
+export const STATUS_AVAILABLE = 'available';
+export const STATUS_TAKEN = 'taken';
 export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
 export const STATUS_ADMIN_CANCELLED = 'admin canceled';
@@ -28,6 +30,7 @@ export const STATUS_OFFPREM = 'offprem';
 export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
+export const STATUS_GUEST = 'guest';
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
