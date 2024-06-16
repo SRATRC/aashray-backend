@@ -19,7 +19,6 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
-import { parse } from 'dotenv';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -381,6 +380,9 @@ export const CancelShibir = async (req, res) => {
 
 export const FetchShibirInRange = async (req, res) => {
   const { start_date, end_date } = req.query;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+  const offset = (page - 1) * pageSize;
 
   const shibirs = await ShibirDb.findAll({
     where: {
@@ -393,6 +395,8 @@ export const FetchShibirInRange = async (req, res) => {
         [Sequelize.Op.lte]: end_date
       }
     },
+    offset,
+    limit: pageSize,
     order: [['start_date', 'ASC']]
   });
 
