@@ -19,12 +19,13 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
+import { parse } from 'dotenv';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
-  const page = req.query.page || 1;
-  const pageSize = req.query.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
   const shibirs = await ShibirDb.findAll({
@@ -376,6 +377,26 @@ export const CancelShibir = async (req, res) => {
   });
 
   return res.status(200).send({ message: 'Shibir booking cancelled' });
+};
+
+export const FetchShibirInRange = async (req, res) => {
+  const { start_date, end_date } = req.query;
+
+  const shibirs = await ShibirDb.findAll({
+    where: {
+      start_date: {
+        [Sequelize.Op.gte]: start_date,
+        [Sequelize.Op.lte]: end_date
+      },
+      end_date: {
+        [Sequelize.Op.gte]: start_date,
+        [Sequelize.Op.lte]: end_date
+      }
+    },
+    order: [['start_date', 'ASC']]
+  });
+
+  return res.status(200).send({ data: shibirs });
 };
 
 function findClosestSum(arr, target) {

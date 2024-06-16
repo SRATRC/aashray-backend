@@ -121,15 +121,15 @@ export const RegisterForGuest = async (req, res) => {
 };
 
 export const FetchFoodBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
 
   const data = await FoodDb.findAll({
     where: {
-      cardno: req.body.cardno,
+      cardno: req.query.cardno,
       date: {
         [Sequelize.Op.gte]: today
       }
@@ -142,16 +142,15 @@ export const FetchFoodBookings = async (req, res) => {
 };
 
 export const FetchGuestFoodBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
 
   const data = await GuestFoodDb.findAll({
-    // attributes: ['date', 'guest_count', 'breakfast', 'lunch', 'dinner'],
     where: {
-      cardno: req.body.cardno,
+      cardno: req.query.cardno,
       date: {
         [Sequelize.Op.gte]: today
       }

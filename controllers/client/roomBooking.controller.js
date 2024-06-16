@@ -89,6 +89,7 @@ export const AvailabilityCalender = async (req, res) => {
   });
 };
 
+//TODO: BOOKING FOR GUESTS??
 export const BookingForMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
