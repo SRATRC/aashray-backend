@@ -293,11 +293,11 @@ export const ViewAllBookings = async (req, res) => {
 
   const user_bookings = await RoomBooking.findAll({
     where: {
-      cardno: req.query.cardno
+      cardno: req.user.cardno
     },
     offset,
     limit: pageSize,
-    order: [['checkin', 'ASC']]
+    order: [['checkin', 'DESC']]
   });
   return res.status(200).send(user_bookings);
 };
