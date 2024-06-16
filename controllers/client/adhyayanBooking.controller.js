@@ -245,28 +245,26 @@ export const RegisterShibir = async (req, res) => {
 };
 
 export const FetchBookedShibir = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+  const offset = (page - 1) * pageSize;
 
-  const shibirs = await ShibirDb.findAll({
-    attributes: ['name', 'speaker', 'start_date', 'end_date'],
+  const shibirs = await ShibirBookingDb.findAll({
     include: [
       {
-        model: ShibirBookingDb,
-        attributes: ['status'],
-        where: {
-          cardno: req.params.cardno
-        }
+        model: ShibirDb,
+        attributes: ['name', 'speaker', 'start_date', 'end_date']
       }
     ],
     where: {
-      start_date: {
-        [Sequelize.Op.gt]: today
-      }
+      cardno: req.user.cardno
     },
-    order: [['start_date', 'ASC']]
+    offset,
+    limit: pageSize,
+    order: [['updatedAt', 'DESC']]
   });
 
-  return res.status(200).send({ message: 'fetched results', data: shibirs });
+  return res.status(200).send({ data: shibirs });
 };
 
 export const CancelShibir = async (req, res) => {
