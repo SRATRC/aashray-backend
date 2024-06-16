@@ -384,17 +384,26 @@ export const FetchShibirInRange = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
+  const whereCondition = {
+    start_date: {
+      [Sequelize.Op.gte]: start_date
+    }
+  };
+
+  if (end_date) {
+    whereCondition.start_date[Sequelize.Op.lte] = end_date;
+    whereCondition.end_date = {
+      [Sequelize.Op.gte]: start_date,
+      [Sequelize.Op.lte]: end_date
+    };
+  } else {
+    whereCondition.end_date = {
+      [Sequelize.Op.gte]: start_date
+    };
+  }
+
   const shibirs = await ShibirDb.findAll({
-    where: {
-      start_date: {
-        [Sequelize.Op.gte]: start_date,
-        [Sequelize.Op.lte]: end_date
-      },
-      end_date: {
-        [Sequelize.Op.gte]: start_date,
-        [Sequelize.Op.lte]: end_date
-      }
-    },
+    where: whereCondition,
     offset,
     limit: pageSize,
     order: [['start_date', 'ASC']]
