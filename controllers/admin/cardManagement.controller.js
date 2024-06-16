@@ -56,8 +56,8 @@ export const createCard = async (req, res) => {
 };
 
 export const fetchAllCards = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = req.query.page || 1;
+  const pageSize = req.query.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const data = await CardDb.findAll({
@@ -69,8 +69,8 @@ export const fetchAllCards = async (req, res) => {
 };
 
 export const searchCardsByName = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = req.query.page || 1;
+  const pageSize = req.query.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const data = await CardDb.findAll({
