@@ -252,8 +252,7 @@ export const FetchBookedShibir = async (req, res) => {
   const shibirs = await ShibirBookingDb.findAll({
     include: [
       {
-        model: ShibirDb,
-        attributes: ['name', 'speaker', 'start_date', 'end_date']
+        model: ShibirDb
       }
     ],
     where: {
