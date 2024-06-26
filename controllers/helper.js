@@ -1,8 +1,15 @@
-import { RoomBooking, FlatBooking, FoodDb } from '../models/associations.js';
+import {
+  RoomBooking,
+  FlatBooking,
+  FoodDb,
+  ShibirBookingDb,
+  ShibirDb
+} from '../models/associations.js';
 import {
   STATUS_WAITING,
   ROOM_STATUS_CHECKEDIN,
-  ROOM_STATUS_PENDING_CHECKIN
+  ROOM_STATUS_PENDING_CHECKIN,
+  STATUS_CONFIRMED
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -125,4 +132,36 @@ export function validateDate(start_date, end_date) {
   if (today > start_date || today > end_date || checkinDate > checkoutDate) {
     throw new ApiError(400, 'Invalid Date');
   }
+}
+
+export async function checkSpecialAllowance(start_date, end_date, cardno) {
+  const adhyayans = await ShibirBookingDb.findAll({
+    include: [
+      {
+        model: ShibirDb,
+        where: {
+          start_date: {
+            [Sequelize.Op.lte]: start_date
+          },
+          end_date: {
+            [Sequelize.Op.gte]: end_date
+          }
+        }
+      }
+    ],
+    where: {
+      cardno: cardno,
+      status: {
+        [Sequelize.Op.in]: [STATUS_CONFIRMED]
+      }
+    }
+  });
+
+  if (adhyayans) {
+    for (var data of adhyayans) {
+      if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
+    }
+  }
+
+  return false;
 }

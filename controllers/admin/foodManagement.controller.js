@@ -3,7 +3,8 @@ import {
   FoodDb,
   GuestFoodDb,
   GuestFoodTransactionDb,
-  FoodPhysicalPlate
+  FoodPhysicalPlate,
+  Menu
 } from '../../models/associations.js';
 import {
   BREAKFAST_PRICE,
@@ -438,4 +439,67 @@ export const foodReportDetails = async (req, res) => {
   );
 
   return res.status(200).send({ data: data });
+};
+
+export const fetchMenu = async (req, res) => {
+  const menu = await Menu.findAll({
+    where: {
+      date: {
+        [Sequelize.Op.gte]: moment().format('YYYY-MM-DD')
+      }
+    }
+  });
+
+  return res.status(200).send({ data: menu });
+};
+
+export const addMenu = async (req, res) => {
+  const { date, breakfast, lunch, dinner } = req.body;
+
+  await Menu.create({
+    date,
+    breakfast,
+    lunch,
+    dinner,
+    updatedBy: req.user.username
+  });
+
+  return res.status(200).send({ message: 'Menu Added' });
+};
+
+export const updateMenu = async (req, res) => {
+  const { old_date, date, breakfast, lunch, dinner } = req.body;
+
+  const [itemsUpdated] = await Menu.update(
+    {
+      date,
+      breakfast,
+      lunch,
+      dinner,
+      updatedBy: req.user.username
+    },
+    {
+      where: {
+        date: old_date
+      }
+    }
+  );
+
+  if (itemsUpdated == 0) throw new ApiError(500, 'Menu Item not found');
+
+  return res.status(200).send({ message: 'Menu Item Updated' });
+};
+
+export const deleteMenu = async (req, res) => {
+  const { date } = req.query;
+
+  const item = await Menu.destroy({
+    where: {
+      date: date
+    }
+  });
+
+  if (item == 0) throw new ApiError(500, 'Menu Item not found');
+
+  return res.status(200).send({ message: 'Menu Item Deleted' });
 };

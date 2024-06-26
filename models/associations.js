@@ -26,6 +26,7 @@ import UtsavPackagesDb from './utsav_packages.model.js';
 import AdminUsers from './admin_users.model.js';
 import AdminRoles from './admin_roles.model.js';
 import Roles from './roles.model.js';
+import Menu from './menu.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -399,6 +400,17 @@ AdminRoles.belongsTo(Roles, {
   targetKey: 'name'
 });
 
+AdminUsers.hasMany(Menu, {
+  foreignKey: 'updatedBy',
+  sourceKey: 'username',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+Menu.belongsTo(AdminUsers, {
+  foreignKey: 'updatedBy',
+  targetKey: 'username'
+});
+
 export {
   CardDb,
   ShibirDb,
@@ -427,5 +439,6 @@ export {
   UtsavPackagesDb,
   AdminRoles,
   AdminUsers,
-  Roles
+  Roles,
+  Menu
 };

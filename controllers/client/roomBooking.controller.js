@@ -89,7 +89,6 @@ export const AvailabilityCalender = async (req, res) => {
   });
 };
 
-//TODO: BOOKING FOR GUESTS??
 export const BookingForMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
@@ -222,6 +221,12 @@ export const BookingForMumukshu = async (req, res) => {
   });
 
   return res.status(201).send({ message: 'booked successfully' });
+};
+
+//TODO: COMPLETE BOOKING FOR GUESTS
+export const BookingForGuest = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
 };
 
 export const FlatBookingForMumukshu = async (req, res) => {

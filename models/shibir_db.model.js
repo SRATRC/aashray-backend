@@ -38,6 +38,11 @@ const ShibirDb = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
+    food_allowed: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: 0
+    },
     amount: {
       type: DataTypes.INTEGER,
       allowNull: false

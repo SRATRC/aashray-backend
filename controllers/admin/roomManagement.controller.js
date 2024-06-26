@@ -390,69 +390,41 @@ export const updateRoomBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { bookingid, cardno, roomno, gender, status } = req.body;
+  const {
+    bookingid,
+    cardno,
+    roomno,
+    checkout_date,
+    room_type,
+    gender,
+    status
+  } = req.body;
 
-  // const result = await RoomBookingTransaction.findOne({
-  //   attributes: [
-  //     [
-  //       Sequelize.fn(
-  //         'SUM',
-  //         Sequelize.literal(
-  //           "CASE WHEN status = 'payment completed' AND type = 'expense' THEN amount ELSE 0 END"
-  //         )
-  //       ),
-  //       'totalPaidExpense'
-  //     ],
-  //     [
-  //       Sequelize.fn(
-  //         'SUM',
-  //         Sequelize.literal(
-  //           "CASE WHEN status = 'payment completed' AND type = 'refund' THEN amount ELSE 0 END"
-  //         )
-  //       ),
-  //       'totalPaidRefund'
-  //     ],
-  //     [
-  //       Sequelize.fn(
-  //         'SUM',
-  //         Sequelize.literal(
-  //           "CASE WHEN status IN ('payment pending', 'awaiting_refund') AND type = 'expense' THEN amount ELSE 0 END"
-  //         )
-  //       ),
-  //       'totalUnPaidExpense'
-  //     ],
-  //     [
-  //       Sequelize.fn(
-  //         'SUM',
-  //         Sequelize.literal(
-  //           "CASE WHEN status IN ('payment pending', 'awaiting_refund') AND type = 'refund' THEN amount ELSE 0 END"
-  //         )
-  //       ),
-  //       'totalUnPaidRefund'
-  //     ]
-  //   ],
-  //   where: {
-  //     bookingid: bookingid
-  //   },
-  //   raw: true // Ensures the result is plain JSON
-  // });
-
-  const room_no = await RoomDb.findOne({
-    where: {
-      roomno: roomno,
-      gender: gender
-    }
+  const old_booking = await RoomBooking.findOne({
+    where: { bookingid: bookingid }
   });
 
   // TODO: check if roomno is not taken
-  if (!room_no) throw new ApiError(404, 'unable to find room with that number');
-  if (room_no == ROOM_BLOCKED)
-    throw new ApiError(403, 'selected room is blocked');
+  var room_no;
+  if (roomno) {
+    room_no = await RoomDb.findOne({
+      where: {
+        roomno: roomno,
+        gender: gender,
+        roomtype: room_type
+      }
+    });
+    if (!room_no)
+      throw new ApiError(404, 'unable to find room with that number');
+    if (room_no == ROOM_BLOCKED)
+      throw new ApiError(403, 'selected room is blocked');
+  }
 
   const updatedBooking = await RoomBooking.update(
     {
       roomno: roomno,
-      roomtype: room_no.dataValues.roomtype,
+      checkout_date: checkout_date,
+      roomtype: room_type,
       status: status,
       updatedBy: req.user.username
     },
