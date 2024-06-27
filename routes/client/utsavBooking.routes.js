@@ -13,6 +13,7 @@ import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(validateCard);
+
 router.get('/upcoming', CatchAsync(FetchUpcoming));
 router.get('/booking/:cardno', CatchAsync(ViewUtsavBookings));
 router.post('/booking', CatchAsync(BookUtsav));

@@ -324,8 +324,8 @@ export const flatBooking = async (req, res) => {
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const bookings = await RoomBooking.findAll({
@@ -338,8 +338,8 @@ export const fetchAllRoomBookings = async (req, res) => {
 };
 
 export const fetchAllFlatBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const bookings = await FlatBooking.findAll({
@@ -352,8 +352,8 @@ export const fetchAllFlatBookings = async (req, res) => {
 };
 
 export const fetchRoomBookingsByCard = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const bookings = await RoomBooking.findAll({
@@ -369,8 +369,8 @@ export const fetchRoomBookingsByCard = async (req, res) => {
 };
 
 export const fetchFlatBookingsByCard = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const bookings = await FlatBooking.findAll({
@@ -482,8 +482,8 @@ export const updateFlatBooking = async (req, res) => {
 };
 
 export const checkinReport = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
@@ -504,8 +504,8 @@ export const checkinReport = async (req, res) => {
 };
 
 export const checkoutReport = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
@@ -593,8 +593,8 @@ export const unblockRC = async (req, res) => {
 };
 
 export const occupancyReport = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const result = await RoomBooking.findAll({
@@ -620,8 +620,18 @@ export const occupancyReport = async (req, res) => {
 
 export const ReservationReport = async (req, res) => {
   const { start_date, end_date } = req.query;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
 
   const reservations = await RoomBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'centre'],
+        required: true
+      }
+    ],
     attributes: [
       'bookingid',
       'roomtype',
@@ -639,13 +649,8 @@ export const ReservationReport = async (req, res) => {
       ['checkin', 'ASC'],
       ['roomno', 'ASC']
     ],
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
-        required: true
-      }
-    ]
+    offset,
+    limit: pageSize
   });
 
   return res
@@ -655,8 +660,18 @@ export const ReservationReport = async (req, res) => {
 
 export const CancellationReport = async (req, res) => {
   const { start_date, end_date } = req.query;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
 
   const cancellations = await RoomBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'centre'],
+        required: true
+      }
+    ],
     attributes: [
       'bookingid',
       'roomtype',
@@ -671,13 +686,8 @@ export const CancellationReport = async (req, res) => {
       status: { [Sequelize.Op.eq]: STATUS_CANCELLED }
     },
     order: [['checkin', 'ASC']],
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
-        required: true
-      }
-    ]
+    offset,
+    limit: pageSize
   });
 
   return res
@@ -687,8 +697,18 @@ export const CancellationReport = async (req, res) => {
 
 export const WaitlistReport = async (req, res) => {
   const { start_date, end_date } = req.query;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
 
   const waiting = await RoomBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'centre'],
+        required: true
+      }
+    ],
     attributes: [
       'bookingid',
       'roomtype',
@@ -702,13 +722,8 @@ export const WaitlistReport = async (req, res) => {
       status: { [Sequelize.Op.eq]: STATUS_WAITING }
     },
     order: [['checkin', 'ASC']],
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
-        required: true
-      }
-    ]
+    offset,
+    limit: pageSize
   });
 
   return res
@@ -719,6 +734,9 @@ export const WaitlistReport = async (req, res) => {
 export const dayWiseGuestCountReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const allDates = getDates(start_date, end_date);
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
 
   var data = [];
 
@@ -747,7 +765,9 @@ export const dayWiseGuestCountReport = async (req, res) => {
           [Sequelize.Op.in]: ['pending checkin', 'checkedin', 'checkedout']
         }
       },
-      group: 'checkin'
+      group: 'checkin',
+      offset,
+      limit: pageSize
     });
     if (daywise_report[0]) {
       data.push({

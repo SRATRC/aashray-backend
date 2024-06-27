@@ -49,8 +49,8 @@ export const createAdhyayan = async (req, res) => {
 export const fetchAllAdhyayan = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const shibirs = await ShibirDb.findAll({
@@ -113,8 +113,8 @@ export const adhyayanReport = async (req, res) => {
 export const adhyayanWaitlist = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const data = await ShibirBookingDb.findAll({
