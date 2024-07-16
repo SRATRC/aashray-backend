@@ -12,13 +12,14 @@ import {
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_CHECKEDOUT,
   TYPE_EXPENSE,
-  ROOM_PRICE,
   STATUS_PAYMENT_PENDING,
   ROOM_BLOCKED,
   ROOM_STATUS_AVAILABLE,
   STATUS_INACTIVE,
   STATUS_WAITING,
-  STATUS_CANCELLED
+  STATUS_CANCELLED,
+  NAC_ROOM_PRICE,
+  AC_ROOM_PRICE
 } from '../../config/constants.js';
 import {
   checkRoomAlreadyBooked,
@@ -82,7 +83,10 @@ export const manualCheckout = async (req, res) => {
 
     const [transactionItemsUpdated] = await RoomBookingTransaction.update(
       {
-        amount: ROOM_PRICE * nights,
+        amount:
+          booking.dataValues.roomtype == 'nac'
+            ? NAC_ROOM_PRICE * nights
+            : AC_ROOM_PRICE * nights,
         updatedBy: req.user.username
       },
       {
@@ -107,26 +111,41 @@ export const manualCheckout = async (req, res) => {
 };
 
 export const roomBooking = async (req, res) => {
-  validateDate(req.body.checkin_date, req.body.checkout_date);
+  const { mobno, cardno, checkin_date, checkout_date, room_type, floor_pref } =
+    req.body;
+  validateDate(checkin_date, checkout_date);
 
   const t = await database.transaction();
   req.transaction = t;
 
+  if (mobno) {
+    const user = await CardDb.findOne({
+      where: {
+        mobno: mobno
+      }
+    });
+    if (user) req.mumukshu = user;
+  } else {
+    const user = await CardDb.findOne({
+      where: {
+        cardno: cardno
+      }
+    });
+    if (user) req.mumukshu = user;
+  }
+
   if (
     await checkRoomAlreadyBooked(
-      req.body.checkin_date,
-      req.body.checkout_date,
-      req.user.cardno
+      checkin_date,
+      checkout_date,
+      req.mumukshu.cardno
     )
   ) {
     throw new ApiError(400, 'Already Booked');
   }
 
-  const gender = req.user.gender;
-  const nights = await calculateNights(
-    req.body.checkin_date,
-    req.body.checkout_date
-  );
+  const gender = req.mumukshu.gender;
+  const nights = await calculateNights(checkin_date, checkout_date);
   var roomno = undefined;
   var booking = undefined;
 
@@ -139,12 +158,12 @@ export const roomBooking = async (req, res) => {
           [Sequelize.Op.notIn]: Sequelize.literal(`(
                     SELECT roomno 
                     FROM room_booking 
-                    WHERE NOT (checkout <= ${req.body.checkin_date} OR checkin >= ${req.body.checkout_date})
+                    WHERE NOT (checkout <= ${checkin_date} OR checkin >= ${checkout_date})
                 )`)
         },
         roomstatus: 'available',
-        roomtype: req.body.room_type,
-        gender: req.body.floor_pref + gender
+        roomtype: room_type,
+        gender: floor_pref + gender
       },
       order: [
         Sequelize.literal(
@@ -161,13 +180,13 @@ export const roomBooking = async (req, res) => {
     booking = await RoomBooking.create(
       {
         bookingid: uuidv4(),
-        cardno: req.user.cardno,
+        cardno: req.mumukshu.cardno,
         roomno: roomno.dataValues.roomno,
-        checkin: req.body.checkin_date,
-        checkout: req.body.checkout_date,
+        checkin: checkin_date,
+        checkout: checkout_date,
         nights: nights,
-        roomtype: req.body.room_type,
-        status: ROOM_STATUS_CHECKEDIN,
+        roomtype: room_type,
+        status: ROOM_STATUS_PENDING_CHECKIN,
         gender: gender,
         updatedBy: req.user.username
       },
@@ -180,10 +199,13 @@ export const roomBooking = async (req, res) => {
 
     const transaction = await RoomBookingTransaction.create(
       {
-        cardno: req.user.cardno,
+        cardno: req.mumukshu.cardno,
         bookingid: booking.dataValues.bookingid,
         type: TYPE_EXPENSE,
-        amount: ROOM_PRICE * nights,
+        amount:
+          req.body.room_type == 'nac'
+            ? NAC_ROOM_PRICE * nights
+            : AC_ROOM_PRICE * nights,
         description: `Room Booked for ${nights} nights`,
         status: STATUS_PAYMENT_PENDING,
         updatedBy: req.user.username
@@ -198,8 +220,8 @@ export const roomBooking = async (req, res) => {
     roomno = await RoomDb.findOne({
       where: {
         roomno: { [Sequelize.Op.like]: 'NA%' },
-        roomtype: req.body.room_type,
-        gender: req.body.floor_pref + gender,
+        roomtype: room_type,
+        gender: floor_pref + gender,
         roomstatus: ROOM_STATUS_AVAILABLE
       },
       attributes: ['roomno']
@@ -208,12 +230,12 @@ export const roomBooking = async (req, res) => {
     booking = await RoomBooking.create(
       {
         bookingid: uuidv4(),
-        cardno: req.user.cardno,
+        cardno: req.mumukshu.cardno,
         roomno: roomno.dataValues.roomno,
-        checkin: req.body.checkin_date,
-        checkout: req.body.checkout_date,
+        checkin: checkin_date,
+        checkout: checkout_date,
         nights: nights,
-        roomtype: req.body.room_type,
+        roomtype: room_type,
         status: ROOM_STATUS_PENDING_CHECKIN,
         gender: gender,
         updatedBy: req.user.username
@@ -228,27 +250,16 @@ export const roomBooking = async (req, res) => {
 
   await t.commit();
 
-  const message = `
-      Dear ${req.user.issuedto},<br><br>
-
-    	We are pleased to confirm your booking for ${booking.dataValues.roomtype} room as per following details:<br><br>
-
-    	<b>Booking id:</b> ${booking.dataValues.bookingid}<br>
-    	<b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
-    	<b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
-
-    	Your Room Number will be provided from office upon checkin.<br><br>
-
-    	<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
-    	We hope you have a spiritually blissful stay. <br><br>
-
-    	Research Centre Admin office, <br>
-    	7875432613 / 9004273512`;
-
   SendMail({
-    email: req.user.email,
+    email: req.mumukshu.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
-    message
+    template: 'rajSharan',
+    context: {
+      name: req.mumukshu.issuedto,
+      bookingid: booking.dataValues.bookingid,
+      checkin: booking.dataValues.checkin,
+      checkout: booking.dataValues.checkout
+    }
   });
 
   return res.status(201).send({ message: 'booked successfully' });

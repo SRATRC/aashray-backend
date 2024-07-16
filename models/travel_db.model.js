@@ -35,6 +35,10 @@ const TravelDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
+    type: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
     luggage: {
       type: DataTypes.STRING,
       allowNull: false

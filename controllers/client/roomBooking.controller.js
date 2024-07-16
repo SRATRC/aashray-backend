@@ -9,14 +9,16 @@ import {
 import {
   ROOM_STATUS_AVAILABLE,
   STATUS_WAITING,
-  ROOM_PRICE,
   STATUS_CANCELLED,
   ROOM_WL,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
   TYPE_EXPENSE,
   STATUS_AWAITING_REFUND,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  STATUS_AVAILABLE,
+  NAC_ROOM_PRICE,
+  AC_ROOM_PRICE
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -128,7 +130,7 @@ export const BookingForMumukshu = async (req, res) => {
                     WHERE NOT (checkout <= ${req.body.checkin_date} OR checkin >= ${req.body.checkout_date})
                 )`)
         },
-        roomstatus: 'available',
+        roomstatus: STATUS_AVAILABLE,
         roomtype: req.body.room_type,
         gender: gender
       },
@@ -168,7 +170,8 @@ export const BookingForMumukshu = async (req, res) => {
         cardno: req.user.cardno,
         bookingid: booking.dataValues.bookingid,
         type: TYPE_EXPENSE,
-        amount: ROOM_PRICE * nights,
+        amount:
+          room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
         description: `Room Booked for ${nights} nights`,
         status: STATUS_PAYMENT_PENDING
       },

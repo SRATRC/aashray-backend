@@ -24,10 +24,6 @@ const AdminUsers = sequelize.define(
       allowNull: true,
       values: [STATUS_ACTIVE, STATUS_INACTIVE],
       defaultValue: STATUS_ACTIVE
-    },
-    updatedBy: {
-      type: DataTypes.STRING,
-      allowNull: false
     }
   },
   {
