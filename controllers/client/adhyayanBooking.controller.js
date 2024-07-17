@@ -25,6 +25,7 @@ export const FetchAllShibir = async (req, res) => {
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
+
   const offset = (page - 1) * pageSize;
 
   const shibirs = await ShibirDb.findAll({
