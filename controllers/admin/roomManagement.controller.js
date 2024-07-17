@@ -28,7 +28,7 @@ import {
   validateDate
 } from '../helper.js';
 import getDates from '../../utils/getDates.js';
-import Sequelize from 'sequelize';
+import Sequelize, { where } from 'sequelize';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import SendMail from '../../utils/sendMail.js';
@@ -540,36 +540,79 @@ export const checkoutReport = async (req, res) => {
 };
 
 export const blockRoom = async (req, res) => {
-  const isBlocked = await RoomDb.findOne({
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const isBlocked = await RoomDb.findAll({
     where: {
-      roomno: req.params.roomno
+      roomno: {
+        [Sequelize.Op.like]: `${req.params.roomno}_`
+      }
     }
   });
-  if (isBlocked.dataValues.roomstatus == ROOM_BLOCKED) {
-    return res.status(200).send({ message: 'blocked room successfully' });
-  } else {
-    isBlocked.roomstatus = ROOM_BLOCKED;
-    isBlocked.updatedBy = req.user.username;
-    await isBlocked.save();
+
+  if (isBlocked.length == 0) {
+    throw new ApiError(400, 'room not found');
+  }
+  for (let i of isBlocked) {
+    if (i.dataValues.roomstatus == ROOM_BLOCKED) {
+      return res.status(400).send({ message: 'room already blocked' });
+    } else {
+      await RoomDb.update(
+        {
+          roomstatus: ROOM_BLOCKED,
+          updatedBy: req.user.username
+        },
+        {
+          where: {
+            roomno: i.dataValues.roomno
+          }
+        },
+        { transaction: t }
+      );
+    }
   }
 
+  await t.commit();
   return res.status(200).send({ message: 'blocked room successfully' });
 };
 
 export const unblockRoom = async (req, res) => {
-  const isunBlocked = await RoomDb.findOne({
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const isBlocked = await RoomDb.findAll({
     where: {
-      roomno: req.params.roomno
+      roomno: {
+        [Sequelize.Op.like]: `${req.params.roomno}_`
+      }
     }
   });
-  if (isunBlocked.dataValues.roomstatus == ROOM_STATUS_AVAILABLE) {
-    return res.status(200).send({ message: 'unblocking room successfully' });
-  } else {
-    isunBlocked.roomstatus = ROOM_STATUS_AVAILABLE;
-    isunBlocked.updatedBy = req.user.username;
-    await isunBlocked.save();
+
+  if (isBlocked.length == 0) {
+    throw new ApiError(400, 'room not found');
   }
 
+  for (let i of isBlocked) {
+    if (i.dataValues.roomstatus == ROOM_STATUS_AVAILABLE) {
+      return res.status(400).send({ message: 'room already unblocked' });
+    } else {
+      await RoomDb.update(
+        {
+          roomstatus: ROOM_STATUS_AVAILABLE,
+          updatedBy: req.user.username
+        },
+        {
+          where: {
+            roomno: i.dataValues.roomno
+          }
+        },
+        { transaction: t }
+      );
+    }
+  }
+
+  await t.commit();
   return res.status(200).send({ message: 'unblocking room successfully' });
 };
 
