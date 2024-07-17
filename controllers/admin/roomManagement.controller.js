@@ -35,6 +35,7 @@ import SendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 
+// TODO: early checkin??
 export const manualCheckin = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
@@ -69,6 +70,8 @@ export const manualCheckout = async (req, res) => {
     },
     order: [['checkin', 'ASC']]
   });
+
+  if (!booking) throw new ApiError(404, 'Booking not found');
 
   const today = moment().format('YYYY-MM-DD');
 

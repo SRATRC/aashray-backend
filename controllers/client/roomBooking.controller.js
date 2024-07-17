@@ -171,7 +171,9 @@ export const BookingForMumukshu = async (req, res) => {
         bookingid: booking.dataValues.bookingid,
         type: TYPE_EXPENSE,
         amount:
-          room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
+          req.body.room_type == 'nac'
+            ? NAC_ROOM_PRICE * nights
+            : AC_ROOM_PRICE * nights,
         description: `Room Booked for ${nights} nights`,
         status: STATUS_PAYMENT_PENDING
       },
