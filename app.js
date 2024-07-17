@@ -1,4 +1,4 @@
-import 'dotenv/config.js';
+import './config/environment.js';
 import express, { urlencoded, json } from 'express';
 import cors from 'cors';
 import session from 'express-session';

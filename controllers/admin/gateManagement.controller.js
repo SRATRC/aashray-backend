@@ -21,8 +21,8 @@ export const fetchTotal = async (req, res) => {
 };
 
 export const fetchPR = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const total_pr = await CardDb.findAll({
@@ -38,8 +38,8 @@ export const fetchPR = async (req, res) => {
 };
 
 export const fetchMumukshu = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const total_mumukshu = await CardDb.findAll({
@@ -55,8 +55,8 @@ export const fetchMumukshu = async (req, res) => {
 };
 
 export const fetchSevaKutir = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const total_seva = await CardDb.findAll({

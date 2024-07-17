@@ -43,8 +43,7 @@ const GuestFoodDb = sequelize.define(
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'USER'
+      allowNull: false
     }
   },
   {

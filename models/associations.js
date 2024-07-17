@@ -26,6 +26,8 @@ import UtsavPackagesDb from './utsav_packages.model.js';
 import AdminUsers from './admin_users.model.js';
 import AdminRoles from './admin_roles.model.js';
 import Roles from './roles.model.js';
+import Menu from './menu.model.js';
+import Transactions from './transactions.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -123,6 +125,18 @@ CardDb.hasMany(UtsavGuestBookingTransaction, {
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
+});
+CardDb.hasMany(Transactions, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+// Transactions
+Transactions.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
 });
 
 // Room Transaction
@@ -383,20 +397,31 @@ AdminUsers.hasMany(AdminRoles, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+AdminUsers.hasMany(Menu, {
+  foreignKey: 'updatedBy',
+  sourceKey: 'username',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 AdminRoles.belongsTo(AdminUsers, {
   foreignKey: 'user_id',
   targetKey: 'id'
 });
-
+AdminRoles.belongsTo(Roles, {
+  foreignKey: 'role_name',
+  targetKey: 'name'
+});
 Roles.hasMany(AdminRoles, {
   foreignKey: 'role_name',
   sourceKey: 'name',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
-AdminRoles.belongsTo(Roles, {
-  foreignKey: 'role_name',
-  targetKey: 'name'
+
+// Menu
+Menu.belongsTo(AdminUsers, {
+  foreignKey: 'updatedBy',
+  targetKey: 'username'
 });
 
 export {
@@ -427,5 +452,6 @@ export {
   UtsavPackagesDb,
   AdminRoles,
   AdminUsers,
-  Roles
+  Roles,
+  Menu
 };

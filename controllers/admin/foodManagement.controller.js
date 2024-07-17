@@ -3,7 +3,8 @@ import {
   FoodDb,
   GuestFoodDb,
   GuestFoodTransactionDb,
-  FoodPhysicalPlate
+  FoodPhysicalPlate,
+  Menu
 } from '../../models/associations.js';
 import {
   BREAKFAST_PRICE,
@@ -109,8 +110,8 @@ export const physicalPlatesIssued = async (req, res) => {
 };
 
 export const fetchPhysicalPlateIssued = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
   const data = await FoodPhysicalPlate.findAll({
@@ -425,17 +426,83 @@ GROUP BY
 
 export const foodReportDetails = async (req, res) => {
   const { meal, is_issued, date } = req.query;
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
 
   const data = await database.query(
     `SELECT food_db.date, card_db.mobno, card_db.issuedto
     FROM food_db 
     join card_db 
     on food_db.cardno = card_db.cardno
-    WHERE date='${date}' AND ${meal}_plate_issued=${is_issued};`,
+    WHERE date='${date}' AND ${meal}_plate_issued=${is_issued} LIMIT ${offset}, ${pageSize} ;`,
     {
       type: Sequelize.QueryTypes.SELECT
     }
   );
 
   return res.status(200).send({ data: data });
+};
+
+export const fetchMenu = async (req, res) => {
+  const menu = await Menu.findAll({
+    where: {
+      date: {
+        [Sequelize.Op.gte]: moment().format('YYYY-MM-DD')
+      }
+    }
+  });
+
+  return res.status(200).send({ data: menu });
+};
+
+export const addMenu = async (req, res) => {
+  const { date, breakfast, lunch, dinner } = req.body;
+
+  await Menu.create({
+    date,
+    breakfast,
+    lunch,
+    dinner,
+    updatedBy: req.user.username
+  });
+
+  return res.status(200).send({ message: 'Menu Added' });
+};
+
+export const updateMenu = async (req, res) => {
+  const { old_date, date, breakfast, lunch, dinner } = req.body;
+
+  const [itemsUpdated] = await Menu.update(
+    {
+      date,
+      breakfast,
+      lunch,
+      dinner,
+      updatedBy: req.user.username
+    },
+    {
+      where: {
+        date: old_date
+      }
+    }
+  );
+
+  if (itemsUpdated == 0) throw new ApiError(500, 'Menu Item not found');
+
+  return res.status(200).send({ message: 'Menu Item Updated' });
+};
+
+export const deleteMenu = async (req, res) => {
+  const { date } = req.query;
+
+  const item = await Menu.destroy({
+    where: {
+      date: date
+    }
+  });
+
+  if (item == 0) throw new ApiError(500, 'Menu Item not found');
+
+  return res.status(200).send({ message: 'Menu Item Deleted' });
 };

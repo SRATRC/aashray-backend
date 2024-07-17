@@ -1,19 +1,29 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
 
-const Departments = sequelize.define(
-  'Departments',
+const Menu = sequelize.define(
+  'Menu',
   {
-    dept_name: {
-      type: DataTypes.STRING,
+    id: {
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
       allowNull: false,
       primaryKey: true
     },
-    dept_head: {
+    date: {
+      type: DataTypes.DATEONLY,
+      allowNull: false,
+      unique: true
+    },
+    breakfast: {
       type: DataTypes.STRING,
       allowNull: false
     },
-    dept_email: {
+    lunch: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    dinner: {
       type: DataTypes.STRING,
       allowNull: false
     },
@@ -23,9 +33,9 @@ const Departments = sequelize.define(
     }
   },
   {
-    tableName: 'departments',
+    tableName: 'menu',
     timestamps: true
   }
 );
 
-export default Departments;
+export default Menu;

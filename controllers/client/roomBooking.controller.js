@@ -9,14 +9,16 @@ import {
 import {
   ROOM_STATUS_AVAILABLE,
   STATUS_WAITING,
-  ROOM_PRICE,
   STATUS_CANCELLED,
   ROOM_WL,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
   TYPE_EXPENSE,
   STATUS_AWAITING_REFUND,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  STATUS_AVAILABLE,
+  NAC_ROOM_PRICE,
+  AC_ROOM_PRICE
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -128,7 +130,7 @@ export const BookingForMumukshu = async (req, res) => {
                     WHERE NOT (checkout <= ${req.body.checkin_date} OR checkin >= ${req.body.checkout_date})
                 )`)
         },
-        roomstatus: 'available',
+        roomstatus: STATUS_AVAILABLE,
         roomtype: req.body.room_type,
         gender: gender
       },
@@ -168,7 +170,10 @@ export const BookingForMumukshu = async (req, res) => {
         cardno: req.user.cardno,
         bookingid: booking.dataValues.bookingid,
         type: TYPE_EXPENSE,
-        amount: ROOM_PRICE * nights,
+        amount:
+          req.body.room_type == 'nac'
+            ? NAC_ROOM_PRICE * nights
+            : AC_ROOM_PRICE * nights,
         description: `Room Booked for ${nights} nights`,
         status: STATUS_PAYMENT_PENDING
       },
@@ -221,6 +226,12 @@ export const BookingForMumukshu = async (req, res) => {
   });
 
   return res.status(201).send({ message: 'booked successfully' });
+};
+
+//TODO: COMPLETE BOOKING FOR GUESTS
+export const BookingForGuest = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
 };
 
 export const FlatBookingForMumukshu = async (req, res) => {
@@ -286,17 +297,17 @@ export const FlatBookingForMumukshu = async (req, res) => {
 };
 
 export const ViewAllBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
   const user_bookings = await RoomBooking.findAll({
     where: {
-      cardno: req.params.cardno
+      cardno: req.user.cardno
     },
     offset,
     limit: pageSize,
-    order: [['checkin', 'ASC']]
+    order: [['checkin', 'DESC']]
   });
   return res.status(200).send(user_bookings);
 };

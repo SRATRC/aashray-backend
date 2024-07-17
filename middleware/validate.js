@@ -16,8 +16,13 @@ export const validateCard = catchAsync(async (req, res, next) => {
 });
 
 export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
-  const startDate = new Date(req.body.checkin_date);
-  const endDate = new Date(req.body.checkout_date);
+  const { checkin_date, checkout_date } =
+    req.body || req.body.primary_booking.details;
+
+  if (!checkin_date || !checkout_date) return next();
+
+  const startDate = new Date(checkin_date);
+  const endDate = new Date(checkout_date);
 
   const blockdates = await BlockDates.findAll({
     where: {

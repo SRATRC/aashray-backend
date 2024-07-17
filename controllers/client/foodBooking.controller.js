@@ -1,17 +1,20 @@
 import {
   FoodDb,
   GuestFoodDb,
-  GuestFoodTransactionDb
+  GuestFoodTransactionDb,
+  Menu
 } from '../../models/associations.js';
 import {
   BREAKFAST_PRICE,
   LUNCH_PRICE,
   DINNER_PRICE,
-  TYPE_EXPENSE
+  TYPE_EXPENSE,
+  STATUS_RESIDENT
 } from '../../config/constants.js';
 import {
   checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
+  checkSpecialAllowance,
   isFoodBooked,
   validateDate
 } from '../helper.js';
@@ -35,6 +38,12 @@ export const RegisterFood = async (req, res) => {
         req.user.cardno
       )) ||
       (await checkFlatAlreadyBooked(
+        req.body.start_date,
+        req.body.end_date,
+        req.user.cardno
+      )) ||
+      req.user.res_status === STATUS_RESIDENT ||
+      (await checkSpecialAllowance(
         req.body.start_date,
         req.body.end_date,
         req.user.cardno
@@ -120,16 +129,21 @@ export const RegisterForGuest = async (req, res) => {
   return res.status(201).send({ message: 'successfully booked guest food' });
 };
 
+// TODO: Implementation of this function
+export const updateGuestCount = async (req, res) => {
+  const { bookingid, guest_count } = req.body;
+};
+
 export const FetchFoodBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
 
   const data = await FoodDb.findAll({
     where: {
-      cardno: req.body.cardno,
+      cardno: req.query.cardno,
       date: {
         [Sequelize.Op.gte]: today
       }
@@ -142,16 +156,15 @@ export const FetchFoodBookings = async (req, res) => {
 };
 
 export const FetchGuestFoodBookings = async (req, res) => {
-  const page = req.body.page || 1;
-  const pageSize = req.body.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
 
   const data = await GuestFoodDb.findAll({
-    // attributes: ['date', 'guest_count', 'breakfast', 'lunch', 'dinner'],
     where: {
-      cardno: req.body.cardno,
+      cardno: req.query.cardno,
       date: {
         [Sequelize.Op.gte]: today
       }
@@ -273,4 +286,16 @@ export const CancelGuestFood = async (req, res) => {
     throw new ApiError(500, 'Error occured while updating transaction');
 
   return res.status(200).send({ message: 'Successfully deleted' });
+};
+
+export const fetchMenu = async (req, res) => {
+  const menu = await Menu.findAll({
+    where: {
+      date: {
+        [Sequelize.Op.gte]: moment().format('YYYY-MM-DD')
+      }
+    }
+  });
+
+  return res.status(200).send({ data: menu });
 };

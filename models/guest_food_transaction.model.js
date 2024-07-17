@@ -30,7 +30,7 @@ const GuestFoodTransactionDb = sequelize.define(
       allowNull: false
     },
     type: {
-      type: DataTypes.STRING,
+      type: DataTypes.ENUM,
       allowNull: false,
       values: [TYPE_EXPENSE, TYPE_REFUND]
     },
@@ -55,8 +55,7 @@ const GuestFoodTransactionDb = sequelize.define(
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'USER'
+      allowNull: false
     }
   },
   {

@@ -25,8 +25,7 @@ const GateRecord = sequelize.define(
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'ADMIN'
+      allowNull: false
     }
   },
   {

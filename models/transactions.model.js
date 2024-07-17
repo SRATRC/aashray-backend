@@ -3,14 +3,16 @@ import sequelize from '../config/database.js';
 import {
   STATUS_PAYMENT_PENDING,
   STATUS_PAYMENT_COMPLETED,
+  STATUS_CASH_PENDING,
+  STATUS_CASH_COMPLETED,
   STATUS_CANCELLED,
-  STATUS_AWAITING_REFUND,
+  STATUS_ADMIN_CANCELLED,
   TYPE_EXPENSE,
   TYPE_REFUND
 } from '../config/constants.js';
 
-const UtsavGuestBookingTransaction = sequelize.define(
-  'UtsavGuestBookingTransaction',
+const Transactions = sequelize.define(
+  'Transactions',
   {
     id: {
       type: DataTypes.INTEGER,
@@ -27,11 +29,11 @@ const UtsavGuestBookingTransaction = sequelize.define(
     },
     bookingid: {
       type: DataTypes.STRING,
-      allowNull: false,
-      references: {
-        model: 'utsav_guest_booking',
-        key: 'bookingid'
-      }
+      allowNull: false
+    },
+    category: {
+      type: DataTypes.STRING,
+      allowNull: false
     },
     type: {
       type: DataTypes.ENUM,
@@ -42,9 +44,19 @@ const UtsavGuestBookingTransaction = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
+    discount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    upi_ref: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'NA'
+    },
     description: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     status: {
       type: DataTypes.ENUM,
@@ -52,16 +64,21 @@ const UtsavGuestBookingTransaction = sequelize.define(
       values: [
         STATUS_PAYMENT_PENDING,
         STATUS_PAYMENT_COMPLETED,
+        STATUS_CASH_PENDING,
+        STATUS_CASH_COMPLETED,
         STATUS_CANCELLED,
-        STATUS_AWAITING_REFUND
-      ],
-      defaultValue: STATUS_PAYMENT_PENDING
+        STATUS_ADMIN_CANCELLED
+      ]
+    },
+    updatedBy: {
+      type: DataTypes.STRING,
+      allowNull: false
     }
   },
   {
-    tableName: 'utsav_guest_booking_transaction',
+    tableName: 'transactions',
     timestamps: true
   }
 );
 
-export default UtsavGuestBookingTransaction;
+export default Transactions;

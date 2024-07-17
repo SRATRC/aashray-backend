@@ -23,8 +23,9 @@ import sendMail from '../../utils/sendMail.js';
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
-  const page = req.query.page || 1;
-  const pageSize = req.query.page_size || 10;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+
   const offset = (page - 1) * pageSize;
 
   const shibirs = await ShibirDb.findAll({
@@ -245,28 +246,25 @@ export const RegisterShibir = async (req, res) => {
 };
 
 export const FetchBookedShibir = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+  const offset = (page - 1) * pageSize;
 
-  const shibirs = await ShibirDb.findAll({
-    attributes: ['name', 'speaker', 'start_date', 'end_date'],
+  const shibirs = await ShibirBookingDb.findAll({
     include: [
       {
-        model: ShibirBookingDb,
-        attributes: ['status'],
-        where: {
-          cardno: req.params.cardno
-        }
+        model: ShibirDb
       }
     ],
     where: {
-      start_date: {
-        [Sequelize.Op.gt]: today
-      }
+      cardno: req.user.cardno
     },
-    order: [['start_date', 'ASC']]
+    offset,
+    limit: pageSize,
+    order: [['updatedAt', 'DESC']]
   });
 
-  return res.status(200).send({ message: 'fetched results', data: shibirs });
+  return res.status(200).send({ data: shibirs });
 };
 
 export const CancelShibir = async (req, res) => {
@@ -376,6 +374,40 @@ export const CancelShibir = async (req, res) => {
   });
 
   return res.status(200).send({ message: 'Shibir booking cancelled' });
+};
+
+export const FetchShibirInRange = async (req, res) => {
+  const { start_date, end_date } = req.query;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+  const offset = (page - 1) * pageSize;
+
+  const whereCondition = {
+    start_date: {
+      [Sequelize.Op.gte]: start_date
+    }
+  };
+
+  if (end_date) {
+    whereCondition.start_date[Sequelize.Op.lte] = end_date;
+    whereCondition.end_date = {
+      [Sequelize.Op.gte]: start_date,
+      [Sequelize.Op.lte]: end_date
+    };
+  } else {
+    whereCondition.end_date = {
+      [Sequelize.Op.gte]: start_date
+    };
+  }
+
+  const shibirs = await ShibirDb.findAll({
+    where: whereCondition,
+    offset,
+    limit: pageSize,
+    order: [['start_date', 'ASC']]
+  });
+
+  return res.status(200).send({ data: shibirs });
 };
 
 function findClosestSum(arr, target) {

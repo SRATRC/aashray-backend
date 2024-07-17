@@ -35,6 +35,10 @@ const TravelDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
+    type: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
     luggage: {
       type: DataTypes.STRING,
       allowNull: false
@@ -56,7 +60,7 @@ const TravelDb = sequelize.define(
         STATUS_CANCELLED,
         STATUS_ADMIN_CANCELLED
       ],
-      defaultValue: 'waiting'
+      defaultValue: STATUS_WAITING
     },
     updatedBy: {
       type: DataTypes.STRING,

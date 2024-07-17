@@ -6,7 +6,8 @@ import {
   CancelFood,
   CancelGuestFood,
   FetchFoodBookings,
-  FetchGuestFoodBookings
+  FetchGuestFoodBookings,
+  fetchMenu
 } from '../../controllers/client/foodBooking.controller.js';
 import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -19,4 +20,5 @@ router.put('/cancel', CatchAsync(CancelFood));
 router.put('/cancelGuest', CatchAsync(CancelGuestFood));
 router.get('/get', CatchAsync(FetchFoodBookings));
 router.get('/getGuest', CatchAsync(FetchGuestFoodBookings));
+router.get('/menu', CatchAsync(fetchMenu));
 export default router;

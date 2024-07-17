@@ -1,15 +1,16 @@
 import { Sequelize } from 'sequelize';
-const { private_key } = JSON.parse(process.env.AIVEN_CA_CERT);
+const { private_key } =
+  process.env.NODE_ENV == 'pord' && JSON.parse(process.env.DB_CERT);
 
 const sequelize = new Sequelize(
-  process.env.AIVEN_DATABASE_NAME,
-  process.env.AIVEN_USERNAME,
-  process.env.AIVEN_PASSWORD,
+  process.env.DB_NAME,
+  process.env.DB_USERNAME,
+  process.env.DB_PASSWORD,
   {
-    host: process.env.AIVEN_HOST,
-    port: process.env.AIVEN_PORT,
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
     dialect: 'mysql',
-    dialectOptions: {
+    dialectOptions: process.env.NODE_ENV == 'pord' && {
       ssl: {
         ca: private_key
       }

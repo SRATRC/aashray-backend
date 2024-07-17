@@ -33,7 +33,7 @@ router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN));
 router.get('/occupancyReport', CatchAsync(occupancyReport));
 router.put('/checkin/:cardno', CatchAsync(manualCheckin));
 router.put('/checkout/:cardno', CatchAsync(manualCheckout));
-router.post('/bookForMumukshu/:mobno', CatchAsync(roomBooking));
+router.post('/bookForMumukshu', CatchAsync(roomBooking));
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));
 router.get('/fetch_room_bookings', CatchAsync(fetchAllRoomBookings));
 router.get('/fetch_flat_bookings', CatchAsync(fetchAllFlatBookings));

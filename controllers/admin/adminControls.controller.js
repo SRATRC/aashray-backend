@@ -7,6 +7,7 @@ export const fetchAllAdmins = async (req, res) => {
   const admins = await AdminUsers.findAll();
   res.status(200).send({ message: 'fetched admins', data: admins });
 };
+
 export const updateAdminRoles = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
@@ -65,6 +66,7 @@ export const deactivateAdmin = async (req, res) => {
 
   return res.status(200).send({ message: 'deactivated admin' });
 };
+
 export const activateAdmin = async (req, res) => {
   const updatedItems = await AdminUsers.update(
     {
@@ -99,6 +101,7 @@ export const createRole = async (req, res) => {
 
   return res.status(201).send({ message: 'role created' });
 };
+
 export const fetchRoles = async (req, res) => {
   const roles = await Roles.findAll({
     attributes: ['name'],
@@ -111,6 +114,7 @@ export const fetchRoles = async (req, res) => {
     .status(200)
     .send({ message: 'fetched all roles', data: role_data });
 };
+
 // export const updateRole = async (req, res) => {
 //   const role = await Roles.findByPk(req.params.name);
 //   if (!role) throw new ApiError(500, 'cannot find the given role');
@@ -120,6 +124,7 @@ export const fetchRoles = async (req, res) => {
 
 //   return res.status(200).send({ message: 'role updated' });
 // };
+
 export const deleteRole = async (req, res) => {
   const deletedItems = await Roles.update(
     {
