@@ -33,6 +33,7 @@ import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';
 
+// TODO: DEPRECATE THIS ENDPOINT
 export const AvailabilityCalender = async (req, res) => {
   const startDate = new Date(req.body.checkin_date);
   const endDate = new Date(req.body.checkout_date);
@@ -91,6 +92,7 @@ export const AvailabilityCalender = async (req, res) => {
   });
 };
 
+// TODO: DEPRECATE THIS ENDPOINT
 export const BookingForMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;

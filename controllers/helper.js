@@ -9,7 +9,8 @@ import {
   STATUS_WAITING,
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_PENDING_CHECKIN,
-  STATUS_CONFIRMED
+  STATUS_CONFIRMED,
+  TYPE_ROOM
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -109,14 +110,14 @@ export async function calculateNights(checkin, checkout) {
   return nights;
 }
 
-export async function isFoodBooked(req) {
-  const startDate = new Date(req.body.start_date);
-  const endDate = new Date(req.body.end_date);
+export async function isFoodBooked(start_date, end_date, cardno) {
+  const startDate = new Date(start_date);
+  const endDate = new Date(end_date);
 
   const allDates = getDates(startDate, endDate);
   const food_bookings = await FoodDb.findAll({
     where: {
-      cardno: req.body.cardno || req.user.cardno || req.params.cardno,
+      cardno: cardno,
       date: { [Sequelize.Op.in]: allDates }
     }
   });
@@ -164,4 +165,105 @@ export async function checkSpecialAllowance(start_date, end_date, cardno) {
   }
 
   return false;
+}
+
+export async function checkRoomBookingProgress(
+  start_date,
+  end_date,
+  primary_booking,
+  addons
+) {
+  var addon = undefined;
+  for (var i of addons) {
+    if (i.booking_type == TYPE_ROOM) addon = i;
+  }
+
+  if (primary_booking.booking_type == TYPE_ROOM || addon) {
+    const startDate = new Date(start_date);
+    const endDate = new Date(end_date);
+    const checkinDate = new Date(
+      primary_booking.details.checkin_date || addon.details.checkin_date
+    );
+    const checkoutDate = new Date(
+      primary_booking.details.checkout_date || addon.details.checkout_date
+    );
+
+    if (startDate >= checkinDate && endDate <= checkoutDate) return true;
+    else return false;
+  } else {
+    return false;
+  }
+}
+
+export function findClosestSum(arr, target) {
+  let closestSum = null;
+  let closestIndices = null;
+
+  function findExactSum(
+    arr,
+    n,
+    target,
+    currentSum = 0,
+    currentIndices = [],
+    index = 0
+  ) {
+    if (currentSum === target) {
+      closestSum = currentSum;
+      closestIndices = [...currentIndices];
+      return true;
+    }
+    if (index === n || currentSum > target) {
+      return false;
+    }
+
+    return (
+      findExactSum(
+        arr,
+        n,
+        target,
+        currentSum + arr[index],
+        [...currentIndices, index],
+        index + 1
+      ) || findExactSum(arr, n, target, currentSum, currentIndices, index + 1)
+    );
+  }
+
+  function findClosestSubsetSum(
+    arr,
+    target,
+    index,
+    currentSum,
+    currentIndices
+  ) {
+    if (index === arr.length) {
+      if (
+        closestSum === null ||
+        Math.abs(target - currentSum) < Math.abs(target - closestSum)
+      ) {
+        closestSum = currentSum;
+        closestIndices = [...currentIndices];
+      }
+      return;
+    }
+
+    findClosestSubsetSum(arr, target, index + 1, currentSum, currentIndices);
+    findClosestSubsetSum(arr, target, index + 1, currentSum + arr[index], [
+      ...currentIndices,
+      index
+    ]);
+  }
+
+  if (arr.includes(target)) {
+    closestSum = target;
+    closestIndices = [arr.indexOf(target)];
+    return { closestSum, closestIndices };
+  }
+
+  if (findExactSum(arr, arr.length, target)) {
+    return { closestSum, closestIndices };
+  }
+
+  findClosestSubsetSum(arr, target, 0, 0, []);
+
+  return { closestSum, closestIndices };
 }

@@ -25,6 +25,7 @@ import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 
+// TODO: DEPRECATE THIS ENDPOINT
 export const RegisterFood = async (req, res) => {
   validateDate(req.body.start_date, req.body.end_date);
 

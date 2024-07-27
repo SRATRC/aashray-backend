@@ -18,7 +18,7 @@ import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 
-// TODO: will add the transaction when the status is updated to confirmed
+// TODO: DEPRECATE THIS ENDPOINT
 export const BookTravel = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
