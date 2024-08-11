@@ -16,7 +16,7 @@ router.use(validateCard);
 
 router.post('/book', CatchAsync(RegisterFood));
 router.post('/bookGuest', CatchAsync(RegisterForGuest));
-router.put('/cancel', CatchAsync(CancelFood));
+router.patch('/cancel', CatchAsync(CancelFood));
 router.put('/cancelGuest', CatchAsync(CancelGuestFood));
 router.get('/get', CatchAsync(FetchFoodBookings));
 router.get('/getGuest', CatchAsync(FetchGuestFoodBookings));

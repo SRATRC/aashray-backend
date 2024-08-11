@@ -143,17 +143,54 @@ export const FetchFoodBookings = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   const data = await FoodDb.findAll({
+    attributes: ['date', 'breakfast', 'lunch', 'dinner', 'spicy'],
     where: {
-      cardno: req.query.cardno,
-      date: {
-        [Sequelize.Op.gte]: today
-      }
+      cardno: req.query.cardno
     },
-    order: [['date', 'ASC']],
+    order: [['date', 'DESC']],
     offset,
     limit: pageSize
   });
-  return res.status(200).send({ message: 'fetched results', data: data });
+
+  var transformedData = [];
+
+  data.map((item) => {
+    const { id, date, breakfast, lunch, dinner, spicy } = item.dataValues;
+
+    if (breakfast) {
+      transformedData.push({
+        id,
+        date,
+        mealType: 'breakfast',
+        spicy,
+        classify: date > today + 1 ? 'upcoming' : 'old'
+      });
+    }
+
+    if (lunch) {
+      transformedData.push({
+        id,
+        date,
+        mealType: 'lunch',
+        spicy,
+        classify: date > today + 1 ? 'upcoming' : 'old'
+      });
+    }
+
+    if (dinner) {
+      transformedData.push({
+        id,
+        date,
+        mealType: 'dinner',
+        spicy,
+        classify: date > today + 1 ? 'upcoming' : 'old'
+      });
+    }
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'fetched results', data: transformedData });
 };
 
 export const FetchGuestFoodBookings = async (req, res) => {
@@ -178,27 +215,39 @@ export const FetchGuestFoodBookings = async (req, res) => {
 };
 
 export const CancelFood = async (req, res) => {
-  const updateData = req.body.food_data;
-
   const t = await database.transaction();
 
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await FoodDb.findOne({
-      where: {
-        cardno: req.user.cardno,
-        date: req.body.food_data[i].date
-      }
-    });
-    if (isAvailable) {
-      isAvailable.breakfast = req.body.food_data[i].breakfast;
-      isAvailable.lunch = req.body.food_data[i].lunch;
-      isAvailable.dinner = req.body.food_data[i].dinner;
-      await isAvailable.save({ transaction: t });
+  const { cardno, food_data } = req.body;
+  const today = moment().format('YYYY-MM-DD');
+  const foodData = food_data.filter((item) => item.date > today + 1);
+
+  // Group updates by mealType
+  const updates = foodData.reduce((acc, item) => {
+    if (!acc[item.mealType]) {
+      acc[item.mealType] = [];
     }
+    acc[item.mealType].push(item.date);
+    return acc;
+  }, {});
+
+  // Perform updates in bulk for each mealType
+  for (const [mealType, dates] of Object.entries(updates)) {
+    const updateFields = {};
+    updateFields[mealType] = 0;
+    updateFields['updatedBy'] = 'user';
+
+    await FoodDb.update(updateFields, {
+      where: {
+        cardno: cardno,
+        date: dates
+      },
+      transaction: t
+    });
   }
 
   await FoodDb.destroy({
     where: {
+      cardno: cardno,
       breakfast: false,
       lunch: false,
       dinner: false
