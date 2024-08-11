@@ -59,6 +59,7 @@ export const FetchAllShibir = async (req, res) => {
   return res.status(200).send(formattedResponse);
 };
 
+// TODO: DEPRECATE THIS ENDPOINT
 export const RegisterShibir = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;

@@ -28,6 +28,9 @@ import gateManagementRoutes from './routes/admin/gateManagement.routes.js';
 import roomManagementRoutes from './routes/admin/roomManagement.routes.js';
 import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 
+// Unified Route Imports
+import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
+
 (async () => {
   try {
     await sequelize.authenticate();
@@ -83,6 +86,9 @@ app.use('/api/v1/admin/food', foodManagementRoutes);
 app.use('/api/v1/admin/gate', gateManagementRoutes);
 app.use('/api/v1/admin/stay', roomManagementRoutes);
 app.use('/api/v1/admin/travel', travelManagementRoutes);
+
+// Unified Routes
+app.use('/api/v1/unified', unifiedBookingRoutes);
 
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {

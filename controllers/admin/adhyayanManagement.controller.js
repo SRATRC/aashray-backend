@@ -21,24 +21,35 @@ import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 
 export const createAdhyayan = async (req, res) => {
-  const { name, start_date, end_date, speaker, total_seats, comments } =
-    req.body;
+  const {
+    name,
+    start_date,
+    end_date,
+    speaker,
+    total_seats,
+    food_allowed,
+    comments
+  } = req.body;
 
   const alreadyExists = await ShibirDb.findOne({
     where: {
-      speaker: speaker,
+      speaker: { [Sequelize.Op.iLike]: speaker },
       start_date: start_date
     }
   });
   if (alreadyExists) throw new ApiError(400, 'Adhyayan Already Exists');
 
+  const month = moment(start_date).format('MMMM');
+
   const adhyayan_details = await ShibirDb.create({
     name: name,
     speaker: speaker,
+    month: month,
     start_date: start_date,
     end_date: end_date,
     total_seats: total_seats,
     available_seats: total_seats,
+    food_allowed: food_allowed,
     comments: comments,
     updatedBy: req.user.username
   });
@@ -67,8 +78,15 @@ export const fetchAllAdhyayan = async (req, res) => {
 };
 
 export const updateAdhyayan = async (req, res) => {
-  const { name, start_date, end_date, speaker, total_seats, comments } =
-    req.body;
+  const {
+    name,
+    start_date,
+    end_date,
+    speaker,
+    total_seats,
+    food_allowed,
+    comments
+  } = req.body;
 
   const id = req.params.id;
 
@@ -87,10 +105,12 @@ export const updateAdhyayan = async (req, res) => {
     {
       name: name,
       speaker: speaker,
+      month: moment(start_date).format('MMMM'),
       start_date: start_date,
       end_date: end_date,
       total_seats: total_seats,
       available_seats: available_seats,
+      food_allowed: food_allowed,
       comments: comments,
       updatedBy: req.user.username
     },
