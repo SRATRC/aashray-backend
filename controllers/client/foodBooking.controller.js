@@ -152,45 +152,39 @@ export const FetchFoodBookings = async (req, res) => {
     limit: pageSize
   });
 
-  var transformedData = [];
-
-  data.map((item) => {
+  const groupedData = data.reduce((acc, item) => {
     const { id, date, breakfast, lunch, dinner, spicy } = item.dataValues;
+    const classify = date > today + 1 ? 'upcoming' : 'past';
 
-    if (breakfast) {
-      transformedData.push({
-        id,
-        date,
-        mealType: 'breakfast',
-        spicy,
-        classify: date > today + 1 ? 'upcoming' : 'old'
-      });
-    }
+    const meals = [
+      { type: 'breakfast', exists: breakfast },
+      { type: 'lunch', exists: lunch },
+      { type: 'dinner', exists: dinner }
+    ];
 
-    if (lunch) {
-      transformedData.push({
-        id,
-        date,
-        mealType: 'lunch',
-        spicy,
-        classify: date > today + 1 ? 'upcoming' : 'old'
-      });
-    }
+    meals.forEach(({ type, exists }) => {
+      if (exists) {
+        const mealData = { date, mealType: type, spicy };
 
-    if (dinner) {
-      transformedData.push({
-        id,
-        date,
-        mealType: 'dinner',
-        spicy,
-        classify: date > today + 1 ? 'upcoming' : 'old'
-      });
-    }
-  });
+        if (!acc[classify]) {
+          acc[classify] = [];
+        }
+
+        acc[classify].push(mealData);
+      }
+    });
+
+    return acc;
+  }, {});
+
+  const responseData = Object.keys(groupedData).map((key) => ({
+    title: key,
+    data: groupedData[key]
+  }));
 
   return res
     .status(200)
-    .send({ message: 'fetched results', data: transformedData });
+    .send({ message: 'fetched results', data: responseData });
 };
 
 export const FetchGuestFoodBookings = async (req, res) => {
