@@ -18,7 +18,8 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_AVAILABLE,
   NAC_ROOM_PRICE,
-  AC_ROOM_PRICE
+  AC_ROOM_PRICE,
+  TYPE_ROOM
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -303,14 +304,23 @@ export const ViewAllBookings = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
-  const user_bookings = await RoomBooking.findAll({
-    where: {
-      cardno: req.user.cardno
-    },
-    offset,
-    limit: pageSize,
-    order: [['checkin', 'DESC']]
-  });
+  const user_bookings = await database.query(
+    `SELECT t1.bookingid, t1.roomno, t1.checkin, t1.checkout, t1.nights, t1.roomtype, t1.status, t1.gender, t2.amount
+   FROM room_booking t1
+   JOIN transactions t2 ON t1.bookingid = t2.bookingid
+   WHERE t1.cardno = :cardno AND t2.category = :category
+   ORDER BY t1.checkin DESC
+   LIMIT :limit OFFSET :offset`,
+    {
+      replacements: {
+        cardno: req.user.cardno,
+        category: TYPE_ROOM,
+        limit: pageSize,
+        offset: offset
+      },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
   return res.status(200).send(user_bookings);
 };
 
