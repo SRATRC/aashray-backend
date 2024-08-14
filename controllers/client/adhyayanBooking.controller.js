@@ -14,7 +14,8 @@ import {
   TYPE_REFUND,
   TYPE_EXPENSE,
   STATUS_PAYMENT_COMPLETED,
-  STATUS_AWAITING_REFUND
+  STATUS_AWAITING_REFUND,
+  TYPE_ADHYAYAN
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import APIError from '../../utils/ApiError.js';
@@ -251,19 +252,24 @@ export const FetchBookedShibir = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
-  const shibirs = await ShibirBookingDb.findAll({
-    include: [
-      {
-        model: ShibirDb
-      }
-    ],
-    where: {
-      cardno: req.user.cardno
-    },
-    offset,
-    limit: pageSize,
-    order: [['updatedAt', 'DESC']]
-  });
+  const shibirs = await database.query(
+    `SELECT t1.bookingid, t1.shibir_id, t1.status, t2.name, t2.speaker, t2.start_date, t2.end_date, t3.amount, t3.status as transaction_status
+   FROM shibir_booking_db t1
+   JOIN shibir_db t2 ON t1.shibir_id = t2.id
+   JOIN transactions t3 ON t1.bookingid = t3.bookingid
+   WHERE t1.cardno = :cardno AND t3.category = :category
+   ORDER BY t2.start_date DESC
+   LIMIT :limit OFFSET :offset`,
+    {
+      replacements: {
+        cardno: req.user.cardno,
+        category: TYPE_ADHYAYAN,
+        limit: pageSize,
+        offset: offset
+      },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
 
   return res.status(200).send({ data: shibirs });
 };
