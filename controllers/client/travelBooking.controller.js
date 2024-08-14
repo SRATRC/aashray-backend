@@ -12,11 +12,13 @@ import {
   STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
   STATUS_PAYMENT_COMPLETED,
-  TYPE_EXPENSE
+  TYPE_EXPENSE,
+  TYPE_TRAVEL
 } from '../../config/constants.js';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
+import Transactions from '../../models/transactions.model.js';
 
 // TODO: DEPRECATE THIS ENDPOINT
 export const BookTravel = async (req, res) => {
@@ -113,26 +115,25 @@ export const CancelTravel = async (req, res) => {
     }
   );
 
-  const travelBookingTransaction = await TravelBookingTransaction.findOne({
-    where: {
-      cardno: req.user.cardno,
-      bookingid: req.body.bookingid,
-      type: TYPE_EXPENSE,
-      status: {
-        [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_COMPLETED]
-      }
-    }
-  });
+  // TODO: SHOULD WE EVEN CANCEL THE TRANSACTIONS
 
-  if (travelBookingTransaction) {
-    if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
-      travelBookingTransaction.status = STATUS_CANCELLED;
-      await travelBookingTransaction.save({ transaction: t });
-    } else if (travelBookingTransaction.status == STATUS_PAYMENT_PENDING) {
-      travelBookingTransaction.status = STATUS_AWAITING_REFUND;
-      await travelBookingTransaction.save({ transaction: t });
-    }
-  }
+  // await Transactions.update(
+  //   {
+  //     status: STATUS_CANCELLED
+  //   },
+  //   {
+  //     where: {
+  //       cardno: req.user.cardno,
+  //       bookingid: req.body.bookingid,
+  //       category: TYPE_TRAVEL,
+  //       type: TYPE_EXPENSE,
+  //       status: {
+  //         [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_COMPLETED]
+  //       }
+  //     },
+  //     transaction: t
+  //   }
+  // );
 
   await t.commit();
 
@@ -144,13 +145,23 @@ export const ViewAllTravel = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
-  const data = await TravelDb.findAll({
-    where: {
-      cardno: req.user.cardno
-    },
-    offset,
-    limit: pageSize,
-    order: [['date', 'ASC']]
-  });
+  const data = await database.query(
+    `SELECT t1.bookingid, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, t1.comments, t1.status, t2.amount
+   FROM travel_db t1
+   JOIN transactions t2 ON t1.bookingid = t2.bookingid
+   WHERE t1.cardno = :cardno AND t2.category = :category
+   ORDER BY t1.date DESC
+   LIMIT :limit OFFSET :offset`,
+    {
+      replacements: {
+        cardno: req.user.cardno,
+        category: TYPE_TRAVEL,
+        limit: pageSize,
+        offset: offset
+      },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
+
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
