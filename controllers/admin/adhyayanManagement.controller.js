@@ -13,12 +13,14 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
-  STATUS_AWAITING_REFUND
+  STATUS_AWAITING_REFUND,
+  TYPE_ADHYAYAN
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
+import Transactions from '../../models/transactions.model.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -184,55 +186,56 @@ export const adhyayanStatusUpdate = async (req, res) => {
     }
   });
 
-  let booking_transaction = await ShibirBookingTransaction.findOne({
-    where: {
-      bookingid: bookingid,
-      type: TYPE_EXPENSE,
-      status: {
-        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
-      }
-    },
-    order: [['updatedAt', 'DESC']]
-  });
-
   switch (status) {
     case STATUS_CONFIRMED:
       if (booking.dataValues.status == STATUS_PAYMENT_PENDING) {
-        await booking_transaction.update(
+        await Transactions.create(
           {
+            cardno: booking.dataValues.cardno,
+            bookingid: booking.dataValues.bookingid,
+            category: TYPE_ADHYAYAN,
+            type: TYPE_EXPENSE,
+            amount: shibir.dataValues.amount,
+            upi_ref: upi_ref ? upi_ref : 'NA',
             status: STATUS_PAYMENT_COMPLETED,
             updatedBy: req.user.username
           },
           { transaction: t }
         );
+
+        booking.status = STATUS_CONFIRMED;
+        booking.updatedBy = req.user.username;
+        await booking.save({ transaction: t });
       } else if (
         booking.dataValues.status == STATUS_CANCELLED ||
         booking.dataValues.status == STATUS_ADMIN_CANCELLED ||
         booking.dataValues.status == STATUS_WAITING
       ) {
-        await ShibirBookingTransaction.create(
-          {
+        const payment = await Transactions.findOne({
+          where: {
             cardno: booking.dataValues.cardno,
-            bookingid: bookingid,
+            bookingid: booking.dataValues.bookingid,
+            category: TYPE_ADHYAYAN,
             type: TYPE_EXPENSE,
-            amount: shibir.dataValues.amount,
-            upi_ref: upi_ref,
-            description: description,
-            status: STATUS_PAYMENT_COMPLETED,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
+            status: STATUS_PAYMENT_COMPLETED
+          }
+        });
+
+        if (!payment) {
+          booking.status = STATUS_PAYMENT_PENDING;
+          booking.updatedBy = req.user.username;
+          await booking.save({ transaction: t });
+        } else {
+          booking.status = STATUS_CONFIRMED;
+          booking.updatedBy = req.user.username;
+          await booking.save({ transaction: t });
+        }
       }
 
       if (shibir.dataValues.available_seats > 0) {
         shibir.available_seats -= 1;
         await shibir.save({ transaction: t });
       }
-
-      booking.status = STATUS_CONFIRMED;
-      booking.updatedBy = req.user.username;
-      await booking.save({ transaction: t });
 
       break;
 
@@ -540,3 +543,5 @@ function findClosestSum(arr, target) {
 
   return { closestSum, closestIndices };
 }
+
+//TODO: admin can cancel booking and confirm from waitlist

@@ -306,67 +306,88 @@ export const CancelShibir = async (req, res) => {
     lock: t.LOCK.UPDATE
   });
 
-  if (isBooked.dataValues.status == STATUS_CONFIRMED) {
-    const booking_transaction = await ShibirBookingTransaction.findOne({
-      where: {
-        type: TYPE_EXPENSE,
-        bookingid: isBooked.dataValues.bookingid,
-        cardno: isBooked.dataValues.cardno,
-        status: STATUS_PAYMENT_COMPLETED
-      }
-    });
-    booking_transaction.status = STATUS_CANCELLED;
-    await booking_transaction.save({ transaction: t });
-
-    await ShibirBookingTransaction.create(
-      {
-        cardno: cardno,
-        bookingid: isBooked.dataValues.bookingid,
-        type: TYPE_REFUND,
-        amount: booking_transaction.dataValues.amount,
-        upi_ref: 'NA',
-        status: STATUS_AWAITING_REFUND,
-        updatedBy: 'USER'
-      },
-      { transaction: t }
-    );
-
-    if (
-      update_shibir &&
-      update_shibir.available_seats < update_shibir.total_seats
-    ) {
-      update_shibir.available_seats += 1;
-      await update_shibir.save({ transaction: t });
-    }
-  } else if (isBooked.dataValues.status == STATUS_PAYMENT_PENDING) {
-    const booking_transaction = await ShibirBookingTransaction.findOne({
-      where: {
-        type: TYPE_EXPENSE,
-        bookingid: isBooked.dataValues.bookingid,
-        cardno: isBooked.dataValues.cardno,
-        status: STATUS_PAYMENT_PENDING
-      }
-    });
-    booking_transaction.status = STATUS_CANCELLED;
-    await booking_transaction.save({ transaction: t });
-    if (booking_transaction.dataValues.discount > 0) {
-      await ShibirBookingTransaction.create(
-        {
-          cardno: cardno,
-          bookingid: isBooked.dataValues.bookingid,
-          type: TYPE_REFUND,
-          amount: booking_transaction.dataValues.discount,
-          upi_ref: 'NA',
-          status: STATUS_AWAITING_REFUND,
-          updatedBy: 'USER'
-        },
-        { transaction: t }
-      );
-    }
+  if (
+    update_shibir &&
+    update_shibir.available_seats < update_shibir.total_seats
+  ) {
+    update_shibir.available_seats += 1;
+    await update_shibir.save({ transaction: t });
   }
+  // if (isBooked.dataValues.status == STATUS_CONFIRMED) {
+  //   const booking_transaction = await ShibirBookingTransaction.findOne({
+  //     where: {
+  //       type: TYPE_EXPENSE,
+  //       bookingid: isBooked.dataValues.bookingid,
+  //       cardno: isBooked.dataValues.cardno,
+  //       status: STATUS_PAYMENT_COMPLETED
+  //     }
+  //   });
+  //   booking_transaction.status = STATUS_CANCELLED;
+  //   await booking_transaction.save({ transaction: t });
+
+  //   await ShibirBookingTransaction.create(
+  //     {
+  //       cardno: cardno,
+  //       bookingid: isBooked.dataValues.bookingid,
+  //       type: TYPE_REFUND,
+  //       amount: booking_transaction.dataValues.amount,
+  //       upi_ref: 'NA',
+  //       status: STATUS_AWAITING_REFUND,
+  //       updatedBy: 'USER'
+  //     },
+  //     { transaction: t }
+  //   );
+
+  //   if (
+  //     update_shibir &&
+  //     update_shibir.available_seats < update_shibir.total_seats
+  //   ) {
+  //     update_shibir.available_seats += 1;
+  //     await update_shibir.save({ transaction: t });
+  //   }
+  // } else if (isBooked.dataValues.status == STATUS_PAYMENT_PENDING) {
+  //   const booking_transaction = await ShibirBookingTransaction.findOne({
+  //     where: {
+  //       type: TYPE_EXPENSE,
+  //       bookingid: isBooked.dataValues.bookingid,
+  //       cardno: isBooked.dataValues.cardno,
+  //       status: STATUS_PAYMENT_PENDING
+  //     }
+  //   });
+  //   booking_transaction.status = STATUS_CANCELLED;
+  //   await booking_transaction.save({ transaction: t });
+  //   if (booking_transaction.dataValues.discount > 0) {
+  //     await ShibirBookingTransaction.create(
+  //       {
+  //         cardno: cardno,
+  //         bookingid: isBooked.dataValues.bookingid,
+  //         type: TYPE_REFUND,
+  //         amount: booking_transaction.dataValues.discount,
+  //         upi_ref: 'NA',
+  //         status: STATUS_AWAITING_REFUND,
+  //         updatedBy: 'USER'
+  //       },
+  //       { transaction: t }
+  //     );
+  //   }
+  // }
 
   isBooked.status = STATUS_CANCELLED;
   await isBooked.save({ transaction: t });
+
+  const waitlist = await ShibirBookingDb.findOne({
+    where: {
+      shibir_id: req.body.shibir_id,
+      status: STATUS_WAITING
+    },
+    order: [['createdAt', 'ASC']]
+  });
+
+  //TODO: send notification to user
+  if (waitlist) {
+    waitlist.status = STATUS_PAYMENT_PENDING;
+    await waitlist.save({ transaction: t });
+  }
 
   await t.commit();
 
@@ -384,10 +405,18 @@ export const CancelShibir = async (req, res) => {
 };
 
 export const FetchShibirInRange = async (req, res) => {
-  const { start_date, end_date } = req.query;
+  const { start_date } = req.query;
+  let { end_date } = req.query;
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+
+  const startDateObj = new Date(start_date);
+  if (!end_date) {
+    const endDateObj = new Date(startDateObj);
+    endDateObj.setDate(startDateObj.getDate() + 15); // Add 15 days
+    end_date = endDateObj.toISOString().split('T')[0]; // Format the new end_date as YYYY-MM-DD
+  }
 
   const whereCondition = {
     start_date: {
@@ -400,10 +429,6 @@ export const FetchShibirInRange = async (req, res) => {
     whereCondition.end_date = {
       [Sequelize.Op.gte]: start_date,
       [Sequelize.Op.lte]: end_date
-    };
-  } else {
-    whereCondition.end_date = {
-      [Sequelize.Op.gte]: start_date
     };
   }
 
