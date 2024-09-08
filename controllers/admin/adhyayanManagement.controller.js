@@ -28,6 +28,7 @@ export const createAdhyayan = async (req, res) => {
     start_date,
     end_date,
     speaker,
+    amount,
     total_seats,
     food_allowed,
     comments
@@ -35,7 +36,7 @@ export const createAdhyayan = async (req, res) => {
 
   const alreadyExists = await ShibirDb.findOne({
     where: {
-      speaker: { [Sequelize.Op.iLike]: speaker },
+      speaker: { [Sequelize.Op.like]: speaker },
       start_date: start_date
     }
   });
@@ -50,6 +51,7 @@ export const createAdhyayan = async (req, res) => {
     start_date: start_date,
     end_date: end_date,
     total_seats: total_seats,
+    amount: amount,
     available_seats: total_seats,
     food_allowed: food_allowed,
     comments: comments,
