@@ -407,9 +407,6 @@ export const CancelShibir = async (req, res) => {
 export const FetchShibirInRange = async (req, res) => {
   const { start_date } = req.query;
   let { end_date } = req.query;
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
 
   const startDateObj = new Date(start_date);
   if (!end_date) {
@@ -434,8 +431,6 @@ export const FetchShibirInRange = async (req, res) => {
 
   const shibirs = await ShibirDb.findAll({
     where: whereCondition,
-    offset,
-    limit: pageSize,
     order: [['start_date', 'ASC']]
   });
 

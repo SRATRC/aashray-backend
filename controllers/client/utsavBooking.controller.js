@@ -26,7 +26,14 @@ import { v4 as uuidv4 } from 'uuid';
 // TODO: sending mails
 
 export const FetchUpcoming = async (req, res) => {
-  const utsav_bookings = await UtsavDb.findAll({
+  const today = moment().format('YYYY-MM-DD');
+
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+
+  const offset = (page - 1) * pageSize;
+
+  const utsavs = await UtsavDb.findAll({
     include: [
       {
         model: UtsavPackagesDb,
@@ -37,14 +44,33 @@ export const FetchUpcoming = async (req, res) => {
     ],
     where: {
       start_date: {
-        [Sequelize.Op.gte]: moment().format('YYYY-MM-DD')
+        [Sequelize.Op.gt]: today
       },
       status: STATUS_OPEN
-    }
+    },
+    offset,
+    limit: pageSize,
+    order: [['start_date', 'ASC']]
   });
-  return res
-    .status(200)
-    .send({ message: 'Fetched data', data: utsav_bookings });
+
+  const groupedByMonth = utsavs.reduce((acc, event) => {
+    const month = event.month;
+    if (!acc[month]) {
+      acc[month] = [];
+    }
+    acc[month].push(event);
+    return acc;
+  }, {});
+
+  const formattedResponse = {
+    message: 'fetched results',
+    data: Object.keys(groupedByMonth).map((month) => ({
+      title: month,
+      data: groupedByMonth[month]
+    }))
+  };
+
+  return res.status(200).send(formattedResponse);
 };
 
 export const BookUtsav = async (req, res) => {
