@@ -17,6 +17,7 @@ import travelRoutes from './routes/client/travelBooking.routes.js';
 import adhyayanRoutes from './routes/client/adhyayanBooking.routes.js';
 import utsavBookingRoutes from './routes/client/utsavBooking.routes.js';
 import maintenanceRoutes from './routes/client/maintenaneRequest.routes.js';
+import profileRoutes from './routes/client/profile.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -76,6 +77,7 @@ app.use('/api/v1/travel', travelRoutes);
 app.use('/api/v1/adhyayan', adhyayanRoutes);
 app.use('/api/v1/utsav', utsavBookingRoutes);
 app.use('/api/v1/maintenance', maintenanceRoutes);
+app.use('/api/v1/profile', profileRoutes);
 
 // Admin Routes
 app.use('/api/v1/admin/sudo', adminControlRoutes);
