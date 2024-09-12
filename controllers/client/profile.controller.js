@@ -38,5 +38,17 @@ export const updateProfile = async (req, res) => {
   if (!updatedProfile) {
     throw new ApiError(404, 'user not updated');
   }
-  return res.status(200).send({ message: 'Profile Updated' });
+
+  const updatedProfileData = await CardDb.findOne({
+    where: {
+      cardno: req.user.cardno
+    },
+    attributes: {
+      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
+    }
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'Profile Updated', data: updatedProfileData });
 };
