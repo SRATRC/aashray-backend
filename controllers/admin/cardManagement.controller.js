@@ -15,8 +15,9 @@ export const createCard = async (req, res) => {
     idType,
     idNo,
     address,
-    city,
+    country,
     state,
+    city,
     pin,
     centre,
     res_status
@@ -38,8 +39,9 @@ export const createCard = async (req, res) => {
     idType: idType,
     idNo: idNo,
     address: address,
-    city: city,
+    country: country,
     state: state,
+    city: city,
     pin: pin,
     centre: centre,
     status: STATUS_ONPREM,
@@ -152,7 +154,6 @@ export const transferCard = async (req, res) => {
 };
 
 // TODO: Add more balance endpoints if required
-
 export const fetchTotalTransactions = async (req, res) => {
   const cardno = req.params.cardno;
 
