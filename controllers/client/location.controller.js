@@ -66,7 +66,10 @@ export const addData = async (req, res) => {
 
 export const getCountries = async (req, res) => {
   const data = await Countries.findAll({
-    attributes: ['id', 'name'],
+    attributes: [
+      ['id', 'key'],
+      ['name', 'value']
+    ],
     order: [['name', 'ASC']]
   });
   return res.status(200).send({ message: 'fetched countries', data: data });
@@ -77,7 +80,10 @@ export const getStates = async (req, res) => {
     where: {
       country_id: req.params.id
     },
-    attributes: ['id', 'name'],
+    attributes: [
+      ['id', 'key'],
+      ['name', 'value']
+    ],
     order: [['name', 'ASC']]
   });
   return res.status(200).send({ message: 'fetched states', data: data });
@@ -88,7 +94,10 @@ export const getCities = async (req, res) => {
     where: {
       state_id: req.params.id
     },
-    attributes: ['id', 'name'],
+    attributes: [
+      ['id', 'key'],
+      ['name', 'value']
+    ],
     order: [['name', 'ASC']]
   });
   return res.status(200).send({ message: 'fetched cities', data: data });
