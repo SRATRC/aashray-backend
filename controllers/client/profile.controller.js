@@ -59,12 +59,30 @@ export const transactions = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
+  const whereClause = {
+    cardno: req.user.cardno
+  };
+
+  if (req.query.status) {
+    whereClause.status = req.query.status;
+  }
+
+  if (req.query.category) {
+    whereClause.category = req.query.category;
+  }
+
   const transactions = await Transactions.findAll({
-    where: {
-      cardno: req.user.cardno
-    },
+    where: whereClause,
     attributes: {
-      exclude: ['id', 'cardno', 'updatedAt', 'updatedBy']
+      exclude: [
+        'id',
+        'cardno',
+        'bookingid',
+        'description',
+        'upi_ref',
+        'updatedAt',
+        'updatedBy'
+      ]
     },
     order: [['createdAt', 'DESC']],
     offset,
