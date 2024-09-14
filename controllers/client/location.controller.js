@@ -77,9 +77,13 @@ export const getCountries = async (req, res) => {
 
 export const getStates = async (req, res) => {
   const data = await States.findAll({
-    where: {
-      country_id: req.params.id
-    },
+    include: [
+      {
+        model: Countries,
+        where: { name: req.params.country },
+        attributes: []
+      }
+    ],
     attributes: [
       ['id', 'key'],
       ['name', 'value']
@@ -91,9 +95,20 @@ export const getStates = async (req, res) => {
 
 export const getCities = async (req, res) => {
   const data = await Cities.findAll({
-    where: {
-      state_id: req.params.id
-    },
+    include: [
+      {
+        model: States,
+        include: [
+          {
+            model: Countries,
+            where: { name: req.params.country },
+            attributes: []
+          }
+        ],
+        where: { name: req.params.state },
+        attributes: []
+      }
+    ],
     attributes: [
       ['id', 'key'],
       ['name', 'value']

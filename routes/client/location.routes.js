@@ -10,7 +10,7 @@ import CatchAsync from '../../utils/CatchAsync.js';
 
 router.post('/', CatchAsync(addData));
 router.get('/countries', CatchAsync(getCountries));
-router.get('/states/:id', CatchAsync(getStates));
-router.get('/cities/:id', CatchAsync(getCities));
+router.get('/states/:country', CatchAsync(getStates));
+router.get('/cities/:country/:state', CatchAsync(getCities));
 
 export default router;
