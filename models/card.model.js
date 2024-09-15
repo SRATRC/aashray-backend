@@ -56,11 +56,15 @@ const CardDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
-    city: {
+    country: {
       type: DataTypes.STRING,
       allowNull: false
     },
     state: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    city: {
       type: DataTypes.STRING,
       allowNull: false
     },

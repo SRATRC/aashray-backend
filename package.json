@@ -18,6 +18,7 @@
     "express": "^4.19.2",
     "express-session": "^1.17.3",
     "jsonwebtoken": "^9.0.2",
+    "lodash": "^4.17.21",
     "mysql2": "^3.9.8",
     "nodemailer": "^6.9.9",
     "nodemailer-express-handlebars": "^6.1.2",

@@ -29,7 +29,10 @@ import ApiError from '../../utils/ApiError.js';
 export const RegisterFood = async (req, res) => {
   validateDate(req.body.start_date, req.body.end_date);
 
-  if (await isFoodBooked(req)) throw new ApiError(403, 'Food already booked');
+  if (
+    await isFoodBooked(req.body.start_date, req.body.end_date, req.user.cardno)
+  )
+    throw new ApiError(403, 'Food already booked');
 
   if (
     !(

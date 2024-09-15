@@ -28,6 +28,9 @@ import AdminRoles from './admin_roles.model.js';
 import Roles from './roles.model.js';
 import Menu from './menu.model.js';
 import Transactions from './transactions.model.js';
+import Countries from './countries.model.js';
+import States from './states.model.js';
+import Cities from './cities.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -424,6 +427,28 @@ Menu.belongsTo(AdminUsers, {
   targetKey: 'username'
 });
 
+// Countries - States - Cities
+Countries.hasMany(States, {
+  foreignKey: 'country_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+States.hasMany(Cities, {
+  foreignKey: 'state_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+States.belongsTo(Countries, {
+  foreignKey: 'country_id',
+  targetKey: 'id'
+});
+Cities.belongsTo(States, {
+  foreignKey: 'state_id',
+  targetKey: 'id'
+});
+
 export {
   CardDb,
   ShibirDb,
@@ -453,5 +478,8 @@ export {
   AdminRoles,
   AdminUsers,
   Roles,
-  Menu
+  Menu,
+  Cities,
+  States,
+  Countries
 };
