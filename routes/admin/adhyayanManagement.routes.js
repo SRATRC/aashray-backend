@@ -3,6 +3,7 @@ const router = express.Router();
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import {
   fetchAllAdhyayan,
+  fetchAdhyayan,
   createAdhyayan,
   updateAdhyayan,
   adhyayanReport,
@@ -21,6 +22,7 @@ router.use(authorizeRoles(ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN));
 
 router.get('/fetch', CatchAsync(fetchAllAdhyayan));
 router.post('/create', CatchAsync(createAdhyayan));
+router.get('/fetch/:id', CatchAsync(fetchAdhyayan));
 router.put('/update/:id', CatchAsync(updateAdhyayan));
 router.post('/report/:id', CatchAsync(adhyayanReport));
 router.get('/waitlist', CatchAsync(adhyayanWaitlist));
