@@ -77,7 +77,6 @@ export const transactions = async (req, res) => {
       exclude: [
         'id',
         'cardno',
-        'bookingid',
         'description',
         'upi_ref',
         'updatedAt',
