@@ -58,12 +58,13 @@ export const transactions = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const status = req.query.status || 'all';
 
   const whereClause = {
     cardno: req.user.cardno
   };
 
-  if (req.query.status) {
+  if (req.query.status != 'all') {
     whereClause.status = req.query.status;
   }
 
