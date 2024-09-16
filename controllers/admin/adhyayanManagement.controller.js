@@ -13,12 +13,14 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
-  STATUS_AWAITING_REFUND
+  STATUS_AWAITING_REFUND,
+  TYPE_ADHYAYAN
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
+import Transactions from '../../models/transactions.model.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -26,6 +28,7 @@ export const createAdhyayan = async (req, res) => {
     start_date,
     end_date,
     speaker,
+    amount,
     total_seats,
     food_allowed,
     comments
@@ -33,7 +36,7 @@ export const createAdhyayan = async (req, res) => {
 
   const alreadyExists = await ShibirDb.findOne({
     where: {
-      speaker: { [Sequelize.Op.iLike]: speaker },
+      speaker: { [Sequelize.Op.like]: speaker },
       start_date: start_date
     }
   });
@@ -48,13 +51,14 @@ export const createAdhyayan = async (req, res) => {
     start_date: start_date,
     end_date: end_date,
     total_seats: total_seats,
+    amount: amount,
     available_seats: total_seats,
     food_allowed: food_allowed,
     comments: comments,
     updatedBy: req.user.username
   });
 
-  res.status(201).send({ message: 'Created Adhyayan', data: adhyayan_details });
+  res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
 };
 
 export const fetchAllAdhyayan = async (req, res) => {
@@ -77,23 +81,34 @@ export const fetchAllAdhyayan = async (req, res) => {
   return res.status(200).send({ message: 'fetched results', data: shibirs });
 };
 
+export const fetchAdhyayan = async (req, res) => {
+  const adhyayanId = req.params.id;
+  const adhyayanData = await ShibirDb.findByPk(adhyayanId);
+  if(adhyayanData ===  null) {
+    return res.status(404).send({message: 'No Adhyayan found with given id'})
+  }
+  return res.status(200).send({message: 'found adhyayan', data: adhyayanData});
+};
+
 export const updateAdhyayan = async (req, res) => {
   const {
     name,
     start_date,
     end_date,
     speaker,
+    amount,
     total_seats,
     food_allowed,
     comments
   } = req.body;
 
-  const id = req.params.id;
+  const adhyayanId = req.params.id;
+  const data = await ShibirDb.findByPk(adhyayanId);
 
-  const data = await ShibirDb.findByPk(id);
+  console.log("Updating Adhyayan - " + data.dataValues.name);
+
   var available_seats = data.dataValues.available_seats;
   const diff = Math.abs(data.dataValues.total_seats - total_seats);
-
   if (data.dataValues.total_seats > total_seats) {
     available_seats -= diff;
     if (available_seats < 0) available_seats = 0;
@@ -101,27 +116,42 @@ export const updateAdhyayan = async (req, res) => {
     available_seats += diff;
   }
 
-  const updatedItem = await ShibirDb.update(
-    {
-      name: name,
-      speaker: speaker,
-      month: moment(start_date).format('MMMM'),
-      start_date: start_date,
-      end_date: end_date,
-      total_seats: total_seats,
-      available_seats: available_seats,
-      food_allowed: food_allowed,
-      comments: comments,
-      updatedBy: req.user.username
-    },
-    {
-      where: {
-        id: id
-      }
-    }
-  );
-  if (updatedItem != 1)
-    throw new ApiError(500, 'Error occured while updating adhyayan');
+  const month = moment(start_date).format('MMMM');
+  console.log("Month of Adhyayan: " + month);
+  console.log("End Date: " + end_date);
+  try{
+    const updatedItem = await ShibirDb.update(
+      {
+        name: name,
+        speaker: speaker,
+        month: month,
+        start_date: start_date,
+        end_date: end_date,
+        total_seats: total_seats,
+        amount: amount,
+        available_seats: available_seats,
+        food_allowed: food_allowed,
+        comments: comments,
+        updatedBy: req.user.username
+      },
+      {
+        where: {
+          id: adhyayanId
+        },
+      },
+    );
+  
+    console.log("Database Update response: " + updatedItem);
+    if (updatedItem != 1) {
+      console.log("Error. Returning 500")
+      throw new ApiError(500, 'Error occured while updating adhyayan');
+    } 
+  
+  }
+  catch(error) {
+    console.log("Error: " + error);
+  }
+
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
 
@@ -184,55 +214,56 @@ export const adhyayanStatusUpdate = async (req, res) => {
     }
   });
 
-  let booking_transaction = await ShibirBookingTransaction.findOne({
-    where: {
-      bookingid: bookingid,
-      type: TYPE_EXPENSE,
-      status: {
-        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
-      }
-    },
-    order: [['updatedAt', 'DESC']]
-  });
-
   switch (status) {
     case STATUS_CONFIRMED:
       if (booking.dataValues.status == STATUS_PAYMENT_PENDING) {
-        await booking_transaction.update(
+        await Transactions.create(
           {
+            cardno: booking.dataValues.cardno,
+            bookingid: booking.dataValues.bookingid,
+            category: TYPE_ADHYAYAN,
+            type: TYPE_EXPENSE,
+            amount: shibir.dataValues.amount,
+            upi_ref: upi_ref ? upi_ref : 'NA',
             status: STATUS_PAYMENT_COMPLETED,
             updatedBy: req.user.username
           },
           { transaction: t }
         );
+
+        booking.status = STATUS_CONFIRMED;
+        booking.updatedBy = req.user.username;
+        await booking.save({ transaction: t });
       } else if (
         booking.dataValues.status == STATUS_CANCELLED ||
         booking.dataValues.status == STATUS_ADMIN_CANCELLED ||
         booking.dataValues.status == STATUS_WAITING
       ) {
-        await ShibirBookingTransaction.create(
-          {
+        const payment = await Transactions.findOne({
+          where: {
             cardno: booking.dataValues.cardno,
-            bookingid: bookingid,
+            bookingid: booking.dataValues.bookingid,
+            category: TYPE_ADHYAYAN,
             type: TYPE_EXPENSE,
-            amount: shibir.dataValues.amount,
-            upi_ref: upi_ref,
-            description: description,
-            status: STATUS_PAYMENT_COMPLETED,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
+            status: STATUS_PAYMENT_COMPLETED
+          }
+        });
+
+        if (!payment) {
+          booking.status = STATUS_PAYMENT_PENDING;
+          booking.updatedBy = req.user.username;
+          await booking.save({ transaction: t });
+        } else {
+          booking.status = STATUS_CONFIRMED;
+          booking.updatedBy = req.user.username;
+          await booking.save({ transaction: t });
+        }
       }
 
       if (shibir.dataValues.available_seats > 0) {
         shibir.available_seats -= 1;
         await shibir.save({ transaction: t });
       }
-
-      booking.status = STATUS_CONFIRMED;
-      booking.updatedBy = req.user.username;
-      await booking.save({ transaction: t });
 
       break;
 
@@ -540,3 +571,5 @@ function findClosestSum(arr, target) {
 
   return { closestSum, closestIndices };
 }
+
+//TODO: admin can cancel booking and confirm from waitlist

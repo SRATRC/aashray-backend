@@ -22,6 +22,10 @@ const UtsavDb = sequelize.define(
       type: DataTypes.DATEONLY,
       allowNull: false
     },
+    month: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
     max_guests: {
       type: DataTypes.BIGINT,
       allowNull: false

@@ -1,24 +1,16 @@
-import {
-  TravelDb,
-  TravelBookingTransaction
-} from '../../models/associations.js';
+import { TravelDb } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import sendMail from '../../utils/sendMail.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
-  TRAVEL_PRICE,
   STATUS_CANCELLED,
-  STATUS_PAYMENT_PENDING,
-  STATUS_PAYMENT_COMPLETED,
-  TYPE_EXPENSE,
   TYPE_TRAVEL
 } from '../../config/constants.js';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
-import Transactions from '../../models/transactions.model.js';
 
 // TODO: DEPRECATE THIS ENDPOINT
 export const BookTravel = async (req, res) => {
