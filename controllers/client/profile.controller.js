@@ -64,8 +64,8 @@ export const transactions = async (req, res) => {
     cardno: req.user.cardno
   };
 
-  if (req.query.status != 'all') {
-    whereClause.status = req.query.status;
+  if (status != 'all') {
+    whereClause.status = status;
   }
 
   if (req.query.category) {
