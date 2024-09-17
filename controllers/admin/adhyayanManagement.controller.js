@@ -58,7 +58,7 @@ export const createAdhyayan = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  res.status(201).send({ message: 'Created Adhyayan', data: adhyayan_details });
+  res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
 };
 
 export const fetchAllAdhyayan = async (req, res) => {
@@ -81,23 +81,34 @@ export const fetchAllAdhyayan = async (req, res) => {
   return res.status(200).send({ message: 'fetched results', data: shibirs });
 };
 
+export const fetchAdhyayan = async (req, res) => {
+  const adhyayanId = req.params.id;
+  const adhyayanData = await ShibirDb.findByPk(adhyayanId);
+  if(adhyayanData ===  null) {
+    return res.status(404).send({message: 'No Adhyayan found with given id'})
+  }
+  return res.status(200).send({message: 'found adhyayan', data: adhyayanData});
+};
+
 export const updateAdhyayan = async (req, res) => {
   const {
     name,
     start_date,
     end_date,
     speaker,
+    amount,
     total_seats,
     food_allowed,
     comments
   } = req.body;
 
-  const id = req.params.id;
+  const adhyayanId = req.params.id;
+  const data = await ShibirDb.findByPk(adhyayanId);
 
-  const data = await ShibirDb.findByPk(id);
+  console.log("Updating Adhyayan - " + data.dataValues.name);
+
   var available_seats = data.dataValues.available_seats;
   const diff = Math.abs(data.dataValues.total_seats - total_seats);
-
   if (data.dataValues.total_seats > total_seats) {
     available_seats -= diff;
     if (available_seats < 0) available_seats = 0;
@@ -105,27 +116,42 @@ export const updateAdhyayan = async (req, res) => {
     available_seats += diff;
   }
 
-  const updatedItem = await ShibirDb.update(
-    {
-      name: name,
-      speaker: speaker,
-      month: moment(start_date).format('MMMM'),
-      start_date: start_date,
-      end_date: end_date,
-      total_seats: total_seats,
-      available_seats: available_seats,
-      food_allowed: food_allowed,
-      comments: comments,
-      updatedBy: req.user.username
-    },
-    {
-      where: {
-        id: id
-      }
-    }
-  );
-  if (updatedItem != 1)
-    throw new ApiError(500, 'Error occured while updating adhyayan');
+  const month = moment(start_date).format('MMMM');
+  console.log("Month of Adhyayan: " + month);
+  console.log("End Date: " + end_date);
+  try{
+    const updatedItem = await ShibirDb.update(
+      {
+        name: name,
+        speaker: speaker,
+        month: month,
+        start_date: start_date,
+        end_date: end_date,
+        total_seats: total_seats,
+        amount: amount,
+        available_seats: available_seats,
+        food_allowed: food_allowed,
+        comments: comments,
+        updatedBy: req.user.username
+      },
+      {
+        where: {
+          id: adhyayanId
+        },
+      },
+    );
+  
+    console.log("Database Update response: " + updatedItem);
+    if (updatedItem != 1) {
+      console.log("Error. Returning 500")
+      throw new ApiError(500, 'Error occured while updating adhyayan');
+    } 
+  
+  }
+  catch(error) {
+    console.log("Error: " + error);
+  }
+
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
 
