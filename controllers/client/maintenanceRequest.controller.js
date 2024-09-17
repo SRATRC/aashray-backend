@@ -85,7 +85,7 @@ export const ViewRequest = CatchAsync(async (req, res) => {
   const data = await MaintenanceDb.findAll({
     where: whereClause,
     attributes: {
-      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
+      exclude: ['id', 'updatedAt', 'updatedBy']
     },
     order: [['createdAt', 'DESC']],
     offset,
