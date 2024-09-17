@@ -28,7 +28,8 @@ export const CreateRequest = CatchAsync(async (req, res) => {
       requested_by: req.user.cardno,
       department: req.body.department,
       work_detail: req.body.work_detail,
-      area_of_work: req.body.area_of_work || null
+      area_of_work: req.body.area_of_work || null,
+      updatedBy: 'USER'
     },
     { transaction: t }
   );
@@ -60,9 +61,10 @@ export const CreateRequest = CatchAsync(async (req, res) => {
     }
   });
 
+  await t.commit();
+
   return res.status(201).send({
-    message: 'successfully created request',
-    data: request
+    message: 'successfully created request'
   });
 });
 
@@ -70,11 +72,22 @@ export const ViewRequest = CatchAsync(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const status = req.query.status.toLowerCase() || 'all';
+
+  const whereClause = {
+    requested_by: req.user.cardno
+  };
+
+  if (status != 'all') {
+    whereClause.status = status;
+  }
 
   const data = await MaintenanceDb.findAll({
-    where: {
-      requested_by: req.user.cardno
+    where: whereClause,
+    attributes: {
+      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
     },
+    order: [['createdAt', 'DESC']],
     offset,
     limit: pageSize
   });

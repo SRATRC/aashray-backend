@@ -10,7 +10,7 @@ import { validateCard } from '../../middleware/validate.js';
 router.use(validateCard);
 
 router.post('/request', CreateRequest);
-router.get('/get', ViewRequest);
+router.get('/', ViewRequest);
 router.get('/departments', FetchDepartments);
 
 export default router;
