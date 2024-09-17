@@ -5,10 +5,10 @@ import { STATUS_CLOSED, STATUS_OPEN } from '../config/constants.js';
 const MaintenanceDb = sequelize.define(
   'MaintenanceDb',
   {
-    id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true
+    bookingid: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      primaryKey: true
     },
     requested_by: {
       type: DataTypes.STRING,

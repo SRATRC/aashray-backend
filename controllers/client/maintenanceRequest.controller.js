@@ -3,8 +3,9 @@ import {
   MaintenanceDb,
   Departments
 } from '../../models/associations.js';
-import database from '../../config/database.js';
 import { ROOM_STATUS_CHECKEDIN } from '../../config/constants.js';
+import { v4 as uuidv4 } from 'uuid';
+import database from '../../config/database.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
@@ -25,6 +26,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
 
   const request = await MaintenanceDb.create(
     {
+      bookingid: uuidv4(),
       requested_by: req.user.cardno,
       department: req.body.department,
       work_detail: req.body.work_detail,
@@ -85,7 +87,7 @@ export const ViewRequest = CatchAsync(async (req, res) => {
   const data = await MaintenanceDb.findAll({
     where: whereClause,
     attributes: {
-      exclude: ['id', 'updatedAt', 'updatedBy']
+      exclude: ['updatedAt', 'updatedBy']
     },
     order: [['createdAt', 'DESC']],
     offset,
