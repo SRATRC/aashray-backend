@@ -306,11 +306,12 @@ export const ViewAllBookings = async (req, res) => {
 
   const user_bookings = await database.query(
     `SELECT t1.bookingid, t1.roomno, t1.checkin, t1.checkout, t1.nights, t1.roomtype, t1.status, t1.gender, t2.amount, t2.status as transaction_status
-   FROM room_booking t1
-   JOIN transactions t2 ON t1.bookingid = t2.bookingid
-   WHERE t1.cardno = :cardno AND t2.category = :category
-   ORDER BY t1.checkin DESC
-   LIMIT :limit OFFSET :offset`,
+    FROM room_booking t1
+    LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid AND t2.category = :category
+    WHERE t1.cardno = :cardno
+    ORDER BY t1.checkin DESC
+    LIMIT :limit OFFSET :offset;
+`,
     {
       replacements: {
         cardno: req.user.cardno,
