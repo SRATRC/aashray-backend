@@ -25,6 +25,12 @@ import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 
+const mealTimes = {
+  breakfast: '7:30 AM - 9:00 AM',
+  lunch: '12:00 PM - 2:00 PM',
+  dinner: '7:00 PM - 9:00 PM'
+};
+
 // TODO: DEPRECATE THIS ENDPOINT
 export const RegisterFood = async (req, res) => {
   validateDate(req.body.start_date, req.body.end_date);
@@ -336,25 +342,31 @@ export const CancelGuestFood = async (req, res) => {
 };
 
 export const fetchMenu = async (req, res) => {
-  const menu = await Menu.findAll({
+  const menuItems = await Menu.findAll({
+    attributes: ['date', 'breakfast', 'lunch', 'dinner'],
     where: {
       date: {
         [Sequelize.Op.gte]: moment().format('YYYY-MM-DD')
       }
-    }
+    },
+    order: [['date', 'ASC']]
   });
-  const formattedMenu = menu.reduce((acc, menu) => {
-    const dateKey = menu.date;
-    if (!acc[dateKey]) {
-      acc[dateKey] = [];
-    }
-    acc[dateKey].push(
-      { meal: 'Breakfast', name: menu.breakfast, time: '7:30 AM - 9:00 AM' },
-      { meal: 'Lunch', name: menu.lunch, time: '12:00 PM - 2:00 PM' },
-      { meal: 'Dinner', name: menu.dinner, time: '7:00 PM - 9:00 PM' }
-    );
-    return acc;
-  }, {});
 
-  return res.status(200).send(formattedMenu);
+  if (menuItems.length === 0) {
+    return res.status(404).json({ data: null, message: 'No menu available' });
+  }
+
+  const formattedMenu = menuItems.reduce(
+    (acc, { date, breakfast, lunch, dinner }) => {
+      acc[date] = [
+        { meal: 'Breakfast', name: breakfast, time: mealTimes.breakfast },
+        { meal: 'Lunch', name: lunch, time: mealTimes.lunch },
+        { meal: 'Dinner', name: dinner, time: mealTimes.dinner }
+      ];
+      return acc;
+    },
+    {}
+  );
+
+  return res.status(200).send({ data: formattedMenu });
 };
