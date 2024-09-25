@@ -343,6 +343,18 @@ export const fetchMenu = async (req, res) => {
       }
     }
   });
+  const formattedMenu = menu.reduce((acc, menu) => {
+    const dateKey = menu.date;
+    if (!acc[dateKey]) {
+      acc[dateKey] = [];
+    }
+    acc[dateKey].push(
+      { meal: 'Breakfast', name: menu.breakfast, time: '7:30 AM - 9:00 AM' },
+      { meal: 'Lunch', name: menu.lunch, time: '12:00 PM - 2:00 PM' },
+      { meal: 'Dinner', name: menu.dinner, time: '7:00 PM - 9:00 PM' }
+    );
+    return acc;
+  }, {});
 
-  return res.status(200).send({ data: menu });
+  return res.status(200).send(formattedMenu);
 };
