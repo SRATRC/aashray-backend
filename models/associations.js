@@ -31,6 +31,7 @@ import Transactions from './transactions.model.js';
 import Countries from './countries.model.js';
 import States from './states.model.js';
 import Cities from './cities.model.js';
+import GuestDb from './guest_db.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -130,6 +131,12 @@ CardDb.hasMany(UtsavGuestBookingTransaction, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(Transactions, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(GuestDb, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -449,6 +456,22 @@ Cities.belongsTo(States, {
   targetKey: 'id'
 });
 
+// Guest
+GuestDb.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+GuestFoodDb.belongsTo(GuestDb, {
+  foreignKey: 'guest',
+  targetKey: 'id'
+});
+GuestDb.hasMany(GuestFoodDb, {
+  foreignKey: 'guest',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
 export {
   CardDb,
   ShibirDb,
@@ -481,5 +504,6 @@ export {
   Menu,
   Cities,
   States,
-  Countries
+  Countries,
+  GuestDb
 };

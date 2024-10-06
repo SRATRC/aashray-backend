@@ -35,8 +35,7 @@ import {
   calculateNights,
   isFoodBooked,
   validateDate,
-  checkRoomBookingProgress,
-  findClosestSum
+  checkRoomBookingProgress
 } from '../helper.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';

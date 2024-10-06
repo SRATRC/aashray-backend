@@ -4,14 +4,10 @@ import sequelize from '../config/database.js';
 const GuestFoodDb = sequelize.define(
   'GuestFoodDb',
   {
-    id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true
-    },
     bookingid: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      primaryKey: true
     },
     cardno: {
       type: DataTypes.STRING,
@@ -21,12 +17,16 @@ const GuestFoodDb = sequelize.define(
         key: 'cardno'
       }
     },
+    guest: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
+    },
     date: {
       type: DataTypes.DATEONLY,
-      allowNull: false
-    },
-    guest_count: {
-      type: DataTypes.INTEGER,
       allowNull: false
     },
     breakfast: {
@@ -38,6 +38,15 @@ const GuestFoodDb = sequelize.define(
       allowNull: false
     },
     dinner: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false
+    },
+    hightea: {
+      type: DataTypes.ENUM,
+      allowNull: false,
+      values: ['TEA', 'COFFEE', 'NONE']
+    },
+    spicy: {
       type: DataTypes.BOOLEAN,
       allowNull: false
     },

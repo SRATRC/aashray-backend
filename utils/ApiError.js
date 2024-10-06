@@ -7,6 +7,9 @@ class ApiError extends Error {
       this.data = data;
     } else {
       Error.captureStackTrace(this, this.constructor);
+      // if (process.env.NODE_ENV !== 'production') {
+      //   Error.captureStackTrace(this, this.constructor);
+      // }
     }
   }
 }
