@@ -177,7 +177,7 @@ export const FetchFoodBookings = async (req, res) => {
         cardno: req.query.cardno,
         ...dateFilter // Apply date filter if provided
       },
-      order: [['date', 'ASC']],
+      order: [['date', 'DESC']],
       offset,
       limit: pageSize
     }),
@@ -193,7 +193,7 @@ export const FetchFoodBookings = async (req, res) => {
           attributes: ['name']
         }
       ],
-      order: [['date', 'ASC']],
+      order: [['date', 'DESC']],
       offset,
       limit: pageSize
     })
