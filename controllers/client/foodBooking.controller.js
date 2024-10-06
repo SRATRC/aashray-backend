@@ -144,48 +144,43 @@ export const FetchFoodBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
-  const { date, meal = 'all', spice = 'both', bookedFor = 'all' } = req.query;
+  const { date, meal = 'all', spice = 'all', bookedFor = 'all' } = req.query;
 
   const today = moment().format('YYYY-MM-DD');
 
-  // Filter conditions based on query params
-  const dateFilter = date ? { date } : {}; // If date is provided
+  const dateFilter = date ? { date } : {};
 
-  // Helper to filter meals
   const mealFilter = (mealType, exists) => {
     if (meal === 'all') return exists;
     return meal.split(',').includes(mealType) && exists;
   };
 
-  // Adjusted spice filter: 'true', 'false', or 'both'
   const spiceFilter = (spiceValue) => {
-    if (spice === 'both') return true;
+    if (spice === 'all') return true;
     return spice === 'true' ? spiceValue === true : spiceValue === false;
   };
 
-  // Filter for bookedFor: 'self', guest names, or 'all'
   const bookedForFilter = (bookedForKey) => {
     if (bookedFor === 'all') return true;
     return bookedFor.split(',').includes(bookedForKey);
   };
 
-  // Fetch both self and guest bookings in parallel
   const [selfData, guestData] = await Promise.all([
     FoodDb.findAll({
       attributes: ['date', 'breakfast', 'lunch', 'dinner', 'spicy'],
       where: {
         cardno: req.query.cardno,
-        ...dateFilter // Apply date filter if provided
+        ...dateFilter
       },
       order: [['date', 'DESC']],
       offset,
       limit: pageSize
     }),
     GuestFoodDb.findAll({
-      attributes: ['date', 'breakfast', 'lunch', 'dinner'],
+      attributes: ['date', 'breakfast', 'lunch', 'dinner', 'spicy'],
       where: {
         cardno: req.query.cardno,
-        ...dateFilter // Apply date filter if provided
+        ...dateFilter
       },
       include: [
         {
@@ -199,16 +194,14 @@ export const FetchFoodBookings = async (req, res) => {
     })
   ]);
 
-  // Helper function to classify the booking as 'upcoming' or 'past'
   const classifyBooking = (bookingDate) => {
-    return bookingDate >= today ? 'upcoming' : 'past'; // Include today as upcoming
+    return bookingDate >= today ? 'upcoming' : 'past';
   };
 
-  // Generalized function to process bookings with meal and spice filters
   const processBookings = (data, bookedForKey) => {
     return data.reduce((acc, item) => {
       const { date, breakfast, lunch, dinner, spicy } = item.dataValues;
-      const classify = classifyBooking(date); // Classify once per booking
+      const classify = classifyBooking(date);
 
       const meals = [
         { type: 'breakfast', exists: breakfast },
@@ -240,15 +233,12 @@ export const FetchFoodBookings = async (req, res) => {
     }, {});
   };
 
-  // Process self bookings
   const selfGroupedData = processBookings(selfData, 'self');
 
-  // Process guest bookings, including the guest name
   const guestGroupedData = guestData.reduce((acc, item) => {
     const guestName = item.GuestDb?.name || 'guest';
     const guestBookings = processBookings([item], guestName);
 
-    // Merge the processed guest bookings into acc
     Object.keys(guestBookings).forEach((key) => {
       if (!acc[key]) {
         acc[key] = [];
@@ -259,7 +249,6 @@ export const FetchFoodBookings = async (req, res) => {
     return acc;
   }, {});
 
-  // Merge self and guest bookings in one step
   const finalGroupedData = { ...selfGroupedData };
 
   Object.keys(guestGroupedData).forEach((key) => {
@@ -272,11 +261,18 @@ export const FetchFoodBookings = async (req, res) => {
     ];
   });
 
-  // Convert grouped data into response format
-  const responseData = Object.keys(finalGroupedData).map((key) => ({
+  let responseData = Object.keys(finalGroupedData).map((key) => ({
     title: key,
     data: finalGroupedData[key]
   }));
+
+  responseData = responseData.sort((a, b) => {
+    if (a.title === 'upcoming') return -1;
+    if (b.title === 'upcoming') return 1;
+    if (a.title === 'past') return 1;
+    if (b.title === 'past') return -1;
+    return 0;
+  });
 
   return res
     .status(200)
