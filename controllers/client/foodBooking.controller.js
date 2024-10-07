@@ -319,9 +319,13 @@ export const FetchGuestsForFilter = async (req, res) => {
     limit: 50
   });
 
-  const guestNames = guests.map((guest) => guest.name);
+  const guestNames = guests.map((guest) => ({
+    label: guest.name,
+    value: guest.name
+  }));
 
   return res.status(200).send({
+    message: 'fetched results',
     data: guestNames
   });
 };
