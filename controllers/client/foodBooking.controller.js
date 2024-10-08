@@ -319,10 +319,15 @@ export const FetchGuestsForFilter = async (req, res) => {
     limit: 50
   });
 
-  const guestNames = guests.map((guest) => ({
+  let guestNames = guests.map((guest) => ({
     label: guest.name,
     value: guest.name
   }));
+
+  guestNames.push([
+    { label: 'All', value: 'all' },
+    { label: 'Self', value: 'self' }
+  ]);
 
   return res.status(200).send({
     message: 'fetched results',
