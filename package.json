@@ -27,10 +27,6 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "@babel/preset-env": "^7.25.8",
-    "babel-jest": "^29.7.0",
-    "jest": "^29.7.0",
-    "nodemon": "^3.0.1",
-    "supertest": "^7.0.0"
+    "nodemon": "^3.0.1"
   }
 }
