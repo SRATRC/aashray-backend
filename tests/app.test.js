@@ -1,14 +1,5 @@
 import request from 'supertest';
 import { app, sequelize, server } from '../app';
-import hbs from 'nodemailer-express-handlebars';
-
-
-// Mock nodemailer-express-handlebars
-jest.mock('nodemailer-express-handlebars', () => {
-  return jest.fn(() => ({
-    use: jest.fn(),
-  }));
-});
 
 beforeAll(async () => {
   await sequelize.authenticate();
