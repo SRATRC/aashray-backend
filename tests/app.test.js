@@ -10,6 +10,11 @@ jest.mock('nodemailer-express-handlebars', () => {
   }));
 });
 
+beforeAll(async () => {
+  await sequelize.authenticate();
+  await sequelize.sync();
+});
+
 describe('GET /', () => {
   it('should return 200 and "API is up and running... 🚀"', async () => {
     const response = await request(app).get('/');
