@@ -3,5 +3,8 @@ module.exports = {
     '^.+\\.jsx?$': 'babel-jest',
   },
   testEnvironment: 'node',
-  testMatch: ['<rootDir>/tests/**/*.test.js']
+  testMatch: ['<rootDir>/tests/**/*.test.js'],
+  collectCoverage: true,
+  coverageDirectory: "coverage",
+  coverageReporters: ["html"],
 };
