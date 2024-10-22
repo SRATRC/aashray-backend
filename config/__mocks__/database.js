@@ -1,3 +1,4 @@
+import { query } from 'express';
 import { Sequelize } from 'sequelize';
 
 const mockSequelize = {
@@ -11,6 +12,7 @@ const mockSequelize = {
   Op: Sequelize.Op,
   authenticate: jest.fn(),
   sync: jest.fn(),
+  query: jest.fn(),
 };
 
 export default mockSequelize;
