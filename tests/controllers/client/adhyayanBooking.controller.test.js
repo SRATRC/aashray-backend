@@ -4,9 +4,10 @@ jest.mock('../../../models/associations.js');
 jest.mock('../../../config/database.js');
 
 import request from 'supertest';
-import { app, sequelize, server } from '../../../app'; 
-import { CardDb, ShibirDb } from '../../../models/associations';
-import { STATUS_CONFIRMED, STATUS_PAYMENT_PENDING } from '../../../config/constants';
+import { app, sequelize, server } from '../../../app.js'; 
+import sendMail from '../../../utils/sendMail.js';
+import { CardDb, ShibirDb, ShibirBookingDb } from '../../../models/associations.js';
+import { STATUS_CONFIRMED, STATUS_PAYMENT_PENDING } from '../../../config/constants.js';
 
 afterAll(async () => {
   server.close();
@@ -37,42 +38,6 @@ describe('Adhyayan Booking Controller', () => {
     });
   });
 
-
-  // describe('RegisterShibir', () => {
-  //   it('should register a shibir booking', async () => {
-  //       const mockTransaction = { commit: jest.fn(), rollback: jest.fn() };
-  //       database.transaction.mockResolvedValue(mockTransaction);
-  //       uuidv4.mockReturnValue('mock-uuid');
-  //       ShibirBookingDb.findOne.mockResolvedValue(null);
-  //       ShibirDb.findOne.mockResolvedValue({ available_seats: 1, dataValues: { amount: 1000 } });
-  //       ShibirBookingTransaction.findAll.mockResolvedValue([]);
-  //       ShibirBookingDb.create.mockResolvedValue({});
-  //       ShibirBookingTransaction.create.mockResolvedValue({});
-  //       sendMail.mockResolvedValue({});
-
-  //       const res = await request(app)
-  //           .post('/api/shibir/register')
-  //           .send({ shibir_id: 1, cardno: '1234' })
-  //           .set('user', { email: 'test@example.com', issuedto: 'Test User' });
-
-  //       expect(res.status).toBe(201);
-  //       expect(res.body.message).toBe('Shibir booking successful');
-  //       expect(mockTransaction.commit).toHaveBeenCalled();
-  //       expect(sendMail).toHaveBeenCalledWith({
-  //           email: 'test@example.com',
-  //           subject: 'Shibir Booking Confirmation',
-  //           template: 'rajAdhyayan',
-  //           context: {
-  //               name: 'Test User',
-  //               adhyayanName: undefined,
-  //               speaker: undefined,
-  //               startDate: undefined,
-  //               endDate: undefined
-  //           }
-  //       });
-  //   });
-  // });
-
   describe('FetchBookedShibir', () => {
     it('should fetch booked shibirs for a user', async () => {
         const mockShibirs = [
@@ -92,34 +57,36 @@ describe('Adhyayan Booking Controller', () => {
     });
   });
 
-//   describe('CancelShibir', () => {
-//     it('should cancel a shibir booking', async () => {
-//         const mockTransaction = { commit: jest.fn(), rollback: jest.fn() };
-//         database.transaction.mockResolvedValue(mockTransaction);
-//         ShibirBookingDb.findOne.mockResolvedValue({ status: STATUS_CONFIRMED, save: jest.fn() });
-//         ShibirDb.findOne.mockResolvedValue({ available_seats: 1, total_seats: 10, save: jest.fn() });
-//         ShibirBookingDb.create.mockResolvedValue({});
-//         sendMail.mockResolvedValue({});
+  describe('CancelShibir', () => {
+    it('should cancel a shibir booking', async () => {
+        const mockTransaction = { commit: jest.fn(), rollback: jest.fn() };
+        sequelize.transaction.mockResolvedValue(mockTransaction);
 
-//         const res = await request(app)
-//             .post('/api/shibir/cancel')
-//             .send({ shibir_id: 1, cardno: '1234' })
-//             .set('user', { email: 'test@example.com', issuedto: 'Test User' });
+        const mockCard = { cardno: '1234', email: 'test@example.com', issuedto: 'Test User' };
+        CardDb.findOne.mockResolvedValue(mockCard);
+        
+        ShibirBookingDb.findOne.mockResolvedValue({ status: STATUS_CONFIRMED, save: jest.fn() });
+        ShibirDb.findOne.mockResolvedValue({ available_seats: 1, total_seats: 10, dataValues: {name: "Test"}, save: jest.fn() });
+        sendMail.mockResolvedValue({});
+        
+        const res = await request(app)
+            .delete('/api/v1/adhyayan/cancel')
+            .send({ shibir_id: 1, cardno: '1234' });
 
-//         expect(res.status).toBe(200);
-//         expect(res.body.message).toBe('Shibir booking cancelled');
-//         expect(mockTransaction.commit).toHaveBeenCalled();
-//         expect(sendMail).toHaveBeenCalledWith({
-//             email: 'test@example.com',
-//             subject: 'Shibir Booking Cancellation',
-//             template: 'rajAdhyayanCancellation',
-//             context: {
-//                 name: 'Test User',
-//                 adhyayanName: undefined
-//             }
-//         });
-//     });
-// });
+        expect(res.status).toBe(200);
+        expect(res.body.message).toBe('Shibir booking cancelled');
+        expect(mockTransaction.commit).toHaveBeenCalled();
+        expect(sendMail).toHaveBeenCalledWith({
+            email: 'test@example.com',
+            subject: 'Shibir Booking Cancellation',
+            template: 'rajAdhyayanCancellation',
+            context: {
+                name: 'Test User',
+                adhyayanName: 'Test'
+            }
+        });
+    });
+});
 
 // describe('FetchShibirInRange', () => {
 //     it('should fetch shibirs within a date range', async () => {
