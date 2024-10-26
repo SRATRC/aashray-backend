@@ -88,20 +88,23 @@ describe('Adhyayan Booking Controller', () => {
     });
 });
 
-// describe('FetchShibirInRange', () => {
-//     it('should fetch shibirs within a date range', async () => {
-//         const mockShibirs = [
-//             { start_date: '2023-01-15', end_date: '2023-01-20' },
-//             { start_date: '2023-01-25', end_date: '2023-01-30' }
-//         ];
-//         ShibirDb.findAll.mockResolvedValue(mockShibirs);
+describe('FetchShibirInRange', () => {
+    it('should fetch shibirs within a date range', async () => {
+        const mockCard = { cardno: '1234', email: 'test@example.com', issuedto: 'Test User' };
+        CardDb.findOne.mockResolvedValue(mockCard);
 
-//         const res = await request(app)
-//             .get('/api/shibir/range')
-//             .query({ start_date: '2023-01-01', end_date: '2023-01-31' });
+        const res = await request(app)
+            .get('/api/v1/adhyayan/getrange')
+            .query({ cardno: '1234', start_date: '2023-01-01', end_date: '2023-01-31' });
 
-//         expect(res.status).toBe(200);
-//         expect(res.body.data).toEqual(mockShibirs);
-//     });
-//   });
+        expect(res.status).toBe(200);
+        expect(ShibirDb.findAll).toHaveBeenCalledWith({
+            where: {
+                start_date: { [sequelize.Op.gte]: '2023-01-01', [sequelize.Op.lte]: '2023-01-31' },
+                end_date: { [sequelize.Op.gte]: '2023-01-01', [sequelize.Op.lte]: '2023-01-31' }
+            },
+            order: [['start_date', 'ASC']]
+        });
+    });
+  });
 });
