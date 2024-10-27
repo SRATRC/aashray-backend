@@ -15,10 +15,7 @@
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-<<<<<<< HEAD
     "expo-server-sdk": "^3.11.0",
-=======
->>>>>>> b7d15f401f8a8d265c7d179ac1b1e36f9a7400fc
     "express": "^4.21.0",
     "express-session": "^1.17.3",
     "jsonwebtoken": "^9.0.2",
