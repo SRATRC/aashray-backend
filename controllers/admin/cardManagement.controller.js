@@ -4,6 +4,7 @@ import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 
+//FIXME: Add validations and throw informative error messages
 export const createCard = async (req, res) => {
   const {
     cardno,
