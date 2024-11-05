@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sratrc-portal-backend
+  labels:
+    app: sratrc-portal-backend  
+spec:
+  selector:
+    app: sratrc-portal-backend
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+  type: LoadBalancer

@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sratrc-portal-backend
+  labels:
+    app: sratrc-portal-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sratrc-portal-backend
+  template:
+    metadata:
+      labels:
+        app: sratrc-portal-backend
+    spec:
+      containers:
+        - name: sratrc-portal-backend
+          image: <your-dockerhub-username>/sratrc-portal-backend:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "dev"
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: sratrc-portal-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: sratrc-portal-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: sratrc-portal-config
+                  key: DB_NAME
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: sratrc-portal-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sratrc-portal-secret
+                  key: DB_PASSWORD
+      imagePullSecrets:
+        - name: myregistrykey      

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sratrc-portal-config
+data:
+  DB_HOST: host.docker.internal
+  DB_PORT: "3306"
+  DB_NAME: "dev"
