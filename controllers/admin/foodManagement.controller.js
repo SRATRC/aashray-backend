@@ -24,6 +24,7 @@ import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 
+//FIXME: logic is flawed, need to be fixed
 export const issuePlate = async (req, res) => {
   const currentTime = moment();
   const breakfastEnd = moment().hour(10).minute(0).second(0); // Adjust timings as needed
@@ -458,6 +459,14 @@ export const fetchMenu = async (req, res) => {
 
 export const addMenu = async (req, res) => {
   const { date, breakfast, lunch, dinner } = req.body;
+
+  const checkMenu = await Menu.findOne({
+    where: {
+      date: date
+    }
+  });
+
+  if (checkMenu) throw new ApiError(400, 'Menu already exists for given date');
 
   await Menu.create({
     date,
