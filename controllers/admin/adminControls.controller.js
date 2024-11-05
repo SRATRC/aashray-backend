@@ -126,17 +126,11 @@ export const fetchRoles = async (req, res) => {
 // };
 
 export const deleteRole = async (req, res) => {
-  const deletedItems = await Roles.update(
-    {
-      status: STATUS_INACTIVE,
-      updatedBy: req.user.username
-    },
-    {
-      where: {
-        name: req.params.name
-      }
+  const deletedItems = await Roles.destroy({
+    where: {
+      name: req.params.name
     }
-  );
+  });
 
   if (deletedItems == 0)
     throw new ApiError(500, 'error occured while deleting role');
