@@ -101,6 +101,9 @@ app.use((_req, _res) => {
 app.use(ErrorHandler);
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`server is listning on port ${port}...`);
 });
+
+// Export the app and a function to close the database connection
+export { app, sequelize, server };

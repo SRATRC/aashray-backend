@@ -303,7 +303,7 @@ export const CancelShibir = async (req, res) => {
       id: req.body.shibir_id
     },
     transaction: t,
-    lock: t.LOCK.UPDATE
+    lock: Sequelize.Transaction.LOCK.UPDATE
   });
 
   if (
