@@ -305,7 +305,7 @@ export const ViewAllBookings = async (req, res) => {
   const offset = (page - 1) * pageSize;
 
   const user_bookings = await database.query(
-    `SELECT t1.bookingid, t1.roomno, t1.checkin, t1.checkout, t1.nights, t1.roomtype, t1.status, t1.gender, t2.amount, t2.status as transaction_status
+    `SELECT t1.bookingid, t1.roomno, t1.checkin, t1.checkout, t1.nights, t1.roomtype, t1.status, t1.gender, COALESCE(t2.amount, 0) as amount, t2.status as transaction_status
     FROM room_booking t1
     LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid AND t2.category = :category
     WHERE t1.cardno = :cardno
