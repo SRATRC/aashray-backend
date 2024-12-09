@@ -1,8 +1,14 @@
 import express from 'express';
 const router = express.Router();
-import { VerifyIdentity } from '../../controllers/client/auth.controller.js';
+import {
+  verifyMobno,
+  login,
+  logout
+} from '../../controllers/client/auth.controller.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
-router.get('/verify', CatchAsync(VerifyIdentity));
+router.get('/verify', CatchAsync(verifyMobno));
+router.post('/login', CatchAsync(login));
+router.get('/logout', CatchAsync(logout));
 
 export default router;
