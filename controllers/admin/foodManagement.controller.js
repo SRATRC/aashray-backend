@@ -27,9 +27,23 @@ import ApiError from '../../utils/ApiError.js';
 //FIXME: logic is flawed, need to be fixed
 export const issuePlate = async (req, res) => {
   const currentTime = moment();
-  const breakfastEnd = moment().hour(10).minute(0).second(0); // Adjust timings as needed
-  const lunchEnd = moment().hour(14).minute(0).second(0);
-  const dinnerEnd = moment().hour(19).minute(0).second(0);
+  const mealTimes = {
+    breakfast: {
+      end: moment().hour(10).minute(0).second(0),
+      field: 'breakfast',
+      plateField: 'breakfast_plate_issued'
+    },
+    lunch: {
+      end: moment().hour(14).minute(0).second(0),
+      field: 'lunch',
+      plateField: 'lunch_plate_issued'
+    },
+    dinner: {
+      end: moment().hour(19).minute(0).second(0),
+      field: 'dinner',
+      plateField: 'dinner_plate_issued'
+    }
+  };
 
   const food_booking = await FoodDb.findOne({
     where: {
@@ -38,47 +52,37 @@ export const issuePlate = async (req, res) => {
     }
   });
 
-  if (!food_booking) throw new ApiError(404, 'booking not found');
+  if (!food_booking) {
+    throw new ApiError(404, 'booking not found');
+  }
 
-  if (currentTime.isBefore(breakfastEnd)) {
-    if (food_booking.dataValues.breakfast == 1) {
-      if (food_booking.dataValues.breakfast_plate_issued == 0) {
-        food_booking.breakfast_plate_issued = 1;
-        await food_booking.save();
-      } else {
-        throw new ApiError(400, 'Plate already issued');
-      }
-    } else {
-      throw new ApiError(404, 'Breakfast not booked');
-    }
-  } else if (
-    currentTime.isBefore(lunchEnd) &&
-    currentTime.isAfter(breakfastEnd)
-  ) {
-    if (food_booking.dataValues.lunch == 1) {
-      if (food_booking.dataValues.lunch_plate_issued == 0) {
-        food_booking.lunch_plate_issued = 1;
-        await food_booking.save();
-      } else {
-        throw new ApiError(400, 'Plate already issued');
-      }
-    } else {
-      throw new ApiError(404, 'Lunch not booked');
-    }
-  } else if (currentTime.isBefore(dinnerEnd) && currentTime.isAfter(lunchEnd)) {
-    if (food_booking.dataValues.dinner == 1) {
-      if (food_booking.dataValues.dinner_plate_issued == 0) {
-        food_booking.dinner_plate_issued = 1;
-        await food_booking.save();
-      } else {
-        throw new ApiError(400, 'Plate already issued');
-      }
-    } else {
-      throw new ApiError(404, 'Dinner not booked');
-    }
-  } else {
+  // Determine current meal period
+  let currentMeal = null;
+  if (currentTime.isBefore(mealTimes.breakfast.end)) {
+    currentMeal = mealTimes.breakfast;
+  } else if (currentTime.isBefore(mealTimes.lunch.end)) {
+    currentMeal = mealTimes.lunch;
+  } else if (currentTime.isBefore(mealTimes.dinner.end)) {
+    currentMeal = mealTimes.dinner;
+  }
+
+  if (!currentMeal) {
     throw new ApiError(404, 'Invalid meal time');
   }
+
+  // Check if meal is booked
+  if (!food_booking[currentMeal.field]) {
+    throw new ApiError(404, `${currentMeal.field} not booked`);
+  }
+
+  // Check if plate is already issued
+  if (food_booking[currentMeal.plateField]) {
+    throw new ApiError(400, 'Plate already issued');
+  }
+
+  // Issue plate
+  food_booking[currentMeal.plateField] = true;
+  await food_booking.save();
 
   return res.status(200).send({ message: 'Plate issued successfully' });
 };
@@ -127,7 +131,9 @@ export const fetchPhysicalPlateIssued = async (req, res) => {
 };
 
 export const bookFoodForMumukshu = async (req, res) => {
-  if (await isFoodBooked(req)) {
+  if (
+    await isFoodBooked(req.body.start_date, req.body.end_date, req.body.cardno)
+  ) {
     return res
       .status(200)
       .send({ message: 'Food Already booked on one on more of the dates' });
