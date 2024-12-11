@@ -14,8 +14,10 @@ import {
   updateFlatBooking,
   checkinReport,
   checkoutReport,
+  roomList,
   blockRoom,
   unblockRoom,
+  rcBlockList,
   blockRC,
   unblockRC,
   ReservationReport,
@@ -45,8 +47,10 @@ router.get('/checkin_report', CatchAsync(checkinReport));
 router.get('/checkout_report', CatchAsync(checkoutReport));
 router.put('/block_room/:roomno', CatchAsync(blockRoom));
 router.put('/unblock_room/:roomno', CatchAsync(unblockRoom));
+router.get('/room_list', CatchAsync(roomList));
 router.post('/block_rc', CatchAsync(blockRC));
 router.put('/unblock_rc/:id', CatchAsync(unblockRC));
+router.get('/rc_block_list', CatchAsync(rcBlockList));
 router.get('/reservation_report', CatchAsync(ReservationReport));
 router.get('/cancellation_report', CatchAsync(CancellationReport));
 router.get('/waitlist_report', CatchAsync(WaitlistReport));

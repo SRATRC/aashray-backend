@@ -17,7 +17,7 @@ import {
   TYPE_ADHYAYAN
 } from '../../config/constants.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
+import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
@@ -68,26 +68,69 @@ export const fetchAllAdhyayan = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
-  const shibirs = await ShibirDb.findAll({
-    where: {
-      start_date: {
-        [Sequelize.Op.gte]: today
-      }
-    },
-    offset,
-    limit: pageSize,
-    order: [['start_date', 'ASC']]
-  });
+  const shibirs = await database.query(
+    `SELECT 
+		shibir_db.id,
+    shibir_db.name,
+    shibir_db.speaker,
+    shibir_db.month,
+    shibir_db.start_date,
+    shibir_db.end_date,
+    shibir_db.total_seats,
+    shibir_db.available_seats,
+    COUNT(shibir_booking_db.status) AS waitlist_count,
+    shibir_db.food_allowed,
+    shibir_db.comments,
+    shibir_db.status,
+    shibir_db.updatedBy
+FROM 
+    shibir_db
+LEFT JOIN 
+    shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+GROUP BY 
+    shibir_db.id,
+    shibir_db.name,
+    shibir_db.speaker,
+    shibir_db.month,
+    shibir_db.start_date,
+    shibir_db.end_date,
+    shibir_db.total_seats,
+    shibir_db.available_seats,
+    shibir_db.food_allowed,
+    shibir_db.comments,
+    shibir_db.status,
+    shibir_db.updatedBy
+    
+    LIMIT ${pageSize} OFFSET ${offset};`,
+    {
+      type: QueryTypes.SELECT
+    }
+  );
   return res.status(200).send({ message: 'fetched results', data: shibirs });
 };
 
-export const fetchAdhyayan = async (req, res) => {
-  const adhyayanId = req.params.id;
-  const adhyayanData = await ShibirDb.findByPk(adhyayanId);
-  if(adhyayanData ===  null) {
-    return res.status(404).send({message: 'No Adhyayan found with given id'})
+export const fetchAdhyayanBookings = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.query;
+  const adhyayanData = await ShibirBookingDb.findAll({
+    attributes: ['bookingid', 'status', 'updatedBy'],
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'centre']
+      }
+    ],
+    where: {
+      shibir_id: id,
+      status: status
+    }
+  });
+  if (adhyayanData === null) {
+    return res.status(404).send({ message: 'No Adhyayan found with given id' });
   }
-  return res.status(200).send({message: 'found adhyayan', data: adhyayanData});
+  return res
+    .status(200)
+    .send({ message: 'found adhyayan', data: adhyayanData });
 };
 
 export const updateAdhyayan = async (req, res) => {
@@ -105,7 +148,7 @@ export const updateAdhyayan = async (req, res) => {
   const adhyayanId = req.params.id;
   const data = await ShibirDb.findByPk(adhyayanId);
 
-  console.log("Updating Adhyayan - " + data.dataValues.name);
+  console.log('Updating Adhyayan - ' + data.dataValues.name);
 
   var available_seats = data.dataValues.available_seats;
   const diff = Math.abs(data.dataValues.total_seats - total_seats);
@@ -117,9 +160,9 @@ export const updateAdhyayan = async (req, res) => {
   }
 
   const month = moment(start_date).format('MMMM');
-  console.log("Month of Adhyayan: " + month);
-  console.log("End Date: " + end_date);
-  try{
+  console.log('Month of Adhyayan: ' + month);
+  console.log('End Date: ' + end_date);
+  try {
     const updatedItem = await ShibirDb.update(
       {
         name: name,
@@ -137,19 +180,17 @@ export const updateAdhyayan = async (req, res) => {
       {
         where: {
           id: adhyayanId
-        },
-      },
+        }
+      }
     );
-  
-    console.log("Database Update response: " + updatedItem);
+
+    console.log('Database Update response: ' + updatedItem);
     if (updatedItem != 1) {
-      console.log("Error. Returning 500")
+      console.log('Error. Returning 500');
       throw new ApiError(500, 'Error occured while updating adhyayan');
-    } 
-  
-  }
-  catch(error) {
-    console.log("Error: " + error);
+    }
+  } catch (error) {
+    console.log('Error: ' + error);
   }
 
   res.status(200).send({ message: 'Updated Adhyayan' });

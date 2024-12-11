@@ -539,6 +539,26 @@ export const checkoutReport = async (req, res) => {
     .send({ message: 'fetched checkout report', data: checkedout });
 };
 
+export const roomList = async (req, res) => {
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
+
+  const result = await RoomDb.findAll({
+    attributes: ['roomno', 'roomtype', 'gender', 'roomstatus'],
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%'
+      }
+    },
+    offset,
+    limit: pageSize
+  });
+
+  return res.status(200).send({ message: 'Success', data: result });
+};
+
 export const blockRoom = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
@@ -614,6 +634,20 @@ export const unblockRoom = async (req, res) => {
 
   await t.commit();
   return res.status(200).send({ message: 'unblocking room successfully' });
+};
+
+export const rcBlockList = async (req, res) => {
+  const today = moment().format('YYYY-MM-DD');
+  const blocked = await BlockDates.findAll({
+    attributes: ['id', 'checkin', 'checkout', 'comments', 'status'],
+    where: {
+      checkin: { [Sequelize.Op.gte]: today }
+    }
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'fetched rc block list', data: blocked });
 };
 
 export const blockRC = async (req, res) => {

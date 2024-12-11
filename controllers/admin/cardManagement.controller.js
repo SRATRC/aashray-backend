@@ -1,5 +1,5 @@
 import { CardDb } from '../../models/associations.js';
-import { STATUS_ACTIVE, STATUS_ONPREM } from '../../config/constants.js';
+import { STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
@@ -45,7 +45,7 @@ export const createCard = async (req, res) => {
     city: city,
     pin: pin,
     centre: centre,
-    status: STATUS_ONPREM,
+    status: STATUS_OFFPREM,
     res_status: res_status,
     updatedBy: req.user.username
   });
