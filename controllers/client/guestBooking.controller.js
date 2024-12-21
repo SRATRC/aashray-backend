@@ -3,7 +3,8 @@ import {
   ShibirDb,
   GuestRoomBooking,
   GuestFoodDb,
-  GuestShibirBooking
+  GuestShibirBooking,
+  GuestDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -94,6 +95,16 @@ async function bookRoom(body, user, data, t) {
     totalGuests.push(...guests);
   }
 
+  const guest_db = await GuestDb.findAll({
+    attributes: ['id', 'name', 'gender'],
+    where: {
+      id: {
+        [Sequelize.Op.in]: totalGuests
+      }
+    }
+  });
+  const guest_details = guest_db.map((guest) => guest.dataValues);
+
   if (
     await checkGuestRoomAlreadyBooked(
       checkin_date,
@@ -113,6 +124,7 @@ async function bookRoom(body, user, data, t) {
         body,
         user,
         guest,
+        guest_details,
         checkin_date,
         checkout_date,
         roomType,
@@ -128,13 +140,17 @@ async function bookRoomForSingleGuest(
   body,
   user,
   guest,
+  guest_details,
   checkin_date,
   checkout_date,
   room_type,
   floor_type,
   t
 ) {
-  const gender = floor_type ? floor_type + user.gender : user.gender;
+  const gender = floor_type
+    ? floor_type + guest_details.filter((item) => item.id == guest)[0].gender
+    : guest_details.filter((item) => item.id == guest)[0].gender;
+
   const nights = await calculateNights(checkin_date, checkout_date);
 
   if (nights <= 0) {
@@ -151,7 +167,12 @@ async function bookRoomForSingleGuest(
                         SELECT roomno 
                         FROM room_booking 
                         WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-                    )`)
+                    )`),
+        [Sequelize.Op.notIn]: Sequelize.literal(`(
+                      SELECT roomno 
+                      FROM guest_room_booking 
+                      WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
+                  )`)
       },
       roomstatus: STATUS_AVAILABLE,
       roomtype: room_type,

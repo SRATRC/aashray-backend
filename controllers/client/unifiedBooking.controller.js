@@ -121,7 +121,12 @@ async function bookRoom(body, user, data, t) {
                     SELECT roomno 
                     FROM room_booking 
                     WHERE NOT (checkout <= ${checkin_date} OR checkin >= ${checkout_date})
-                )`)
+                )`),
+          [Sequelize.Op.notIn]: Sequelize.literal(`(
+                  SELECT roomno 
+                  FROM guest_room_booking 
+                  WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
+              )`)
         },
         roomstatus: STATUS_AVAILABLE,
         roomtype: room_type,
