@@ -302,6 +302,8 @@ export const FetchGuestFoodBookings = async (req, res) => {
 };
 
 export const FetchGuestsForFilter = async (req, res) => {
+  const { cardno } = req.user;
+
   const guests = await GuestDb.findAll({
     attributes: ['name'],
     where: {
@@ -313,7 +315,7 @@ export const FetchGuestsForFilter = async (req, res) => {
         )`)
       }
     },
-    replacements: { cardno: req.user.cardno },
+    replacements: { cardno: cardno },
     group: ['name'],
     raw: true,
     limit: 50

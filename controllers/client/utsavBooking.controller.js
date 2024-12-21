@@ -10,7 +10,8 @@ import {
   STATUS_AWAITING_REFUND,
   TYPE_REFUND,
   STATUS_CONFIRMED,
-  STATUS_OPEN
+  STATUS_OPEN,
+  TYPE_UTSAV
 } from '../../config/constants.js';
 import {
   UtsavDb,
@@ -22,6 +23,7 @@ import {
 } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import { v4 as uuidv4 } from 'uuid';
+import Transactions from '../../models/transactions.model.js';
 
 // TODO: sending mails
 
@@ -108,11 +110,7 @@ export const BookUtsav = async (req, res) => {
 
   var status = STATUS_WAITING;
 
-  if (utsav.dataValues.max_guests > 0) {
-    status = STATUS_CONFIRMED;
-  } else {
-    status = STATUS_WAITING;
-  }
+  if (utsav.dataValues.max_guests > 0) status = STATUS_CONFIRMED;
 
   const utsav_booking = await UtsavBooking.create(
     {
@@ -130,18 +128,27 @@ export const BookUtsav = async (req, res) => {
     await utsav.save({ transaction: t });
   }
 
-  const utsav_transaction = await UtsavBookingTransaction.create(
-    {
-      bookingid: utsav_booking.dataValues.bookingid,
-      cardno: req.user.cardno,
-      type: TYPE_EXPENSE,
-      amount: utsav_package.dataValues.amount,
-      status: STATUS_PAYMENT_PENDING
-    },
-    { transaction: t }
-  );
+  var utsav_transaction = undefined;
 
-  if (utsav_booking == undefined || utsav_transaction == undefined) {
+  if (status !== STATUS_WAITING) {
+    utsav_transaction = await Transactions.create(
+      {
+        cardno: req.user.cardno,
+        bookingid: utsav_booking.dataValues.bookingid,
+        category: TYPE_UTSAV,
+        type: TYPE_EXPENSE,
+        amount: utsav_package.dataValues.amount,
+        status: STATUS_PAYMENT_PENDING,
+        updatedBy: 'user'
+      },
+      { transaction: t }
+    );
+  }
+
+  if (
+    utsav_booking == undefined ||
+    (utsav_transaction == undefined && status !== STATUS_WAITING)
+  ) {
     throw new ApiError(500, 'Failed to book utsav');
   }
 
@@ -226,6 +233,17 @@ export const BookGuestUtsav = async (req, res) => {
 
 export const ViewUtsavBookings = async (req, res) => {
   const user_bookings = await UtsavBooking.findAll({
+    attributes: ['bookingid', 'packageid', 'utsavid', 'status'],
+    include: [
+      {
+        model: UtsavPackagesDb,
+        attributes: ['name', 'start_date', 'end_date', 'amount']
+      },
+      {
+        model: UtsavDb,
+        attributes: ['name', 'start_date', 'end_date']
+      }
+    ],
     where: {
       cardno: req.user.cardno
     }

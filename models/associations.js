@@ -1,7 +1,6 @@
 import CardDb from './card.model.js';
 import GateRecord from './gate_record.model.js';
 import FoodDb from './food_db.model.js';
-import GuestFoodDb from './guest_food_db.model.js';
 import GuestFoodTransactionDb from './guest_food_transaction.model.js';
 import FoodPhysicalPlate from './food_physical_plate.model.js';
 import FlatDb from './flatdb.model.js';
@@ -32,6 +31,9 @@ import Countries from './countries.model.js';
 import States from './states.model.js';
 import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
+import GuestRoomBooking from './guest_room_booking.model.js';
+import GuestFoodDb from './guest_food_db.model.js';
+import GuestShibirBooking from './guest_shibir_booking_db.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -137,6 +139,18 @@ CardDb.hasMany(Transactions, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(GuestDb, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(GuestRoomBooking, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(GuestShibirBooking, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -461,15 +475,43 @@ GuestDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-GuestFoodDb.belongsTo(GuestDb, {
-  foreignKey: 'guest',
-  targetKey: 'id'
-});
 GuestDb.hasMany(GuestFoodDb, {
   foreignKey: 'guest',
   sourceKey: 'id',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
+});
+GuestFoodDb.belongsTo(GuestDb, {
+  foreignKey: 'guest',
+  targetKey: 'id'
+});
+GuestDb.hasMany(GuestRoomBooking, {
+  foreignKey: 'guest',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+GuestRoomBooking.belongsTo(GuestDb, {
+  foreignKey: 'guest',
+  targetKey: 'id'
+});
+GuestRoomBooking.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+GuestDb.hasMany(GuestShibirBooking, {
+  foreignKey: 'guest',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+GuestShibirBooking.belongsTo(GuestDb, {
+  foreignKey: 'guest',
+  targetKey: 'id'
+});
+GuestShibirBooking.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
 });
 
 export {
@@ -505,5 +547,7 @@ export {
   Cities,
   States,
   Countries,
-  GuestDb
+  GuestDb,
+  GuestRoomBooking,
+  GuestShibirBooking
 };

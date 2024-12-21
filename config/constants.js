@@ -1,10 +1,16 @@
 export const TYPE_EXPENSE = 'expense';
 export const TYPE_REFUND = 'refund';
 export const TYPE_ROOM = 'room';
+export const TYPE_GUEST_ROOM = 'guest_room';
 export const TYPE_FLAT = 'flat';
+export const TYPE_GUEST_FLAT = 'guest_flat';
 export const TYPE_FOOD = 'food';
+export const TYPE_GUEST_FOOD = 'guest_food';
 export const TYPE_TRAVEL = 'travel';
 export const TYPE_ADHYAYAN = 'adhyayan';
+export const TYPE_GUEST_ADHYAYAN = 'guest_adhyayan';
+export const TYPE_UTSAV = 'utsav';
+export const TYPE_GUEST_UTSAV = 'guest_utsav';
 export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 

@@ -41,7 +41,7 @@ const Transactions = sequelize.define(
       values: [TYPE_EXPENSE, TYPE_REFUND]
     },
     amount: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.DECIMAL,
       allowNull: false
     },
     discount: {
@@ -72,7 +72,8 @@ const Transactions = sequelize.define(
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

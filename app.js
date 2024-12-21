@@ -19,6 +19,7 @@ import utsavBookingRoutes from './routes/client/utsavBooking.routes.js';
 import maintenanceRoutes from './routes/client/maintenaneRequest.routes.js';
 import profileRoutes from './routes/client/profile.routes.js';
 import locationRoutes from './routes/client/location.routes.js';
+import guestRoutes from './routes/client/guestBooking.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -93,6 +94,7 @@ app.use('/api/v1/admin/travel', travelManagementRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
+app.use('/api/v1/guest', guestRoutes);
 
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {

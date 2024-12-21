@@ -4,11 +4,6 @@ import sequelize from '../config/database.js';
 const GuestFoodDb = sequelize.define(
   'GuestFoodDb',
   {
-    bookingid: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      primaryKey: true
-    },
     cardno: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -52,7 +47,8 @@ const GuestFoodDb = sequelize.define(
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

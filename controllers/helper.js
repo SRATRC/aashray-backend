@@ -3,7 +3,10 @@ import {
   FlatBooking,
   FoodDb,
   ShibirBookingDb,
-  ShibirDb
+  ShibirDb,
+  GuestRoomBooking,
+  GuestFoodDb,
+  GuestShibirBooking
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -173,6 +176,8 @@ export async function checkRoomBookingProgress(
   primary_booking,
   addons
 ) {
+  if (!addons) return;
+
   var addon = undefined;
   for (var i of addons) {
     if (i.booking_type == TYPE_ROOM) addon = i;
@@ -266,4 +271,103 @@ export function findClosestSum(arr, target) {
   findClosestSubsetSum(arr, target, 0, 0, []);
 
   return { closestSum, closestIndices };
+}
+
+export async function checkGuestRoomAlreadyBooked(
+  checkin,
+  checkout,
+  cardno,
+  guest
+) {
+  const result = await GuestRoomBooking.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: checkin } },
+            { checkin: { [Sequelize.Op.lt]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkout: { [Sequelize.Op.gt]: checkin } },
+            { checkout: { [Sequelize.Op.lte]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: checkin } },
+            { checkout: { [Sequelize.Op.gte]: checkout } }
+          ]
+        }
+      ],
+      cardno: cardno,
+      guest: { [Sequelize.Op.in]: guest },
+      status: {
+        [Sequelize.Op.in]: [
+          STATUS_WAITING,
+          ROOM_STATUS_CHECKEDIN,
+          ROOM_STATUS_PENDING_CHECKIN
+        ]
+      }
+    }
+  });
+
+  if (result.length > 0) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+export async function checkGuestFoodAlreadyBooked(
+  start_date,
+  end_date,
+  guests
+) {
+  const startDate = new Date(start_date);
+  const endDate = new Date(end_date);
+
+  const allDates = getDates(startDate, endDate);
+  const food_bookings = await GuestFoodDb.findAll({
+    where: {
+      date: { [Sequelize.Op.in]: allDates },
+      guest: { [Sequelize.Op.in]: guests }
+    }
+  });
+
+  if (food_bookings.length > 0) return true;
+  else return false;
+}
+
+export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
+  const adhyayans = await GuestShibirBooking.findAll({
+    include: [
+      {
+        model: ShibirDb,
+        where: {
+          start_date: {
+            [Sequelize.Op.lte]: start_date
+          },
+          end_date: {
+            [Sequelize.Op.gte]: end_date
+          }
+        }
+      }
+    ],
+    where: {
+      guest: { [Sequelize.Op.in]: guests },
+      status: {
+        [Sequelize.Op.in]: [STATUS_CONFIRMED]
+      }
+    }
+  });
+
+  if (adhyayans) {
+    for (var data of adhyayans) {
+      if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
+    }
+  }
+
+  return false;
 }
