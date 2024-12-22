@@ -305,11 +305,11 @@ async function bookTravel(body, user, data, t) {
   if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
   else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
 
-  var travelBookings = undefined;
+  const travelBookings = await TravelDb.findAll({
+    where: whereCondition
+  });
+
   if (type == TRAVEL_TYPE_FULL) {
-    travelBookings = await TravelDb.findAll({
-      where: whereCondition
-    });
     if (travelBookings.length > 0) {
       throw new ApiError(
         400,
@@ -317,6 +317,8 @@ async function bookTravel(body, user, data, t) {
       );
     }
   }
+
+  console.log(travelBookings);
 
   const booking = await TravelDb.create(
     {
