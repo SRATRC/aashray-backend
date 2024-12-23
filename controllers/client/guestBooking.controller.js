@@ -416,7 +416,7 @@ export const fetchGuests = async (req, res) => {
   const { cardno } = req.user;
 
   const guests = await GuestDb.findAll({
-    attributes: ['name'],
+    attributes: ['id', 'name', 'type', 'mobno', 'gender'],
     where: {
       cardno: cardno
     },
@@ -425,14 +425,9 @@ export const fetchGuests = async (req, res) => {
     limit: 10
   });
 
-  let guestNames = guests.map((guest) => ({
-    label: guest.name,
-    value: guest.name
-  }));
-
   return res.status(200).send({
     message: 'fetched results',
-    data: guestNames
+    data: guests
   });
 };
 
