@@ -411,3 +411,78 @@ async function bookAdhyayan(body, user, data, t) {
 
   return t;
 }
+
+export const fetchGuests = async (req, res) => {
+  const { cardno } = req.user;
+
+  const guests = await GuestDb.findAll({
+    attributes: ['name'],
+    where: {
+      cardno: cardno
+    },
+    raw: true,
+    order: [['updatedAt', 'DESC']],
+    limit: 10
+  });
+
+  let guestNames = guests.map((guest) => ({
+    label: guest.name,
+    value: guest.name
+  }));
+
+  return res.status(200).send({
+    message: 'fetched results',
+    data: guestNames
+  });
+};
+
+export const updateGuests = async (req, res) => {
+  const { cardno } = req.user;
+  const { guests } = req.body;
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const guestsToUpdate = guests.filter((guest) => guest.id);
+  const guestsToCreate = guests
+    .filter((guest) => !guest.id)
+    .map((guest) => ({
+      ...guest,
+      cardno: cardno
+    }));
+
+  for (const guest of guestsToUpdate) {
+    const { id, ...updateData } = guest;
+    await GuestDb.update(updateData, {
+      where: { id },
+      transaction: t
+    });
+  }
+
+  const createdGuests = await GuestDb.bulkCreate(guestsToCreate, {
+    transaction: t,
+    returning: true
+  });
+  const createdGuestsData = createdGuests.map((guest) => ({
+    id: guest.id,
+    name: guest.name
+  }));
+
+  const updatedGuests = await GuestDb.findAll({
+    where: { id: guestsToUpdate.map((guest) => guest.id) },
+    attributes: ['id', 'name'],
+    transaction: t
+  });
+
+  const allGuests = [
+    ...updatedGuests.map((guest) => guest.toJSON()),
+    ...createdGuestsData
+  ];
+
+  await t.commit();
+
+  return res.status(200).send({
+    message: 'Guests updated successfully',
+    guests: allGuests
+  });
+};
