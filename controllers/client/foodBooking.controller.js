@@ -17,7 +17,11 @@ import {
   checkFlatAlreadyBooked,
   checkSpecialAllowance,
   isFoodBooked,
-  validateDate
+  validateDate,
+  checkGuestFoodAlreadyBooked,
+  checkGuestRoomAlreadyBooked,
+  checkGuestSpecialAllowance,
+  checkRoomBookingProgress
 } from '../helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
@@ -32,7 +36,6 @@ const mealTimes = {
   dinner: '7:00 PM - 9:00 PM'
 };
 
-// TODO: DEPRECATE THIS ENDPOINT
 export const RegisterFood = async (req, res) => {
   validateDate(req.body.start_date, req.body.end_date);
 
@@ -91,50 +94,75 @@ export const RegisterFood = async (req, res) => {
 };
 
 export const RegisterForGuest = async (req, res) => {
-  const { start_date, end_date, guest_count, breakfast, lunch, dinner } =
-    req.body;
-
-  validateDate(start_date, end_date);
-
   const t = await database.transaction();
   req.transaction = t;
 
-  const allDates = getDates(start_date, end_date);
-  const days = allDates.length;
+  const { start_date, end_date, guestGroup } = req.body;
+  validateDate(start_date, end_date);
 
+  var totalGuests = [];
+  for (const group of guestGroup) {
+    const { guests } = group;
+    totalGuests.push(...guests);
+  }
+
+  if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
+    throw new ApiError(403, 'Food already booked');
+
+  if (
+    !(
+      (await checkGuestRoomAlreadyBooked(
+        start_date,
+        end_date,
+        req.user.cardno,
+        totalGuests
+      )) ||
+      (await checkGuestSpecialAllowance(start_date, end_date, totalGuests))
+    )
+  ) {
+    throw new ApiError(
+      403,
+      'You do not have a room booked on one or more dates selected'
+    );
+  }
+
+  const allDates = getDates(start_date, end_date);
   var food_data = [];
-  const bookingid = uuidv4();
-  for (var date of allDates) {
-    food_data.push({
-      bookingid: bookingid,
-      cardno: req.user.cardno,
-      date: date,
-      guest_count: guest_count,
-      breakfast: req.body.breakfast,
-      lunch: req.body.lunch,
-      dinner: req.body.dinner
-    });
+
+  // var update_guest_data = [];
+  // var insert_guest_data = [];
+  // for (const group of guestGroup) {
+  //   const { guests } = group;
+  //   for (const guest of guests) {
+  //     if (guest.id) update_guest_data.push(guest);
+  //     else insert_guest_data.push({ cardno: req.user.cardno, ...guest });
+  //   }
+  // }
+
+  for (const group of guestGroup) {
+    const { meals, spicy, hightea, guests } = group;
+    const mealFields = {
+      breakfast: meals.includes('breakfast') ? 1 : 0,
+      lunch: meals.includes('lunch') ? 1 : 0,
+      dinner: meals.includes('dinner') ? 1 : 0
+    };
+
+    food_data.push(
+      ...allDates.flatMap((date) =>
+        guests.map((guest) => ({
+          cardno: req.user.cardno,
+          guest: guest,
+          date: date,
+          ...mealFields,
+          hightea: hightea,
+          spicy: spicy,
+          plateissued: 0
+        }))
+      )
+    );
   }
 
   await GuestFoodDb.bulkCreate(food_data, { transaction: t });
-
-  const food_cost =
-    (breakfast ? BREAKFAST_PRICE : 0) +
-    (lunch ? LUNCH_PRICE : 0) +
-    (dinner ? DINNER_PRICE : 0);
-  const amount = food_cost * guest_count * days;
-
-  await GuestFoodTransactionDb.create(
-    {
-      cardno: req.user.cardno,
-      bookingid: bookingid,
-      type: TYPE_EXPENSE,
-      amount: amount,
-      description: `Food Booking for ${guest_count} guests`
-    },
-    { transaction: t }
-  );
-
   await t.commit();
 
   return res.status(201).send({ message: 'successfully booked guest food' });
@@ -301,6 +329,7 @@ export const FetchGuestFoodBookings = async (req, res) => {
   return res.status(200).send({ message: 'fetched results', data: data });
 };
 
+//TODO: DEPRECATE THIS ENDPOINT
 export const FetchGuestsForFilter = async (req, res) => {
   const { cardno } = req.user;
 
