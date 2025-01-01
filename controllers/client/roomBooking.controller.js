@@ -4,7 +4,8 @@ import {
   RoomBookingTransaction,
   FlatDb,
   FlatBooking,
-  CardDb
+  CardDb,
+  GuestRoomBooking
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_AVAILABLE,
@@ -14,12 +15,15 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
   TYPE_EXPENSE,
-  STATUS_AWAITING_REFUND,
   STATUS_PAYMENT_COMPLETED,
   STATUS_AVAILABLE,
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
-  TYPE_ROOM
+  TYPE_ROOM,
+  STATUS_CASH_COMPLETED,
+  STATUS_CASH_PENDING,
+  TYPE_GUEST_ROOM,
+  STATUS_CREDITED
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -33,6 +37,7 @@ import {
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';
+import Transactions from '../../models/transactions.model.js';
 
 // TODO: DEPRECATE THIS ENDPOINT
 export const AvailabilityCalender = async (req, res) => {
@@ -231,7 +236,7 @@ export const BookingForMumukshu = async (req, res) => {
   return res.status(201).send({ message: 'booked successfully' });
 };
 
-//TODO: COMPLETE BOOKING FOR GUESTS
+// TODO: DEPRECATE THIS ENDPOINT
 export const BookingForGuest = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
@@ -305,17 +310,54 @@ export const ViewAllBookings = async (req, res) => {
   const offset = (page - 1) * pageSize;
 
   const user_bookings = await database.query(
-    `SELECT t1.bookingid, t1.roomno, t1.checkin, t1.checkout, t1.nights, t1.roomtype, t1.status, t1.gender, COALESCE(t2.amount, 0) as amount, t2.status as transaction_status
-    FROM room_booking t1
-    LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid AND t2.category = :category
-    WHERE t1.cardno = :cardno
-    ORDER BY t1.checkin DESC
-    LIMIT :limit OFFSET :offset;
+    `SELECT 
+    t1.bookingid, 
+    NULL AS bookedFor,
+    NULL AS name,
+    t1.roomno, 
+    t1.checkin, 
+    t1.checkout, 
+    t1.nights, 
+    t1.roomtype, 
+    t1.status, 
+    t1.gender, 
+    COALESCE(t2.amount, 0) AS amount, 
+    t2.status AS transaction_status
+FROM room_booking t1
+LEFT JOIN transactions t2 
+    ON t1.bookingid = t2.bookingid AND t2.category = :category
+WHERE t1.cardno = :cardno
+
+UNION ALL
+
+SELECT 
+    t1.bookingid, 
+    COALESCE(t1.guest, 'NA') AS bookedFor,
+    t3.name AS name,
+    t1.roomno, 
+    t1.checkin, 
+    t1.checkout, 
+    t1.nights, 
+    t1.roomtype, 
+    t1.status, 
+    t1.gender, 
+    COALESCE(t2.amount, 0) AS amount, 
+    t2.status AS transaction_status
+FROM guest_room_booking t1
+LEFT JOIN transactions t2 
+    ON t1.bookingid = t2.bookingid AND t2.category = :guest_category
+LEFT JOIN guest_db t3 
+    ON t3.id = t1.guest
+WHERE t1.cardno = :cardno
+
+ORDER BY checkin DESC
+LIMIT :limit OFFSET :offset;
 `,
     {
       replacements: {
         cardno: req.user.cardno,
         category: TYPE_ROOM,
+        guest_category: TYPE_GUEST_ROOM,
         limit: pageSize,
         offset: offset
       },
@@ -326,41 +368,108 @@ export const ViewAllBookings = async (req, res) => {
 };
 
 export const CancelBooking = async (req, res) => {
+  const { bookingid, bookedFor } = req.body;
+
   const t = await database.transaction();
   req.transaction = t;
 
-  const booking = await RoomBooking.findOne({
-    where: { bookingid: req.body.bookingid, cardno: req.user.cardno }
-  });
+  var booking = undefined;
 
-  if (booking == undefined) {
-    throw new ApiError(404, 'unable to find selected booking');
-  }
-
-  booking.status = STATUS_CANCELLED;
-  await booking.save({ transaction: t });
-
-  const roomBookingTransaction = await RoomBookingTransaction.findOne({
-    where: {
-      cardno: req.user.cardno,
-      bookingid: req.body.bookingid,
-      type: TYPE_EXPENSE,
-      status: {
-        [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_COMPLETED]
+  if (bookedFor !== null) {
+    booking = await GuestRoomBooking.findOne({
+      where: {
+        bookingid: bookingid,
+        cardno: req.user.cardno,
+        guest: bookedFor
       }
+    });
+    if (booking == undefined) {
+      throw new ApiError(404, 'unable to find selected booking');
     }
-  });
 
-  if (roomBookingTransaction == undefined) {
-    throw new ApiError(404, 'unable to find selected booking');
-  }
+    booking.status = STATUS_CANCELLED;
+    await booking.save({ transaction: t });
 
-  if (roomBookingTransaction.status == STATUS_PAYMENT_PENDING) {
-    roomBookingTransaction.status = STATUS_CANCELLED;
-    await roomBookingTransaction.save({ transaction: t });
-  } else if (roomBookingTransaction.status == STATUS_PAYMENT_COMPLETED) {
-    roomBookingTransaction.status = STATUS_AWAITING_REFUND;
-    await roomBookingTransaction.save({ transaction: t });
+    const guestRoomBookingTransaction = await Transactions.findOne({
+      where: {
+        cardno: req.user.cardno,
+        bookingid: bookingid,
+        category: TYPE_GUEST_ROOM,
+        status: {
+          [Sequelize.Op.in]: [
+            STATUS_PAYMENT_PENDING,
+            STATUS_PAYMENT_COMPLETED,
+            STATUS_CASH_PENDING,
+            STATUS_CASH_COMPLETED
+          ]
+        }
+      }
+    });
+
+    if (guestRoomBookingTransaction == undefined) {
+      throw new ApiError(404, 'unable to find selected booking transaction');
+    }
+
+    if (
+      guestRoomBookingTransaction.status == STATUS_PAYMENT_PENDING ||
+      guestRoomBookingTransaction.status == STATUS_CASH_PENDING
+    ) {
+      guestRoomBookingTransaction.status = STATUS_CANCELLED;
+      await guestRoomBookingTransaction.save({ transaction: t });
+    } else if (
+      guestRoomBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
+      guestRoomBookingTransaction.status == STATUS_CASH_COMPLETED
+    ) {
+      guestRoomBookingTransaction.status = STATUS_CREDITED;
+      // TODO: add credited transaction to its table
+      await guestRoomBookingTransaction.save({ transaction: t });
+    }
+  } else {
+    booking = await RoomBooking.findOne({
+      where: { bookingid: bookingid, cardno: req.user.cardno }
+    });
+
+    if (booking == undefined) {
+      throw new ApiError(404, 'unable to find selected booking');
+    }
+
+    booking.status = STATUS_CANCELLED;
+    await booking.save({ transaction: t });
+
+    const roomBookingTransaction = await Transactions.findOne({
+      where: {
+        cardno: req.user.cardno,
+        bookingid: bookingid,
+        category: TYPE_ROOM,
+        status: {
+          [Sequelize.Op.in]: [
+            STATUS_PAYMENT_PENDING,
+            STATUS_PAYMENT_COMPLETED,
+            STATUS_CASH_PENDING,
+            STATUS_CASH_COMPLETED
+          ]
+        }
+      }
+    });
+
+    if (roomBookingTransaction == undefined) {
+      throw new ApiError(404, 'unable to find selected booking');
+    }
+
+    if (
+      roomBookingTransaction.status == STATUS_PAYMENT_PENDING ||
+      roomBookingTransaction.status == STATUS_CASH_PENDING
+    ) {
+      roomBookingTransaction.status = STATUS_CANCELLED;
+      await roomBookingTransaction.save({ transaction: t });
+    } else if (
+      roomBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
+      roomBookingTransaction.status == STATUS_CASH_COMPLETED
+    ) {
+      roomBookingTransaction.status = STATUS_CREDITED;
+      // TODO: add credited transaction to its table
+      await roomBookingTransaction.save({ transaction: t });
+    }
   }
 
   await t.commit();
@@ -380,6 +489,7 @@ export const CancelBooking = async (req, res) => {
   res.status(200).send({ message: 'booking canceled' });
 };
 
+// TODO: DEPRECATE THIS ENDPOINT
 export const AddWaitlist = async (req, res) => {
   if (
     await checkRoomAlreadyBooked(

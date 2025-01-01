@@ -1,4 +1,4 @@
-import { TravelDb } from '../../models/associations.js';
+import { Transactions, TravelDb } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import sendMail from '../../utils/sendMail.js';
@@ -6,7 +6,12 @@ import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
   STATUS_CANCELLED,
-  TYPE_TRAVEL
+  TYPE_TRAVEL,
+  STATUS_CREDITED,
+  STATUS_PAYMENT_PENDING,
+  STATUS_PAYMENT_COMPLETED,
+  STATUS_CASH_PENDING,
+  STATUS_CASH_COMPLETED
 } from '../../config/constants.js';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
@@ -91,6 +96,8 @@ export const FetchUpcoming = async (req, res) => {
 };
 
 export const CancelTravel = async (req, res) => {
+  const { bookingid } = req.body;
+
   const t = await database.transaction();
   req.transaction = t;
 
@@ -100,32 +107,47 @@ export const CancelTravel = async (req, res) => {
     },
     {
       where: {
-        cardno: req.body.cardno,
-        bookingid: req.body.bookingid
+        cardno: req.user.cardno,
+        bookingid: bookingid
       },
       transaction: t
     }
   );
 
-  // TODO: SHOULD WE EVEN CANCEL THE TRANSACTIONS
+  const travelBookingTransaction = await Transactions.findOne({
+    where: {
+      cardno: req.user.cardno,
+      bookingid: bookingid,
+      category: TYPE_TRAVEL,
+      status: {
+        [Sequelize.Op.in]: [
+          STATUS_PAYMENT_PENDING,
+          STATUS_PAYMENT_COMPLETED,
+          STATUS_CASH_PENDING,
+          STATUS_CASH_COMPLETED
+        ]
+      }
+    }
+  });
 
-  // await Transactions.update(
-  //   {
-  //     status: STATUS_CANCELLED
-  //   },
-  //   {
-  //     where: {
-  //       cardno: req.user.cardno,
-  //       bookingid: req.body.bookingid,
-  //       category: TYPE_TRAVEL,
-  //       type: TYPE_EXPENSE,
-  //       status: {
-  //         [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_COMPLETED]
-  //       }
-  //     },
-  //     transaction: t
-  //   }
-  // );
+  if (travelBookingTransaction == undefined) {
+    throw new ApiError(404, 'unable to find selected booking');
+  }
+
+  if (
+    travelBookingTransaction.status == STATUS_PAYMENT_PENDING ||
+    travelBookingTransaction.status == STATUS_CASH_PENDING
+  ) {
+    travelBookingTransaction.status = STATUS_CANCELLED;
+    await travelBookingTransaction.save({ transaction: t });
+  } else if (
+    travelBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
+    travelBookingTransaction.status == STATUS_CASH_COMPLETED
+  ) {
+    travelBookingTransaction.status = STATUS_CREDITED;
+    // TODO: add credited transaction to its table
+    await travelBookingTransaction.save({ transaction: t });
+  }
 
   await t.commit();
 

@@ -1,7 +1,9 @@
 import {
   ShibirDb,
   ShibirBookingDb,
-  ShibirBookingTransaction
+  ShibirBookingTransaction,
+  Transactions,
+  GuestShibirBooking
 } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -15,11 +17,15 @@ import {
   TYPE_EXPENSE,
   STATUS_PAYMENT_COMPLETED,
   STATUS_AWAITING_REFUND,
-  TYPE_ADHYAYAN
+  TYPE_ADHYAYAN,
+  TYPE_GUEST_ADHYAYAN,
+  STATUS_CASH_PENDING,
+  STATUS_CASH_COMPLETED,
+  STATUS_CREDITED
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
-import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
+import ApiError from '../../utils/ApiError.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -253,17 +259,50 @@ export const FetchBookedShibir = async (req, res) => {
   const offset = (page - 1) * pageSize;
 
   const shibirs = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.status, t2.name, t2.speaker, t2.start_date, t2.end_date, t3.amount, t3.status as transaction_status
-   FROM shibir_booking_db t1
-   JOIN shibir_db t2 ON t1.shibir_id = t2.id
-   JOIN transactions t3 ON t1.bookingid = t3.bookingid
-   WHERE t1.cardno = :cardno AND t3.category = :category
-   ORDER BY t2.start_date DESC
-   LIMIT :limit OFFSET :offset`,
+    `SELECT 
+	t1.bookingid, 
+  NULL AS bookedFor,
+  NULL AS name,
+	t1.shibir_id, 
+	t1.status, 
+	t2.name AS shibir_name, 
+	t2.speaker, 
+	t2.start_date, 
+	t2.end_date, 
+  t3.amount, 
+  t3.status as transaction_status
+FROM shibir_booking_db t1
+JOIN shibir_db t2 ON t1.shibir_id = t2.id
+JOIN transactions t3 ON t1.bookingid = t3.bookingid AND t3.category = :category
+WHERE t1.cardno = :cardno
+
+UNION ALL
+
+SELECT 
+	t1.bookingid, 
+  COALESCE(t1.guest, 'NA') AS bookedFor,
+  t4.name AS name,
+	t1.shibir_id, 
+	t1.status, 
+	t2.name AS shibir_name, 
+	t2.speaker, 
+	t2.start_date, 
+	t2.end_date, 
+  t3.amount, 
+  t3.status as transaction_status
+FROM guest_shibir_booking t1
+JOIN shibir_db t2 ON t1.shibir_id = t2.id
+JOIN guest_db t4 ON t4.id = t1.guest
+JOIN transactions t3 ON t1.bookingid = t3.bookingid AND t3.category = :guest_category
+WHERE t1.cardno = :cardno
+
+ORDER BY start_date DESC
+LIMIT :limit OFFSET :offset`,
     {
       replacements: {
         cardno: req.user.cardno,
         category: TYPE_ADHYAYAN,
+        guest_category: TYPE_GUEST_ADHYAYAN,
         limit: pageSize,
         offset: offset
       },
@@ -275,32 +314,159 @@ export const FetchBookedShibir = async (req, res) => {
 };
 
 export const CancelShibir = async (req, res) => {
-  const { cardno, shibir_id } = req.body;
+  const { cardno, shibir_id, bookedFor } = req.body;
 
   const t = await database.transaction();
   req.transaction = t;
 
-  const isBooked = await ShibirBookingDb.findOne({
-    where: {
-      shibir_id: shibir_id,
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_CONFIRMED,
-          STATUS_WAITING,
-          STATUS_PAYMENT_PENDING
-        ]
+  if (bookedFor == null) {
+    const isBooked = await ShibirBookingDb.findOne({
+      where: {
+        shibir_id: shibir_id,
+        cardno: cardno,
+        status: {
+          [Sequelize.Op.in]: [
+            STATUS_CONFIRMED,
+            STATUS_WAITING,
+            STATUS_PAYMENT_PENDING
+          ]
+        }
       }
-    }
-  });
+    });
 
-  if (!isBooked) {
-    throw new APIError(404, 'Shibir booking not found');
+    if (!isBooked) {
+      throw new ApiError(404, 'Shibir booking not found');
+    }
+
+    isBooked.status = STATUS_CANCELLED;
+    await isBooked.save({ transaction: t });
+
+    const adhyayanBookingTransaction = await Transactions.findOne({
+      where: {
+        cardno: req.user.cardno,
+        bookingid: isBooked.dataValues.bookingid,
+        category: TYPE_ADHYAYAN,
+        status: {
+          [Sequelize.Op.in]: [
+            STATUS_PAYMENT_PENDING,
+            STATUS_PAYMENT_COMPLETED,
+            STATUS_CASH_PENDING,
+            STATUS_CASH_COMPLETED
+          ]
+        }
+      }
+    });
+
+    if (adhyayanBookingTransaction == undefined) {
+      throw new ApiError(404, 'unable to find selected booking transaction');
+    }
+
+    if (
+      adhyayanBookingTransaction.status == STATUS_PAYMENT_PENDING ||
+      adhyayanBookingTransaction.status == STATUS_CASH_PENDING
+    ) {
+      adhyayanBookingTransaction.status = STATUS_CANCELLED;
+      await adhyayanBookingTransaction.save({ transaction: t });
+    } else if (
+      adhyayanBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
+      adhyayanBookingTransaction.status == STATUS_CASH_COMPLETED
+    ) {
+      adhyayanBookingTransaction.status = STATUS_CREDITED;
+      // TODO: add credited transaction to its table
+      await adhyayanBookingTransaction.save({ transaction: t });
+    }
+
+    const waitlist = await ShibirBookingDb.findOne({
+      where: {
+        shibir_id: shibir_id,
+        status: STATUS_WAITING
+      },
+      order: [['createdAt', 'ASC']]
+    });
+
+    //TODO: send notification and email to user
+    if (waitlist) {
+      waitlist.status = STATUS_PAYMENT_PENDING;
+      await waitlist.save({ transaction: t });
+    }
+  } else {
+    const isBooked = await GuestShibirBooking.findOne({
+      where: {
+        shibir_id: shibir_id,
+        cardno: cardno,
+        guest: bookedFor,
+        status: {
+          [Sequelize.Op.in]: [
+            STATUS_CONFIRMED,
+            STATUS_WAITING,
+            STATUS_PAYMENT_PENDING
+          ]
+        }
+      }
+    });
+
+    if (!isBooked) {
+      throw new ApiError(404, 'Shibir booking not found');
+    }
+
+    isBooked.status = STATUS_CANCELLED;
+    await isBooked.save({ transaction: t });
+
+    const adhyayanGuestBookingTransaction = await Transactions.findOne({
+      where: {
+        cardno: req.user.cardno,
+        bookingid: isBooked.dataValues.bookingid,
+        category: TYPE_GUEST_ADHYAYAN,
+        status: {
+          [Sequelize.Op.in]: [
+            STATUS_PAYMENT_PENDING,
+            STATUS_PAYMENT_COMPLETED,
+            STATUS_CASH_PENDING,
+            STATUS_CASH_COMPLETED
+          ]
+        }
+      }
+    });
+
+    if (adhyayanGuestBookingTransaction == undefined) {
+      throw new ApiError(404, 'unable to find selected booking transaction');
+    }
+
+    if (
+      adhyayanGuestBookingTransaction.status == STATUS_PAYMENT_PENDING ||
+      adhyayanGuestBookingTransaction.status == STATUS_CASH_PENDING
+    ) {
+      adhyayanGuestBookingTransaction.status = STATUS_CANCELLED;
+      await adhyayanGuestBookingTransaction.save({ transaction: t });
+    } else if (
+      adhyayanGuestBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
+      adhyayanGuestBookingTransaction.status == STATUS_CASH_COMPLETED
+    ) {
+      adhyayanGuestBookingTransaction.status = STATUS_CREDITED;
+      // TODO: add credited transaction to its table
+      await adhyayanGuestBookingTransaction.save({ transaction: t });
+    }
+
+    const waitlist = await GuestShibirBooking.findOne({
+      where: {
+        shibir_id: shibir_id,
+        cardno: req.user.cardno,
+        guest: bookedFor,
+        status: STATUS_WAITING
+      },
+      order: [['createdAt', 'ASC']]
+    });
+
+    //TODO: send notification and email to user
+    if (waitlist) {
+      waitlist.status = STATUS_PAYMENT_PENDING;
+      await waitlist.save({ transaction: t });
+    }
   }
 
   const update_shibir = await ShibirDb.findOne({
     where: {
-      id: req.body.shibir_id
+      id: shibir_id
     },
     transaction: t,
     lock: Sequelize.Transaction.LOCK.UPDATE
@@ -312,81 +478,6 @@ export const CancelShibir = async (req, res) => {
   ) {
     update_shibir.available_seats += 1;
     await update_shibir.save({ transaction: t });
-  }
-  // if (isBooked.dataValues.status == STATUS_CONFIRMED) {
-  //   const booking_transaction = await ShibirBookingTransaction.findOne({
-  //     where: {
-  //       type: TYPE_EXPENSE,
-  //       bookingid: isBooked.dataValues.bookingid,
-  //       cardno: isBooked.dataValues.cardno,
-  //       status: STATUS_PAYMENT_COMPLETED
-  //     }
-  //   });
-  //   booking_transaction.status = STATUS_CANCELLED;
-  //   await booking_transaction.save({ transaction: t });
-
-  //   await ShibirBookingTransaction.create(
-  //     {
-  //       cardno: cardno,
-  //       bookingid: isBooked.dataValues.bookingid,
-  //       type: TYPE_REFUND,
-  //       amount: booking_transaction.dataValues.amount,
-  //       upi_ref: 'NA',
-  //       status: STATUS_AWAITING_REFUND,
-  //       updatedBy: 'USER'
-  //     },
-  //     { transaction: t }
-  //   );
-
-  //   if (
-  //     update_shibir &&
-  //     update_shibir.available_seats < update_shibir.total_seats
-  //   ) {
-  //     update_shibir.available_seats += 1;
-  //     await update_shibir.save({ transaction: t });
-  //   }
-  // } else if (isBooked.dataValues.status == STATUS_PAYMENT_PENDING) {
-  //   const booking_transaction = await ShibirBookingTransaction.findOne({
-  //     where: {
-  //       type: TYPE_EXPENSE,
-  //       bookingid: isBooked.dataValues.bookingid,
-  //       cardno: isBooked.dataValues.cardno,
-  //       status: STATUS_PAYMENT_PENDING
-  //     }
-  //   });
-  //   booking_transaction.status = STATUS_CANCELLED;
-  //   await booking_transaction.save({ transaction: t });
-  //   if (booking_transaction.dataValues.discount > 0) {
-  //     await ShibirBookingTransaction.create(
-  //       {
-  //         cardno: cardno,
-  //         bookingid: isBooked.dataValues.bookingid,
-  //         type: TYPE_REFUND,
-  //         amount: booking_transaction.dataValues.discount,
-  //         upi_ref: 'NA',
-  //         status: STATUS_AWAITING_REFUND,
-  //         updatedBy: 'USER'
-  //       },
-  //       { transaction: t }
-  //     );
-  //   }
-  // }
-
-  isBooked.status = STATUS_CANCELLED;
-  await isBooked.save({ transaction: t });
-
-  const waitlist = await ShibirBookingDb.findOne({
-    where: {
-      shibir_id: req.body.shibir_id,
-      status: STATUS_WAITING
-    },
-    order: [['createdAt', 'ASC']]
-  });
-
-  //TODO: send notification to user
-  if (waitlist) {
-    waitlist.status = STATUS_PAYMENT_PENDING;
-    await waitlist.save({ transaction: t });
   }
 
   await t.commit();

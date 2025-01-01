@@ -516,6 +516,7 @@ GuestShibirBooking.belongsTo(CardDb, {
 
 export {
   CardDb,
+  Transactions,
   ShibirDb,
   ShibirBookingDb,
   ShibirBookingTransaction,

@@ -9,7 +9,6 @@ import {
   BREAKFAST_PRICE,
   LUNCH_PRICE,
   DINNER_PRICE,
-  TYPE_EXPENSE,
   STATUS_RESIDENT
 } from '../../config/constants.js';
 import {
@@ -20,14 +19,12 @@ import {
   validateDate,
   checkGuestFoodAlreadyBooked,
   checkGuestRoomAlreadyBooked,
-  checkGuestSpecialAllowance,
-  checkRoomBookingProgress
+  checkGuestSpecialAllowance
 } from '../helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
-import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 
 const mealTimes = {
@@ -97,75 +94,107 @@ export const RegisterForGuest = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { start_date, end_date, guestGroup } = req.body;
-  validateDate(start_date, end_date);
+  const { startDay, endDay, guests } = req.body;
 
-  var totalGuests = [];
-  for (const group of guestGroup) {
-    const { guests } = group;
-    totalGuests.push(...guests);
-  }
+  validateDate(startDay, endDay);
 
-  if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
-    throw new ApiError(403, 'Food already booked');
+  const guestsToUpdate = guests.filter((guest) => guest.id);
+  const guestsToCreate = guests
+    .filter((guest) => !guest.id)
+    .map((guest) => ({ ...guest, cardno: req.user.cardno }));
 
-  if (
-    !(
-      (await checkGuestRoomAlreadyBooked(
-        start_date,
-        end_date,
-        req.user.cardno,
-        totalGuests
-      )) ||
-      (await checkGuestSpecialAllowance(start_date, end_date, totalGuests))
-    )
-  ) {
-    throw new ApiError(
-      403,
-      'You do not have a room booked on one or more dates selected'
-    );
-  }
-
-  const allDates = getDates(start_date, end_date);
-  var food_data = [];
-
-  // var update_guest_data = [];
-  // var insert_guest_data = [];
-  // for (const group of guestGroup) {
-  //   const { guests } = group;
-  //   for (const guest of guests) {
-  //     if (guest.id) update_guest_data.push(guest);
-  //     else insert_guest_data.push({ cardno: req.user.cardno, ...guest });
-  //   }
-  // }
-
-  for (const group of guestGroup) {
-    const { meals, spicy, hightea, guests } = group;
-    const mealFields = {
-      breakfast: meals.includes('breakfast') ? 1 : 0,
-      lunch: meals.includes('lunch') ? 1 : 0,
-      dinner: meals.includes('dinner') ? 1 : 0
-    };
-
-    food_data.push(
-      ...allDates.flatMap((date) =>
-        guests.map((guest) => ({
-          cardno: req.user.cardno,
-          guest: guest,
-          date: date,
-          ...mealFields,
-          hightea: hightea,
-          spicy: spicy,
-          plateissued: 0
-        }))
+  if (guestsToUpdate.length > 0) {
+    await Promise.all(
+      guestsToUpdate.map(({ id, ...updateData }) =>
+        GuestDb.update(updateData, {
+          where: { id },
+          transaction: t
+        })
       )
     );
   }
 
-  await GuestFoodDb.bulkCreate(food_data, { transaction: t });
+  const createdGuests = guestsToCreate.length
+    ? await GuestDb.bulkCreate(guestsToCreate, {
+        transaction: t,
+        returning: true
+      })
+    : [];
+
+  const updatedGuests = guestsToUpdate.length
+    ? await GuestDb.findAll({
+        where: { id: guestsToUpdate.map((guest) => guest.id) },
+        attributes: ['id', 'name', 'gender', 'mobno', 'type'],
+        transaction: t
+      })
+    : [];
+
+  const allGuests = [
+    ...updatedGuests.map((guest) => guest.toJSON()),
+    ...createdGuests.map((guest) => guest.toJSON())
+  ];
+
+  const guestIdMap = allGuests.reduce((map, guest) => {
+    const key = `${guest.name}${guest.mobno}${guest.type}${guest.gender}`;
+    map[key] = guest.id;
+    return map;
+  }, {});
+
+  const guestsWithIds = guests.map((guest) => {
+    const key = `${guest.name}${guest.mobno}${guest.type}${guest.gender}`;
+    const id = guestIdMap[key];
+
+    if (!id) {
+      throw new ApiError(404, `Guest not found for key: ${key}`);
+    }
+
+    return { ...guest, id };
+  });
+
+  const totalGuestIds = guestsWithIds.map((guest) => guest.id);
+  const isFoodAlreadyBooked = await checkGuestFoodAlreadyBooked(
+    startDay,
+    endDay,
+    totalGuestIds
+  );
+
+  if (isFoodAlreadyBooked) {
+    throw new ApiError(403, 'Food already booked for one or more guests');
+  }
+
+  if (
+    (await checkGuestRoomAlreadyBooked(
+      startDay,
+      endDay,
+      req.user.cardno,
+      totalGuestIds
+    )) ||
+    (await checkGuestSpecialAllowance(startDay, endDay, totalGuestIds))
+  ) {
+    throw new ApiError(403, 'Room is not booked for one or more guests');
+  }
+
+  const allDates = getDates(startDay, endDay);
+  const foodData = allDates.flatMap((date) =>
+    guestsWithIds.map(({ meals, spicy, hightea, id }) => ({
+      cardno: req.user.cardno,
+      guest: id,
+      date,
+      breakfast: meals.includes('breakfast') ? 1 : 0,
+      lunch: meals.includes('lunch') ? 1 : 0,
+      dinner: meals.includes('dinner') ? 1 : 0,
+      hightea,
+      spicy
+    }))
+  );
+
+  await GuestFoodDb.bulkCreate(foodData, { transaction: t });
+
   await t.commit();
 
-  return res.status(201).send({ message: 'successfully booked guest food' });
+  return res.status(200).json({
+    message: 'Food booking successful'
+  });
 };
 
 export const FetchFoodBookings = async (req, res) => {
@@ -307,29 +336,27 @@ export const FetchFoodBookings = async (req, res) => {
     .send({ message: 'fetched results', data: responseData });
 };
 
-// TODO: depricate this endpoint
-export const FetchGuestFoodBookings = async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+// export const FetchGuestFoodBookings = async (req, res) => {
+//   const page = parseInt(req.query.page) || 1;
+//   const pageSize = parseInt(req.query.page_size) || 10;
+//   const offset = (page - 1) * pageSize;
 
-  const today = moment().format('YYYY-MM-DD');
+//   const today = moment().format('YYYY-MM-DD');
 
-  const data = await GuestFoodDb.findAll({
-    where: {
-      cardno: req.query.cardno,
-      date: {
-        [Sequelize.Op.gte]: today
-      }
-    },
-    order: [['date', 'ASC']],
-    offset,
-    limit: pageSize
-  });
-  return res.status(200).send({ message: 'fetched results', data: data });
-};
+//   const data = await GuestFoodDb.findAll({
+//     where: {
+//       cardno: req.query.cardno,
+//       date: {
+//         [Sequelize.Op.gte]: today
+//       }
+//     },
+//     order: [['date', 'ASC']],
+//     offset,
+//     limit: pageSize
+//   });
+//   return res.status(200).send({ message: 'fetched results', data: data });
+// };
 
-//TODO: DEPRECATE THIS ENDPOINT
 export const FetchGuestsForFilter = async (req, res) => {
   const { cardno } = req.user;
 
@@ -366,29 +393,44 @@ export const FetchGuestsForFilter = async (req, res) => {
 
 export const CancelFood = async (req, res) => {
   const t = await database.transaction();
+  req.transaction = t;
 
   const { cardno, food_data } = req.body;
   const today = moment().format('YYYY-MM-DD');
-  const foodData = food_data.filter((item) => item.date > today + 1);
+  const validFoodData = food_data.filter((item) => item.date > today + 1);
 
-  // Group updates by mealType
-  const updates = foodData.reduce((acc, item) => {
-    if (!acc[item.mealType]) {
-      acc[item.mealType] = [];
+  const selfUpdates = {};
+  const guestUpdates = {};
+
+  validFoodData.forEach((item) => {
+    const { date, mealType, bookedFor } = item;
+
+    if (bookedFor) {
+      // Guest bookings
+      if (!guestUpdates[bookedFor]) {
+        guestUpdates[bookedFor] = {};
+      }
+      if (!guestUpdates[bookedFor][mealType]) {
+        guestUpdates[bookedFor][mealType] = [];
+      }
+      guestUpdates[bookedFor][mealType].push(date);
+    } else {
+      // Self bookings
+      if (!selfUpdates[mealType]) {
+        selfUpdates[mealType] = [];
+      }
+      selfUpdates[mealType].push(date);
     }
-    acc[item.mealType].push(item.date);
-    return acc;
-  }, {});
+  });
 
-  // Perform updates in bulk for each mealType
-  for (const [mealType, dates] of Object.entries(updates)) {
+  for (const [mealType, dates] of Object.entries(selfUpdates)) {
     const updateFields = {};
-    updateFields[mealType] = 0;
-    updateFields['updatedBy'] = 'user';
+    updateFields[mealType] = false;
+    updateFields['updatedBy'] = 'USER';
 
     await FoodDb.update(updateFields, {
       where: {
-        cardno: cardno,
+        cardno,
         date: dates
       },
       transaction: t
@@ -397,7 +439,34 @@ export const CancelFood = async (req, res) => {
 
   await FoodDb.destroy({
     where: {
-      cardno: cardno,
+      cardno,
+      breakfast: false,
+      lunch: false,
+      dinner: false
+    },
+    transaction: t
+  });
+
+  for (const [guestId, meals] of Object.entries(guestUpdates)) {
+    for (const [mealType, dates] of Object.entries(meals)) {
+      const updateFields = {};
+      updateFields[mealType] = false;
+      updateFields['updatedBy'] = 'USER';
+
+      await GuestFoodDb.update(updateFields, {
+        where: {
+          cardno,
+          guest: guestId,
+          date: dates
+        },
+        transaction: t
+      });
+    }
+  }
+
+  await GuestFoodDb.destroy({
+    where: {
+      cardno,
       breakfast: false,
       lunch: false,
       dinner: false

@@ -4,12 +4,12 @@ import {
   TravelDb,
   FoodDb,
   ShibirBookingDb,
-  ShibirDb
+  ShibirDb,
+  Transactions
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
-  TYPE_EXPENSE,
   STATUS_AVAILABLE,
   TYPE_ROOM,
   NAC_ROOM_PRICE,
@@ -23,7 +23,8 @@ import {
   TRAVEL_TYPE_FULL,
   STATUS_PAYMENT_COMPLETED,
   TRANSACTION_TYPE_UPI,
-  TYPE_ADHYAYAN
+  TYPE_ADHYAYAN,
+  TRANSACTION_TYPE_CASH
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -40,7 +41,6 @@ import {
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import Transactions from '../../models/transactions.model.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -163,19 +163,22 @@ async function bookRoom(body, user, data, t) {
       throw new ApiError(400, 'Failed to book a bed');
     }
 
+    // TODO: Apply Discounts on credits left
+    // TODO: transaction status should be pending and updated to completed only after payment
     const transaction = await Transactions.create(
       {
         cardno: user.cardno,
         bookingid: booking.dataValues.bookingid,
         category: TYPE_ROOM,
-        type: TYPE_EXPENSE,
         amount:
           room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
         upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
         status:
           body.transaction_type == TRANSACTION_TYPE_UPI
             ? STATUS_PAYMENT_COMPLETED
-            : STATUS_PAYMENT_PENDING,
+            : body.transaction_type == TRANSACTION_TYPE_CASH
+            ? STATUS_CASH_COMPLETED
+            : null,
         updatedBy: 'USER'
       },
       { transaction: t }
@@ -335,19 +338,22 @@ async function bookTravel(body, user, data, t) {
     { transaction: t }
   );
 
+  // TODO: Apply Discounts on credits left
+  // TODO: transaction status should be pending and updated to completed only after payment
   if (travelBookings.length < 5) {
     const bookingTransaction = await Transactions.create(
       {
         cardno: user.cardno,
         bookingid: booking.dataValues.bookingid,
         category: TYPE_TRAVEL,
-        type: TYPE_EXPENSE,
         amount: TRAVEL_PRICE,
         upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
         status:
           body.transaction_type == TRANSACTION_TYPE_UPI
             ? STATUS_PAYMENT_COMPLETED
-            : STATUS_PAYMENT_PENDING,
+            : body.transaction_type == TRANSACTION_TYPE_CASH
+            ? STATUS_CASH_COMPLETED
+            : null,
         updatedBy: 'USER'
       },
       { transaction: t }
@@ -429,17 +435,20 @@ async function bookAdhyayan(body, user, data, t) {
       shibir.available_seats -= 1;
       await shibir.save({ transaction: t });
 
+      // TODO: Apply Discounts on credits left
+      // TODO: transaction status should be pending and updated to completed only after payment
       transaction_data.push({
         cardno: user.cardno,
         bookingid: bookingid,
         category: TYPE_ADHYAYAN,
-        type: TYPE_EXPENSE,
         amount: shibir.dataValues.amount,
         upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
         status:
           body.transaction_type == TRANSACTION_TYPE_UPI
             ? STATUS_PAYMENT_COMPLETED
-            : STATUS_PAYMENT_PENDING,
+            : body.transaction_type == TRANSACTION_TYPE_CASH
+            ? STATUS_CASH_COMPLETED
+            : null,
         updatedBy: 'USER'
       });
     } else {
