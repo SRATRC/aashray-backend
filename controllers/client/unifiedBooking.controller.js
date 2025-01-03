@@ -24,7 +24,8 @@ import {
   STATUS_PAYMENT_COMPLETED,
   TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
-  TRANSACTION_TYPE_CASH
+  TRANSACTION_TYPE_CASH,
+  FULL_TRAVEL_PRICE
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -97,6 +98,97 @@ export const unifiedBooking = async (req, res) => {
   return res.status(200).send({ message: 'Booking Successful' });
 };
 
+export const validateBooking = async (req, res) => {
+  const { primary_booking, addons } = req.body;
+
+  var roomDetails = {};
+  var travelDetails = {};
+  var adhyayanDetails = {};
+
+  switch (primary_booking.booking_type) {
+    case TYPE_ROOM:
+      roomDetails = await checkRoomAvailability(req.user, req.body.primary_booking);
+      break;
+
+    case TYPE_FOOD:
+      // Food is always available
+      break;
+
+    case TYPE_TRAVEL:
+      travelDetails = await checkTravelAvailability(req.body.primary_booking);
+      break;
+
+    case TYPE_ADHYAYAN:
+      adhyayanDetails = await checkAdhyayanAvailability(req.body.primary_booking);
+      break;
+
+    default:
+      throw new ApiError(400, 'Invalid Booking Type');
+  }
+
+  if (addons) {
+    for (const addon of addons) {
+      switch (addon.booking_type) {
+        case TYPE_ROOM:
+          roomDetails = await checkRoomAvailability(req.user, addon);
+          break;
+
+        case TYPE_FOOD:
+          // Food is always available
+          break;
+
+        case TYPE_TRAVEL:
+          travelDetails = await checkTravelAvailability(addon);
+          break;
+
+        case TYPE_ADHYAYAN:
+          adhyayanDetails = await checkAdhyayanAvailability(addon);
+          break;
+
+        default:
+          throw new ApiError(400, 'Invalid Booking type');
+      }
+    }
+  }
+
+  return res.status(200).send({ 
+    data: {
+      roomDetails: roomDetails,
+      adhyayanDetails: adhyayanDetails,
+      travelDetails: travelDetails
+    }
+   });
+};
+
+async function checkRoomAvailability(user, data) {
+  const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
+
+  validateDate(checkin_date, checkout_date);
+
+  const gender = floor_pref ? floor_pref + user.gender : user.gender;
+  const nights = await calculateNights(checkin_date, checkout_date);
+
+  var roomStatus = STATUS_WAITING;
+  var charge = 0;
+  var roomno = undefined;
+
+  if (nights > 0) {
+    roomno = findRoom(checkin_date, checkout_date, room_type, gender);
+    if (roomno) {
+      roomStatus = STATUS_AVAILABLE
+      charge = room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights
+    }
+  } else { // TODO: explain what is this case, where room_type = NA
+    roomStatus = STATUS_AVAILABLE
+    charge = 0
+  }
+
+  return {
+    status: roomStatus,
+    charge: charge
+  }
+}
+
 async function bookRoom(body, user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, user.cardno)) {
@@ -111,35 +203,7 @@ async function bookRoom(body, user, data, t) {
   var booking = undefined;
 
   if (nights > 0) {
-    roomno = await RoomDb.findOne({
-      attributes: ['roomno'],
-      where: {
-        roomno: {
-          [Sequelize.Op.notLike]: 'NA%',
-          [Sequelize.Op.notLike]: 'WL%',
-          [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= ${checkin_date} OR checkin >= ${checkout_date})
-                )`),
-          [Sequelize.Op.notIn]: Sequelize.literal(`(
-                  SELECT roomno 
-                  FROM guest_room_booking 
-                  WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-              )`)
-        },
-        roomstatus: STATUS_AVAILABLE,
-        roomtype: room_type,
-        gender: gender
-      },
-      order: [
-        Sequelize.literal(
-          `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-        ),
-        Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-      ],
-      limit: 1
-    });
+    roomno = findRoom(checkin_date, checkout_date, room_type, gender);
     if (roomno == undefined) {
       throw new ApiError(400, 'No Beds Available');
     }
@@ -230,6 +294,38 @@ async function bookRoom(body, user, data, t) {
   return t;
 }
 
+async function findRoom(checkin_date, checkout_date, room_type, gender) {
+  await RoomDb.findOne({
+    attributes: ['roomno'],
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%',
+        [Sequelize.Op.notIn]: Sequelize.literal(`(
+                    SELECT roomno 
+                    FROM room_booking 
+                    WHERE NOT (checkout <= ${checkin_date} OR checkin >= ${checkout_date})
+                )`),
+        [Sequelize.Op.notIn]: Sequelize.literal(`(
+                  SELECT roomno 
+                  FROM guest_room_booking 
+                  WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
+              )`)
+      },
+      roomstatus: STATUS_AVAILABLE,
+      roomtype: room_type,
+      gender: gender
+    },
+    order: [
+      Sequelize.literal(
+        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
+      ),
+      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
+    ],
+    limit: 1
+  });
+}
+
 async function bookFood(req, user, data, t) {
   const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
@@ -278,6 +374,42 @@ async function bookFood(req, user, data, t) {
   await FoodDb.bulkCreate(food_data, { transaction: t });
 
   return t;
+}
+
+async function checkTravelAvailability(data) {
+  const { date, pickup_point, drop_point, type } = data.details;
+
+  const whereCondition = {
+    status: { [Sequelize.Op.in]: [STATUS_CONFIRMED] },
+    date: { [Sequelize.Op.eq]: date }
+  };
+
+  if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
+  else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
+
+  const travelBookings = await TravelDb.findAll({
+    where: whereCondition
+  });
+
+  var travelStatus = STATUS_WAITING;
+  var charge = 0
+
+  if (type == TRAVEL_TYPE_FULL) {
+    if (travelBookings.length == 0) {
+      travelStatus = STATUS_AVAILABLE
+      charge = FULL_TRAVEL_PRICE
+    }
+  } else {
+    if (travelBookings.length < 5) {
+      travelStatus = STATUS_AVAILABLE
+      charge = TRAVEL_PRICE
+    }
+  }
+  
+  return {
+    status: travelStatus,
+    charge: charge
+  }
 }
 
 async function bookTravel(body, user, data, t) {
@@ -346,7 +478,7 @@ async function bookTravel(body, user, data, t) {
         cardno: user.cardno,
         bookingid: booking.dataValues.bookingid,
         category: TYPE_TRAVEL,
-        amount: TRAVEL_PRICE,
+        amount: type == TRAVEL_TYPE_FULL ? FULL_TRAVEL_PRICE : TRAVEL_PRICE,
         upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
         status:
           body.transaction_type == TRANSACTION_TYPE_UPI
@@ -378,6 +510,41 @@ async function bookTravel(body, user, data, t) {
   //   });
 
   return t;
+}
+
+async function checkAdhyayanAvailability(data) {
+  const { shibir_ids } = data.details;
+
+  const shibirs = await ShibirDb.findAll({
+    where: {
+      id: {
+        [Sequelize.Op.in]: shibir_ids
+      }
+    }
+  });
+
+  var adhyayanDetails = []
+  var adhyayanStatus = STATUS_WAITING
+  var charge = 0
+
+  for (var shibir of shibirs) {
+    if (shibir.dataValues.available_seats > 0) {
+      adhyayanStatus = STATUS_AVAILABLE
+      charge = shibir.dataValues.amount
+    } else {
+      adhyayanStatus = STATUS_WAITING
+      charge = 0
+    }
+    adhyayanDetails.push(
+      {
+        shibirId: shibir.dataValues.id,
+        status: adhyayanStatus,
+        charge: charge
+      }
+    )
+  }
+
+  return adhyayanDetails;
 }
 
 async function bookAdhyayan(body, user, data, t) {
