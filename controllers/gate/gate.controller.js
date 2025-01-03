@@ -1,4 +1,4 @@
-import { GateRecord, CardDb, FlatBooking } from '../../models/associations.js';
+import { GateRecord, CardDb, FlatBooking, GuestRoomBooking, GuestDb } from '../../models/associations.js';
 import {
   STATUS_ONPREM,
   STATUS_OFFPREM,
@@ -92,4 +92,28 @@ export const gateExit = async (req, res) => {
 
   await t.commit();
   return res.status(200).send({ message: 'Success', data: gatein.dataValues });
+};
+
+export const guestList = async (req, res) => {
+  const today = moment().format('YYYY-MM-DD');
+  const guestBookings = await GuestRoomBooking.findAll({
+    include :[
+      {
+        model: CardDb,
+        attributes: ['mobno', 'issuedto',],
+        where : { cardno: Sequelize.col('GuestRoomBooking.cardno') },
+      },
+      {
+        model: GuestDb,
+        attributes: ['name',],
+        where : { id: Sequelize.col('GuestRoomBooking.guest') },
+      },
+    ],
+    where: {
+      checkin: { [Sequelize.Op.eq]: today },
+      status: { [Sequelize.Op.in]: [ROOM_STATUS_PENDING_CHECKIN, ROOM_STATUS_CHECKEDIN] },
+    }
+  });
+
+  return res.status(200).send({ message: 'Success', data: guestBookings });
 };
