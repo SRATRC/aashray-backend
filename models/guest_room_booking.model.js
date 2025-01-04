@@ -1,5 +1,4 @@
 import { DataTypes } from 'sequelize';
-import sequelize from '../config/database.js';
 import {
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_CHECKEDOUT,
@@ -8,6 +7,7 @@ import {
   STATUS_CANCELLED,
   STATUS_WAITING
 } from '../config/constants.js';
+import sequelize from '../config/database.js';
 
 const GuestRoomBooking = sequelize.define(
   'GuestRoomBooking',
