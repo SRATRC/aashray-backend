@@ -25,7 +25,8 @@ import {
   TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
   TRANSACTION_TYPE_CASH,
-  FULL_TRAVEL_PRICE
+  FULL_TRAVEL_PRICE,
+  RAZORPAY_FEE
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -104,10 +105,12 @@ export const validateBooking = async (req, res) => {
   var roomDetails = {};
   var travelDetails = {};
   var adhyayanDetails = {};
+  var totalCharge = 0;
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
       roomDetails = await checkRoomAvailability(req.user, req.body.primary_booking);
+      totalCharge += roomDetails.charge;
       break;
 
     case TYPE_FOOD:
@@ -116,10 +119,12 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_TRAVEL:
       travelDetails = await checkTravelAvailability(req.body.primary_booking);
+      totalCharge += travelDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
       adhyayanDetails = await checkAdhyayanAvailability(req.body.primary_booking);
+      totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
       break;
 
     default:
@@ -131,6 +136,7 @@ export const validateBooking = async (req, res) => {
       switch (addon.booking_type) {
         case TYPE_ROOM:
           roomDetails = await checkRoomAvailability(req.user, addon);
+          totalCharge += roomDetails.charge;
           break;
 
         case TYPE_FOOD:
@@ -139,10 +145,12 @@ export const validateBooking = async (req, res) => {
 
         case TYPE_TRAVEL:
           travelDetails = await checkTravelAvailability(addon);
+          totalCharge += travelDetails.charge;
           break;
 
         case TYPE_ADHYAYAN:
           adhyayanDetails = await checkAdhyayanAvailability(addon);
+          totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
           break;
 
         default:
@@ -155,7 +163,8 @@ export const validateBooking = async (req, res) => {
     data: {
       roomDetails: roomDetails,
       adhyayanDetails: adhyayanDetails,
-      travelDetails: travelDetails
+      travelDetails: travelDetails,
+      totalCharge: totalCharge * (1 + RAZORPAY_FEE)
     }
    });
 };
@@ -175,12 +184,12 @@ async function checkRoomAvailability(user, data) {
   if (nights > 0) {
     roomno = findRoom(checkin_date, checkout_date, room_type, gender);
     if (roomno) {
-      roomStatus = STATUS_AVAILABLE
-      charge = room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights
+      roomStatus = STATUS_AVAILABLE;
+      charge = room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
     }
   } else { // TODO: explain what is this case, where room_type = NA
-    roomStatus = STATUS_AVAILABLE
-    charge = 0
+    roomStatus = STATUS_AVAILABLE;
+    charge = 0;
   }
 
   return {
@@ -392,20 +401,20 @@ async function checkTravelAvailability(data) {
   });
 
   var travelStatus = STATUS_WAITING;
-  var charge = 0
+  var charge = 0;
 
   if (type == TRAVEL_TYPE_FULL) {
     if (travelBookings.length == 0) {
-      travelStatus = STATUS_AVAILABLE
-      charge = FULL_TRAVEL_PRICE
+      travelStatus = STATUS_AVAILABLE;
+      charge = FULL_TRAVEL_PRICE;
     }
   } else {
     if (travelBookings.length < 5) {
-      travelStatus = STATUS_AVAILABLE
-      charge = TRAVEL_PRICE
+      travelStatus = STATUS_AVAILABLE;
+      charge = TRAVEL_PRICE;
     }
   }
-  
+
   return {
     status: travelStatus,
     charge: charge
@@ -523,17 +532,17 @@ async function checkAdhyayanAvailability(data) {
     }
   });
 
-  var adhyayanDetails = []
-  var adhyayanStatus = STATUS_WAITING
-  var charge = 0
+  var adhyayanDetails = [];
+  var adhyayanStatus = STATUS_WAITING;
+  var charge = 0;
 
   for (var shibir of shibirs) {
     if (shibir.dataValues.available_seats > 0) {
-      adhyayanStatus = STATUS_AVAILABLE
-      charge = shibir.dataValues.amount
+      adhyayanStatus = STATUS_AVAILABLE;
+      charge = shibir.dataValues.amount;
     } else {
-      adhyayanStatus = STATUS_WAITING
-      charge = 0
+      adhyayanStatus = STATUS_WAITING;
+      charge = 0;
     }
     adhyayanDetails.push(
       {
@@ -541,7 +550,7 @@ async function checkAdhyayanAvailability(data) {
         status: adhyayanStatus,
         charge: charge
       }
-    )
+    );
   }
 
   return adhyayanDetails;

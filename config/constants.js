@@ -22,6 +22,7 @@ export const NAC_ROOM_PRICE = 400;
 export const AC_ROOM_PRICE = 600;
 export const TRAVEL_PRICE = 350;
 export const FULL_TRAVEL_PRICE = 2300;
+export const RAZORPAY_FEE = 0.02; // 2%
 
 // STATUS
 export const STATUS_WAITING = 'waiting';
