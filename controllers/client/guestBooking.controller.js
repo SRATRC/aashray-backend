@@ -163,12 +163,7 @@ async function checkRoomAvailability(user, data) {
     throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
   }
 
-  var totalGuests = [];
-  for (const group of guestGroup) {
-    const { guests } = group;
-    totalGuests.push(...guests);
-  }
-
+  const totalGuests = guestGroup.reduce((partial, group) => partial.concat(group.guests), []);
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
     where: {
@@ -198,7 +193,6 @@ async function checkRoomAvailability(user, data) {
     for (const guest of guests) {
       var roomStatus = STATUS_WAITING;
       var charge = 0;
-      var roomno = undefined;
 
       const gender = floorType 
         ? floorType + guest_details.filter((item) => item.id == guest)[0].gender
@@ -209,13 +203,11 @@ async function checkRoomAvailability(user, data) {
       if (room) {
         roomStatus = STATUS_AVAILABLE;
         charge = roomType == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
-        roomno = room.dataValues.roomno;
       }
       
       roomDetails.push(
         {
           guestId: guest,
-          roomno: roomno,
           status: roomStatus,
           charge: charge
         }
@@ -236,12 +228,7 @@ async function bookRoom(body, user, data, t) {
     throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
   }
 
-  var totalGuests = [];
-  for (const group of guestGroup) {
-    const { guests } = group;
-    totalGuests.push(...guests);
-  }
-
+  const totalGuests = guestGroup.reduce((partial, group) => partial.concat(group.guests), []);
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
     where: {
@@ -355,11 +342,7 @@ async function bookFood(req, user, data, t) {
   const { start_date, end_date, guestGroup } = data.details;
   validateDate(start_date, end_date);
 
-  var totalGuests = [];
-  for (const group of guestGroup) {
-    const { guests } = group;
-    totalGuests.push(...guests);
-  }
+  const totalGuests = guestGroup.reduce((partial, group) => partial.concat(group.guests), []);
 
   if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
     throw new ApiError(403, 'Food already booked');
