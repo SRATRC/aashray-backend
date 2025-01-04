@@ -38,7 +38,8 @@ import {
   calculateNights,
   isFoodBooked,
   validateDate,
-  checkRoomBookingProgress
+  checkRoomBookingProgress,
+  findRoom
 } from '../helper.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
@@ -301,38 +302,6 @@ async function bookRoom(body, user, data, t) {
   //   });
 
   return t;
-}
-
-async function findRoom(checkin_date, checkout_date, room_type, gender) {
-  await RoomDb.findOne({
-    attributes: ['roomno'],
-    where: {
-      roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= ${checkin_date} OR checkin >= ${checkout_date})
-                )`),
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                  SELECT roomno 
-                  FROM guest_room_booking 
-                  WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-              )`)
-      },
-      roomstatus: STATUS_AVAILABLE,
-      roomtype: room_type,
-      gender: gender
-    },
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ],
-    limit: 1
-  });
 }
 
 async function bookFood(req, user, data, t) {

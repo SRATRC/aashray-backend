@@ -29,7 +29,8 @@ import {
   checkRoomBookingProgress,
   checkGuestRoomAlreadyBooked,
   checkGuestFoodAlreadyBooked,
-  checkGuestSpecialAllowance
+  checkGuestSpecialAllowance,
+  findRoom
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
@@ -157,35 +158,7 @@ async function bookRoomForSingleGuest(
     throw new ApiError(400, 'Invalid booking duration');
   }
 
-  const roomno = await RoomDb.findOne({
-    attributes: ['roomno'],
-    where: {
-      roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                        SELECT roomno 
-                        FROM room_booking 
-                        WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-                    )`),
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                      SELECT roomno 
-                      FROM guest_room_booking 
-                      WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-                  )`)
-      },
-      roomstatus: STATUS_AVAILABLE,
-      roomtype: room_type,
-      gender: gender
-    },
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ],
-    limit: 1
-  });
+  const roomno = findRoom(checkin_date, checkout_date, room_type, gender);
 
   if (!roomno) {
     throw new ApiError(400, 'No Beds Available');

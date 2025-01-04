@@ -1,4 +1,5 @@
 import {
+  RoomDb,
   RoomBooking,
   FlatBooking,
   FoodDb,
@@ -10,6 +11,7 @@ import {
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
+  STATUS_AVAILABLE,
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
@@ -111,6 +113,38 @@ export async function calculateNights(checkin, checkout) {
   const nights = Math.ceil(timeDifference / (1000 * 3600 * 24));
 
   return nights;
+}
+
+export async function findRoom(checkin_date, checkout_date, room_type, gender) {
+  await RoomDb.findOne({
+    attributes: ['roomno'],
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%',
+        [Sequelize.Op.notIn]: Sequelize.literal(`(
+                    SELECT roomno 
+                    FROM room_booking 
+                    WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
+                )`),
+        [Sequelize.Op.notIn]: Sequelize.literal(`(
+                  SELECT roomno 
+                  FROM guest_room_booking 
+                  WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
+              )`)
+      },
+      roomstatus: STATUS_AVAILABLE,
+      roomtype: room_type,
+      gender: gender
+    },
+    order: [
+      Sequelize.literal(
+        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
+      ),
+      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
+    ],
+    limit: 1
+  });
 }
 
 export async function isFoodBooked(start_date, end_date, cardno) {
