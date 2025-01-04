@@ -109,6 +109,7 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
+      // Food is always available
       break;
 
     case TYPE_ADHYAYAN:
@@ -129,6 +130,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
+          // Food is always available
           break;
 
         case TYPE_ADHYAYAN:
