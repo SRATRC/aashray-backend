@@ -15,7 +15,9 @@ import {
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
-  TYPE_ROOM
+  TYPE_ROOM,
+
+  ERR_INVALID_DATE
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -116,7 +118,7 @@ export async function calculateNights(checkin, checkout) {
 }
 
 export async function findRoom(checkin_date, checkout_date, room_type, gender) {
-  await RoomDb.findOne({
+  return RoomDb.findOne({
     attributes: ['roomno'],
     where: {
       roomno: {
@@ -168,7 +170,7 @@ export function validateDate(start_date, end_date) {
   const checkinDate = new Date(start_date);
   const checkoutDate = new Date(end_date);
   if (today > start_date || today > end_date || checkinDate > checkoutDate) {
-    throw new ApiError(400, 'Invalid Date');
+    throw new ApiError(400, ERR_INVALID_DATE);
   }
 }
 

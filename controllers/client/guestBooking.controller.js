@@ -22,12 +22,15 @@ import {
   TYPE_ADHYAYAN,
   TYPE_GUEST_ROOM,
   TYPE_GUEST_ADHYAYAN,
+  RAZORPAY_FEE,
 
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
   ERR_ROOM_INVALID_DURATION,
-  ERR_ROOM_FAILED_TO_BOOK
+  ERR_ROOM_FAILED_TO_BOOK,
+  ERR_ADHYAYAN_ALREADY_BOOKED,
+  ERR_ADHYAYAN_NOT_FOUND
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -91,6 +94,135 @@ export const guestBooking = async (req, res) => {
   await t.commit();
   return res.status(200).send({ message: 'Booking Successful' });
 };
+
+export const validateBooking = async (req, res) => {
+  const { primary_booking, addons } = req.body;
+
+  var roomDetails = [];
+  var adhyayanDetails = [];
+  var totalCharge = 0;
+
+  switch (primary_booking.booking_type) {
+    case TYPE_ROOM:
+      roomDetails = await checkRoomAvailability(req.user, req.body.primary_booking);
+      totalCharge += roomDetails.reduce((partialSum, room) => partialSum + room.charge, 0);
+      break;
+
+    case TYPE_FOOD:
+      break;
+
+    case TYPE_ADHYAYAN:
+      adhyayanDetails = await checkAdhyayanAvailability(req.user, req.body.primary_booking);
+      totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
+      break;
+
+    default:
+      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
+  }
+
+  if (addons) {
+    for (const addon of addons) {
+      switch (addon.booking_type) {
+        case TYPE_ROOM:
+          roomDetails = await checkRoomAvailability(req.user, addon);
+          totalCharge += roomDetails.reduce((partialSum, room) => partialSum + room.charge, 0);
+          break;
+
+        case TYPE_FOOD:
+          break;
+
+        case TYPE_ADHYAYAN:
+          adhyayanDetails = await checkAdhyayanAvailability(req.user, addon);
+          totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
+          break;
+
+        default:
+          throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
+      }
+    }
+  }
+
+  return res.status(200).send({ 
+    data: {
+      roomDetails: roomDetails,
+      adhyayanDetails: adhyayanDetails,
+      totalCharge: totalCharge * (1 + RAZORPAY_FEE)
+    }
+   });
+};
+
+async function checkRoomAvailability(user, data) {
+  const { checkin_date, checkout_date, guestGroup } = data.details;
+
+  validateDate(checkin_date, checkout_date);
+  const nights = await calculateNights(checkin_date, checkout_date);
+  // TODO: logic for nights = 0 is different for self and for guests 
+  if (nights <= 0) {
+    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
+  }
+
+  var totalGuests = [];
+  for (const group of guestGroup) {
+    const { guests } = group;
+    totalGuests.push(...guests);
+  }
+
+  const guest_db = await GuestDb.findAll({
+    attributes: ['id', 'name', 'gender'],
+    where: {
+      id: {
+        [Sequelize.Op.in]: totalGuests
+      }
+    }
+  });
+  const guest_details = guest_db.map((guest) => guest.dataValues);
+
+  if (
+    await checkGuestRoomAlreadyBooked(
+      checkin_date,
+      checkout_date,
+      user.cardno,
+      totalGuests
+    )
+  ) {
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
+  }
+
+  var roomDetails = [];
+
+  for (const group of guestGroup) {
+    const { roomType, floorType, guests } = group;
+
+    for (const guest of guests) {
+      var roomStatus = STATUS_WAITING;
+      var charge = 0;
+      var roomno = undefined;
+
+      const gender = floorType 
+        ? floorType + guest_details.filter((item) => item.id == guest)[0].gender
+        : guest_details.filter((item) => item.id == guest)[0].gender;
+
+      const room = await findRoom(checkin_date, checkout_date, roomType, gender);
+
+      if (room) {
+        roomStatus = STATUS_AVAILABLE;
+        charge = roomType == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
+        roomno = room.dataValues.roomno;
+      }
+      
+      roomDetails.push(
+        {
+          guestId: guest,
+          roomno: roomno,
+          status: roomStatus,
+          charge: charge
+        }
+      )
+    }
+  }
+
+  return roomDetails;
+}
 
 async function bookRoom(body, user, data, t) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
@@ -166,7 +298,7 @@ async function bookRoomForSingleGuest(
     ? floor_type + guest_details.filter((item) => item.id == guest)[0].gender
     : guest_details.filter((item) => item.id == guest)[0].gender;
 
-  const roomno = findRoom(checkin_date, checkout_date, room_type, gender);
+  const roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
 
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
@@ -283,6 +415,47 @@ async function bookFood(req, user, data, t) {
   return t;
 }
 
+async function checkAdhyayanAvailability(user, data) {
+  const { shibir_ids, guests } = data.details;
+
+  const shibirs = await ShibirDb.findAll({
+    where: {
+      id: {
+        [Sequelize.Op.in]: shibir_ids
+      }
+    }
+  });
+
+  if (shibirs.length != shibir_ids.length) {
+    throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
+  }
+
+  var adhyayanDetails = [];
+  for (var shibir of shibirs) {
+    var confirmed = guests.length;
+    var waiting = 0;
+    var charge = 0;
+
+    if (shibir.dataValues.available_seats < guests.length) {
+      confirmed = shibir.dataValues.available_seats;
+      waiting = guests.length - shibir.dataValues.available_seats;
+    }
+    charge = confirmed * shibir.dataValues.amount;
+
+    adhyayanDetails.push(
+      {
+        shibirId: shibir.dataValues.id,
+        confirmed: confirmed,
+        waiting: waiting,
+        charge: charge
+      }
+    )
+  }
+  
+  return adhyayanDetails;
+}
+
+
 async function bookAdhyayan(body, user, data, t) {
   const { shibir_ids, guests } = data.details;
 
@@ -303,7 +476,7 @@ async function bookAdhyayan(body, user, data, t) {
   });
 
   if (isBooked.length > 0) {
-    throw new ApiError(400, 'Shibir already booked');
+    throw new ApiError(400, ERR_ADHYAYAN_ALREADY_BOOKED);
   }
 
   const shibirs = await ShibirDb.findAll({
@@ -315,7 +488,7 @@ async function bookAdhyayan(body, user, data, t) {
   });
 
   if (shibirs.length != shibir_ids.length) {
-    throw new ApiError(400, 'Shibir not found');
+    throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
   }
 
   var booking_data = [];

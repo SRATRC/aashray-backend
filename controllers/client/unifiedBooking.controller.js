@@ -31,7 +31,9 @@ import {
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
-  ERR_ROOM_FAILED_TO_BOOK
+  ERR_ROOM_FAILED_TO_BOOK,
+  ERR_ADHYAYAN_ALREADY_BOOKED,
+  ERR_ADHYAYAN_NOT_FOUND
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -185,10 +187,9 @@ async function checkRoomAvailability(user, data) {
 
   var roomStatus = STATUS_WAITING;
   var charge = 0;
-  var roomno = undefined;
 
   if (nights > 0) {
-    roomno = findRoom(checkin_date, checkout_date, room_type, gender);
+    const roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
     if (roomno) {
       roomStatus = STATUS_AVAILABLE;
       charge = room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
@@ -220,7 +221,7 @@ async function bookRoom(body, user, data, t) {
   var booking = undefined;
 
   if (nights > 0) {
-    roomno = findRoom(checkin_date, checkout_date, room_type, gender);
+    roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
     if (!roomno) {
       throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
     }
@@ -552,7 +553,7 @@ async function bookAdhyayan(body, user, data, t) {
   });
 
   if (isBooked.length > 0) {
-    throw new ApiError(400, 'Shibir already booked');
+    throw new ApiError(400, ERR_ADHYAYAN_ALREADY_BOOKED);
   }
 
   const shibirs = await ShibirDb.findAll({
@@ -564,7 +565,7 @@ async function bookAdhyayan(body, user, data, t) {
   });
 
   if (shibirs.length != shibir_ids.length) {
-    throw new ApiError(400, 'Shibir not found');
+    throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
   }
 
   var booking_data = [];
