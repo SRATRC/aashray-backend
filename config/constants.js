@@ -82,3 +82,4 @@ export const ERR_ROOM_INVALID_DURATION = 'Invalid Booking Duration';
 export const ERR_ROOM_FAILED_TO_BOOK = 'Failed To Book A Bed';
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Shibir Already Booked';
 export const ERR_ADHYAYAN_NOT_FOUND = 'Shibir Not Found';
+export const ERR_FOOD_ALREADY_BOOKED = 'Food Already Booked';

@@ -33,7 +33,8 @@ import {
   ERR_ROOM_ALREADY_BOOKED,
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_ADHYAYAN_ALREADY_BOOKED,
-  ERR_ADHYAYAN_NOT_FOUND
+  ERR_ADHYAYAN_NOT_FOUND,
+  ERR_FOOD_ALREADY_BOOKED
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -319,7 +320,7 @@ async function bookFood(req, user, data, t) {
   validateDate(start_date, end_date);
 
   if (await isFoodBooked(start_date, end_date, user.cardno))
-    throw new ApiError(403, 'Food already booked');
+    throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
 
   if (
     !(
