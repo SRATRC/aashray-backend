@@ -71,3 +71,11 @@ export const ROLE_ADHYAYAN_ADMIN = 'adhyayanAdmin';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
+
+
+// ERROR MESSAGES
+export const ERR_INVALID_BOOKING_TYPE = 'Invalid Booking Type';
+export const ERR_ROOM_NO_BED_AVAILABLE = 'No Beds Available';
+export const ERR_ROOM_ALREADY_BOOKED = 'Room Already Booked';
+export const ERR_ROOM_INVALID_DURATION = 'Invalid Booking Duration';
+export const ERR_ROOM_FAILED_TO_BOOK = 'Failed To Book A Bed';

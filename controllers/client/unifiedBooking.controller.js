@@ -26,7 +26,12 @@ import {
   TYPE_ADHYAYAN,
   TRANSACTION_TYPE_CASH,
   FULL_TRAVEL_PRICE,
-  RAZORPAY_FEE
+  RAZORPAY_FEE,
+
+  ERR_INVALID_BOOKING_TYPE,
+  ERR_ROOM_NO_BED_AVAILABLE,
+  ERR_ROOM_ALREADY_BOOKED,
+  ERR_ROOM_FAILED_TO_BOOK
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -129,7 +134,7 @@ export const validateBooking = async (req, res) => {
       break;
 
     default:
-      throw new ApiError(400, 'Invalid Booking Type');
+      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
 
   if (addons) {
@@ -155,7 +160,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         default:
-          throw new ApiError(400, 'Invalid Booking type');
+          throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
       }
     }
   }
@@ -202,20 +207,22 @@ async function checkRoomAvailability(user, data) {
 async function bookRoom(body, user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, user.cardno)) {
-    throw new ApiError(400, 'Room Already Booked');
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
   validateDate(checkin_date, checkout_date);
 
-  const gender = floor_pref ? floor_pref + user.gender : user.gender;
   const nights = await calculateNights(checkin_date, checkout_date);
+
+  const gender = floor_pref ? floor_pref + user.gender : user.gender;
+  
   var roomno = undefined;
   var booking = undefined;
 
   if (nights > 0) {
     roomno = findRoom(checkin_date, checkout_date, room_type, gender);
-    if (roomno == undefined) {
-      throw new ApiError(400, 'No Beds Available');
+    if (!roomno) {
+      throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
     }
 
     booking = await RoomBooking.create(
@@ -234,7 +241,7 @@ async function bookRoom(body, user, data, t) {
     );
 
     if (!booking) {
-      throw new ApiError(400, 'Failed to book a bed');
+      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
     }
 
     // TODO: Apply Discounts on credits left
@@ -246,7 +253,7 @@ async function bookRoom(body, user, data, t) {
         category: TYPE_ROOM,
         amount:
           room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
-        upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
+        upi_ref: body.transaction_ref || 'NA',
         status:
           body.transaction_type == TRANSACTION_TYPE_UPI
             ? STATUS_PAYMENT_COMPLETED
@@ -259,7 +266,7 @@ async function bookRoom(body, user, data, t) {
     );
 
     if (!transaction) {
-      throw new ApiError(400, 'Failed to book a bed');
+      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
     }
   } else {
     roomno = await RoomDb.findOne({
@@ -285,7 +292,7 @@ async function bookRoom(body, user, data, t) {
     );
 
     if (!booking) {
-      throw new ApiError(400, 'Failed to book a bed');
+      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
     }
   }
 

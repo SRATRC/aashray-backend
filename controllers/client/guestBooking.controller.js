@@ -21,7 +21,13 @@ import {
   TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
   TYPE_GUEST_ROOM,
-  TYPE_GUEST_ADHYAYAN
+  TYPE_GUEST_ADHYAYAN,
+
+  ERR_INVALID_BOOKING_TYPE,
+  ERR_ROOM_NO_BED_AVAILABLE,
+  ERR_ROOM_ALREADY_BOOKED,
+  ERR_ROOM_INVALID_DURATION,
+  ERR_ROOM_FAILED_TO_BOOK
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -58,7 +64,7 @@ export const guestBooking = async (req, res) => {
       break;
 
     default:
-      throw new ApiError(400, 'Invalid Booking Type');
+      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
 
   if (addons) {
@@ -77,7 +83,7 @@ export const guestBooking = async (req, res) => {
           break;
 
         default:
-          throw new ApiError(400, 'Invalid Booking type');
+          throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
       }
     }
   }
@@ -89,6 +95,12 @@ export const guestBooking = async (req, res) => {
 async function bookRoom(body, user, data, t) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
   validateDate(checkin_date, checkout_date);
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  // TODO: logic for nights = 0 is different for self and for guests 
+  if (nights <= 0) {
+    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
+  }
 
   var totalGuests = [];
   for (const group of guestGroup) {
@@ -114,7 +126,7 @@ async function bookRoom(body, user, data, t) {
       totalGuests
     )
   ) {
-    throw new ApiError(400, 'Room Already Booked');
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
   for (const group of guestGroup) {
@@ -130,6 +142,7 @@ async function bookRoom(body, user, data, t) {
         checkout_date,
         roomType,
         floorType,
+        nights,
         t
       );
     }
@@ -146,22 +159,17 @@ async function bookRoomForSingleGuest(
   checkout_date,
   room_type,
   floor_type,
+  nights,
   t
 ) {
   const gender = floor_type
     ? floor_type + guest_details.filter((item) => item.id == guest)[0].gender
     : guest_details.filter((item) => item.id == guest)[0].gender;
 
-  const nights = await calculateNights(checkin_date, checkout_date);
-
-  if (nights <= 0) {
-    throw new ApiError(400, 'Invalid booking duration');
-  }
-
   const roomno = findRoom(checkin_date, checkout_date, room_type, gender);
 
   if (!roomno) {
-    throw new ApiError(400, 'No Beds Available');
+    throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
 
   const booking = await GuestRoomBooking.create(
@@ -181,7 +189,7 @@ async function bookRoomForSingleGuest(
   );
 
   if (!booking) {
-    throw new ApiError(400, 'Failed to book a bed');
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
   const transaction = await Transactions.create(
@@ -203,7 +211,7 @@ async function bookRoomForSingleGuest(
   );
 
   if (!transaction) {
-    throw new ApiError(400, 'Failed to create transaction');
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
   return t;
