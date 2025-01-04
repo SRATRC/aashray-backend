@@ -618,28 +618,5 @@ async function bookAdhyayan(body, user, data, t) {
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
-  // await ShibirBookingDb.create(
-  //   {
-  //     bookingid: bookingid,
-  //     shibir_id: req.body.shibir_id,
-  //     cardno: req.body.cardno,
-  //     status: STATUS_PAYMENT_PENDING
-  //   },
-  //   { transaction: t }
-  // );
-
-  // await ShibirBookingTransaction.create(
-  //   {
-  //     cardno: req.body.cardno,
-  //     bookingid: bookingid,
-  //     type: TYPE_EXPENSE,
-  //     amount: shibir.dataValues.amount,
-  //     upi_ref: 'NA',
-  //     status: STATUS_PAYMENT_PENDING,
-  //     updatedBy: 'USER'
-  //   },
-  //   { transaction: t }
-  // );
-
   return t;
 }
