@@ -3,3 +3,4 @@ coverage
 .env.*
 *.pem
 .vscode
+*.mwb
