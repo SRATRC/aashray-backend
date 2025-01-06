@@ -566,7 +566,7 @@ export const blockRoom = async (req, res) => {
   const isBlocked = await RoomDb.findAll({
     where: {
       roomno: {
-        [Sequelize.Op.like]: `${req.params.roomno}_`
+        [Sequelize.Op.like]: `${req.params.roomno}%`
       }
     }
   });
@@ -604,7 +604,7 @@ export const unblockRoom = async (req, res) => {
   const isBlocked = await RoomDb.findAll({
     where: {
       roomno: {
-        [Sequelize.Op.like]: `${req.params.roomno}_`
+        [Sequelize.Op.like]: `${req.params.roomno}%`
       }
     }
   });
