@@ -27,7 +27,6 @@ import {
   TRANSACTION_TYPE_CASH,
   FULL_TRAVEL_PRICE,
   RAZORPAY_FEE,
-
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
@@ -68,7 +67,7 @@ export const unifiedBooking = async (req, res) => {
       break;
 
     case TYPE_TRAVEL:
-      t = await bookTravel(req.body, req.user, req.body.primary_booking, t);
+      t = await bookTravel(req.user, req.body.primary_booking, t);
       break;
 
     case TYPE_ADHYAYAN:
@@ -91,7 +90,7 @@ export const unifiedBooking = async (req, res) => {
           break;
 
         case TYPE_TRAVEL:
-          t = await bookTravel(req.body, req.user, addon, t);
+          t = await bookTravel(req.user, addon, t);
           break;
 
         case TYPE_ADHYAYAN:
@@ -118,7 +117,10 @@ export const validateBooking = async (req, res) => {
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      roomDetails = await checkRoomAvailability(req.user, req.body.primary_booking);
+      roomDetails = await checkRoomAvailability(
+        req.user,
+        req.body.primary_booking
+      );
       totalCharge += roomDetails.charge;
       break;
 
@@ -132,8 +134,13 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_ADHYAYAN:
-      adhyayanDetails = await checkAdhyayanAvailability(req.body.primary_booking);
-      totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
+      adhyayanDetails = await checkAdhyayanAvailability(
+        req.body.primary_booking
+      );
+      totalCharge += adhyayanDetails.reduce(
+        (partialSum, adhyayan) => partialSum + adhyayan.charge,
+        0
+      );
       break;
 
     default:
@@ -159,7 +166,10 @@ export const validateBooking = async (req, res) => {
 
         case TYPE_ADHYAYAN:
           adhyayanDetails = await checkAdhyayanAvailability(addon);
-          totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
+          totalCharge += adhyayanDetails.reduce(
+            (partialSum, adhyayan) => partialSum + adhyayan.charge,
+            0
+          );
           break;
 
         default:
@@ -168,14 +178,14 @@ export const validateBooking = async (req, res) => {
     }
   }
 
-  return res.status(200).send({ 
+  return res.status(200).send({
     data: {
       roomDetails: roomDetails,
       adhyayanDetails: adhyayanDetails,
       travelDetails: travelDetails,
       totalCharge: totalCharge * (1 + RAZORPAY_FEE)
     }
-   });
+  });
 };
 
 async function checkRoomAvailability(user, data) {
@@ -190,12 +200,19 @@ async function checkRoomAvailability(user, data) {
   var charge = 0;
 
   if (nights > 0) {
-    const roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
+    const roomno = await findRoom(
+      checkin_date,
+      checkout_date,
+      room_type,
+      gender
+    );
     if (roomno) {
       roomStatus = STATUS_AVAILABLE;
-      charge = room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
+      charge =
+        room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
     }
-  } else { // TODO: explain what is this case, where room_type = NA
+  } else {
+    // TODO: explain what is this case, where room_type = NA
     roomStatus = STATUS_AVAILABLE;
     charge = 0;
   }
@@ -203,7 +220,7 @@ async function checkRoomAvailability(user, data) {
   return {
     status: roomStatus,
     charge: charge
-  }
+  };
 }
 
 async function bookRoom(body, user, data, t) {
@@ -217,7 +234,7 @@ async function bookRoom(body, user, data, t) {
   const nights = await calculateNights(checkin_date, checkout_date);
 
   const gender = floor_pref ? floor_pref + user.gender : user.gender;
-  
+
   var roomno = undefined;
   var booking = undefined;
 
@@ -363,6 +380,7 @@ async function bookFood(req, user, data, t) {
   return t;
 }
 
+// TODO: ASK VIRAGBHAI IF WE CAN SHOW TRAVEL IS FULL OR NOTs
 async function checkTravelAvailability(data) {
   const { date, pickup_point, drop_point, type } = data.details;
 
@@ -396,15 +414,15 @@ async function checkTravelAvailability(data) {
   return {
     status: travelStatus,
     charge: charge
-  }
+  };
 }
 
-async function bookTravel(body, user, data, t) {
+async function bookTravel(user, data, t) {
   const { date, pickup_point, drop_point, luggage, comments, type } =
     data.details;
 
   const today = moment().format('YYYY-MM-DD');
-  if (date < today) {
+  if (date <= today) {
     throw new ApiError(400, 'Invalid Date');
   }
 
@@ -419,30 +437,7 @@ async function bookTravel(body, user, data, t) {
     throw new ApiError(400, 'Travel already booked on the selected date');
   }
 
-  const whereCondition = {
-    status: { [Sequelize.Op.in]: [STATUS_CONFIRMED] },
-    date: { [Sequelize.Op.eq]: date }
-  };
-
-  if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
-  else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
-
-  const travelBookings = await TravelDb.findAll({
-    where: whereCondition
-  });
-
-  if (type == TRAVEL_TYPE_FULL) {
-    if (travelBookings.length > 0) {
-      throw new ApiError(
-        400,
-        'Full travel booking not allowed on the selected date'
-      );
-    }
-  }
-
-  console.log(travelBookings);
-
-  const booking = await TravelDb.create(
+  await TravelDb.create(
     {
       bookingid: uuidv4(),
       cardno: user.cardno,
@@ -452,37 +447,10 @@ async function bookTravel(body, user, data, t) {
       drop_point: drop_point,
       luggage: luggage,
       comments: comments,
-      status: travelBookings.length < 5 ? STATUS_CONFIRMED : STATUS_WAITING
+      status: STATUS_WAITING
     },
     { transaction: t }
   );
-
-  // TODO: Apply Discounts on credits left
-  // TODO: transaction status should be pending and updated to completed only after payment
-  if (travelBookings.length < 5) {
-    const bookingTransaction = await Transactions.create(
-      {
-        cardno: user.cardno,
-        bookingid: booking.dataValues.bookingid,
-        category: TYPE_TRAVEL,
-        amount: type == TRAVEL_TYPE_FULL ? FULL_TRAVEL_PRICE : TRAVEL_PRICE,
-        upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
-        status:
-          body.transaction_type == TRANSACTION_TYPE_UPI
-            ? STATUS_PAYMENT_COMPLETED
-            : body.transaction_type == TRANSACTION_TYPE_CASH
-            ? STATUS_CASH_COMPLETED
-            : null,
-        updatedBy: 'USER'
-      },
-      { transaction: t }
-    );
-
-    if (!booking || !bookingTransaction) {
-      throw new ApiError(500, 'Failed to book travel');
-    }
-  }
-
   //   sendMail({
   //     email: user.email,
   //     subject: 'Your Booking for RajPravas',
@@ -522,13 +490,11 @@ async function checkAdhyayanAvailability(data) {
       adhyayanStatus = STATUS_WAITING;
       charge = 0;
     }
-    adhyayanDetails.push(
-      {
-        shibirId: shibir.dataValues.id,
-        status: adhyayanStatus,
-        charge: charge
-      }
-    );
+    adhyayanDetails.push({
+      shibirId: shibir.dataValues.id,
+      status: adhyayanStatus,
+      charge: charge
+    });
   }
 
   return adhyayanDetails;
