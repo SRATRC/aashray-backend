@@ -380,7 +380,6 @@ async function bookFood(req, user, data, t) {
   return t;
 }
 
-// TODO: ASK VIRAGBHAI IF WE CAN SHOW TRAVEL IS FULL OR NOTs
 async function checkTravelAvailability(data) {
   const { date, pickup_point, drop_point, type } = data.details;
 

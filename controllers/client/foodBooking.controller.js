@@ -2,15 +2,9 @@ import {
   FoodDb,
   GuestDb,
   GuestFoodDb,
-  GuestFoodTransactionDb,
   Menu
 } from '../../models/associations.js';
-import {
-  BREAKFAST_PRICE,
-  LUNCH_PRICE,
-  DINNER_PRICE,
-  STATUS_RESIDENT
-} from '../../config/constants.js';
+import { STATUS_RESIDENT } from '../../config/constants.js';
 import {
   checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
@@ -204,7 +198,6 @@ export const FetchFoodBookings = async (req, res) => {
   const { date, meal = 'all', spice = 'all', bookedFor = 'all' } = req.query;
 
   const today = moment().format('YYYY-MM-DD');
-
   const dateFilter = date ? { date } : {};
 
   const mealFilter = (mealType, exists) => {
@@ -217,45 +210,57 @@ export const FetchFoodBookings = async (req, res) => {
     return spice === 'true' ? spiceValue === true : spiceValue === false;
   };
 
-  const bookedForFilter = (bookedForKey) => {
-    if (bookedFor === 'all') return true;
-    return bookedFor.split(',').includes(bookedForKey);
-  };
+  const isSelf = bookedFor === 'self';
+  const isAll = bookedFor === 'all';
+  const isGuest = !isNaN(Number(bookedFor));
 
   const [selfData, guestData] = await Promise.all([
-    FoodDb.findAll({
-      attributes: ['date', 'breakfast', 'lunch', 'dinner', 'spicy'],
-      where: {
-        cardno: req.query.cardno,
-        ...dateFilter
-      },
-      order: [['date', 'DESC']],
-      offset,
-      limit: pageSize
-    }),
-    GuestFoodDb.findAll({
-      attributes: ['date', 'breakfast', 'lunch', 'dinner', 'spicy'],
-      where: {
-        cardno: req.query.cardno,
-        ...dateFilter
-      },
-      include: [
-        {
-          model: GuestDb,
-          attributes: ['name']
-        }
-      ],
-      order: [['date', 'DESC']],
-      offset,
-      limit: pageSize
-    })
+    isSelf || isAll
+      ? FoodDb.findAll({
+          attributes: ['date', 'breakfast', 'lunch', 'dinner', 'spicy'],
+          where: {
+            cardno: req.query.cardno,
+            ...dateFilter
+          },
+          order: [['date', 'DESC']],
+          offset,
+          limit: pageSize
+        })
+      : Promise.resolve([]),
+
+    isGuest || isAll
+      ? GuestFoodDb.findAll({
+          attributes: [
+            'date',
+            'breakfast',
+            'lunch',
+            'dinner',
+            'spicy',
+            'guest'
+          ],
+          where: {
+            cardno: req.query.cardno,
+            ...dateFilter,
+            ...(isGuest && { guest: bookedFor })
+          },
+          include: [
+            {
+              model: GuestDb,
+              attributes: ['id', 'name']
+            }
+          ],
+          order: [['date', 'DESC']],
+          offset,
+          limit: pageSize
+        })
+      : Promise.resolve([])
   ]);
 
   const classifyBooking = (bookingDate) => {
     return bookingDate >= today ? 'upcoming' : 'past';
   };
 
-  const processBookings = (data, bookedForKey) => {
+  const processBookings = (data, isGuestBooking = false) => {
     return data.reduce((acc, item) => {
       const { date, breakfast, lunch, dinner, spicy } = item.dataValues;
       const classify = classifyBooking(date);
@@ -266,17 +271,17 @@ export const FetchFoodBookings = async (req, res) => {
         { type: 'dinner', exists: dinner }
       ];
 
+      const guestID = isGuestBooking ? item.guest : null;
+      const guestName = isGuestBooking ? item.GuestDb?.name || null : null;
+
       meals.forEach(({ type, exists }) => {
-        if (
-          mealFilter(type, exists) &&
-          spiceFilter(spicy) &&
-          bookedForFilter(bookedForKey)
-        ) {
+        if (mealFilter(type, exists) && spiceFilter(spicy)) {
           const mealData = {
             date,
             mealType: type,
             spicy,
-            bookedFor: bookedForKey
+            bookedFor: guestID,
+            name: guestName
           };
 
           if (!acc[classify]) {
@@ -290,21 +295,8 @@ export const FetchFoodBookings = async (req, res) => {
     }, {});
   };
 
-  const selfGroupedData = processBookings(selfData, 'self');
-
-  const guestGroupedData = guestData.reduce((acc, item) => {
-    const guestName = item.GuestDb?.name || 'guest';
-    const guestBookings = processBookings([item], guestName);
-
-    Object.keys(guestBookings).forEach((key) => {
-      if (!acc[key]) {
-        acc[key] = [];
-      }
-      acc[key] = [...acc[key], ...guestBookings[key]];
-    });
-
-    return acc;
-  }, {});
+  const selfGroupedData = processBookings(selfData);
+  const guestGroupedData = processBookings(guestData, true);
 
   const finalGroupedData = { ...selfGroupedData };
 
@@ -336,54 +328,36 @@ export const FetchFoodBookings = async (req, res) => {
     .send({ message: 'fetched results', data: responseData });
 };
 
-// export const FetchGuestFoodBookings = async (req, res) => {
-//   const page = parseInt(req.query.page) || 1;
-//   const pageSize = parseInt(req.query.page_size) || 10;
-//   const offset = (page - 1) * pageSize;
-
-//   const today = moment().format('YYYY-MM-DD');
-
-//   const data = await GuestFoodDb.findAll({
-//     where: {
-//       cardno: req.query.cardno,
-//       date: {
-//         [Sequelize.Op.gte]: today
-//       }
-//     },
-//     order: [['date', 'ASC']],
-//     offset,
-//     limit: pageSize
-//   });
-//   return res.status(200).send({ message: 'fetched results', data: data });
-// };
-
 export const FetchGuestsForFilter = async (req, res) => {
   const { cardno } = req.user;
 
   const guests = await GuestDb.findAll({
-    attributes: ['name'],
+    attributes: ['id', 'name'],
     where: {
       id: {
         [Sequelize.Op.in]: Sequelize.literal(`(
           SELECT DISTINCT guest
           FROM guest_food_db
           WHERE cardno = :cardno
+          ORDER BY updatedAt DESC
         )`)
       }
     },
     replacements: { cardno: cardno },
-    group: ['name'],
     raw: true,
-    limit: 50
+    limit: 10
   });
 
-  let guestNames = guests.map((guest) => ({
-    label: guest.name,
-    value: guest.name
-  }));
+  var guestNames = [];
+  guestNames.push({ key: 'all', value: 'All' });
+  guestNames.push({ key: 'self', value: 'Self' });
 
-  guestNames.push({ label: 'All', value: 'all' });
-  guestNames.push({ label: 'Self', value: 'self' });
+  guestNames.push(
+    ...guests.map((guest) => ({
+      key: guest.id,
+      value: guest.name
+    }))
+  );
 
   return res.status(200).send({
     message: 'fetched results',
@@ -406,7 +380,6 @@ export const CancelFood = async (req, res) => {
     const { date, mealType, bookedFor } = item;
 
     if (bookedFor) {
-      // Guest bookings
       if (!guestUpdates[bookedFor]) {
         guestUpdates[bookedFor] = {};
       }
@@ -415,7 +388,6 @@ export const CancelFood = async (req, res) => {
       }
       guestUpdates[bookedFor][mealType].push(date);
     } else {
-      // Self bookings
       if (!selfUpdates[mealType]) {
         selfUpdates[mealType] = [];
       }
@@ -478,83 +450,6 @@ export const CancelFood = async (req, res) => {
   return res
     .status(200)
     .send({ message: 'Successfully Canceled Food Booking' });
-};
-
-export const CancelGuestFood = async (req, res) => {
-  const updateData = req.body.food_data;
-
-  const t = await database.transaction();
-
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await GuestFoodDb.findOne({
-      where: {
-        cardno: req.body.cardno,
-        bookingid: req.body.food_data[i].bookingid,
-        date: req.body.food_data[i].date
-      }
-    });
-    if (!isAvailable) continue;
-
-    await GuestFoodDb.update(
-      {
-        guest_count: updateData[i].guest_count,
-        breakfast: updateData[i].breakfast,
-        lunch: updateData[i].lunch,
-        dinner: updateData[i].dinner,
-        updatedBy: 'user'
-      },
-      {
-        where: {
-          id: updateData[i].id
-        },
-        transaction: t
-      }
-    );
-  }
-
-  await GuestFoodDb.destroy({
-    where: {
-      breakfast: false,
-      lunch: false,
-      dinner: false
-    },
-    transaction: t
-  });
-
-  await t.commit();
-
-  const revisedPayments = await GuestFoodDb.findAll({
-    where: {
-      bookingid: updateData[0].bookingid
-    }
-  });
-
-  var total = 0;
-
-  for (let data of revisedPayments) {
-    total +=
-      data.dataValues.guest_count *
-      ((data.dataValues.breakfast ? BREAKFAST_PRICE : 0) +
-        (data.dataValues.lunch ? LUNCH_PRICE : 0) +
-        (data.dataValues.dinner ? DINNER_PRICE : 0));
-  }
-
-  const makeTransaction = await GuestFoodTransactionDb.update(
-    {
-      amount: total,
-      updatedBy: 'user'
-    },
-    {
-      where: {
-        bookingid: updateData[0].bookingid
-      }
-    }
-  );
-
-  if (makeTransaction != 1)
-    throw new ApiError(500, 'Error occured while updating transaction');
-
-  return res.status(200).send({ message: 'Successfully deleted' });
 };
 
 export const fetchMenu = async (req, res) => {
