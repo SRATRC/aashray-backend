@@ -4,6 +4,10 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/CatchAsync.js';
 
+import {
+  ERR_BLOCKED_DATES
+} from '../config/constants.js';
+
 export const validateCard = catchAsync(async (req, res, next) => {
   const cardno = req.params.cardno || req.body.cardno || req.query.cardno;
   if (cardno === undefined) throw new ApiError(404, 'cardno not provided');
@@ -17,7 +21,7 @@ export const validateCard = catchAsync(async (req, res, next) => {
 
 export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
   const { checkin_date, checkout_date } =
-    req.body || req.body.primary_booking.details;
+    req.body.primary_booking ? req.body.primary_booking.details : req.body;
 
   if (!checkin_date || !checkout_date) return next();
 
@@ -38,12 +42,18 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
             { checkin: { [Sequelize.Op.lte]: endDate } },
             { checkout: { [Sequelize.Op.gte]: endDate } }
           ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: startDate } },
+            { checkin: { [Sequelize.Op.lte]: endDate } }
+          ]
         }
       ]
     }
   });
   if (blockdates.length > 0) {
-    throw new ApiError(400, 'dates are blocked', blockdates);
+    throw new ApiError(400, ERR_BLOCKED_DATES, blockdates);
   }
   next();
 });
