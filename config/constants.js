@@ -74,6 +74,9 @@ export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 
 
 // ERROR MESSAGES
+export const ERR_CARD_NOT_PROVIDED = 'Cardno Not Provided';
+export const ERR_CARD_NOT_FOUND = 'Card Does Not Exist';
+
 export const ERR_INVALID_BOOKING_TYPE = 'Invalid Booking Type';
 export const ERR_INVALID_DATE = 'Invalid Date';
 export const ERR_BLOCKED_DATES = 'Dates Are Blocked';
