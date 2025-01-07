@@ -383,8 +383,9 @@ async function bookFood(req, user, data, t) {
 async function checkTravelAvailability(data) {
   const { date, pickup_point, drop_point, type } = data.details;
 
+  // TODO: check if the status is CONFIRMED or WAITING and return status accordingly
   const whereCondition = {
-    status: { [Sequelize.Op.in]: [STATUS_CONFIRMED] },
+    status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
     date: { [Sequelize.Op.eq]: date }
   };
 
