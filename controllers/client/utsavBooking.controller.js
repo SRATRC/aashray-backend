@@ -30,7 +30,7 @@ export const FetchUpcoming = async (req, res) => {
   const offset = (page - 1) * pageSize;
 
   const utsavs = await UtsavDb.findAll({
-    attributes: ['id', 'name', 'start_date', 'end_date', 'month', 'max_guests'],
+    attributes: ['id', 'name', 'start_date', 'end_date', 'month'],
     include: [
       {
         model: UtsavPackagesDb,
