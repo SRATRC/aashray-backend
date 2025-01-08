@@ -236,7 +236,7 @@ export const ViewUtsavBookings = async (req, res) => {
         t3.end_date AS package_end, 
         NULL AS bookedFor, 
         NULL AS guest_name, 
-        t1.status AS booking_status,
+        t1.status,
         t4.status AS transaction_status,
         t2.createdAt AS created_at
     FROM 
@@ -265,7 +265,7 @@ export const ViewUtsavBookings = async (req, res) => {
         t3.end_date AS package_end, 
         t4.id AS bookedFor, 
         t4.name AS guest_name, 
-        t1.status AS booking_status,
+        t1.status,
         t5.status AS transaction_status,
         t2.createdAt AS created_at
     FROM 
@@ -297,24 +297,7 @@ LIMIT :limit OFFSET :offset
     }
   );
 
-  const groupedByMonth = utsavs.reduce((acc, event) => {
-    const month = event.month;
-    if (!acc[month]) {
-      acc[month] = [];
-    }
-    acc[month].push(event);
-    return acc;
-  }, {});
-
-  const formattedResponse = {
-    message: 'fetched results',
-    data: Object.keys(groupedByMonth).map((month) => ({
-      title: month,
-      data: groupedByMonth[month]
-    }))
-  };
-
-  return res.status(200).send(formattedResponse);
+  return res.status(200).send({ data: utsavs });
 };
 
 export const CancelUtsavBooking = async (req, res) => {
