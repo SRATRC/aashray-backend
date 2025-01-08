@@ -7,7 +7,11 @@ import {
   STATUS_CONFIRMED,
   STATUS_OPEN,
   TYPE_UTSAV,
-  TYPE_GUEST_UTSAV
+  TYPE_GUEST_UTSAV,
+  STATUS_CASH_PENDING,
+  STATUS_PAYMENT_COMPLETED,
+  STATUS_CASH_COMPLETED,
+  STATUS_CREDITED
 } from '../../config/constants.js';
 import {
   UtsavDb,
@@ -220,6 +224,7 @@ export const ViewUtsavBookings = async (req, res) => {
     `
     WITH combined_results AS (
     SELECT 
+        t1.bookingid,
         t1.utsavid, 
         t2.name AS utsav_name, 
         t2.start_date AS utsav_start_date, 
@@ -248,6 +253,7 @@ export const ViewUtsavBookings = async (req, res) => {
     UNION ALL
 
     SELECT 
+        t1.bookingid,
         t1.utsavid, 
         t2.name AS utsav_name, 
         t2.start_date AS utsav_start_date, 
