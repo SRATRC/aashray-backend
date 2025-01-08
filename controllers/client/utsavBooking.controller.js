@@ -238,6 +238,7 @@ export const ViewUtsavBookings = async (req, res) => {
         NULL AS guest_name, 
         t1.status,
         t4.status AS transaction_status,
+        t4.amount,
         t2.createdAt AS created_at
     FROM 
         utsav_booking t1
@@ -267,6 +268,7 @@ export const ViewUtsavBookings = async (req, res) => {
         t4.name AS guest_name, 
         t1.status,
         t5.status AS transaction_status,
+        t5.amount,
         t2.createdAt AS created_at
     FROM 
         utsav_guest_booking t1
