@@ -17,7 +17,8 @@ import {
   UtsavDb,
   UtsavPackagesDb,
   UtsavBooking,
-  UtsavGuestBooking
+  UtsavGuestBooking,
+  GuestDb
 } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -148,70 +149,119 @@ export const BookUtsav = async (req, res) => {
 };
 
 export const BookGuestUtsav = async (req, res) => {
-  const { utsavid, packageid, guest } = req.body;
+  const { utsavid, guests } = req.body;
 
   const t = await database.transaction();
-  req.transaction = t;
+  const { cardno } = req.user;
 
-  const utsav = await UtsavDb.findOne({
-    where: {
-      id: utsavid,
-      status: STATUS_OPEN
-    }
+  const guestsToUpdate = guests.filter((guest) => guest.id);
+  const guestsToCreate = guests
+    .filter((guest) => !guest.id)
+    .map((guest) => ({ ...guest, cardno }));
+
+  if (guestsToUpdate.length > 0) {
+    await Promise.all(
+      guestsToUpdate.map(({ id, ...updateData }) =>
+        GuestDb.update(updateData, {
+          where: { id },
+          transaction: t
+        })
+      )
+    );
+  }
+
+  const createdGuests = guestsToCreate.length
+    ? await GuestDb.bulkCreate(guestsToCreate, {
+        transaction: t,
+        returning: true
+      })
+    : [];
+
+  const updatedGuests = guestsToUpdate.length
+    ? await GuestDb.findAll({
+        where: { id: guestsToUpdate.map((guest) => guest.id) },
+        attributes: ['id', 'name', 'gender', 'mobno', 'type'],
+        transaction: t
+      })
+    : [];
+
+  const allGuests = [...updatedGuests, ...createdGuests].map((guest) =>
+    guest.toJSON()
+  );
+
+  const guestIdMap = allGuests.reduce((map, guest) => {
+    const key = `${guest.name}${guest.mobno}${guest.type}${guest.gender}`;
+    map[key] = guest.id;
+    return map;
+  }, {});
+
+  const guestsWithIds = guests.map((guest) => {
+    const key = `${guest.name}${guest.mobno}${guest.type}${guest.gender}`;
+    const id = guestIdMap[key];
+    if (!id) throw new ApiError(404, `Guest not found for key: ${key}`);
+    return { ...guest, id };
   });
 
-  const utsav_package = await UtsavPackagesDb.findOne({
-    where: {
-      id: packageid
-    }
-  });
+  const totalPackageIds = guestsWithIds.map((guest) => guest.packageid);
+  const totalGuestIds = guestsWithIds.map((guest) => guest.id);
 
-  if (utsav == undefined || utsav_package == undefined) {
+  const [utsav, utsavPackage] = await Promise.all([
+    UtsavDb.findOne({ where: { id: utsavid, status: STATUS_OPEN } }),
+    UtsavPackagesDb.findOne({
+      where: { id: { [Sequelize.Op.in]: totalPackageIds } }
+    })
+  ]);
+
+  if (!utsav || !utsavPackage)
     throw new ApiError(500, 'Utsav or package not found');
-  }
 
-  const isBooked = await UtsavGuestBooking.findOne({
+  const isBooked = await UtsavGuestBooking.findAll({
     where: {
-      cardno: req.user.cardno,
-      utsavid: utsavid,
-      guest: guest,
-      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED] }
+      cardno,
+      utsavid,
+      guest: { [Sequelize.Op.in]: totalGuestIds },
+      status: {
+        [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED]
+      }
     }
   });
-  if (isBooked) {
-    throw new ApiError(400, 'Already booked');
-  }
 
-  const utsav_booking = await UtsavGuestBooking.create(
-    {
-      bookingid: uuidv4(),
-      utsavid: utsavid,
-      packageid: packageid,
-      cardno: req.user.cardno,
-      guest: guest,
-      status: STATUS_PAYMENT_PENDING
-    },
-    { transaction: t }
-  );
+  if (isBooked.length > 0) throw new ApiError(400, 'Already booked');
 
-  const utsav_transaction = await Transactions.create(
-    {
-      bookingid: utsav_booking.dataValues.bookingid,
-      cardno: req.user.cardno,
-      category: TYPE_GUEST_UTSAV,
-      amount: utsav_package.dataValues.amount,
-      status: STATUS_PAYMENT_PENDING
-    },
-    { transaction: t }
-  );
+  const amount = utsavPackage.dataValues.amount;
+  const bookingsAndTransactions = guestsWithIds.map(({ packageid, id }) => {
+    const bookingid = uuidv4();
+    return {
+      booking: {
+        bookingid,
+        utsavid,
+        packageid,
+        cardno,
+        guest: id,
+        status: STATUS_PAYMENT_PENDING
+      },
+      transaction: {
+        bookingid,
+        cardno,
+        category: TYPE_GUEST_UTSAV,
+        amount,
+        status: STATUS_PAYMENT_PENDING
+      }
+    };
+  });
 
-  if (utsav_booking == undefined || utsav_transaction == undefined) {
-    throw new ApiError(500, 'Failed to book utsav');
-  }
+  const [utsavBooking, utsavTransactions] = [
+    bookingsAndTransactions.map(({ booking }) => booking),
+    bookingsAndTransactions.map(({ transaction }) => transaction)
+  ];
+
+  await Promise.all([
+    UtsavGuestBooking.bulkCreate(utsavBooking, { transaction: t }),
+    Transactions.bulkCreate(utsavTransactions, { transaction: t })
+  ]);
 
   await t.commit();
-
-  return res.status(200).send({ message: 'Booking Successful' });
+  res.status(200).send({ message: 'Booking Successful' });
 };
 
 export const ViewUtsavBookings = async (req, res) => {
