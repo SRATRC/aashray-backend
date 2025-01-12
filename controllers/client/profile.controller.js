@@ -173,24 +173,28 @@ export const transactions = async (req, res) => {
 };
 
 export const sendNotification = async (req, res) => {
+  const { tokenData } = req.body;
+
   let expo = new Expo();
 
   let messages = [];
-  let somePushTokens = ['ExponentPushToken[7KdwVuKuOh2fDMWbyGKljn]'];
+  // let somePushTokens = ['ExponentPushToken[7KdwVuKuOh2fDMWbyGKljn]'];
 
-  for (let pushToken of somePushTokens) {
+  for (let singleData of tokenData) {
     // Check that all your push tokens appear to be valid Expo push tokens
-    if (!Expo.isExpoPushToken(pushToken)) {
-      console.error(`Push token ${pushToken} is not a valid Expo push token`);
+    if (!Expo.isExpoPushToken(singleData.token)) {
+      console.error(
+        `Push token ${singleData.token} is not a valid Expo push token`
+      );
       continue;
     }
 
     // Construct a message (see https://docs.expo.io/push-notifications/sending-notifications/)
     messages.push({
-      to: pushToken,
-      sound: 'default',
-      body: 'This is a test notification',
-      data: { withSome: 'data' }
+      to: singleData.token,
+      sound: singleData.sound || 'default',
+      body: singleData.body || 'This is a test notification',
+      data: singleData.data || { withSome: 'data' }
     });
   }
 
