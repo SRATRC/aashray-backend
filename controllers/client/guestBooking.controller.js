@@ -23,7 +23,6 @@ import {
   TYPE_GUEST_ROOM,
   TYPE_GUEST_ADHYAYAN,
   RAZORPAY_FEE,
-
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
@@ -105,8 +104,14 @@ export const validateBooking = async (req, res) => {
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      roomDetails = await checkRoomAvailability(req.user, req.body.primary_booking);
-      totalCharge += roomDetails.reduce((partialSum, room) => partialSum + room.charge, 0);
+      roomDetails = await checkRoomAvailability(
+        req.user,
+        req.body.primary_booking
+      );
+      totalCharge += roomDetails.reduce(
+        (partialSum, room) => partialSum + room.charge,
+        0
+      );
       break;
 
     case TYPE_FOOD:
@@ -114,8 +119,14 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_ADHYAYAN:
-      adhyayanDetails = await checkAdhyayanAvailability(req.user, req.body.primary_booking);
-      totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
+      adhyayanDetails = await checkAdhyayanAvailability(
+        req.user,
+        req.body.primary_booking
+      );
+      totalCharge += adhyayanDetails.reduce(
+        (partialSum, adhyayan) => partialSum + adhyayan.charge,
+        0
+      );
       break;
 
     default:
@@ -127,7 +138,10 @@ export const validateBooking = async (req, res) => {
       switch (addon.booking_type) {
         case TYPE_ROOM:
           roomDetails = await checkRoomAvailability(req.user, addon);
-          totalCharge += roomDetails.reduce((partialSum, room) => partialSum + room.charge, 0);
+          totalCharge += roomDetails.reduce(
+            (partialSum, room) => partialSum + room.charge,
+            0
+          );
           break;
 
         case TYPE_FOOD:
@@ -136,7 +150,10 @@ export const validateBooking = async (req, res) => {
 
         case TYPE_ADHYAYAN:
           adhyayanDetails = await checkAdhyayanAvailability(req.user, addon);
-          totalCharge += adhyayanDetails.reduce((partialSum, adhyayan) => partialSum + adhyayan.charge, 0);
+          totalCharge += adhyayanDetails.reduce(
+            (partialSum, adhyayan) => partialSum + adhyayan.charge,
+            0
+          );
           break;
 
         default:
@@ -145,14 +162,14 @@ export const validateBooking = async (req, res) => {
     }
   }
 
-  return res.status(200).send({ 
+  return res.status(200).send({
     data: {
       roomDetails: roomDetails,
       adhyayanDetails: adhyayanDetails,
       taxes: totalCharge * RAZORPAY_FEE,
       totalCharge: totalCharge * (1 + RAZORPAY_FEE)
     }
-   });
+  });
 };
 
 async function checkRoomAvailability(user, data) {
@@ -160,12 +177,15 @@ async function checkRoomAvailability(user, data) {
 
   validateDate(checkin_date, checkout_date);
   const nights = await calculateNights(checkin_date, checkout_date);
-  // TODO: logic for nights = 0 is different for self and for guests 
+  // TODO: logic for nights = 0 is different for self and for guests
   if (nights <= 0) {
     throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
   }
 
-  const totalGuests = guestGroup.reduce((partial, group) => partial.concat(group.guests), []);
+  const totalGuests = guestGroup.reduce(
+    (partial, group) => partial.concat(group.guests),
+    []
+  );
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
     where: {
@@ -196,24 +216,28 @@ async function checkRoomAvailability(user, data) {
       var roomStatus = STATUS_WAITING;
       var charge = 0;
 
-      const gender = floorType 
+      const gender = floorType
         ? floorType + guest_details.filter((item) => item.id == guest)[0].gender
         : guest_details.filter((item) => item.id == guest)[0].gender;
 
-      const room = await findRoom(checkin_date, checkout_date, roomType, gender);
+      const room = await findRoom(
+        checkin_date,
+        checkout_date,
+        roomType,
+        gender
+      );
 
       if (room) {
         roomStatus = STATUS_AVAILABLE;
-        charge = roomType == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
+        charge =
+          roomType == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
       }
-      
-      roomDetails.push(
-        {
-          guestId: guest,
-          status: roomStatus,
-          charge: charge
-        }
-      )
+
+      roomDetails.push({
+        guestId: guest,
+        status: roomStatus,
+        charge: charge
+      });
     }
   }
 
@@ -225,12 +249,15 @@ async function bookRoom(body, user, data, t) {
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
-  // TODO: logic for nights = 0 is different for self and for guests 
+  // TODO: logic for nights = 0 is different for self and for guests
   if (nights <= 0) {
     throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
   }
 
-  const totalGuests = guestGroup.reduce((partial, group) => partial.concat(group.guests), []);
+  const totalGuests = guestGroup.reduce(
+    (partial, group) => partial.concat(group.guests),
+    []
+  );
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
     where: {
@@ -344,7 +371,10 @@ async function bookFood(req, user, data, t) {
   const { start_date, end_date, guestGroup } = data.details;
   validateDate(start_date, end_date);
 
-  const totalGuests = guestGroup.reduce((partial, group) => partial.concat(group.guests), []);
+  const totalGuests = guestGroup.reduce(
+    (partial, group) => partial.concat(group.guests),
+    []
+  );
 
   if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
     throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
@@ -419,29 +449,26 @@ async function checkAdhyayanAvailability(user, data) {
 
   var adhyayanDetails = [];
   for (var shibir of shibirs) {
-    var confirmed = guests.length;
+    var available = guests.length;
     var waiting = 0;
     var charge = 0;
 
     if (shibir.dataValues.available_seats < guests.length) {
-      confirmed = shibir.dataValues.available_seats;
+      available = shibir.dataValues.available_seats;
       waiting = guests.length - shibir.dataValues.available_seats;
     }
-    charge = confirmed * shibir.dataValues.amount;
+    charge = available * shibir.dataValues.amount;
 
-    adhyayanDetails.push(
-      {
-        shibirId: shibir.dataValues.id,
-        confirmed: confirmed,
-        waiting: waiting,
-        charge: charge
-      }
-    )
+    adhyayanDetails.push({
+      shibirId: shibir.dataValues.id,
+      available: available,
+      waiting: waiting,
+      charge: charge
+    });
   }
-  
+
   return adhyayanDetails;
 }
-
 
 async function bookAdhyayan(body, user, data, t) {
   const { shibir_ids, guests } = data.details;
