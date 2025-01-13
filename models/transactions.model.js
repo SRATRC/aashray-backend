@@ -34,11 +34,6 @@ const Transactions = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
-    // type: {
-    //   type: DataTypes.ENUM,
-    //   allowNull: false,
-    //   values: [TYPE_EXPENSE, TYPE_REFUND]
-    // },
     amount: {
       type: DataTypes.DECIMAL,
       allowNull: false

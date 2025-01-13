@@ -38,38 +38,13 @@ const UtsavGuestBooking = sequelize.define(
         key: 'id'
       }
     },
-    name: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    gender: {
-      type: DataTypes.ENUM,
+    guest: {
+      type: DataTypes.INTEGER,
       allowNull: false,
-      values: ['M', 'F']
-    },
-    dob: {
-      type: DataTypes.DATEONLY,
-      allowNull: true
-    },
-    mobno: {
-      type: DataTypes.BIGINT,
-      allowNull: false
-    },
-    email: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    idType: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    idNo: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    address: {
-      type: DataTypes.STRING,
-      allowNull: false
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
     },
     status: {
       type: DataTypes.ENUM,

@@ -26,10 +26,6 @@ const UtsavDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
-    max_guests: {
-      type: DataTypes.BIGINT,
-      allowNull: false
-    },
     status: {
       type: DataTypes.ENUM,
       allowNull: true,

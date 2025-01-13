@@ -16,7 +16,6 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
   TYPE_ROOM,
-
   ERR_INVALID_DATE
 } from '../config/constants.js';
 import Sequelize from 'sequelize';

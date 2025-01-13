@@ -13,6 +13,6 @@ router.use(validateCard);
 router.put('/', CatchAsync(updateProfile));
 router.post('/upload', CatchAsync(upload));
 router.get('/transactions', CatchAsync(transactions));
-router.get('/notification', CatchAsync(sendNotification));
+router.post('/notification', CatchAsync(sendNotification));
 
 export default router;
