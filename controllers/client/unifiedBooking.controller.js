@@ -413,39 +413,39 @@ async function bookFood(req, user, data, t) {
 }
 
 async function checkTravelAvailability(data) {
-  const { date, pickup_point, drop_point, type } = data.details;
+  // const { date, pickup_point, drop_point, type } = data.details;
 
-  // TODO: check if the status is CONFIRMED or WAITING and return status accordingly
-  const whereCondition = {
-    status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
-    date: { [Sequelize.Op.eq]: date }
-  };
+  // // TODO: check if the status is CONFIRMED or WAITING and return status accordingly
+  // const whereCondition = {
+  //   status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
+  //   date: { [Sequelize.Op.eq]: date }
+  // };
 
-  if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
-  else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
+  // if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
+  // else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
 
-  const travelBookings = await TravelDb.findAll({
-    where: whereCondition
-  });
+  // const travelBookings = await TravelDb.findAll({
+  //   where: whereCondition
+  // });
 
-  var travelStatus = STATUS_WAITING;
-  var charge = 0;
+  // var travelStatus = STATUS_WAITING;
+  // var charge = 0;
 
-  if (type == TRAVEL_TYPE_FULL) {
-    if (travelBookings.length == 0) {
-      travelStatus = STATUS_AVAILABLE;
-      charge = FULL_TRAVEL_PRICE;
-    }
-  } else {
-    if (travelBookings.length < 5) {
-      travelStatus = STATUS_AVAILABLE;
-      charge = TRAVEL_PRICE;
-    }
-  }
+  // if (type == TRAVEL_TYPE_FULL) {
+  //   if (travelBookings.length == 0) {
+  //     travelStatus = STATUS_AVAILABLE;
+  //     charge = FULL_TRAVEL_PRICE;
+  //   }
+  // } else {
+  //   if (travelBookings.length < 5) {
+  //     travelStatus = STATUS_AVAILABLE;
+  //     charge = TRAVEL_PRICE;
+  //   }
+  // }
 
   return {
-    status: travelStatus,
-    charge: charge
+    status: STATUS_WAITING,
+    charge: 0
   };
 }
 
