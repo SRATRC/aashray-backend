@@ -184,6 +184,7 @@ export const validateBooking = async (req, res) => {
       roomDetails: roomDetails,
       adhyayanDetails: adhyayanDetails,
       travelDetails: travelDetails,
+      taxes: totalCharge * RAZORPAY_FEE,
       totalCharge: totalCharge * (1 + RAZORPAY_FEE)
     }
   });
