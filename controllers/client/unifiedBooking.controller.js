@@ -33,7 +33,8 @@ import {
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_ADHYAYAN_ALREADY_BOOKED,
   ERR_ADHYAYAN_NOT_FOUND,
-  ERR_FOOD_ALREADY_BOOKED
+  ERR_FOOD_ALREADY_BOOKED,
+  ERR_ROOM_MUST_BE_BOOKED
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -334,10 +335,13 @@ async function bookFood(req, user, data, t) {
   const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
 
-  validateDate(start_date, end_date);
+  const meals = [
+    { type: 'breakfast', toBook: breakfast },
+    { type: 'lunch', toBook: lunch },
+    { type: 'dinner', toBook: dinner }
+  ];
 
-  if (await isFoodBooked(start_date, end_date, user.cardno))
-    throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
+  validateDate(start_date, end_date);
 
   if (
     !(
@@ -347,35 +351,63 @@ async function bookFood(req, user, data, t) {
         req.body.primary_booking,
         req.body.addons
       )) ||
-      (await checkRoomAlreadyBooked(start_date, end_date, user.cardno)) ||
-      (await checkFlatAlreadyBooked(start_date, end_date, user.cardno)) ||
+      (await checkRoomAlreadyBooked(
+        start_date,
+        end_date,
+        user.cardno
+      )) ||
+      (await checkFlatAlreadyBooked(
+        start_date,
+        end_date,
+        user.cardno
+      )) ||
       user.res_status === STATUS_RESIDENT ||
-      (await checkSpecialAllowance(start_date, end_date, user.cardno))
+      (await checkSpecialAllowance(
+        start_date,
+        end_date,
+        user.cardno
+      ))
     )
   ) {
-    throw new ApiError(
-      403,
-      'You do not have a room booked on one or more dates selected'
-    );
+    throw new ApiError(403, ERR_ROOM_MUST_BE_BOOKED);
   }
 
   const allDates = getDates(start_date, end_date);
+  const bookingsToUpdate = await FoodDb.findAll({
+    where: {
+      cardno: user.cardno,
+      date: { [Sequelize.Op.in]: allDates }
+    }
+  });
 
-  var food_data = [];
-  for (var date of allDates) {
-    food_data.push({
+  for (const booking of bookingsToUpdate) {
+    meals.forEach(({ type, toBook }) => {
+      if (toBook && !booking[type])
+        booking[type] = toBook;
+    });
+    booking.hightea = high_tea || 'NONE';
+    booking.spicy = spicy;
+    await booking.save({ transaction: t });
+  }
+
+  const bookedDates = bookingsToUpdate.map(booking => booking.date);
+  const remainingDates = allDates.filter(date => !bookedDates.includes(date));
+
+  var bookingsToCreate = [];
+  for (var date of remainingDates) {
+    bookingsToCreate.push({
       cardno: user.cardno,
       date: date,
       breakfast: breakfast,
       lunch: lunch,
       dinner: dinner,
-      hightea: high_tea,
+      hightea: high_tea || 'NONE',
       spicy: spicy,
       plateissued: 0
     });
   }
 
-  await FoodDb.bulkCreate(food_data, { transaction: t });
+  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
 
   return t;
 }
