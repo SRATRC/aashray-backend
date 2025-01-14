@@ -179,13 +179,14 @@ export const validateBooking = async (req, res) => {
     }
   }
 
+  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100)/100;
   return res.status(200).send({
     data: {
       roomDetails: roomDetails,
       adhyayanDetails: adhyayanDetails,
       travelDetails: travelDetails,
-      taxes: totalCharge * RAZORPAY_FEE,
-      totalCharge: totalCharge * (1 + RAZORPAY_FEE)
+      taxes: taxes, 
+      totalCharge: totalCharge + taxes
     }
   });
 };
