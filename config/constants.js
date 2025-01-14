@@ -15,9 +15,9 @@ export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 
 // PRICES
-export const BREAKFAST_PRICE = 120;
-export const LUNCH_PRICE = 80;
-export const DINNER_PRICE = 50;
+export const BREAKFAST_PRICE = 50;
+export const LUNCH_PRICE = 100;
+export const DINNER_PRICE = 100;
 export const NAC_ROOM_PRICE = 400;
 export const AC_ROOM_PRICE = 600;
 export const TRAVEL_PRICE = 350;
