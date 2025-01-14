@@ -392,7 +392,7 @@ async function checkFoodAvailability(data) {
   for (const group of guestGroup) {
     const { meals, guests } = group;
 
-    const groupCharge = guests.length * (
+    const groupCharge = allDates.legnth * guests.length * (
       (meals.includes('breakfast') ? BREAKFAST_PRICE : 0) + 
       (meals.includes('lunch') ? LUNCH_PRICE : 0) + 
       (meals.includes('dinner') ? DINNER_PRICE : 0));
