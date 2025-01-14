@@ -19,13 +19,10 @@ import {
   TYPE_TRAVEL,
   TYPE_FOOD,
   STATUS_RESIDENT,
-  TRAVEL_PRICE,
-  TRAVEL_TYPE_FULL,
   STATUS_PAYMENT_COMPLETED,
   TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
   TRANSACTION_TYPE_CASH,
-  FULL_TRAVEL_PRICE,
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
@@ -33,7 +30,6 @@ import {
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_ADHYAYAN_ALREADY_BOOKED,
   ERR_ADHYAYAN_NOT_FOUND,
-  ERR_FOOD_ALREADY_BOOKED,
   ERR_ROOM_MUST_BE_BOOKED
 } from '../../config/constants.js';
 import database from '../../config/database.js';
@@ -44,7 +40,6 @@ import {
   checkFlatAlreadyBooked,
   checkSpecialAllowance,
   calculateNights,
-  isFoodBooked,
   validateDate,
   checkRoomBookingProgress,
   findRoom
@@ -64,7 +59,7 @@ export const unifiedBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
-      t = await bookFood(req, req.user, req.body.primary_booking, t);
+      t = await bookFood(req.body, req.user, req.body.primary_booking, t);
       break;
 
     case TYPE_TRAVEL:
@@ -87,7 +82,7 @@ export const unifiedBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          t = await bookFood(req, req.user, addon, t);
+          t = await bookFood(req.body, req.user, addon, t);
           break;
 
         case TYPE_TRAVEL:
@@ -112,6 +107,7 @@ export const validateBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
   var roomDetails = {};
+  var foodDetails = {};
   var travelDetails = {};
   var adhyayanDetails = {};
   var totalCharge = 0;
@@ -126,7 +122,11 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
-      // Food is always available
+      foodDetails = await checkFoodAvailability(
+        req.body,
+        req.user,
+        req.body.primary_booking
+      );
       break;
 
     case TYPE_TRAVEL:
@@ -157,7 +157,11 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          // Food is always available
+          foodDetails = await checkFoodAvailability(
+            req.body,
+            req.user,
+            addon
+          );
           break;
 
         case TYPE_TRAVEL:
@@ -183,6 +187,7 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({
     data: {
       roomDetails: roomDetails,
+      foodDetails: foodDetails,
       adhyayanDetails: adhyayanDetails,
       travelDetails: travelDetails,
       taxes: taxes, 
@@ -215,7 +220,6 @@ async function checkRoomAvailability(user, data) {
         room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
     }
   } else {
-    // TODO: explain what is this case, where room_type = NA
     roomStatus = STATUS_AVAILABLE;
     charge = 0;
   }
@@ -333,7 +337,49 @@ async function bookRoom(body, user, data, t) {
   return t;
 }
 
-async function bookFood(req, user, data, t) {
+async function checkFoodAvailability(body, user, data) {
+  const { start_date, end_date } = data.details;
+
+  validateDate(start_date, end_date);
+
+  await validateFood(body, user, start_date, end_date);
+
+  return {
+    status: STATUS_AVAILABLE,
+    charge: 0
+  };
+}
+
+async function validateFood(body, user, start_date, end_date) {
+  if (!(
+    (await checkRoomBookingProgress(
+      start_date,
+      end_date,
+      body.primary_booking,
+      body.addons
+    )) ||
+    (await checkRoomAlreadyBooked(
+      start_date,
+      end_date,
+      user.cardno
+    )) ||
+    (await checkFlatAlreadyBooked(
+      start_date,
+      end_date,
+      user.cardno
+    )) ||
+    user.res_status === STATUS_RESIDENT ||
+    (await checkSpecialAllowance(
+      start_date,
+      end_date,
+      user.cardno
+    ))
+  )) {
+    throw new ApiError(403, ERR_ROOM_MUST_BE_BOOKED);
+  }
+}
+
+async function bookFood(body, user, data, t) {
   const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
 
@@ -344,35 +390,7 @@ async function bookFood(req, user, data, t) {
   ];
 
   validateDate(start_date, end_date);
-
-  if (
-    !(
-      (await checkRoomBookingProgress(
-        start_date,
-        end_date,
-        req.body.primary_booking,
-        req.body.addons
-      )) ||
-      (await checkRoomAlreadyBooked(
-        start_date,
-        end_date,
-        user.cardno
-      )) ||
-      (await checkFlatAlreadyBooked(
-        start_date,
-        end_date,
-        user.cardno
-      )) ||
-      user.res_status === STATUS_RESIDENT ||
-      (await checkSpecialAllowance(
-        start_date,
-        end_date,
-        user.cardno
-      ))
-    )
-  ) {
-    throw new ApiError(403, ERR_ROOM_MUST_BE_BOOKED);
-  }
+  await validateFood(body, user, start_date, end_date);
 
   const allDates = getDates(start_date, end_date);
   const bookingsToUpdate = await FoodDb.findAll({
