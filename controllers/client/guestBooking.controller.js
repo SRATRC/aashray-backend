@@ -29,7 +29,10 @@ import {
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_ADHYAYAN_ALREADY_BOOKED,
   ERR_ADHYAYAN_NOT_FOUND,
-  ERR_FOOD_ALREADY_BOOKED
+  ERR_FOOD_ALREADY_BOOKED,
+  LUNCH_PRICE,
+  BREAKFAST_PRICE,
+  DINNER_PRICE
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -98,6 +101,7 @@ export const validateBooking = async (req, res) => {
 
   var roomDetails = [];
   var adhyayanDetails = [];
+  var foodDetails = {};
   var totalCharge = 0;
 
   switch (primary_booking.booking_type) {
@@ -113,7 +117,8 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
-      // Food is always available
+      foodDetails = await checkFoodAvailability(req.body.primary_booking);
+      totalCharge += foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
@@ -143,7 +148,8 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          // Food is always available
+          foodDetails = await checkFoodAvailability(addon);
+          totalCharge += foodDetails.charge;
           break;
 
         case TYPE_ADHYAYAN:
@@ -165,6 +171,7 @@ export const validateBooking = async (req, res) => {
     data: {
       roomDetails: roomDetails,
       adhyayanDetails: adhyayanDetails,
+      foodDetails: foodDetails,
       taxes: taxes,
       totalCharge: totalCharge + taxes
     }
@@ -364,6 +371,39 @@ async function bookRoomForSingleGuest(
   }
 
   return t;
+}
+
+async function checkFoodAvailability(data) {
+  const { start_date, end_date, guestGroup } = data.details;
+  
+  validateDate(start_date, end_date);
+
+  const totalGuests = guestGroup.reduce(
+    (partial, group) => partial.concat(group.guests),
+    []
+  );
+
+  if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
+    throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
+
+  
+  const allDates = getDates(start_date, end_date);
+  var charge = 0;
+  for (const group of guestGroup) {
+    const { meals, guests } = group;
+
+    const groupCharge = guests.length * (
+      (meals.includes('breakfast') ? BREAKFAST_PRICE : 0) + 
+      (meals.includes('lunch') ? LUNCH_PRICE : 0) + 
+      (meals.includes('dinner') ? DINNER_PRICE : 0));
+
+    charge += groupCharge;
+  }
+
+  return {
+    status: STATUS_AVAILABLE,
+    charge: charge
+  }
 }
 
 async function bookFood(req, user, data, t) {
