@@ -3,7 +3,7 @@ import {
   ShibirBookingDb,
   ShibirBookingTransaction,
   Transactions,
-  GuestShibirBooking
+  ShibirGuestBookingDb
 } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -390,7 +390,7 @@ export const CancelShibir = async (req, res) => {
       await waitlist.save({ transaction: t });
     }
   } else {
-    const isBooked = await GuestShibirBooking.findOne({
+    const isBooked = await ShibirGuestBookingDb.findOne({
       where: {
         shibir_id: shibir_id,
         cardno: cardno,
@@ -447,7 +447,7 @@ export const CancelShibir = async (req, res) => {
       await adhyayanGuestBookingTransaction.save({ transaction: t });
     }
 
-    const waitlist = await GuestShibirBooking.findOne({
+    const waitlist = await ShibirGuestBookingDb.findOne({
       where: {
         shibir_id: shibir_id,
         cardno: req.user.cardno,

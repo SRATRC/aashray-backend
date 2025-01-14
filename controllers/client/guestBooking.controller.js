@@ -1,9 +1,8 @@
 import {
-  RoomDb,
   ShibirDb,
   GuestRoomBooking,
   GuestFoodDb,
-  GuestShibirBooking,
+  ShibirGuestBookingDb,
   GuestDb
 } from '../../models/associations.js';
 import {
@@ -35,10 +34,8 @@ import {
 import {
   calculateNights,
   validateDate,
-  checkRoomBookingProgress,
   checkGuestRoomAlreadyBooked,
   checkGuestFoodAlreadyBooked,
-  checkGuestSpecialAllowance,
   findRoom
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,6 +45,7 @@ import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
 
+// TODO: charge money for guest food
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
   var t = await database.transaction();
@@ -379,29 +377,6 @@ async function bookFood(req, user, data, t) {
   if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
     throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
 
-  if (
-    !(
-      (await checkRoomBookingProgress(
-        start_date,
-        end_date,
-        req.body.primary_booking,
-        req.body.addons
-      )) ||
-      (await checkGuestRoomAlreadyBooked(
-        start_date,
-        end_date,
-        user.cardno,
-        totalGuests
-      )) ||
-      (await checkGuestSpecialAllowance(start_date, end_date, totalGuests))
-    )
-  ) {
-    throw new ApiError(
-      403,
-      'You do not have a room booked on one or more dates selected'
-    );
-  }
-
   const allDates = getDates(start_date, end_date);
   var food_data = [];
 
@@ -473,7 +448,7 @@ async function checkAdhyayanAvailability(user, data) {
 async function bookAdhyayan(body, user, data, t) {
   const { shibir_ids, guests } = data.details;
 
-  const isBooked = await GuestShibirBooking.findAll({
+  const isBooked = await ShibirGuestBookingDb.findAll({
     where: {
       shibir_id: {
         [Sequelize.Op.in]: shibir_ids
@@ -551,7 +526,7 @@ async function bookAdhyayan(body, user, data, t) {
     }
   }
 
-  await GuestShibirBooking.bulkCreate(booking_data, { transaction: t });
+  await ShibirGuestBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
   return t;

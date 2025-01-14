@@ -7,7 +7,7 @@ import {
   ShibirDb,
   GuestRoomBooking,
   GuestFoodDb,
-  GuestShibirBooking
+  ShibirGuestBookingDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -376,7 +376,7 @@ export async function checkGuestFoodAlreadyBooked(
 }
 
 export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
-  const adhyayans = await GuestShibirBooking.findAll({
+  const adhyayans = await ShibirGuestBookingDb.findAll({
     include: [
       {
         model: ShibirDb,
