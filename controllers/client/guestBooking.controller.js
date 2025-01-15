@@ -188,10 +188,7 @@ async function checkRoomAvailability(user, data) {
     throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
   }
 
-  const totalGuests = guestGroup.reduce(
-    (partial, group) => partial.concat(group.guests),
-    []
-  );
+  const totalGuests = guestGroup.flatMap((group) => group.guests);
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
     where: {
@@ -260,10 +257,7 @@ async function bookRoom(body, user, data, t) {
     throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
   }
 
-  const totalGuests = guestGroup.reduce(
-    (partial, group) => partial.concat(group.guests),
-    []
-  );
+  const totalGuests = guestGroup.flatMap((group) => group.guests);
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
     where: {
@@ -378,10 +372,7 @@ async function checkFoodAvailability(data) {
   
   validateDate(start_date, end_date);
 
-  const totalGuests = guestGroup.reduce(
-    (partial, group) => partial.concat(group.guests),
-    []
-  );
+  const totalGuests = guestGroup.flatMap((group) => group.guests);
 
   if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
     throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
@@ -408,45 +399,79 @@ async function checkFoodAvailability(data) {
 
 async function bookFood(req, user, data, t) {
   const { start_date, end_date, guestGroup } = data.details;
+
   validateDate(start_date, end_date);
 
-  const totalGuests = guestGroup.reduce(
-    (partial, group) => partial.concat(group.guests),
-    []
-  );
-
-  if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
-    throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
-
   const allDates = getDates(start_date, end_date);
-  var food_data = [];
+  const totalGuests = guestGroup.flatMap((group) => group.guests);
 
-  for (const group of guestGroup) {
-    const { meals, spicy, hightea, guests } = group;
-    const mealFields = {
-      breakfast: meals.includes('breakfast') ? 1 : 0,
-      lunch: meals.includes('lunch') ? 1 : 0,
-      dinner: meals.includes('dinner') ? 1 : 0
-    };
+  const bookingsToUpdate = await GuestFoodDb.findAll({
+    where: {
+      date: { [Sequelize.Op.in]: allDates },
+      guest: { [Sequelize.Op.in]: totalGuests }
+    }
+  });
 
-    food_data.push(
-      ...allDates.flatMap((date) =>
-        guests.map((guest) => ({
-          cardno: user.cardno,
-          guest: guest,
-          date: date,
-          ...mealFields,
-          hightea: hightea,
-          spicy: spicy,
-          plateissued: 0
-        }))
+  var guestMeals = {};
+  guestGroup.forEach((group) => {
+    const { meals, spicy, high_tea, guests } = group;
+    const mealFields = Object.fromEntries(
+      ['breakfast', 'lunch', 'dinner'].map(
+        (item) => ([item, meals.includes(item) ? 1 : 0 ])
       )
     );
+
+    guests.forEach((guest) => {
+      guestMeals[guest] = {
+        mealFields,
+        hightea: high_tea || 'NONE',
+        spicy
+      }
+    });
+  });
+
+  var guestDatesUpdated = {};
+  for (const booking of bookingsToUpdate) {
+    const meals = guestMeals[booking.guest];
+
+    Object.keys(meals.mealFields).forEach((type) => {
+      const toBook = meals.mealFields[type];
+      if (toBook && !booking[type])
+        booking[type] = toBook;
+    });
+    booking.hightea = meals.hightea;
+    booking.spicy = meals.spicy;
+    await booking.save({ transaction: t });
+
+    guestDatesUpdated[booking.guest] = guestDatesUpdated[booking.guest] || [];
+    guestDatesUpdated[booking.guest].push(booking.date);
   }
 
-  await GuestFoodDb.bulkCreate(food_data, { transaction: t });
+  var bookingsToCreate = [];
+  totalGuests.forEach((guest) => {
+    const bookedDates = guestDatesUpdated[guest] || [];
+    const remainingDates = allDates.filter(date => !bookedDates.includes(date));
+    const meals = guestMeals[guest];
+
+    for (const date of remainingDates) {
+      bookingsToCreate.push({
+        cardno: user.cardno,
+        guest,
+        date,
+        breakfast: meals.mealFields.breakfast,
+        lunch: meals.mealFields.lunch,
+        dinner: meals.mealFields.dinner,
+        hightea: meals.hightea,
+        spicy: meals.spicy,
+        plateissued: 0
+      });
+    }
+  });
+
+  await GuestFoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
 }
+
 
 async function checkAdhyayanAvailability(user, data) {
   const { shibir_ids, guests } = data.details;
