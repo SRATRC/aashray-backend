@@ -107,6 +107,10 @@ const CardDb = sequelize.define(
     updatedBy: {
       type: DataTypes.STRING,
       allowNull: false
+    },
+    password: {
+      type: DataTypes.STRING,
+      allowNull: false
     }
   },
   {
