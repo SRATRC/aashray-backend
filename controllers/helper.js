@@ -23,47 +23,6 @@ import getDates from '../utils/getDates.js';
 import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 
-export async function checkRoomAlreadyBooked(checkin, checkout, cardno) {
-  const result = await RoomBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
-          ]
-        }
-      ],
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
-    }
-  });
-
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
-}
-
 export async function checkFlatAlreadyBooked(checkin, checkout, cardno) {
   const result = await FlatBooking.findAll({
     where: {

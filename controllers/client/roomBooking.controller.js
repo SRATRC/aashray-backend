@@ -29,11 +29,13 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
   calculateNights,
   validateDate
 } from '../helper.js';
+import {
+  checkRoomAlreadyBooked
+} from '../helpers/roomBooking.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';

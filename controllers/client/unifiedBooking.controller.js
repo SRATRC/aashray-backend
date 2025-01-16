@@ -36,7 +36,6 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
   checkSpecialAllowance,
   calculateNights,
@@ -44,6 +43,9 @@ import {
   checkRoomBookingProgress,
   findRoom
 } from '../helper.js';
+import {
+  checkRoomAlreadyBooked
+} from '../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
