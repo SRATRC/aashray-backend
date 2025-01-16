@@ -243,9 +243,10 @@ export const BookingForGuest = async (req, res) => {
 };
 
 export const FlatBookingForMumukshu = async (req, res) => {
+  const { flat_no, mobno, checkin_date, checkout_date } = req.body;
   const ownFlat = await FlatDb.findOne({
     where: {
-      flatno: req.body.flat_no,
+      flatno: flat_no,
       owner: req.user.cardno
     }
   });
@@ -253,36 +254,28 @@ export const FlatBookingForMumukshu = async (req, res) => {
 
   const user_data = await CardDb.findOne({
     where: {
-      mobno: req.body.mobno
+      mobno: mobno
     }
   });
   if (!user_data) throw new ApiError(404, 'user not found');
 
   if (
-    await checkFlatAlreadyBooked(
-      req.body.checkin_date,
-      req.body.checkout_date,
-      user_data.dataValues.cardno
-    )
+    await checkFlatAlreadyBooked(checkin_date, checkout_date, req.user.cardno)
   ) {
     throw new ApiError(400, 'Already Booked');
   }
 
-  validateDate(req.body.checkin_date, req.body.checkout_date);
+  validateDate(checkin_date, checkout_date);
 
-  const nights = await calculateNights(
-    req.body.checkin_date,
-    req.body.checkout_date
-  );
+  const nights = await calculateNights(checkin_date, checkout_date);
 
   const booking = await FlatBooking.create({
     bookingid: uuidv4(),
     cardno: user_data.dataValues.cardno,
-    flatno: req.body.flat_no,
-    checkin: req.body.checkin_date,
-    checkout: req.body.checkout_date,
-    nights: nights,
-    status: ROOM_STATUS_PENDING_CHECKIN
+    flatno: flat_no,
+    checkin: checkin_date,
+    checkout: checkout_date,
+    nights: nights
   });
 
   if (!booking) {
