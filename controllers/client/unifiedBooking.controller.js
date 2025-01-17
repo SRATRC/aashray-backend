@@ -40,15 +40,17 @@ import {
   checkSpecialAllowance,
   calculateNights,
   validateDate,
-  checkRoomBookingProgress,
-  findRoom
+  checkRoomBookingProgress
 } from '../helper.js';
 import {
-  checkRoomAlreadyBooked
-} from '../helpers/roomBooking.helper.js';
+  bookDayVisit,
+  checkRoomAlreadyBooked,
+  findRoom
+} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
+import { createTransaction } from '../../helpers/transactions.helper.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -234,6 +236,7 @@ async function checkRoomAvailability(user, data) {
 
 async function bookRoom(body, user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
+  
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, user.cardno)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
@@ -241,87 +244,65 @@ async function bookRoom(body, user, data, t) {
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
+  
+  if (nights == 0) {
+    await bookDayVisit(
+      user.cardno,
+      checkin_date,
+      checkout_date,
+      t
+    );
+
+    return t;
+  }
 
   const gender = floor_pref ? floor_pref + user.gender : user.gender;
+  
+  const roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
+  if (!roomno) {
+    throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
+  }
 
-  var roomno = undefined;
-  var booking = undefined;
+  const booking = await RoomBooking.create(
+    {
+      bookingid: uuidv4(),
+      cardno: user.cardno,
+      roomno: roomno.dataValues.roomno,
+      checkin: checkin_date,
+      checkout: checkout_date,
+      nights: nights,
+      roomtype: room_type,
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      gender: gender
+    },
+    { transaction: t }
+  );
 
-  if (nights > 0) {
-    roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
-    if (!roomno) {
-      throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
-    }
+  if (!booking) {
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+  }
 
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: user.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: room_type,
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender
-      },
-      { transaction: t }
-    );
+  // TODO: Apply Discounts on credits left
+  // TODO: transaction status should be pending and updated to completed only after payment
 
-    if (!booking) {
-      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-    }
+  const amount = (
+    room_type == 'nac' 
+    ? NAC_ROOM_PRICE
+    : AC_ROOM_PRICE
+  ) * nights;
 
-    // TODO: Apply Discounts on credits left
-    // TODO: transaction status should be pending and updated to completed only after payment
-    const transaction = await Transactions.create(
-      {
-        cardno: user.cardno,
-        bookingid: booking.dataValues.bookingid,
-        category: TYPE_ROOM,
-        amount:
-          room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
-        upi_ref: body.transaction_ref || 'NA',
-        status:
-          body.transaction_type == TRANSACTION_TYPE_UPI
-            ? STATUS_PAYMENT_COMPLETED
-            : body.transaction_type == TRANSACTION_TYPE_CASH
-            ? STATUS_CASH_COMPLETED
-            : null,
-        updatedBy: 'USER'
-      },
-      { transaction: t }
-    );
+  const transaction = await createTransaction(
+    user.cardno, 
+    booking.dataValues.bookingid, 
+    TYPE_ROOM, 
+    amount,
+    body.transaction_ref || 'NA', 
+    body.transaction_type, 
+    'USER'
+  );
 
-    if (!transaction) {
-      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-    }
-  } else {
-    roomno = await RoomDb.findOne({
-      where: {
-        roomno: { [Sequelize.Op.eq]: 'NA' }
-      },
-      attributes: ['roomno']
-    });
-
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: user.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: 'NA',
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender
-      },
-      { transaction: t }
-    );
-
-    if (!booking) {
-      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-    }
+  if (!transaction) {
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
   //   sendMail({

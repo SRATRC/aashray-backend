@@ -75,38 +75,6 @@ export async function calculateNights(checkin, checkout) {
   return nights;
 }
 
-export async function findRoom(checkin_date, checkout_date, room_type, gender) {
-  return RoomDb.findOne({
-    attributes: ['roomno'],
-    where: {
-      roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-                )`),
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                  SELECT roomno 
-                  FROM guest_room_booking 
-                  WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-              )`)
-      },
-      roomstatus: STATUS_AVAILABLE,
-      roomtype: room_type,
-      gender: gender
-    },
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ],
-    limit: 1
-  });
-}
-
 export async function isFoodBooked(start_date, end_date, cardno) {
   const startDate = new Date(start_date);
   const endDate = new Date(end_date);

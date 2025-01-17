@@ -40,16 +40,19 @@ import {
   checkGuestRoomAlreadyBooked,
   checkGuestFoodAlreadyBooked
 } from '../helper.js';
+import { 
+  checkRoomAlreadyBooked,
+  findRoom
+} from '../../helpers/roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
-import { findRoom } from '../../helpers/roomBooking.helper.js';
 
-// TODO: charge money for guest food
-export const guestBooking = async (req, res) => {
+
+export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
   var t = await database.transaction();
   req.transaction = t;
@@ -248,39 +251,30 @@ async function checkRoomAvailability(user, data) {
 }
 
 async function bookRoom(body, user, data, t) {
-  const { checkin_date, checkout_date, guestGroup } = data.details;
+  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
 
-  const nights = await calculateNights(checkin_date, checkout_date);
-  // TODO: logic for nights = 0 is different for self and for guests
-  if (nights <= 0) {
-    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
-  }
-
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
-  const guest_db = await GuestDb.findAll({
-    attributes: ['id', 'name', 'gender'],
-    where: {
-      id: {
-        [Sequelize.Op.in]: totalGuests
-      }
-    }
-  });
-  const guest_details = guest_db.map((guest) => guest.dataValues);
-
-  if (
-    await checkGuestRoomAlreadyBooked(
-      checkin_date,
-      checkout_date,
-      user.cardno,
-      totalGuests
-    )
-  ) {
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  for (const group of guestGroup) {
-    const { roomType, floorType, guests } = group;
+  const cardDb = await CardDb.findAll({
+    where: { cardno: mumukshus }
+  });
+
+  if (cardDb.length != mumukshus) {
+    throw new ApiError(400, ERR_CARD_NOT_FOUND);
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  // TODO: logic for nights = 0 is different for self and for guests
+  // if (nights <= 0) {
+  //   throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
+  // }
+
+  for (const group of mumukshuGroup) {
+    const { roomType, floorType, mumukshus } = group;
 
     for (const guest of guests) {
       await bookRoomForSingleGuest(
@@ -597,73 +591,3 @@ async function bookAdhyayan(body, user, data, t) {
 
   return t;
 }
-
-export const fetchGuests = async (req, res) => {
-  const { cardno } = req.user;
-
-  const guests = await GuestDb.findAll({
-    attributes: ['id', 'name', 'type', 'mobno', 'gender'],
-    where: {
-      cardno: cardno
-    },
-    raw: true,
-    order: [['updatedAt', 'DESC']],
-    limit: 10
-  });
-
-  return res.status(200).send({
-    message: 'fetched results',
-    data: guests
-  });
-};
-
-export const updateGuests = async (req, res) => {
-  const { cardno } = req.user;
-  const { guests } = req.body;
-
-  const t = await database.transaction();
-  req.transaction = t;
-
-  const guestsToUpdate = guests.filter((guest) => guest.id);
-  const guestsToCreate = guests
-    .filter((guest) => !guest.id)
-    .map((guest) => ({
-      ...guest,
-      cardno: cardno
-    }));
-
-  for (const guest of guestsToUpdate) {
-    const { id, ...updateData } = guest;
-    await GuestDb.update(updateData, {
-      where: { id },
-      transaction: t
-    });
-  }
-
-  const createdGuests = await GuestDb.bulkCreate(guestsToCreate, {
-    transaction: t,
-    returning: true
-  });
-  const createdGuestsData = createdGuests.map((guest) => ({
-    id: guest.id,
-    name: guest.name
-  }));
-
-  const updatedGuests = await GuestDb.findAll({
-    where: { id: guestsToUpdate.map((guest) => guest.id) },
-    attributes: ['id', 'name'],
-    transaction: t
-  });
-
-  const allGuests = [
-    ...updatedGuests.map((guest) => guest.toJSON()),
-    ...createdGuestsData
-  ];
-
-  await t.commit();
-
-  return res.status(200).send({
-    message: 'Guests updated successfully',
-    guests: allGuests
-  });
-};

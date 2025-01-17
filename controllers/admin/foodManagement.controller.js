@@ -18,7 +18,7 @@ import {
 } from '../helper.js';
 import {
   checkRoomAlreadyBooked
-} from '../helpers/roomBooking.helper.js';
+} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import moment from 'moment';

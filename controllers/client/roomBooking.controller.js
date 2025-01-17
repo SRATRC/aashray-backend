@@ -35,7 +35,7 @@ import {
 } from '../helper.js';
 import {
   checkRoomAlreadyBooked
-} from '../helpers/roomBooking.helper.js';
+} from '../../helpers/roomBooking.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';
