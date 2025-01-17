@@ -13,10 +13,12 @@ import {
   TYPE_EXPENSE
 } from '../../config/constants.js';
 import {
-  checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
   isFoodBooked
 } from '../helper.js';
+import {
+  checkRoomAlreadyBooked
+} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import moment from 'moment';

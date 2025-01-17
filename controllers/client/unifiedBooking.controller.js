@@ -19,13 +19,10 @@ import {
   TYPE_TRAVEL,
   TYPE_FOOD,
   STATUS_RESIDENT,
-  TRAVEL_PRICE,
-  TRAVEL_TYPE_FULL,
   STATUS_PAYMENT_COMPLETED,
   TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
   TRANSACTION_TYPE_CASH,
-  FULL_TRAVEL_PRICE,
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
@@ -33,25 +30,29 @@ import {
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_ADHYAYAN_ALREADY_BOOKED,
   ERR_ADHYAYAN_NOT_FOUND,
-  ERR_FOOD_ALREADY_BOOKED,
   ERR_ROOM_MUST_BE_BOOKED
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
   checkSpecialAllowance,
   calculateNights,
-  isFoodBooked,
   validateDate,
-  checkRoomBookingProgress,
-  findRoom
+  checkRoomBookingProgress
 } from '../helper.js';
+import {
+  bookDayVisit,
+  checkRoomAlreadyBooked,
+  createRoomBooking,
+  findRoom,
+  roomCharge
+} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
+import { createTransaction } from '../../helpers/transactions.helper.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -64,7 +65,7 @@ export const unifiedBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
-      t = await bookFood(req, req.user, req.body.primary_booking, t);
+      t = await bookFood(req.body, req.user, req.body.primary_booking, t);
       break;
 
     case TYPE_TRAVEL:
@@ -87,7 +88,7 @@ export const unifiedBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          t = await bookFood(req, req.user, addon, t);
+          t = await bookFood(req.body, req.user, addon, t);
           break;
 
         case TYPE_TRAVEL:
@@ -112,6 +113,7 @@ export const validateBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
   var roomDetails = {};
+  var foodDetails = {};
   var travelDetails = {};
   var adhyayanDetails = {};
   var totalCharge = 0;
@@ -126,7 +128,11 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
-      // Food is always available
+      foodDetails = await checkFoodAvailability(
+        req.body,
+        req.user,
+        req.body.primary_booking
+      );
       break;
 
     case TYPE_TRAVEL:
@@ -157,7 +163,11 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          // Food is always available
+          foodDetails = await checkFoodAvailability(
+            req.body,
+            req.user,
+            addon
+          );
           break;
 
         case TYPE_TRAVEL:
@@ -179,13 +189,15 @@ export const validateBooking = async (req, res) => {
     }
   }
 
+  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100)/100;
   return res.status(200).send({
     data: {
       roomDetails: roomDetails,
+      foodDetails: foodDetails,
       adhyayanDetails: adhyayanDetails,
       travelDetails: travelDetails,
-      taxes: totalCharge * RAZORPAY_FEE,
-      totalCharge: totalCharge * (1 + RAZORPAY_FEE)
+      taxes: taxes, 
+      totalCharge: totalCharge + taxes
     }
   });
 };
@@ -210,11 +222,9 @@ async function checkRoomAvailability(user, data) {
     );
     if (roomno) {
       roomStatus = STATUS_AVAILABLE;
-      charge =
-        room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
+      charge = roomCharge(room_type) * nights;
     }
   } else {
-    // TODO: explain what is this case, where room_type = NA
     roomStatus = STATUS_AVAILABLE;
     charge = 0;
   }
@@ -227,6 +237,7 @@ async function checkRoomAvailability(user, data) {
 
 async function bookRoom(body, user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
+  
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, user.cardno)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
@@ -234,87 +245,27 @@ async function bookRoom(body, user, data, t) {
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
-
-  const gender = floor_pref ? floor_pref + user.gender : user.gender;
-
-  var roomno = undefined;
-  var booking = undefined;
-
-  if (nights > 0) {
-    roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
-    if (!roomno) {
-      throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
-    }
-
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: user.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: room_type,
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender
-      },
-      { transaction: t }
+  
+  if (nights == 0) {
+    await bookDayVisit(
+      user.cardno,
+      checkin_date,
+      checkout_date,
+      t
     );
-
-    if (!booking) {
-      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-    }
-
-    // TODO: Apply Discounts on credits left
-    // TODO: transaction status should be pending and updated to completed only after payment
-    const transaction = await Transactions.create(
-      {
-        cardno: user.cardno,
-        bookingid: booking.dataValues.bookingid,
-        category: TYPE_ROOM,
-        amount:
-          room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
-        upi_ref: body.transaction_ref || 'NA',
-        status:
-          body.transaction_type == TRANSACTION_TYPE_UPI
-            ? STATUS_PAYMENT_COMPLETED
-            : body.transaction_type == TRANSACTION_TYPE_CASH
-            ? STATUS_CASH_COMPLETED
-            : null,
-        updatedBy: 'USER'
-      },
-      { transaction: t }
-    );
-
-    if (!transaction) {
-      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-    }
   } else {
-    roomno = await RoomDb.findOne({
-      where: {
-        roomno: { [Sequelize.Op.eq]: 'NA' }
-      },
-      attributes: ['roomno']
-    });
-
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: user.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: 'NA',
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender
-      },
-      { transaction: t }
-    );
-
-    if (!booking) {
-      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-    }
+    await createRoomBooking(
+      user.cardno,
+      checkin_date,
+      checkout_date,
+      nights,
+      room_type,
+      user.gender,
+      floor_pref,
+      body.transaction_ref,
+      body.transaction_type,
+      t
+    )
   }
 
   //   sendMail({
@@ -332,7 +283,49 @@ async function bookRoom(body, user, data, t) {
   return t;
 }
 
-async function bookFood(req, user, data, t) {
+async function checkFoodAvailability(body, user, data) {
+  const { start_date, end_date } = data.details;
+
+  validateDate(start_date, end_date);
+
+  await validateFood(body, user, start_date, end_date);
+
+  return {
+    status: STATUS_AVAILABLE,
+    charge: 0
+  };
+}
+
+async function validateFood(body, user, start_date, end_date) {
+  if (!(
+    (await checkRoomBookingProgress(
+      start_date,
+      end_date,
+      body.primary_booking,
+      body.addons
+    )) ||
+    (await checkRoomAlreadyBooked(
+      start_date,
+      end_date,
+      user.cardno
+    )) ||
+    (await checkFlatAlreadyBooked(
+      start_date,
+      end_date,
+      user.cardno
+    )) ||
+    user.res_status === STATUS_RESIDENT ||
+    (await checkSpecialAllowance(
+      start_date,
+      end_date,
+      user.cardno
+    ))
+  )) {
+    throw new ApiError(403, ERR_ROOM_MUST_BE_BOOKED);
+  }
+}
+
+async function bookFood(body, user, data, t) {
   const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
 
@@ -343,35 +336,7 @@ async function bookFood(req, user, data, t) {
   ];
 
   validateDate(start_date, end_date);
-
-  if (
-    !(
-      (await checkRoomBookingProgress(
-        start_date,
-        end_date,
-        req.body.primary_booking,
-        req.body.addons
-      )) ||
-      (await checkRoomAlreadyBooked(
-        start_date,
-        end_date,
-        user.cardno
-      )) ||
-      (await checkFlatAlreadyBooked(
-        start_date,
-        end_date,
-        user.cardno
-      )) ||
-      user.res_status === STATUS_RESIDENT ||
-      (await checkSpecialAllowance(
-        start_date,
-        end_date,
-        user.cardno
-      ))
-    )
-  ) {
-    throw new ApiError(403, ERR_ROOM_MUST_BE_BOOKED);
-  }
+  await validateFood(body, user, start_date, end_date);
 
   const allDates = getDates(start_date, end_date);
   const bookingsToUpdate = await FoodDb.findAll({

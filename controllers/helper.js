@@ -7,7 +7,7 @@ import {
   ShibirDb,
   GuestRoomBooking,
   GuestFoodDb,
-  GuestShibirBooking
+  ShibirGuestBookingDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -22,47 +22,6 @@ import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
-
-export async function checkRoomAlreadyBooked(checkin, checkout, cardno) {
-  const result = await RoomBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
-          ]
-        }
-      ],
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
-    }
-  });
-
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
-}
 
 export async function checkFlatAlreadyBooked(checkin, checkout, cardno) {
   const result = await FlatBooking.findAll({
@@ -114,38 +73,6 @@ export async function calculateNights(checkin, checkout) {
   const nights = Math.ceil(timeDifference / (1000 * 3600 * 24));
 
   return nights;
-}
-
-export async function findRoom(checkin_date, checkout_date, room_type, gender) {
-  return RoomDb.findOne({
-    attributes: ['roomno'],
-    where: {
-      roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-                )`),
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                  SELECT roomno 
-                  FROM guest_room_booking 
-                  WHERE NOT (checkout <= '${checkin_date}' OR checkin >= '${checkout_date}')
-              )`)
-      },
-      roomstatus: STATUS_AVAILABLE,
-      roomtype: room_type,
-      gender: gender
-    },
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ],
-    limit: 1
-  });
 }
 
 export async function isFoodBooked(start_date, end_date, cardno) {
@@ -376,7 +303,7 @@ export async function checkGuestFoodAlreadyBooked(
 }
 
 export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
-  const adhyayans = await GuestShibirBooking.findAll({
+  const adhyayans = await ShibirGuestBookingDb.findAll({
     include: [
       {
         model: ShibirDb,
