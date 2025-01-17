@@ -45,6 +45,7 @@ import {
 import {
   bookDayVisit,
   checkRoomAlreadyBooked,
+  createRoomBooking,
   findRoom
 } from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
@@ -252,57 +253,19 @@ async function bookRoom(body, user, data, t) {
       checkout_date,
       t
     );
-
-    return t;
-  }
-
-  const gender = floor_pref ? floor_pref + user.gender : user.gender;
-  
-  const roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
-  if (!roomno) {
-    throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
-  }
-
-  const booking = await RoomBooking.create(
-    {
-      bookingid: uuidv4(),
-      cardno: user.cardno,
-      roomno: roomno.dataValues.roomno,
-      checkin: checkin_date,
-      checkout: checkout_date,
-      nights: nights,
-      roomtype: room_type,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      gender: gender
-    },
-    { transaction: t }
-  );
-
-  if (!booking) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-  }
-
-  // TODO: Apply Discounts on credits left
-  // TODO: transaction status should be pending and updated to completed only after payment
-
-  const amount = (
-    room_type == 'nac' 
-    ? NAC_ROOM_PRICE
-    : AC_ROOM_PRICE
-  ) * nights;
-
-  const transaction = await createTransaction(
-    user.cardno, 
-    booking.dataValues.bookingid, 
-    TYPE_ROOM, 
-    amount,
-    body.transaction_ref || 'NA', 
-    body.transaction_type, 
-    'USER'
-  );
-
-  if (!transaction) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+  } else {
+    await createRoomBooking(
+      user.cardno,
+      checkin_date,
+      checkout_date,
+      nights,
+      room_type,
+      user.gender,
+      floor_pref,
+      body.transaction_ref,
+      body.transaction_type,
+      t
+    )
   }
 
   //   sendMail({

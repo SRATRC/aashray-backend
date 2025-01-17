@@ -7,10 +7,14 @@ import {
   STATUS_AVAILABLE,
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_PENDING_CHECKIN,
-  ERR_ROOM_FAILED_TO_BOOK
+  ERR_ROOM_FAILED_TO_BOOK,
+  NAC_ROOM_PRICE,
+  AC_ROOM_PRICE,
+  TYPE_ROOM
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
+import { createTransaction } from './transactions.helper.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -104,4 +108,65 @@ export async function findRoom(checkin, checkout, room_type, gender) {
     ],
     limit: 1
   });
+}
+
+export async function createRoomBooking(
+  cardno, 
+  checkin, 
+  checkout, 
+  nights, 
+  roomtype, 
+  user_gender, 
+  floor_pref,
+  transaction_ref, 
+  transaction_type, 
+  t
+) {
+  const gender = floor_pref ? floor_pref + user_gender : user_gender;
+  const roomno = await findRoom(checkin, checkout, roomtype, gender);
+  if (!roomno) {
+    throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
+  }
+  
+  const booking = await RoomBooking.create(
+    {
+      bookingid: uuidv4(),
+      roomno: roomno.dataValues.roomno,
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      cardno,
+      checkin,
+      checkout,
+      nights,
+      roomtype,
+      gender
+    },
+    { transaction: t }
+  );
+
+  if (!booking) {
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+  }
+
+  // TODO: Apply Discounts on credits left
+  // TODO: transaction status should be pending and updated to completed only after payment
+
+  const amount = (
+    roomtype == 'nac' 
+    ? NAC_ROOM_PRICE
+    : AC_ROOM_PRICE
+  ) * nights;
+
+  const transaction = await createTransaction(
+    cardno, 
+    booking.dataValues.bookingid, 
+    TYPE_ROOM, 
+    amount,
+    transaction_ref || 'NA', 
+    transaction_type, 
+    'USER'
+  );
+
+  if (!transaction) {
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+  }
 }
