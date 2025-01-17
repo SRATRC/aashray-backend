@@ -5,12 +5,6 @@ import bcrypt from 'bcrypt';
 
 export const verifyMobno = async (req, res) => {
   const mobno = req.query.mobno;
-  const password = req.query.password;
-
-// make the api backword compatible.. will rem once front end
-  if(!password){
-    password="vitrag";
-  }
 
   const details = await CardDb.findOne({
     where: {
@@ -21,15 +15,8 @@ export const verifyMobno = async (req, res) => {
     }
   });
 
-
   if (!details) {
     throw new ApiError(404, 'user not found');
-  }
-
-  const match = bcrypt.compareSync(password, details.password);
-
-  if (!match) {
-    throw new ApiError(404, 'user not found');//login
   }
 
   return res.status(200).send({ message: '', data: details });
@@ -97,3 +84,38 @@ export const logout = async (req, res) => {
 
   return res.status(200).send({ message: 'logged out' });
 };
+
+export const verifyAndLogin = async (req, res) => {
+  const { mobno, password,token } = req.body;
+
+  const details = await CardDb.findOne({
+    where: {
+      mobno: mobno
+    },
+    attributes: {
+      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
+    }
+  });
+
+  if (!details) {
+    throw new ApiError(404, 'user not found');
+  }
+
+  const match = bcrypt.compareSync(password, details.password);
+
+  if (!match) {
+    throw new ApiError(404, 'user not found');//login
+  }
+
+  const updated = await CardDb.update(
+    { token: token },
+    { where: { mobno: mobno } }
+  );
+  if (!updated) {
+    throw new ApiError(500, 'Error while logging in user');
+  }
+  details.password = "";
+  return res.status(200).send({ message: 'logged in', data: details });
+
+};
+
