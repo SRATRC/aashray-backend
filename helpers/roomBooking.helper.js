@@ -10,11 +10,13 @@ import {
   ERR_ROOM_FAILED_TO_BOOK,
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
-  TYPE_ROOM
+  TYPE_ROOM,
+  ERR_ROOM_NO_BED_AVAILABLE
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import { createTransaction } from './transactions.helper.js';
+import ApiError from '../utils/ApiError.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -150,11 +152,7 @@ export async function createRoomBooking(
   // TODO: Apply Discounts on credits left
   // TODO: transaction status should be pending and updated to completed only after payment
 
-  const amount = (
-    roomtype == 'nac' 
-    ? NAC_ROOM_PRICE
-    : AC_ROOM_PRICE
-  ) * nights;
+  const amount = roomCharge(roomtype) * nights;
 
   const transaction = await createTransaction(
     cardno, 
@@ -169,4 +167,10 @@ export async function createRoomBooking(
   if (!transaction) {
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
+}
+
+export function roomCharge(roomtype) {
+  return roomtype == 'nac' 
+    ? NAC_ROOM_PRICE
+    : AC_ROOM_PRICE;
 }

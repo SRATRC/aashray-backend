@@ -1,9 +1,8 @@
 import {
   ShibirDb,
-  GuestRoomBooking,
   GuestFoodDb,
   ShibirGuestBookingDb,
-  GuestDb
+  CardDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -32,7 +31,8 @@ import {
   ERR_FOOD_ALREADY_BOOKED,
   LUNCH_PRICE,
   BREAKFAST_PRICE,
-  DINNER_PRICE
+  DINNER_PRICE,
+  ERR_CARD_NOT_FOUND
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -42,7 +42,9 @@ import {
 } from '../helper.js';
 import { 
   checkRoomAlreadyBooked,
-  findRoom
+  createRoomBooking,
+  findRoom,
+  roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
@@ -109,10 +111,7 @@ export const validateBooking = async (req, res) => {
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      roomDetails = await checkRoomAvailability(
-        req.user,
-        req.body.primary_booking
-      );
+      roomDetails = await checkRoomAvailability(req.body.primary_booking);
       totalCharge += roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -143,7 +142,7 @@ export const validateBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          roomDetails = await checkRoomAvailability(req.user, addon);
+          roomDetails = await checkRoomAvailability(addon);
           totalCharge += roomDetails.reduce(
             (partialSum, room) => partialSum + room.charge,
             0
@@ -181,68 +180,63 @@ export const validateBooking = async (req, res) => {
   });
 };
 
-async function checkRoomAvailability(user, data) {
-  const { checkin_date, checkout_date, guestGroup } = data.details;
-
+async function checkRoomAvailability(data) {
+  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
-  const nights = await calculateNights(checkin_date, checkout_date);
-  // TODO: logic for nights = 0 is different for self and for guests
-  if (nights <= 0) {
-    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
-  }
 
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
-  const guest_db = await GuestDb.findAll({
-    attributes: ['id', 'name', 'gender'],
-    where: {
-      id: {
-        [Sequelize.Op.in]: totalGuests
-      }
-    }
-  });
-  const guest_details = guest_db.map((guest) => guest.dataValues);
-
-  if (
-    await checkGuestRoomAlreadyBooked(
-      checkin_date,
-      checkout_date,
-      user.cardno,
-      totalGuests
-    )
-  ) {
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
+  const cardDb = await CardDb.findAll({
+    where: { cardno: mumukshus },
+    attributes: ['id', 'cardno', 'gender']
+  });
+
+  if (cardDb.length != mumukshus.length) {
+    throw new ApiError(400, ERR_CARD_NOT_FOUND);
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  
   var roomDetails = [];
 
-  for (const group of guestGroup) {
-    const { roomType, floorType, guests } = group;
+  for (const group of mumukshuGroup) {
+    const { roomType, floorType, mumukshus } = group;
 
-    for (const guest of guests) {
-      var roomStatus = STATUS_WAITING;
+    for (const mumukshu of mumukshus) {
+      const card = cardDb.filter(
+        (item) => (item.dataValues.cardno == mumukshu)
+      )[0];
+
+      var status = STATUS_WAITING;
       var charge = 0;
 
       const gender = floorType
-        ? floorType + guest_details.filter((item) => item.id == guest)[0].gender
-        : guest_details.filter((item) => item.id == guest)[0].gender;
+        ? floorType + card.dataValues.gender
+        : card.dataValues.gender;
 
-      const room = await findRoom(
-        checkin_date,
-        checkout_date,
-        roomType,
-        gender
-      );
-
-      if (room) {
-        roomStatus = STATUS_AVAILABLE;
-        charge =
-          roomType == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
+      if (nights > 0) {
+        const roomno = await findRoom(
+          checkin_date,
+          checkout_date,
+          roomType,
+          gender
+        );
+        if (roomno) {
+          status = STATUS_AVAILABLE;
+          charge = roomCharge(roomType) * nights;
+        }
+      } else {
+        status = STATUS_AVAILABLE;
+        charge = 0;
       }
-
+    
       roomDetails.push({
-        guestId: guest,
-        status: roomStatus,
-        charge: charge
+        mumukshu,
+        status,
+        charge
       });
     }
   }
@@ -260,10 +254,11 @@ async function bookRoom(body, user, data, t) {
   }
 
   const cardDb = await CardDb.findAll({
-    where: { cardno: mumukshus }
+    where: { cardno: mumukshus },
+    attributes: ['id', 'cardno', 'gender']
   });
 
-  if (cardDb.length != mumukshus) {
+  if (cardDb.length != mumukshus.length) {
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
@@ -279,7 +274,7 @@ async function bookRoom(body, user, data, t) {
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter(
         (item) => (item.dataValues.cardno == mumukshu)
-      );
+      )[0];
 
       if (nights == 0) {
         await bookDayVisit(

@@ -46,7 +46,8 @@ import {
   bookDayVisit,
   checkRoomAlreadyBooked,
   createRoomBooking,
-  findRoom
+  findRoom,
+  roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
@@ -221,8 +222,7 @@ async function checkRoomAvailability(user, data) {
     );
     if (roomno) {
       roomStatus = STATUS_AVAILABLE;
-      charge =
-        room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
+      charge = roomCharge(room_type) * nights;
     }
   } else {
     roomStatus = STATUS_AVAILABLE;
