@@ -276,86 +276,33 @@ async function bookRoom(body, user, data, t) {
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
-    for (const guest of guests) {
-      await bookRoomForSingleGuest(
-        body,
-        user,
-        guest,
-        guest_details,
-        checkin_date,
-        checkout_date,
-        roomType,
-        floorType,
-        nights,
-        t
+    for (const mumukshu of mumukshus) {
+      const card = cardDb.filter(
+        (item) => (item.dataValues.cardno == mumukshu)
       );
+
+      if (nights == 0) {
+        await bookDayVisit(
+          card.dataValues.cardno,
+          checkin_date,
+          checkout_date,
+          t
+        );
+      } else {
+        await createRoomBooking(
+          card.dataValues.cardno,
+          checkin_date,
+          checkout_date,
+          nights,
+          roomType,
+          card.dataValues.gender,
+          floorType,
+          body.transaction_ref,
+          body.transaction_type,
+          t
+        )
+      }
     }
-  }
-  return t;
-}
-
-async function bookRoomForSingleGuest(
-  body,
-  user,
-  guest,
-  guest_details,
-  checkin_date,
-  checkout_date,
-  room_type,
-  floor_type,
-  nights,
-  t
-) {
-  const gender = floor_type
-    ? floor_type + guest_details.filter((item) => item.id == guest)[0].gender
-    : guest_details.filter((item) => item.id == guest)[0].gender;
-
-  const roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
-
-  if (!roomno) {
-    throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
-  }
-
-  const booking = await GuestRoomBooking.create(
-    {
-      bookingid: uuidv4(),
-      cardno: user.cardno,
-      guest: guest,
-      roomno: roomno.dataValues.roomno,
-      checkin: checkin_date,
-      checkout: checkout_date,
-      nights: nights,
-      roomtype: room_type,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      gender: gender
-    },
-    { transaction: t }
-  );
-
-  if (!booking) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-  }
-
-  const transaction = await Transactions.create(
-    {
-      cardno: user.cardno,
-      bookingid: booking.dataValues.bookingid,
-      category: TYPE_GUEST_ROOM,
-      type: TYPE_EXPENSE,
-      amount:
-        room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
-      upi_ref: body.transaction_ref || 'NA',
-      status:
-        body.transaction_type == TRANSACTION_TYPE_UPI
-          ? STATUS_PAYMENT_COMPLETED
-          : STATUS_PAYMENT_PENDING,
-      updatedBy: 'USER'
-    },
-    { transaction: t }
-  );
-
-  if (!transaction) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
   return t;
