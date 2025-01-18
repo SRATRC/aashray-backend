@@ -69,10 +69,10 @@ const CardDb = sequelize.define(
       allowNull: false
     },
     pin: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING,
       allowNull: false
     },
-    centre: {
+    center: {
       type: DataTypes.STRING,
       allowNull: false
     },
