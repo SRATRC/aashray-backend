@@ -2,7 +2,9 @@ import {
   ShibirDb,
   GuestFoodDb,
   ShibirGuestBookingDb,
-  CardDb
+  CardDb,
+  RoomBooking,
+  FoodDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -65,7 +67,7 @@ export const mumukshuBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
-      t = await bookFood(req, req.user, req.body.primary_booking, t);
+      t = await bookFood(req.body.primary_booking, t);
       break;
 
     case TYPE_ADHYAYAN:
@@ -84,7 +86,7 @@ export const mumukshuBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          t = await bookFood(req, req.user, addon, t);
+          t = await bookFood(addon, t);
           break;
 
         case TYPE_ADHYAYAN:
@@ -185,23 +187,15 @@ async function checkRoomAvailability(data) {
   validateDate(checkin_date, checkout_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  const cardDb = await validateMumukshus(mumukshus);
+
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
-  }
-
-  const cardDb = await CardDb.findAll({
-    where: { cardno: mumukshus },
-    attributes: ['id', 'cardno', 'gender']
-  });
-
-  if (cardDb.length != mumukshus.length) {
-    throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
   const nights = await calculateNights(checkin_date, checkout_date);
   
   var roomDetails = [];
-
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
@@ -249,17 +243,10 @@ async function bookRoom(body, user, data, t) {
   validateDate(checkin_date, checkout_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  const cardDb = await validateMumukshus(mumukshus);
+
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
-  }
-
-  const cardDb = await CardDb.findAll({
-    where: { cardno: mumukshus },
-    attributes: ['id', 'cardno', 'gender']
-  });
-
-  if (cardDb.length != mumukshus.length) {
-    throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
   const nights = await calculateNights(checkin_date, checkout_date);
@@ -304,110 +291,87 @@ async function bookRoom(body, user, data, t) {
 }
 
 async function checkFoodAvailability(data) {
-  const { start_date, end_date, guestGroup } = data.details;
-  
+  const { start_date, end_date, mumukshuGroup } = data.details;
   validateDate(start_date, end_date);
 
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  await validateMumukshus(mumukshus);
 
-  if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
-    throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
-
-  
   const allDates = getDates(start_date, end_date);
+  const bookings = await getFoodBookings(mumukshus, allDates);
+
   var charge = 0;
-  for (const group of guestGroup) {
-    const { meals, guests } = group;
 
-    const groupCharge = allDates.length * guests.length * (
-      (meals.includes('breakfast') ? BREAKFAST_PRICE : 0) + 
-      (meals.includes('lunch') ? LUNCH_PRICE : 0) + 
-      (meals.includes('dinner') ? DINNER_PRICE : 0));
-
-    charge += groupCharge;
+  for (const group of mumukshuGroup) {
+    const { meals, mumukshus } = group;
+    for (const date of allDates) {
+      for (const mumukshu of mumukshus) {
+        const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
+        if (booking) {
+          charge +=
+            (meals.includes('breakfast') && !booking['breakfast'] ? BREAKFAST_PRICE : 0) +
+            (meals.includes('lunch') && !booking['lunch'] ? LUNCH_PRICE : 0) +
+            (meals.includes('dinner') && !booking['dinner'] ? DINNER_PRICE : 0);
+        } else {
+          charge +=
+            (meals.includes('breakfast') ? BREAKFAST_PRICE : 0) +
+            (meals.includes('lunch') ? LUNCH_PRICE : 0) +
+            (meals.includes('dinner') ? DINNER_PRICE : 0);
+        }
+      }
+    }
   }
 
   return {
     status: STATUS_AVAILABLE,
-    charge: charge
+    charge
   }
 }
 
-async function bookFood(req, user, data, t) {
-  const { start_date, end_date, guestGroup } = data.details;
-
+async function bookFood(data, t) {
+  const { start_date, end_date, mumukshuGroup } = data.details;
   validateDate(start_date, end_date);
 
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  await validateMumukshus(mumukshus);
+
   const allDates = getDates(start_date, end_date);
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
-
-  const bookingsToUpdate = await GuestFoodDb.findAll({
-    where: {
-      date: { [Sequelize.Op.in]: allDates },
-      guest: { [Sequelize.Op.in]: totalGuests }
-    }
-  });
-
-  var guestMeals = {};
-  guestGroup.forEach((group) => {
-    const { meals, spicy, high_tea, guests } = group;
-    const mealFields = Object.fromEntries(
-      ['breakfast', 'lunch', 'dinner'].map(
-        (item) => ([item, meals.includes(item) ? 1 : 0 ])
-      )
-    );
-
-    guests.forEach((guest) => {
-      guestMeals[guest] = {
-        mealFields,
-        hightea: high_tea || 'NONE',
-        spicy
-      }
-    });
-  });
-
-  var guestDatesUpdated = {};
-  for (const booking of bookingsToUpdate) {
-    const meals = guestMeals[booking.guest];
-
-    Object.keys(meals.mealFields).forEach((type) => {
-      const toBook = meals.mealFields[type];
-      if (toBook && !booking[type])
-        booking[type] = toBook;
-    });
-    booking.hightea = meals.hightea;
-    booking.spicy = meals.spicy;
-    await booking.save({ transaction: t });
-
-    guestDatesUpdated[booking.guest] = guestDatesUpdated[booking.guest] || [];
-    guestDatesUpdated[booking.guest].push(booking.date);
-  }
+  const bookings = await getFoodBookings(mumukshus, allDates);
 
   var bookingsToCreate = [];
-  totalGuests.forEach((guest) => {
-    const bookedDates = guestDatesUpdated[guest] || [];
-    const remainingDates = allDates.filter(date => !bookedDates.includes(date));
-    const meals = guestMeals[guest];
+  for (const group of mumukshuGroup) {
+    const { meals, spicy, high_tea, mumukshus } = group;
 
-    for (const date of remainingDates) {
-      bookingsToCreate.push({
-        cardno: user.cardno,
-        guest,
-        date,
-        breakfast: meals.mealFields.breakfast,
-        lunch: meals.mealFields.lunch,
-        dinner: meals.mealFields.dinner,
-        hightea: meals.hightea,
-        spicy: meals.spicy,
-        plateissued: 0
-      });
+    for (const date of allDates) {
+      for (const mumukshu of mumukshus) {
+        const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
+        if (booking) {
+          ['breakfast', 'lunch', 'dinner'].forEach((type) => {
+            if (meals.includes(type) && !booking[type])
+              booking[type] = 1;
+          });
+          booking['spicy'] = spicy;
+          booking['hightea'] = high_tea;
+          await booking.save({ transaction: t });
+        } else {
+          bookingsToCreate.push({
+            cardno: mumukshu,
+            date,
+            spicy,
+            breakfast: meals.includes('breakfast'),
+            lunch: meals.includes('lunch'),
+            dinner: meals.includes('dinner'),
+            hightea: high_tea,
+            plateissued: 0
+          });
+        }
+      }
     }
-  });
+  }
 
-  await GuestFoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
 }
-
 
 async function checkAdhyayanAvailability(user, data) {
   const { shibir_ids, guests } = data.details;
@@ -533,3 +497,34 @@ async function bookAdhyayan(body, user, data, t) {
 
   return t;
 }
+
+async function validateMumukshus(mumukshus) {
+  const cardDb = await CardDb.findAll({
+    where: { cardno: mumukshus },
+    attributes: ['id', 'cardno', 'gender']
+  });
+
+  if (cardDb.length != mumukshus.length) {
+    throw new ApiError(400, ERR_CARD_NOT_FOUND);
+  }
+
+  return cardDb;
+}
+
+async function getFoodBookings(mumukshus, allDates) {
+  const bookings = await FoodDb.findAll({
+    where: {
+      date: allDates,
+      cardno: mumukshus
+    }
+  });
+
+  const mumukshuBookings = {};
+  for (const booking of bookings) {
+    mumukshuBookings[booking.cardno] ||= {};
+    mumukshuBookings[booking.cardno][booking.date] = booking;
+  }
+
+  return mumukshuBookings;
+}
+
