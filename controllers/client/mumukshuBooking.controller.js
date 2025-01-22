@@ -14,7 +14,8 @@ import {
   LUNCH_PRICE,
   BREAKFAST_PRICE,
   DINNER_PRICE,
-  ERR_CARD_NOT_FOUND
+  ERR_CARD_NOT_FOUND,
+  TYPE_TRAVEL
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -50,6 +51,10 @@ export const mumukshuBooking = async (req, res) => {
       t = await bookFood(req.body.primary_booking, t);
       break;
 
+    case TYPE_TRAVEL:
+      t = await bookTravel(req.body.primary_booking, t);
+      break;
+
     case TYPE_ADHYAYAN:
       t = await bookAdhyayan(req.body, req.body.primary_booking, t);
       break;
@@ -67,6 +72,10 @@ export const mumukshuBooking = async (req, res) => {
 
         case TYPE_FOOD:
           t = await bookFood(addon, t);
+          break;
+
+        case TYPE_TRAVEL:
+          t = await bookTravel(addon, t);
           break;
 
         case TYPE_ADHYAYAN:
@@ -89,6 +98,7 @@ export const validateBooking = async (req, res) => {
   var roomDetails = [];
   var adhyayanDetails = [];
   var foodDetails = {};
+  var travelDetails = {};
   var totalCharge = 0;
 
   switch (primary_booking.booking_type) {
@@ -111,6 +121,11 @@ export const validateBooking = async (req, res) => {
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
         0
       );
+      break;
+
+    case TYPE_TRAVEL:
+      travelDetails = await checkTravelAvailability();
+      totalCharge += travelDetails.charge;
       break;
 
     default:
@@ -141,6 +156,11 @@ export const validateBooking = async (req, res) => {
           );
           break;
 
+        case TYPE_TRAVEL:
+          travelDetails = await checkTravelAvailability();
+          totalCharge += travelDetails.charge;
+          break;
+
         default:
           throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
       }
@@ -150,10 +170,11 @@ export const validateBooking = async (req, res) => {
   const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100)/100; 
   return res.status(200).send({
     data: {
-      roomDetails: roomDetails,
-      adhyayanDetails: adhyayanDetails,
-      foodDetails: foodDetails,
-      taxes: taxes,
+      roomDetails,
+      adhyayanDetails,
+      foodDetails,
+      travelDetails,
+      taxes,
       totalCharge: totalCharge + taxes
     }
   });
@@ -390,6 +411,51 @@ async function bookAdhyayan(body, data, t) {
     t,
     mumukshus, 
   );
+
+  return t;
+}
+
+async function checkTravelAvailability() {
+  return {
+    status: STATUS_WAITING,
+    charge: 0
+  };
+}
+
+async function bookTravel(data, t) {
+  // const { date, pickup_point, drop_point, luggage, comments, type } =
+  //   data.details;
+
+  // const today = moment().format('YYYY-MM-DD');
+  // if (date <= today) {
+  //   throw new ApiError(400, 'Invalid Date');
+  // }
+
+  // const isBooked = await TravelDb.findOne({
+  //   where: {
+  //     cardno: user.cardno,
+  //     status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
+  //     date: date
+  //   }
+  // });
+  // if (isBooked) {
+  //   throw new ApiError(400, 'Travel already booked on the selected date');
+  // }
+
+  // await TravelDb.create(
+  //   {
+  //     bookingid: uuidv4(),
+  //     cardno: user.cardno,
+  //     date: date,
+  //     type: type,
+  //     pickup_point: pickup_point,
+  //     drop_point: drop_point,
+  //     luggage: luggage,
+  //     comments: comments,
+  //     status: STATUS_WAITING
+  //   },
+  //   { transaction: t }
+  // );
 
   return t;
 }
