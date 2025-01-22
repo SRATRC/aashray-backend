@@ -166,7 +166,7 @@ export const validateBooking = async (req, res) => {
     }
   }
 
-  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100)/100; 
+  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100) / 100;
   return res.status(200).send({
     data: {
       roomDetails: roomDetails,
@@ -369,7 +369,7 @@ async function bookRoomForSingleGuest(
 
 async function checkFoodAvailability(data) {
   const { start_date, end_date, guestGroup } = data.details;
-  
+
   validateDate(start_date, end_date);
 
   const totalGuests = guestGroup.flatMap((group) => group.guests);
@@ -377,16 +377,17 @@ async function checkFoodAvailability(data) {
   if (await checkGuestFoodAlreadyBooked(start_date, end_date, totalGuests))
     throw new ApiError(403, ERR_FOOD_ALREADY_BOOKED);
 
-  
   const allDates = getDates(start_date, end_date);
   var charge = 0;
   for (const group of guestGroup) {
     const { meals, guests } = group;
 
-    const groupCharge = allDates.length * guests.length * (
-      (meals.includes('breakfast') ? BREAKFAST_PRICE : 0) + 
-      (meals.includes('lunch') ? LUNCH_PRICE : 0) + 
-      (meals.includes('dinner') ? DINNER_PRICE : 0));
+    const groupCharge =
+      allDates.length *
+      guests.length *
+      ((meals.includes('breakfast') ? BREAKFAST_PRICE : 0) +
+        (meals.includes('lunch') ? LUNCH_PRICE : 0) +
+        (meals.includes('dinner') ? DINNER_PRICE : 0));
 
     charge += groupCharge;
   }
@@ -394,7 +395,7 @@ async function checkFoodAvailability(data) {
   return {
     status: STATUS_AVAILABLE,
     charge: charge
-  }
+  };
 }
 
 async function bookFood(req, user, data, t) {
@@ -416,9 +417,10 @@ async function bookFood(req, user, data, t) {
   guestGroup.forEach((group) => {
     const { meals, spicy, high_tea, guests } = group;
     const mealFields = Object.fromEntries(
-      ['breakfast', 'lunch', 'dinner'].map(
-        (item) => ([item, meals.includes(item) ? 1 : 0 ])
-      )
+      ['breakfast', 'lunch', 'dinner'].map((item) => [
+        item,
+        meals.includes(item) ? 1 : 0
+      ])
     );
 
     guests.forEach((guest) => {
@@ -426,7 +428,7 @@ async function bookFood(req, user, data, t) {
         mealFields,
         hightea: high_tea || 'NONE',
         spicy
-      }
+      };
     });
   });
 
@@ -436,8 +438,7 @@ async function bookFood(req, user, data, t) {
 
     Object.keys(meals.mealFields).forEach((type) => {
       const toBook = meals.mealFields[type];
-      if (toBook && !booking[type])
-        booking[type] = toBook;
+      if (toBook && !booking[type]) booking[type] = toBook;
     });
     booking.hightea = meals.hightea;
     booking.spicy = meals.spicy;
@@ -450,7 +451,9 @@ async function bookFood(req, user, data, t) {
   var bookingsToCreate = [];
   totalGuests.forEach((guest) => {
     const bookedDates = guestDatesUpdated[guest] || [];
-    const remainingDates = allDates.filter(date => !bookedDates.includes(date));
+    const remainingDates = allDates.filter(
+      (date) => !bookedDates.includes(date)
+    );
     const meals = guestMeals[guest];
 
     for (const date of remainingDates) {
@@ -471,7 +474,6 @@ async function bookFood(req, user, data, t) {
   await GuestFoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
 }
-
 
 async function checkAdhyayanAvailability(user, data) {
   const { shibir_ids, guests } = data.details;
@@ -666,4 +668,20 @@ export const updateGuests = async (req, res) => {
     message: 'Guests updated successfully',
     guests: allGuests
   });
+};
+
+export const checkGuests = async (req, res) => {
+  const { mobno } = req.params;
+
+  const isGuest = await GuestDb.findOne({
+    attributes: {
+      exclude: ['updatedBy', 'createdAt', 'updatedAt']
+    },
+    where: { mobno: mobno }
+  });
+  if (!isGuest) {
+    return res.status(404).send({ message: 'Guest not found', data: null });
+  } else {
+    return res.status(200).send({ message: 'Guest found', data: isGuest });
+  }
 };

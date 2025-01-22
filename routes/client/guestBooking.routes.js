@@ -4,7 +4,8 @@ import {
   fetchGuests,
   updateGuests,
   guestBooking,
-  validateBooking
+  validateBooking,
+  checkGuests
 } from '../../controllers/client/guestBooking.controller.js';
 import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -15,5 +16,6 @@ router.get('/', CatchAsync(fetchGuests));
 router.post('/', CatchAsync(updateGuests));
 router.post('/booking', CheckDatesBlocked, CatchAsync(guestBooking));
 router.post('/validate', CheckDatesBlocked, CatchAsync(validateBooking));
+router.get('/check/:mobno', CatchAsync(checkGuests));
 
 export default router;
