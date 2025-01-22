@@ -211,7 +211,7 @@ async function checkRoomAvailability(user, data) {
   const gender = floor_pref ? floor_pref + user.gender : user.gender;
   const nights = await calculateNights(checkin_date, checkout_date);
 
-  var roomStatus = STATUS_WAITING;
+  var status = STATUS_WAITING;
   var charge = 0;
 
   if (nights > 0) {
@@ -222,17 +222,17 @@ async function checkRoomAvailability(user, data) {
       gender
     );
     if (roomno) {
-      roomStatus = STATUS_AVAILABLE;
+      status = STATUS_AVAILABLE;
       charge = roomCharge(room_type) * nights;
     }
   } else {
-    roomStatus = STATUS_AVAILABLE;
+    status = STATUS_AVAILABLE;
     charge = 0;
   }
 
   return {
-    status: roomStatus,
-    charge: charge
+    status,
+    charge
   };
 }
 
