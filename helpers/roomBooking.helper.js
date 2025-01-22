@@ -48,13 +48,13 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
         ROOM_STATUS_PENDING_CHECKIN
     ]
     }
-});
+  });
 
-if (result.length > 0) {
+  if (result.length > 0) {
     return true;
-} else {
+  } else {
     return false;
-}
+  }
 }
 
 export async function bookDayVisit(cardno, checkin, checkout, transaction) {
@@ -120,7 +120,7 @@ export async function createRoomBooking(
   roomtype, 
   user_gender, 
   floor_pref,
-  transaction_ref, 
+  upi_ref, 
   transaction_type, 
   t
 ) {
@@ -159,9 +159,10 @@ export async function createRoomBooking(
     booking.dataValues.bookingid, 
     TYPE_ROOM, 
     amount,
-    transaction_ref || 'NA', 
+    upi_ref, 
     transaction_type, 
-    'USER'
+    'USER',
+    t
   );
 
   if (!transaction) {
