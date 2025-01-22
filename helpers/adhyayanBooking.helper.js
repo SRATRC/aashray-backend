@@ -15,6 +15,7 @@ import {
   Transactions
 } from '../models/associations.js'
 import { v4 as uuidv4 } from 'uuid';
+import ApiError from '../utils/ApiError.js';
 
 export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
   const bookings = await ShibirBookingDb.findAll({

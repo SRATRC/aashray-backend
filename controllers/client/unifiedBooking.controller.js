@@ -53,6 +53,7 @@ import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
 import { createTransaction } from '../../helpers/transactions.helper.js';
+import { checkAdhyayanAlreadyBooked, createAdhyayanBooking } from '../../helpers/adhyayanBooking.helper.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -468,30 +469,25 @@ async function bookTravel(user, data, t) {
 async function checkAdhyayanAvailability(data) {
   const { shibir_ids } = data.details;
 
-  const shibirs = await ShibirDb.findAll({
-    where: {
-      id: {
-        [Sequelize.Op.in]: shibir_ids
-      }
-    }
-  });
+  await checkAdhyayanAlreadyBooked(shibir_ids, user.cardno);
+  const shibirs = await validateAdhyayans(shibir_ids);
 
   var adhyayanDetails = [];
-  var adhyayanStatus = STATUS_WAITING;
+  var status = STATUS_WAITING;
   var charge = 0;
 
   for (var shibir of shibirs) {
     if (shibir.dataValues.available_seats > 0) {
-      adhyayanStatus = STATUS_AVAILABLE;
+      status = STATUS_AVAILABLE;
       charge = shibir.dataValues.amount;
     } else {
-      adhyayanStatus = STATUS_WAITING;
+      status = STATUS_WAITING;
       charge = 0;
     }
     adhyayanDetails.push({
       shibirId: shibir.dataValues.id,
-      status: adhyayanStatus,
-      charge: charge
+      status,
+      charge
     });
   }
 
@@ -501,86 +497,16 @@ async function checkAdhyayanAvailability(data) {
 async function bookAdhyayan(body, user, data, t) {
   const { shibir_ids } = data.details;
 
-  const isBooked = await ShibirBookingDb.findAll({
-    where: {
-      shibir_id: {
-        [Sequelize.Op.in]: shibir_ids
-      },
-      cardno: user.cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_CONFIRMED,
-          STATUS_WAITING,
-          STATUS_PAYMENT_PENDING
-        ]
-      }
-    }
-  });
+  await checkAdhyayanAlreadyBooked(shibir_ids, user.cardno);
+  const shibirs = await validateAdhyayans(shibir_ids);
 
-  if (isBooked.length > 0) {
-    throw new ApiError(400, ERR_ADHYAYAN_ALREADY_BOOKED);
-  }
-
-  const shibirs = await ShibirDb.findAll({
-    where: {
-      id: {
-        [Sequelize.Op.in]: shibir_ids
-      }
-    }
-  });
-
-  if (shibirs.length != shibir_ids.length) {
-    throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
-  }
-
-  var booking_data = [];
-  var transaction_data = [];
-
-  for (var shibir of shibirs) {
-    const bookingid = uuidv4();
-
-    if (shibir.dataValues.available_seats > 0) {
-      booking_data.push({
-        bookingid: bookingid,
-        shibir_id: shibir.dataValues.id,
-        cardno: user.cardno,
-        status:
-          body.transaction_type == TRANSACTION_TYPE_UPI
-            ? STATUS_CONFIRMED
-            : STATUS_PAYMENT_PENDING
-      });
-
-      shibir.available_seats -= 1;
-      await shibir.save({ transaction: t });
-
-      // TODO: Apply Discounts on credits left
-      // TODO: transaction status should be pending and updated to completed only after payment
-      transaction_data.push({
-        cardno: user.cardno,
-        bookingid: bookingid,
-        category: TYPE_ADHYAYAN,
-        amount: shibir.dataValues.amount,
-        upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
-        status:
-          body.transaction_type == TRANSACTION_TYPE_UPI
-            ? STATUS_PAYMENT_COMPLETED
-            : body.transaction_type == TRANSACTION_TYPE_CASH
-            ? STATUS_CASH_COMPLETED
-            : null,
-        updatedBy: 'USER'
-      });
-    } else {
-      booking_data.push({
-        bookingid: bookingid,
-        shibir_id: shibir.dataValues.id,
-        cardno: user.cardno,
-        status: STATUS_WAITING
-      });
-    }
-  }
-
-  await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
-  await Transactions.bulkCreate(transaction_data, { transaction: t });
+  await createAdhyayanBooking(
+    shibirs, 
+    body.transaction_type,
+    body.transaction_ref || 'NA',
+    t,
+    user.cardno, 
+  );
 
   return t;
 }
