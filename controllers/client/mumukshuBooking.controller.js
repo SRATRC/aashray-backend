@@ -227,10 +227,6 @@ async function bookRoom(body, data, t) {
   }
 
   const nights = await calculateNights(checkin_date, checkout_date);
-  // TODO: logic for nights = 0 is different for self and for guests
-  // if (nights <= 0) {
-  //   throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
-  // }
 
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
