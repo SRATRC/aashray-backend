@@ -63,7 +63,7 @@ export const mumukshuBooking = async (req, res) => {
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      t = await bookRoom(req.body, req.user, req.body.primary_booking, t);
+      t = await bookRoom(req.body, req.body.primary_booking, t);
       break;
 
     case TYPE_FOOD:
@@ -82,7 +82,7 @@ export const mumukshuBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          t = await bookRoom(req.body, req.user, addon, t);
+          t = await bookRoom(req.body, addon, t);
           break;
 
         case TYPE_FOOD:
@@ -238,7 +238,7 @@ async function checkRoomAvailability(data) {
   return roomDetails;
 }
 
-async function bookRoom(body, user, data, t) {
+async function bookRoom(body, data, t) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
 
