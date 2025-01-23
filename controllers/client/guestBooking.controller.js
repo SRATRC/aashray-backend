@@ -680,7 +680,7 @@ export const checkGuests = async (req, res) => {
     where: { mobno: mobno }
   });
   if (!isGuest) {
-    return res.status(404).send({ message: 'Guest not found', data: null });
+    return res.status(200).send({ message: 'Guest not found', data: null });
   } else {
     return res.status(200).send({ message: 'Guest found', data: isGuest });
   }
