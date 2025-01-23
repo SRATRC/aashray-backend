@@ -2,7 +2,7 @@ import express from 'express';
 const router = express.Router();
 import {
   fetchGuests,
-  updateGuests,
+  createGuests,
   guestBooking,
   validateBooking,
   checkGuests
@@ -13,7 +13,7 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.use(validateCard);
 
 router.get('/', CatchAsync(fetchGuests));
-router.post('/', CatchAsync(updateGuests));
+router.post('/', CatchAsync(createGuests));
 router.post('/booking', CheckDatesBlocked, CatchAsync(guestBooking));
 router.post('/validate', CheckDatesBlocked, CatchAsync(validateBooking));
 router.get('/check/:mobno', CatchAsync(checkGuests));

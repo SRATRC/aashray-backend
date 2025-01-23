@@ -619,7 +619,7 @@ export const fetchGuests = async (req, res) => {
   });
 };
 
-export const updateGuests = async (req, res) => {
+export const createGuests = async (req, res) => {
   const { cardno } = req.user;
   const { guests } = req.body;
 
@@ -633,14 +633,6 @@ export const updateGuests = async (req, res) => {
       ...guest,
       cardno: cardno
     }));
-
-  for (const guest of guestsToUpdate) {
-    const { id, ...updateData } = guest;
-    await GuestDb.update(updateData, {
-      where: { id },
-      transaction: t
-    });
-  }
 
   const createdGuests = await GuestDb.bulkCreate(guestsToCreate, {
     transaction: t,
