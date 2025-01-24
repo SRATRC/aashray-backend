@@ -65,7 +65,7 @@ const RoomBooking = sequelize.define(
     gender: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['M', 'F', 'SCM', 'SCF']
+      values: ['M', 'F', 'SCM', 'SCF', 'NA']
     },
     updatedBy: {
       type: DataTypes.STRING,

@@ -52,7 +52,7 @@ export async function createAdhyayanBooking(
   transaction_type, 
   upi_ref, 
   t, 
-  mumukshus
+  ...mumukshus
 ) {
   var bookings = [];
   var transactions = [];

@@ -415,7 +415,7 @@ async function bookAdhyayan(body, data, t) {
     body.transaction_type,
     body.transaction_ref || 'NA',
     t,
-    mumukshus
+    ...mumukshus
   );
 
   return t;
