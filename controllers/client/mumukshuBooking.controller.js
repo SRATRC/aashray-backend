@@ -1,6 +1,7 @@
 import {
   CardDb,
-  FoodDb
+  FoodDb,
+  TravelDb
 } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
@@ -15,7 +16,8 @@ import {
   BREAKFAST_PRICE,
   DINNER_PRICE,
   ERR_CARD_NOT_FOUND,
-  TYPE_TRAVEL
+  TYPE_TRAVEL,
+  ERR_INVALID_DATE
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -35,6 +37,11 @@ import {
   checkAdhyayanAlreadyBooked, 
   validateAdhyayans 
 } from '../../helpers/adhyayanBooking.helper.js';
+import { 
+  checkTravelAlreadyBooked 
+} from '../../helpers/travelBooking.helper.js';
+import moment from 'moment';
+import { v4 as uuidv4 } from 'uuid';
 
 
 export const mumukshuBooking = async (req, res) => {
@@ -124,7 +131,7 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_TRAVEL:
-      travelDetails = await checkTravelAvailability();
+      travelDetails = await checkTravelAvailability(req.body.primary_booking);
       totalCharge += travelDetails.charge;
       break;
 
@@ -157,7 +164,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_TRAVEL:
-          travelDetails = await checkTravelAvailability();
+          travelDetails = await checkTravelAvailability(addon);
           totalCharge += travelDetails.charge;
           break;
 
@@ -415,7 +422,17 @@ async function bookAdhyayan(body, data, t) {
   return t;
 }
 
-async function checkTravelAvailability() {
+async function checkTravelAvailability(data) {
+  const { date, mumukshuGroup } = data.details;
+  const today = moment().format('YYYY-MM-DD');
+  if (date <= today) {
+    throw new ApiError(400, ERR_INVALID_DATE);
+  }
+
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  await validateMumukshus(mumukshus);
+  await checkTravelAlreadyBooked(date, mumukshus);
+
   return {
     status: STATUS_WAITING,
     charge: 0
@@ -423,40 +440,36 @@ async function checkTravelAvailability() {
 }
 
 async function bookTravel(data, t) {
-  // const { date, pickup_point, drop_point, luggage, comments, type } =
-  //   data.details;
+  const { date, mumukshuGroup } = data.details;
+  const today = moment().format('YYYY-MM-DD');
+  if (date <= today) {
+    throw new ApiError(400, ERR_INVALID_DATE);
+  }
 
-  // const today = moment().format('YYYY-MM-DD');
-  // if (date <= today) {
-  //   throw new ApiError(400, 'Invalid Date');
-  // }
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  await validateMumukshus(mumukshus);
+  await checkTravelAlreadyBooked(date, mumukshus);
 
-  // const isBooked = await TravelDb.findOne({
-  //   where: {
-  //     cardno: user.cardno,
-  //     status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
-  //     date: date
-  //   }
-  // });
-  // if (isBooked) {
-  //   throw new ApiError(400, 'Travel already booked on the selected date');
-  // }
+  var bookingsToCreate = [];
+  for (const group of mumukshuGroup) {
+    const { pickup_point, drop_point, luggage, comments, type, mumukshus } = group;
 
-  // await TravelDb.create(
-  //   {
-  //     bookingid: uuidv4(),
-  //     cardno: user.cardno,
-  //     date: date,
-  //     type: type,
-  //     pickup_point: pickup_point,
-  //     drop_point: drop_point,
-  //     luggage: luggage,
-  //     comments: comments,
-  //     status: STATUS_WAITING
-  //   },
-  //   { transaction: t }
-  // );
+    for (const mumukshu of mumukshus) {
+      bookingsToCreate.push({
+        bookingid: uuidv4(),
+        cardno: mumukshu,
+        status: STATUS_WAITING,
+        date,
+        type,
+        pickup_point,
+        drop_point,
+        luggage,
+        comments
+      });
+    }
+  }
 
+  await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
 }
 
