@@ -19,11 +19,8 @@ import {
   TYPE_TRAVEL,
   ERR_INVALID_DATE
 } from '../../config/constants.js';
+import { calculateNights, validateDate } from '../helper.js';
 import {
-  calculateNights,
-  validateDate
-} from '../helper.js';
-import { 
   checkRoomAlreadyBooked,
   createRoomBooking,
   findRoom,
@@ -32,17 +29,16 @@ import {
 import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
-import { 
-  createAdhyayanBooking, 
-  checkAdhyayanAlreadyBooked, 
-  validateAdhyayans 
+import {
+  createAdhyayanBooking,
+  checkAdhyayanAlreadyBooked,
+  validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
 import { 
   checkTravelAlreadyBooked 
 } from '../../helpers/travelBooking.helper.js';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
-
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -123,7 +119,9 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_ADHYAYAN:
-      adhyayanDetails = await checkAdhyayanAvailability(req.body.primary_booking);
+      adhyayanDetails = await checkAdhyayanAvailability(
+        req.body.primary_booking
+      );
       totalCharge += adhyayanDetails.reduce(
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
         0
@@ -174,7 +172,7 @@ export const validateBooking = async (req, res) => {
     }
   }
 
-  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100)/100; 
+  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100) / 100;
   return res.status(200).send({
     data: {
       roomDetails,
@@ -199,14 +197,14 @@ async function checkRoomAvailability(data) {
   }
 
   const nights = await calculateNights(checkin_date, checkout_date);
-  
+
   var roomDetails = [];
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter(
-        (item) => (item.dataValues.cardno == mumukshu)
+        (item) => item.dataValues.cardno == mumukshu
       )[0];
 
       var status = STATUS_WAITING;
@@ -231,7 +229,7 @@ async function checkRoomAvailability(data) {
         status = STATUS_AVAILABLE;
         charge = 0;
       }
-    
+
       roomDetails.push({
         mumukshu,
         status,
@@ -261,7 +259,7 @@ async function bookRoom(body, data, t) {
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter(
-        (item) => (item.dataValues.cardno == mumukshu)
+        (item) => item.dataValues.cardno == mumukshu
       )[0];
 
       if (nights == 0) {
@@ -283,7 +281,7 @@ async function bookRoom(body, data, t) {
           body.transaction_ref || 'NA',
           body.transaction_type,
           t
-        )
+        );
       }
     }
   }
@@ -310,7 +308,9 @@ async function checkFoodAvailability(data) {
         const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
         if (booking) {
           charge +=
-            (meals.includes('breakfast') && !booking['breakfast'] ? BREAKFAST_PRICE : 0) +
+            (meals.includes('breakfast') && !booking['breakfast']
+              ? BREAKFAST_PRICE
+              : 0) +
             (meals.includes('lunch') && !booking['lunch'] ? LUNCH_PRICE : 0) +
             (meals.includes('dinner') && !booking['dinner'] ? DINNER_PRICE : 0);
         } else {
@@ -326,7 +326,7 @@ async function checkFoodAvailability(data) {
   return {
     status: STATUS_AVAILABLE,
     charge
-  }
+  };
 }
 
 async function bookFood(data, t) {
@@ -348,8 +348,7 @@ async function bookFood(data, t) {
         const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
         if (booking) {
           ['breakfast', 'lunch', 'dinner'].forEach((type) => {
-            if (meals.includes(type) && !booking[type])
-              booking[type] = 1;
+            if (meals.includes(type) && !booking[type]) booking[type] = 1;
           });
           booking['spicy'] = spicy;
           booking['hightea'] = high_tea;
@@ -412,11 +411,11 @@ async function bookAdhyayan(body, data, t) {
   const shibirs = await validateAdhyayans(shibir_ids);
 
   await createAdhyayanBooking(
-    shibirs, 
+    shibirs,
     body.transaction_type,
     body.transaction_ref || 'NA',
     t,
-    mumukshus, 
+    mumukshus
   );
 
   return t;
@@ -503,3 +502,16 @@ async function getFoodBookings(mumukshus, allDates) {
   return mumukshuBookings;
 }
 
+export const checkMumukshu = async (req, res) => {
+  const { mobno } = req.query;
+  const cardDb = await CardDb.findOne({
+    where: { mobno: mobno },
+    attributes: ['cardno', 'issuedto', 'mobno']
+  });
+
+  if (!cardDb) {
+    throw new ApiError(404, ERR_CARD_NOT_FOUND);
+  }
+
+  return res.status(200).send({ data: cardDb });
+};

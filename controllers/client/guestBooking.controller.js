@@ -619,7 +619,7 @@ export const fetchGuests = async (req, res) => {
   });
 };
 
-export const updateGuests = async (req, res) => {
+export const createGuests = async (req, res) => {
   const { cardno } = req.user;
   const { guests } = req.body;
 
@@ -633,14 +633,6 @@ export const updateGuests = async (req, res) => {
       ...guest,
       cardno: cardno
     }));
-
-  for (const guest of guestsToUpdate) {
-    const { id, ...updateData } = guest;
-    await GuestDb.update(updateData, {
-      where: { id },
-      transaction: t
-    });
-  }
 
   const createdGuests = await GuestDb.bulkCreate(guestsToCreate, {
     transaction: t,
@@ -680,7 +672,7 @@ export const checkGuests = async (req, res) => {
     where: { mobno: mobno }
   });
   if (!isGuest) {
-    return res.status(404).send({ message: 'Guest not found', data: null });
+    return res.status(200).send({ message: 'Guest not found', data: null });
   } else {
     return res.status(200).send({ message: 'Guest found', data: isGuest });
   }
