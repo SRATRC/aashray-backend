@@ -487,7 +487,7 @@ async function getFoodBookings(mumukshus, allDates) {
 }
 
 export const checkMumukshu = async (req, res) => {
-  const { mobno } = req.body;
+  const { mobno } = req.query;
   const cardDb = await CardDb.findOne({
     where: { mobno: mobno },
     attributes: ['cardno', 'issuedto', 'mobno']
