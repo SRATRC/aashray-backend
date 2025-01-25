@@ -185,11 +185,7 @@ async function checkRoomAvailability(user, data) {
   const totalGuests = guestGroup.flatMap((group) => group.guests);
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
-    where: {
-      id: {
-        [Sequelize.Op.in]: totalGuests
-      }
-    }
+    where: { id: totalGuests }
   });
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
@@ -205,7 +201,6 @@ async function checkRoomAvailability(user, data) {
   }
 
   var roomDetails = [];
-
   for (const group of guestGroup) {
     const { roomType, floorType, guests } = group;
 
@@ -254,11 +249,7 @@ async function bookRoom(body, user, data, t) {
   const totalGuests = guestGroup.flatMap((group) => group.guests);
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
-    where: {
-      id: {
-        [Sequelize.Op.in]: totalGuests
-      }
-    }
+    where: { id: totalGuests }
   });
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
