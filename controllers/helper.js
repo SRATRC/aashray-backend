@@ -6,8 +6,7 @@ import {
   ShibirBookingDb,
   ShibirDb,
   GuestRoomBooking,
-  GuestFoodDb,
-  ShibirGuestBookingDb
+  GuestFoodDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -117,6 +116,7 @@ export async function checkSpecialAllowance(start_date, end_date, cardno) {
     ],
     where: {
       cardno: cardno,
+      guest: null,
       status: {
         [Sequelize.Op.in]: [STATUS_CONFIRMED]
       }
@@ -303,7 +303,7 @@ export async function checkGuestFoodAlreadyBooked(
 }
 
 export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
-  const adhyayans = await ShibirGuestBookingDb.findAll({
+  const adhyayans = await ShibirBookingDb.findAll({
     include: [
       {
         model: ShibirDb,
@@ -318,10 +318,8 @@ export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
       }
     ],
     where: {
-      guest: { [Sequelize.Op.in]: guests },
-      status: {
-        [Sequelize.Op.in]: [STATUS_CONFIRMED]
-      }
+      guest: guests,
+      status: STATUS_CONFIRMED
     }
   });
 

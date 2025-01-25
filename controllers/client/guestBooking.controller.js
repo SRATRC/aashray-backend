@@ -2,8 +2,8 @@ import {
   ShibirDb,
   GuestRoomBooking,
   GuestFoodDb,
-  ShibirGuestBookingDb,
-  GuestDb
+  GuestDb,
+  ShibirBookingDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -530,19 +530,15 @@ async function checkAdhyayanAvailability(user, data) {
 async function bookAdhyayan(body, user, data, t) {
   const { shibir_ids, guests } = data.details;
 
-  const isBooked = await ShibirGuestBookingDb.findAll({
+  const isBooked = await ShibirBookingDb.findAll({
     where: {
-      shibir_id: {
-        [Sequelize.Op.in]: shibir_ids
-      },
-      guest: { [Sequelize.Op.in]: guests },
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_CONFIRMED,
-          STATUS_WAITING,
-          STATUS_PAYMENT_PENDING
-        ]
-      }
+      shibir_id: shibir_ids,
+      guest: guests,
+      status: [
+        STATUS_CONFIRMED,
+        STATUS_WAITING,
+        STATUS_PAYMENT_PENDING
+      ]
     }
   });
 
@@ -608,7 +604,7 @@ async function bookAdhyayan(body, user, data, t) {
     }
   }
 
-  await ShibirGuestBookingDb.bulkCreate(booking_data, { transaction: t });
+  await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
   return t;

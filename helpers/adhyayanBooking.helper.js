@@ -22,6 +22,7 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
     where: {
       shibir_id: shibirIds,
       cardno: mumukshus,
+      guest: null,
       status: [
         STATUS_CONFIRMED,
         STATUS_WAITING,
