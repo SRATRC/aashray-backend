@@ -32,6 +32,14 @@ const ShibirBookingDb = sequelize.define(
         key: 'cardno'
       }
     },
+    guest: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
+    },
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
