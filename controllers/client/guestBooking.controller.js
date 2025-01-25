@@ -11,8 +11,6 @@ import {
   TYPE_EXPENSE,
   STATUS_AVAILABLE,
   TYPE_ROOM,
-  NAC_ROOM_PRICE,
-  AC_ROOM_PRICE,
   STATUS_CONFIRMED,
   STATUS_WAITING,
   TYPE_FOOD,
@@ -25,7 +23,6 @@ import {
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
-  ERR_ROOM_INVALID_DURATION,
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_ADHYAYAN_ALREADY_BOOKED,
   ERR_ADHYAYAN_NOT_FOUND,
@@ -46,7 +43,8 @@ import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
-import { findRoom } from '../../helpers/roomBooking.helper.js';
+import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import { createTransaction } from '../../helpers/transactions.helper.js';
 
 // TODO: charge money for guest food
 export const guestBooking = async (req, res) => {
@@ -183,10 +181,6 @@ async function checkRoomAvailability(user, data) {
 
   validateDate(checkin_date, checkout_date);
   const nights = await calculateNights(checkin_date, checkout_date);
-  // TODO: logic for nights = 0 is different for self and for guests
-  if (nights <= 0) {
-    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
-  }
 
   const totalGuests = guestGroup.flatMap((group) => group.guests);
   const guest_db = await GuestDb.findAll({
@@ -216,30 +210,34 @@ async function checkRoomAvailability(user, data) {
     const { roomType, floorType, guests } = group;
 
     for (const guest of guests) {
-      var roomStatus = STATUS_WAITING;
+      var status = STATUS_WAITING;
       var charge = 0;
 
       const gender = floorType
         ? floorType + guest_details.filter((item) => item.id == guest)[0].gender
         : guest_details.filter((item) => item.id == guest)[0].gender;
 
-      const room = await findRoom(
-        checkin_date,
-        checkout_date,
-        roomType,
-        gender
-      );
-
-      if (room) {
-        roomStatus = STATUS_AVAILABLE;
-        charge =
-          roomType == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights;
+      if (nights > 0) {
+        const room = await findRoom(
+          checkin_date,
+          checkout_date,
+          roomType,
+          gender
+        );
+  
+        if (room) {
+          status = STATUS_AVAILABLE;
+          charge = roomCharge(roomType) * nights;
+        }
+      } else {
+        status = STATUS_AVAILABLE;
+        charge = 0;
       }
 
       roomDetails.push({
         guestId: guest,
-        status: roomStatus,
-        charge: charge
+        status,
+        charge
       });
     }
   }
@@ -252,10 +250,6 @@ async function bookRoom(body, user, data, t) {
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
-  // TODO: logic for nights = 0 is different for self and for guests
-  if (nights <= 0) {
-    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
-  }
 
   const totalGuests = guestGroup.flatMap((group) => group.guests);
   const guest_db = await GuestDb.findAll({
@@ -283,21 +277,55 @@ async function bookRoom(body, user, data, t) {
     const { roomType, floorType, guests } = group;
 
     for (const guest of guests) {
-      await bookRoomForSingleGuest(
-        body,
-        user,
-        guest,
-        guest_details,
-        checkin_date,
-        checkout_date,
-        roomType,
-        floorType,
-        nights,
-        t
-      );
+      if (nights == 0) {
+        await bookDayVisitForGuest(
+          user,
+          guest,
+          checkin_date,
+          checkout_date,
+          t
+        );
+      } else {
+        await bookRoomForSingleGuest(
+          body,
+          user,
+          guest,
+          guest_details,
+          checkin_date,
+          checkout_date,
+          roomType,
+          floorType,
+          nights,
+          t
+        );
+      }
     }
   }
   return t;
+}
+
+async function bookDayVisitForGuest(user, guest, checkin, checkout, transaction) {
+  const booking = await GuestRoomBooking.create(
+    {
+      bookingid: uuidv4(),
+      cardno: user.cardno,
+      guest,
+      roomno: 'NA',
+      roomtype: 'NA',
+      gender: 'NA',
+      nights: 0,
+      checkin,
+      checkout,
+      status: ROOM_STATUS_PENDING_CHECKIN
+    },
+    { transaction }
+  );
+
+  if (!booking) {
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+  }
+  
+  return booking;
 }
 
 async function bookRoomForSingleGuest(
@@ -305,9 +333,9 @@ async function bookRoomForSingleGuest(
   user,
   guest,
   guest_details,
-  checkin_date,
-  checkout_date,
-  room_type,
+  checkin,
+  checkout,
+  roomtype,
   floor_type,
   nights,
   t
@@ -316,7 +344,7 @@ async function bookRoomForSingleGuest(
     ? floor_type + guest_details.filter((item) => item.id == guest)[0].gender
     : guest_details.filter((item) => item.id == guest)[0].gender;
 
-  const roomno = await findRoom(checkin_date, checkout_date, room_type, gender);
+  const roomno = await findRoom(checkin, checkout, roomtype, gender);
 
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
@@ -326,14 +354,14 @@ async function bookRoomForSingleGuest(
     {
       bookingid: uuidv4(),
       cardno: user.cardno,
-      guest: guest,
+      guest,
       roomno: roomno.dataValues.roomno,
-      checkin: checkin_date,
-      checkout: checkout_date,
-      nights: nights,
-      roomtype: room_type,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      gender: gender
+      checkin,
+      checkout,
+      nights,
+      roomtype,
+      gender,
+      status: ROOM_STATUS_PENDING_CHECKIN
     },
     { transaction: t }
   );
@@ -342,22 +370,17 @@ async function bookRoomForSingleGuest(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const transaction = await Transactions.create(
-    {
-      cardno: user.cardno,
-      bookingid: booking.dataValues.bookingid,
-      category: TYPE_GUEST_ROOM,
-      type: TYPE_EXPENSE,
-      amount:
-        room_type == 'nac' ? NAC_ROOM_PRICE * nights : AC_ROOM_PRICE * nights,
-      upi_ref: body.transaction_ref || 'NA',
-      status:
-        body.transaction_type == TRANSACTION_TYPE_UPI
-          ? STATUS_PAYMENT_COMPLETED
-          : STATUS_PAYMENT_PENDING,
-      updatedBy: 'USER'
-    },
-    { transaction: t }
+  const amount = roomCharge(roomtype) * nights;
+
+  const transaction = await createTransaction(
+    user.cardno, 
+    booking.dataValues.bookingid, 
+    TYPE_GUEST_ROOM, 
+    amount,
+    body.transaction_ref || 'NA',
+    body.transaction_type, 
+    'USER',
+    t
   );
 
   if (!transaction) {

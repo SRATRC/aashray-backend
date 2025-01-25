@@ -21,6 +21,7 @@ import {
 } from '../../config/constants.js';
 import { calculateNights, validateDate } from '../helper.js';
 import {
+  bookDayVisit,
   checkRoomAlreadyBooked,
   createRoomBooking,
   findRoom,
