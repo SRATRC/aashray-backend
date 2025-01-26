@@ -6,7 +6,8 @@ import {
   ShibirBookingDb,
   ShibirDb,
   GuestRoomBooking,
-  GuestFoodDb
+  GuestFoodDb,
+  GuestFlatBooking
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -22,7 +23,7 @@ import getDates from '../utils/getDates.js';
 import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 
-export async function checkFlatAlreadyBooked(checkin, checkout, cardno) {
+export async function checkFlatAlreadyBooked(checkin, checkout, flat_no,card_no) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -45,14 +46,46 @@ export async function checkFlatAlreadyBooked(checkin, checkout, cardno) {
           ]
         }
       ],
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
+      flatno: flat_no,
+      cardno: card_no,
+      
+    }
+  });
+
+  if (result.length > 0) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+//TODO remove this once we consolidate guest into card_db
+export async function checkGuestFlatAlreadyBooked(checkin, checkout, flat_no,guest_id) {
+  const result = await GuestFlatBooking.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: checkin } },
+            { checkin: { [Sequelize.Op.lt]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkout: { [Sequelize.Op.gt]: checkin } },
+            { checkout: { [Sequelize.Op.lte]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: checkin } },
+            { checkout: { [Sequelize.Op.gte]: checkout } }
+          ]
+        }
+      ],
+      flatno: flat_no,
+      guest: guest_id,
+      
     }
   });
 
