@@ -2,8 +2,7 @@ import {
   ShibirDb,
   ShibirBookingDb,
   ShibirBookingTransaction,
-  Transactions,
-  ShibirGuestBookingDb
+  Transactions
 } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -77,13 +76,12 @@ export const RegisterShibir = async (req, res) => {
     where: {
       shibir_id: req.body.shibir_id,
       cardno: req.body.cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_CONFIRMED,
-          STATUS_WAITING,
-          STATUS_PAYMENT_PENDING
-        ]
-      }
+      guest: null,
+      status: [
+        STATUS_CONFIRMED,
+        STATUS_WAITING,
+        STATUS_PAYMENT_PENDING
+      ]
     }
   });
 
@@ -324,6 +322,7 @@ export const CancelShibir = async (req, res) => {
       where: {
         shibir_id: shibir_id,
         cardno: cardno,
+        guest: null,
         status: {
           [Sequelize.Op.in]: [
             STATUS_CONFIRMED,
@@ -390,18 +389,16 @@ export const CancelShibir = async (req, res) => {
       await waitlist.save({ transaction: t });
     }
   } else {
-    const isBooked = await ShibirGuestBookingDb.findOne({
+    const isBooked = await ShibirBookingDb.findOne({
       where: {
         shibir_id: shibir_id,
         cardno: cardno,
         guest: bookedFor,
-        status: {
-          [Sequelize.Op.in]: [
-            STATUS_CONFIRMED,
-            STATUS_WAITING,
-            STATUS_PAYMENT_PENDING
-          ]
-        }
+        status: [
+          STATUS_CONFIRMED,
+          STATUS_WAITING,
+          STATUS_PAYMENT_PENDING
+        ]
       }
     });
 
@@ -447,7 +444,7 @@ export const CancelShibir = async (req, res) => {
       await adhyayanGuestBookingTransaction.save({ transaction: t });
     }
 
-    const waitlist = await ShibirGuestBookingDb.findOne({
+    const waitlist = await ShibirBookingDb.findOne({
       where: {
         shibir_id: shibir_id,
         cardno: req.user.cardno,

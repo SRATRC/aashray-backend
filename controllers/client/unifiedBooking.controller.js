@@ -1,35 +1,19 @@
 import {
-  RoomDb,
-  RoomBooking,
   TravelDb,
   FoodDb,
-  ShibirBookingDb,
-  ShibirDb,
-  Transactions
 } from '../../models/associations.js';
 import {
-  ROOM_STATUS_PENDING_CHECKIN,
-  STATUS_PAYMENT_PENDING,
   STATUS_AVAILABLE,
   TYPE_ROOM,
-  NAC_ROOM_PRICE,
-  AC_ROOM_PRICE,
   STATUS_CONFIRMED,
   STATUS_WAITING,
   TYPE_TRAVEL,
   TYPE_FOOD,
   STATUS_RESIDENT,
-  STATUS_PAYMENT_COMPLETED,
-  TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
-  TRANSACTION_TYPE_CASH,
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
-  ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
-  ERR_ROOM_FAILED_TO_BOOK,
-  ERR_ADHYAYAN_ALREADY_BOOKED,
-  ERR_ADHYAYAN_NOT_FOUND,
   ERR_ROOM_MUST_BE_BOOKED
 } from '../../config/constants.js';
 import database from '../../config/database.js';
@@ -52,8 +36,11 @@ import {
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import { createTransaction } from '../../helpers/transactions.helper.js';
-import { checkAdhyayanAlreadyBooked, createAdhyayanBooking } from '../../helpers/adhyayanBooking.helper.js';
+import { 
+  checkAdhyayanAlreadyBooked, 
+  createAdhyayanBooking, 
+  validateAdhyayans 
+} from '../../helpers/adhyayanBooking.helper.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -143,6 +130,7 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_ADHYAYAN:
       adhyayanDetails = await checkAdhyayanAvailability(
+        req.user,
         req.body.primary_booking
       );
       totalCharge += adhyayanDetails.reduce(
@@ -177,7 +165,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_ADHYAYAN:
-          adhyayanDetails = await checkAdhyayanAvailability(addon);
+          adhyayanDetails = await checkAdhyayanAvailability(req.user, addon);
           totalCharge += adhyayanDetails.reduce(
             (partialSum, adhyayan) => partialSum + adhyayan.charge,
             0
@@ -466,7 +454,7 @@ async function bookTravel(user, data, t) {
   return t;
 }
 
-async function checkAdhyayanAvailability(data) {
+async function checkAdhyayanAvailability(user, data) {
   const { shibir_ids } = data.details;
 
   await checkAdhyayanAlreadyBooked(shibir_ids, user.cardno);

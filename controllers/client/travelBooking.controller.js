@@ -162,14 +162,13 @@ export const ViewAllTravel = async (req, res) => {
   const data = await database.query(
     `SELECT t1.bookingid, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, t1.comments, t1.status, t2.amount, t2.status as transaction_status
    FROM travel_db t1
-   JOIN transactions t2 ON t1.bookingid = t2.bookingid
-   WHERE t1.cardno = :cardno AND t2.category = :category
+   LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid
+   WHERE t1.cardno = :cardno
    ORDER BY t1.date DESC
    LIMIT :limit OFFSET :offset`,
     {
       replacements: {
         cardno: req.user.cardno,
-        category: TYPE_TRAVEL,
         limit: pageSize,
         offset: offset
       },

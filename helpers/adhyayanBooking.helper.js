@@ -18,10 +18,11 @@ import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 
 export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
-  const bookings = await ShibirBookingDb.findAll({
+  const booking = await ShibirBookingDb.findOne({
     where: {
       shibir_id: shibirIds,
       cardno: mumukshus,
+      guest: null,
       status: [
         STATUS_CONFIRMED,
         STATUS_WAITING,
@@ -30,7 +31,7 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
     }
   });
 
-  if (bookings.length > 0) {
+  if (booking) {
     throw new ApiError(400, ERR_ADHYAYAN_ALREADY_BOOKED);
   }
 }
@@ -52,7 +53,7 @@ export async function createAdhyayanBooking(
   transaction_type, 
   upi_ref, 
   t, 
-  mumukshus
+  ...mumukshus
 ) {
   var bookings = [];
   var transactions = [];
