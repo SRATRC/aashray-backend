@@ -27,7 +27,11 @@ const GuestFlatBooking = sequelize.define(
     },
     guest: {
       type: DataTypes.INTEGER,
-      allowNull: false
+      allowNull: false,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
     },
     flatno: {
       type: DataTypes.INTEGER,
