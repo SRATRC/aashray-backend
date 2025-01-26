@@ -9,7 +9,7 @@ import {
   adhyayanReport,
   adhyayanWaitlist,
   adhyayanStatusUpdate,
-  openCloseAdhyayan
+  activateAdhyayan
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -27,6 +27,6 @@ router.put('/update/:id', CatchAsync(updateAdhyayan));
 router.post('/report/:id', CatchAsync(adhyayanReport));
 router.get('/waitlist', CatchAsync(adhyayanWaitlist));
 router.put('/status', CatchAsync(adhyayanStatusUpdate));
-router.put('/:id/:activate', CatchAsync(openCloseAdhyayan));
+router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 
 export default router;

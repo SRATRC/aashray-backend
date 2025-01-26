@@ -44,7 +44,7 @@ export const createCard = async (req, res) => {
     state: state,
     city: city,
     pin: pin,
-    centre: centre,
+    center: centre,
     status: STATUS_OFFPREM,
     res_status: res_status,
     updatedBy: req.user.username
@@ -119,7 +119,7 @@ export const updateCard = async (req, res) => {
       city: city,
       state: state,
       pin: pin,
-      centre: centre,
+      center: centre,
       status: status,
       res_status: res_status,
       updatedBy: req.user.username

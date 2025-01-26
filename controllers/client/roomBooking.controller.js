@@ -515,7 +515,6 @@ export const AddWaitlist = async (req, res) => {
   const booking = await RoomBooking.create({
     cardno: req.user.cardno,
     guest_name: req.user.issuedto,
-    centre: req.user.centre,
     roomno: roomno.dataValues.roomno,
     checkin: req.body.checkin_date,
     checkout: req.body.checkout_date,
