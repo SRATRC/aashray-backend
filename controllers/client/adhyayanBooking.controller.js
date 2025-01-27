@@ -1,7 +1,6 @@
 import {
   ShibirDb,
   ShibirBookingDb,
-  ShibirBookingTransaction,
   Transactions
 } from '../../models/associations.js';
 import database from '../../config/database.js';
@@ -12,17 +11,13 @@ import {
   STATUS_CONFIRMED,
   STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
-  TYPE_REFUND,
-  TYPE_EXPENSE,
   STATUS_PAYMENT_COMPLETED,
-  STATUS_AWAITING_REFUND,
   TYPE_ADHYAYAN,
   TYPE_GUEST_ADHYAYAN,
   STATUS_CASH_PENDING,
   STATUS_CASH_COMPLETED,
   STATUS_CREDITED
 } from '../../config/constants.js';
-import { v4 as uuidv4 } from 'uuid';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
 
@@ -63,192 +58,6 @@ export const FetchAllShibir = async (req, res) => {
   };
 
   return res.status(200).send(formattedResponse);
-};
-
-// TODO: DEPRECATE THIS ENDPOINT
-export const RegisterShibir = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
-
-  const bookingid = uuidv4();
-
-  const isBooked = await ShibirBookingDb.findOne({
-    where: {
-      shibir_id: req.body.shibir_id,
-      cardno: req.body.cardno,
-      guest: null,
-      status: [
-        STATUS_CONFIRMED,
-        STATUS_WAITING,
-        STATUS_PAYMENT_PENDING
-      ]
-    }
-  });
-
-  if (isBooked) {
-    throw new APIError(400, 'Shibir already booked');
-  }
-
-  const shibir = await ShibirDb.findOne({
-    where: {
-      id: req.body.shibir_id
-    },
-    transaction: t,
-    lock: t.LOCK.UPDATE
-  });
-  if (!shibir) {
-    throw new APIError(404, 'Shibir not found');
-  }
-
-  if (shibir.available_seats > 0) {
-    const refund_amounts = await ShibirBookingTransaction.findAll({
-      where: {
-        cardno: req.body.cardno,
-        type: TYPE_REFUND,
-        status: STATUS_AWAITING_REFUND
-      }
-    });
-
-    if (refund_amounts.length > 0) {
-      const amounts = refund_amounts.map((refund) => refund.dataValues.amount);
-      const targetAmount = shibir.dataValues.amount;
-      const { closestSum, closestIndices } = findClosestSum(
-        amounts,
-        targetAmount
-      );
-
-      await ShibirBookingDb.create(
-        {
-          bookingid: bookingid,
-          shibir_id: req.body.shibir_id,
-          cardno: req.body.cardno,
-          status:
-            closestSum < targetAmount
-              ? STATUS_PAYMENT_PENDING
-              : STATUS_CONFIRMED
-        },
-        { transaction: t }
-      );
-
-      const bookingIds = [];
-      for (var index of closestIndices) {
-        await ShibirBookingTransaction.update(
-          {
-            status: STATUS_PAYMENT_COMPLETED,
-            description: `compensated with transactions:${bookingid}`
-          },
-          {
-            where: {
-              id: refund_amounts[index].dataValues.id
-            },
-            transaction: t
-          }
-        );
-        bookingIds.push(refund_amounts[index].dataValues.id);
-        await refund_amounts[index].save({ transaction: t });
-      }
-
-      if (closestSum >= targetAmount) {
-        await ShibirBookingTransaction.create(
-          {
-            cardno: req.body.cardno,
-            bookingid: bookingid,
-            type: TYPE_EXPENSE,
-            amount: targetAmount,
-            upi_ref: 'NA',
-            description: `compensated with pending refunds: ${bookingIds}`,
-            status: STATUS_PAYMENT_COMPLETED,
-            updatedBy: 'USER'
-          },
-          { transaction: t }
-        );
-        if (closestSum > targetAmount) {
-          await ShibirBookingTransaction.create(
-            {
-              cardno: req.body.cardno,
-              bookingid: bookingid,
-              type: TYPE_REFUND,
-              amount: closestSum - targetAmount,
-              upi_ref: 'NA',
-              description: `remaining amounts for transactions: ${bookingIds}`,
-              status: STATUS_AWAITING_REFUND,
-              updatedBy: 'USER'
-            },
-            { transaction: t }
-          );
-        }
-        shibir.available_seats -= 1;
-        await shibir.save({ transaction: t });
-      } else if (closestSum < targetAmount) {
-        await ShibirBookingTransaction.create(
-          {
-            cardno: req.body.cardno,
-            bookingid: bookingid,
-            type: TYPE_EXPENSE,
-            amount: targetAmount - closestSum,
-            discount: closestSum,
-            upi_ref: 'NA',
-            description: `compensated with pending refunds: ${bookingIds}`,
-            status: STATUS_PAYMENT_PENDING,
-            updatedBy: 'USER'
-          },
-          { transaction: t }
-        );
-      }
-    } else {
-      await ShibirBookingDb.create(
-        {
-          bookingid: bookingid,
-          shibir_id: req.body.shibir_id,
-          cardno: req.body.cardno,
-          status: STATUS_PAYMENT_PENDING
-        },
-        { transaction: t }
-      );
-
-      await ShibirBookingTransaction.create(
-        {
-          cardno: req.body.cardno,
-          bookingid: bookingid,
-          type: TYPE_EXPENSE,
-          amount: shibir.dataValues.amount,
-          upi_ref: 'NA',
-          status: STATUS_PAYMENT_PENDING,
-          updatedBy: 'USER'
-        },
-        { transaction: t }
-      );
-    }
-  } else {
-    const booking = await ShibirBookingDb.create(
-      {
-        shibir_id: req.body.shibir_id,
-        cardno: req.body.cardno,
-        status: STATUS_WAITING
-      },
-      { transaction: t }
-    );
-    if (!booking) {
-      throw new APIError(400, 'Shibir booking failed');
-    }
-  }
-
-  await t.commit();
-
-  sendMail({
-    email: req.user.email,
-    subject: `Shibir Booking Confirmation`,
-    template: 'rajAdhyayan',
-    context: {
-      name: req.user.issuedto,
-      adhyayanName: shibir.dataValues.name,
-      speaker: shibir.dataValues.speaker,
-      startDate: shibir.dataValues.start_date,
-      endDate: shibir.dataValues.end_date
-    }
-  });
-
-  return res.status(201).send({ message: 'Shibir booking successful' });
 };
 
 export const FetchBookedShibir = async (req, res) => {
