@@ -70,11 +70,18 @@ export async function adminCancelTransaction(user, transaction, t) {
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
-      await addCredit(user, transaction.cardno, transaction.amount + transaction.discount, t);
+      await addCredit(user, transaction, t);
       break;
 
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
+      await transaction.update(
+        {
+          status: STATUS_ADMIN_CANCELLED,
+          updatedBy: user.username
+        },
+        { transaction: t }
+      );
       break;
 
     // TODO: Should we allow these or throw error?
@@ -87,19 +94,14 @@ export async function adminCancelTransaction(user, transaction, t) {
     default:
       throw new ApiError(400, 'Invalid status provided');
   }
-
-  await transaction.update(
-    {
-      status: STATUS_ADMIN_CANCELLED,
-      updatedBy: user.username
-    },
-    { transaction: t }
-  );
 }
 
-async function addCredit(user, cardno, amount, t) {
+async function addCredit(user, transaction, t) {
+  if (transaction.discount <= 0) 
+    return;
+
   const card = await CardDb.findOne({
-    where: { cardno: cardno }
+    where: { cardno: transaction.cardno }
   });
 
   if (!card)
@@ -107,11 +109,22 @@ async function addCredit(user, cardno, amount, t) {
 
   await card.update(
     {
-      credits: card.credits + amount,
+      credits: card.credits + transaction.discount,
       updatedBy: user.username
     },
     { transaction: t }
   );
+
+  await transaction.update(
+    {
+      discount: 0,
+      amount: transaction.amount + transaction.discount,
+      description: `credits added: ${transaction.discount}`,
+      status: STATUS_ADMIN_CANCELLED,
+      updatedBy: user.username
+    },
+    { transaction: t }
+  )
 }
 
 export async function useCredit(user, cardno, transaction, amount, t) {
@@ -133,7 +146,7 @@ export async function useCredit(user, cardno, transaction, amount, t) {
         status,
         discount: Math.min(amount, card.credits),
         amount: Math.max(0, amount - card.credits),
-        description: `Credits Applied: ${card.credits}`,
+        description: `credits used: ${card.credits}`,
         updatedBy: user.username
       },
       { transaction: t }
@@ -147,7 +160,4 @@ export async function useCredit(user, cardno, transaction, amount, t) {
       { transaction: t }
     );
   }
-
-  
-
 }
