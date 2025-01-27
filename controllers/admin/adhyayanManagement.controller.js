@@ -352,6 +352,6 @@ export const activateAdhyayan = async (req, res) => {
   );
 
   if (itemUpdated != 1)
-    throw new ApiError(500, 'Error occured while closing adhyayan');
+    throw new ApiError(500, 'Error occured while activating adhyayan');
   res.status(200).send({ message: 'Adhyayan status updated' });
 };
