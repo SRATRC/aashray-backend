@@ -1,8 +1,4 @@
-import {
-  CardDb,
-  FoodDb,
-  TravelDb
-} from '../../models/associations.js';
+import { CardDb, FoodDb, TravelDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
@@ -35,9 +31,7 @@ import {
   checkAdhyayanAlreadyBooked,
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
-import { 
-  checkTravelAlreadyBooked 
-} from '../../helpers/travelBooking.helper.js';
+import { checkTravelAlreadyBooked } from '../../helpers/travelBooking.helper.js';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -116,7 +110,7 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_FOOD:
       foodDetails = await checkFoodAvailability(req.body.primary_booking);
-      totalCharge += foodDetails.charge;
+      // totalCharge += foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
@@ -151,7 +145,7 @@ export const validateBooking = async (req, res) => {
 
         case TYPE_FOOD:
           foodDetails = await checkFoodAvailability(addon);
-          totalCharge += foodDetails.charge;
+          // totalCharge += foodDetails.charge;
           break;
 
         case TYPE_ADHYAYAN:
@@ -452,7 +446,8 @@ async function bookTravel(data, t) {
 
   var bookingsToCreate = [];
   for (const group of mumukshuGroup) {
-    const { pickup_point, drop_point, luggage, comments, type, mumukshus } = group;
+    const { pickup_point, drop_point, luggage, comments, type, mumukshus } =
+      group;
 
     for (const mumukshu of mumukshus) {
       bookingsToCreate.push({

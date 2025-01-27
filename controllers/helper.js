@@ -6,8 +6,7 @@ import {
   ShibirBookingDb,
   ShibirDb,
   GuestRoomBooking,
-  GuestFoodDb,
-  GuestFlatBooking
+  GuestFoodDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -22,6 +21,7 @@ import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
+
 
 export async function checkFlatAlreadyBooked(checkin, checkout, flat_no,card_no) {
   const result = await FlatBooking.findAll({
@@ -47,8 +47,7 @@ export async function checkFlatAlreadyBooked(checkin, checkout, flat_no,card_no)
         }
       ],
       flatno: flat_no,
-      cardno: card_no,
-      
+      cardno: card_no
     }
   });
 
@@ -59,9 +58,8 @@ export async function checkFlatAlreadyBooked(checkin, checkout, flat_no,card_no)
   }
 }
 
-//TODO remove this once we consolidate guest into card_db
-export async function checkGuestFlatAlreadyBooked(checkin, checkout, flat_no,guest_id) {
-  const result = await GuestFlatBooking.findAll({
+export async function checkFlatAlreadyBookedForGuest(checkin, checkout, flat_no,card_no,guest_id) {
+  const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
         {
@@ -84,8 +82,8 @@ export async function checkGuestFlatAlreadyBooked(checkin, checkout, flat_no,gue
         }
       ],
       flatno: flat_no,
-      guest: guest_id,
-      
+      cardno: card_no,
+      guest:guest_id
     }
   });
 
@@ -95,6 +93,7 @@ export async function checkGuestFlatAlreadyBooked(checkin, checkout, flat_no,gue
     return false;
   }
 }
+
 
 export async function calculateNights(checkin, checkout) {
   const date1 = new Date(checkin);

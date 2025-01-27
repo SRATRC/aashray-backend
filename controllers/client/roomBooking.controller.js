@@ -4,7 +4,6 @@ import {
   RoomBookingTransaction,
   FlatDb,
   FlatBooking,
-  GuestFlatBooking,
   CardDb,
   GuestRoomBooking,
   GuestDb
@@ -32,7 +31,7 @@ import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import {
   checkFlatAlreadyBooked,
-  checkGuestFlatAlreadyBooked,
+  checkFlatAlreadyBookedForGuest,
   calculateNights,
   validateDate
 } from '../helper.js';
@@ -247,8 +246,8 @@ export const BookingForGuest = async (req, res) => {
   req.transaction = t;
 };
 
-export const FlatBookingForMumukshu = async (req, res) => {
-  const { flat_no, mobno, checkin_date, checkout_date } = req.body;
+export const FlatBookingForMumukshuAndGuest = async (req, res) => {
+  const { flat_no, mobno, checkin_date, checkout_date,guest_id } = req.body;
   
   const ownFlat = await FlatDb.findOne({
     where: {
@@ -265,12 +264,20 @@ export const FlatBookingForMumukshu = async (req, res) => {
   });
   if (!user_data) throw new ApiError(404, 'user not found');
 
-  if (
-    await checkFlatAlreadyBooked(checkin_date, checkout_date, flat_no,user_data.dataValues.cardno)
-  ) {
-    throw new ApiError(400, 'Already Booked');
+  if (guest_id == null) {
+    if (
+      await checkFlatAlreadyBooked(checkin_date, checkout_date, flat_no, user_data.dataValues.cardno)
+    ) {
+      throw new ApiError(400, 'Already Booked');
+    }
   }
-
+  else{
+    if (
+      await checkFlatAlreadyBookedForGuest(checkin_date, checkout_date, flat_no, user_data.dataValues.cardno,guest_id)
+    ) {
+      throw new ApiError(400, 'Already Booked');
+    }
+  }
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
@@ -281,67 +288,8 @@ export const FlatBookingForMumukshu = async (req, res) => {
     flatno: flat_no,
     checkin: checkin_date,
     checkout: checkout_date,
-    nights: nights
-  });
-
-  if (!booking) {
-    throw new ApiError(500, 'Failed to book your flat');
-  }
-
-  sendMail({
-    email: req.user.email,
-    subject: `Your Booking Confirmation for Stay at SRATRC`,
-    template: 'rajSharan',
-    context: {
-      name: req.user.issuedto,
-      bookingid: booking.dataValues.id,
-      checkin: booking.dataValues.checkin,
-      checkout: booking.dataValues.checkout
-    }
-  });
-
-  return res.status(201).send({ message: 'booked successfully' });
-};
-
-
-//TODO remove this once we consolidate guest into carddb
-export const FlatBookingForGuest = async (req, res) => {
-  const { flat_no, guest_id, checkin_date, checkout_date } = req.body;
-  
-  const ownFlat = await FlatDb.findOne({
-    where: {
-      flatno: flat_no,
-      owner: req.user.cardno
-    }
-  });
-
-  if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
-console.log("guest_id is"+req.user.cardno);
-  const user_data = await GuestDb.findOne({
-    where: {
-      id: guest_id
-    }
-  });
-  if (!user_data) throw new ApiError(404, 'user not found');
-
-  if (
-    await checkGuestFlatAlreadyBooked(checkin_date, checkout_date, flat_no,guest_id)
-  ) {
-    throw new ApiError(400, 'Already Booked');
-  }
-
-  validateDate(checkin_date, checkout_date);
-
-  const nights = await calculateNights(checkin_date, checkout_date);
-
-  const booking = await GuestFlatBooking.create({
-    bookingid: uuidv4(),
-    guest: guest_id,
-    cardno:req.user.cardno,
-    flatno: flat_no,
-    checkin: checkin_date,
-    checkout: checkout_date,
     nights: nights,
+    guest:guest_id,
     status:ROOM_STATUS_PENDING_CHECKIN
   });
 
@@ -363,6 +311,9 @@ console.log("guest_id is"+req.user.cardno);
 
   return res.status(201).send({ message: 'booked successfully' });
 };
+
+
+
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
