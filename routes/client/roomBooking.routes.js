@@ -4,8 +4,7 @@ import {
   AvailabilityCalender,
   BookingForMumukshu,
   ViewAllBookings,
-  FlatBookingForMumukshu,
-  FlatBookingForGuest,
+  FlatBookingForMumukshuAndGuest,
   CancelBooking,
   AddWaitlist,
 } from '../../controllers/client/roomBooking.controller.js';
@@ -17,8 +16,7 @@ router.use(validateCard);
 router.get('/availablity', CatchAsync(AvailabilityCalender));
 router.post('/room', CheckDatesBlocked, CatchAsync(BookingForMumukshu));
 router.post('/cancel', CatchAsync(CancelBooking));
-router.post('/flat', CatchAsync(FlatBookingForMumukshu));
-router.post('/guestflat', CatchAsync(FlatBookingForGuest));
+router.post('/flat', CatchAsync(FlatBookingForMumukshuAndGuest));
 router.post('/waitlist', CatchAsync(AddWaitlist));
 router.get('/bookings', CatchAsync(ViewAllBookings));
 

@@ -1,5 +1,13 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
+import {
+  ROOM_STATUS_CHECKEDIN,
+  ROOM_STATUS_CHECKEDOUT,
+  ROOM_STATUS_PENDING_CHECKIN,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CANCELLED,
+  STATUS_WAITING
+} from '../config/constants.js';
 
 const FlatBooking = sequelize.define(
   'FlatBooking',
@@ -41,7 +49,27 @@ const FlatBooking = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: 'USER'
-    }
+    },
+    guest :{
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
+    },
+    status: {
+      type: DataTypes.ENUM,
+      allowNull: false,
+      values: [
+        ROOM_STATUS_CHECKEDIN,
+        STATUS_CANCELLED,
+        STATUS_ADMIN_CANCELLED,
+        STATUS_WAITING,
+        ROOM_STATUS_CHECKEDOUT,
+        ROOM_STATUS_PENDING_CHECKIN
+      ]
+    },
   },
   {
     tableName: 'flat_booking',
