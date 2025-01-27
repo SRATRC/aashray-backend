@@ -1,5 +1,8 @@
 import { 
   ERR_ADHYAYAN_ALREADY_BOOKED,
+  ERR_ADHYAYAN_NOT_FOUND,
+  ERR_BOOKING_NOT_FOUND,
+  ERR_TRANSACTION_NOT_FOUND,
   STATUS_CASH_COMPLETED,
   STATUS_CONFIRMED, 
   STATUS_PAYMENT_COMPLETED, 
@@ -36,7 +39,7 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
   }
 }
 
-export async function validateAdhyayans(shibirIds) {
+export async function validateAdhyayans(...shibirIds) {
   const shibirs = await ShibirDb.findAll({
     where: { id: shibirIds } 
   });
@@ -46,6 +49,22 @@ export async function validateAdhyayans(shibirIds) {
   }
 
   return shibirs;
+}
+
+export async function validateAdhyayanBooking(bookingId, shibirId) {
+  const booking = await ShibirBookingDb.findOne({
+    where: { 
+      shibir_id: shibirId,
+      bookingid: bookingId
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(400, ERR_BOOKING_NOT_FOUND);
+  }
+
+
+  return booking;
 }
 
 export async function createAdhyayanBooking(
@@ -62,44 +81,33 @@ export async function createAdhyayanBooking(
     for (const shibir of shibirs) {
       const bookingId = uuidv4();
 
+      const status = STATUS_WAITING;
+
+      // TODO: Apply Discounts on credits left
       if (shibir.dataValues.available_seats > 0) {
-        bookings.push({
-          bookingid: bookingId,
-          shibir_id: shibir.dataValues.id,
-          cardno: mumukshu,
-          status:
-            transaction_type == TRANSACTION_TYPE_UPI
-              ? STATUS_CONFIRMED
-              : STATUS_PAYMENT_PENDING
-        });
+
+        status = STATUS_PAYMENT_PENDING;
 
         shibir.available_seats -= 1;
         await shibir.save({ transaction: t });
 
-        // TODO: Apply Discounts on credits left
-        // TODO: transaction status should be pending and updated to completed only after payment
+
+
         transactions.push({
           cardno: mumukshu,
           bookingid: bookingId,
           category: TYPE_ADHYAYAN,
           amount: shibir.dataValues.amount,
-          upi_ref: upi_ref,
-          status:
-            transaction_type == TRANSACTION_TYPE_UPI
-              ? STATUS_PAYMENT_COMPLETED
-              : transaction_type == TRANSACTION_TYPE_CASH
-              ? STATUS_CASH_COMPLETED
-              : null,
-          updatedBy: 'USER'
-        });
-      } else {
-        bookings.push({
-          bookingid: bookingId,
-          shibir_id: shibir.dataValues.id,
-          cardno: mumukshu,
-          status: STATUS_WAITING
+          status: STATUS_PAYMENT_PENDING
         });
       }
+
+      bookings.push({
+        cardno: mumukshu,
+        bookingid: bookingId,
+        shibir_id: shibir.dataValues.id,
+        status: status
+      });        
     }
   }
 
@@ -107,4 +115,26 @@ export async function createAdhyayanBooking(
   await Transactions.bulkCreate(transactions, { transaction: t });
 
   return t;
+}
+
+export async function reserveAdhyayanSeat(adhyayan, t) {
+  if (adhyayan.dataValues.available_seats > 0) {
+    await adhyayan.update(
+      {
+        available_seats: adhyayan.dataValues.available_seats - 1
+      },
+      { transaction: t }
+    );
+  }
+}
+
+export async function unreserveAdhyayanSeat(adhyayan, t) {
+  if (adhyayan.dataValues.available_seats > 0) {
+    await adhyayan.update(
+      {
+        available_seats: adhyayan.dataValues.available_seats + 1
+      },
+      { transaction: t }
+    );
+  }
 }

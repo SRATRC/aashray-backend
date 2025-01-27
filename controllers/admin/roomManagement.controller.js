@@ -324,10 +324,10 @@ export const flatBooking = async (req, res) => {
 			
 			Your Room Number will be provided from office upon checkin.<br><br>
 
-			<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
+			<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Center
 			We hope you have a spiritually blissful stay. <br><br>
 			
-			Research Centre Admin office, <br>
+			Research Center Admin office, <br>
 			7875432613 / 9004273512`;
 
   SendMail({
@@ -695,7 +695,7 @@ export const occupancyReport = async (req, res) => {
     include: [
       {
         model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'centre'],
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
         where: {
           res_status: STATUS_MUMUKSHU
         }
@@ -721,7 +721,7 @@ export const ReservationReport = async (req, res) => {
     include: [
       {
         model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
+        attributes: ['issuedto', 'mobno', 'center'],
         required: true
       }
     ],
@@ -761,7 +761,7 @@ export const CancellationReport = async (req, res) => {
     include: [
       {
         model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
+        attributes: ['issuedto', 'mobno', 'center'],
         required: true
       }
     ],
@@ -798,7 +798,7 @@ export const WaitlistReport = async (req, res) => {
     include: [
       {
         model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
+        attributes: ['issuedto', 'mobno', 'center'],
         required: true
       }
     ],

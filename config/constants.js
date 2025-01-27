@@ -28,7 +28,6 @@ export const RAZORPAY_FEE = 0.02; // 2%
 export const STATUS_WAITING = 'waiting';
 export const STATUS_CONFIRMED = 'confirmed';
 export const STATUS_CANCELLED = 'cancelled';
-export const STATUS_PENDING = 'pending';
 export const STATUS_REJECTED = 'rejected';
 export const STATUS_ACTIVE = 'active';
 export const STATUS_INACTIVE = 'inactive';
@@ -87,5 +86,8 @@ export const ERR_ROOM_FAILED_TO_BOOK = 'Failed To Book A Bed';
 export const ERR_ROOM_MUST_BE_BOOKED = 'Must Have Room Booked On One Or More Selected Dates';
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan Already Booked';
 export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan Not Found';
+export const ERR_BOOKING_NOT_FOUND = 'Booking Not Found';
+export const ERR_TRANSACTION_NOT_FOUND = 'Booking Transaction Not Found';
+
 export const ERR_FOOD_ALREADY_BOOKED = 'Food Already Booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel Already Booked';

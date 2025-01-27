@@ -36,7 +36,7 @@ export const updateProfile = async (req, res) => {
       state,
       city,
       pin,
-      centre
+      center: centre
     },
     {
       where: {

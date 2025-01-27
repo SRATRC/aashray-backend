@@ -111,7 +111,12 @@ const CardDb = sequelize.define(
     password: {
       type: DataTypes.STRING,
       allowNull: false
-    }
+    },
+    credits: {
+      type: DataTypes.DECIMAL,
+      allowNull: false,
+      defaultValue: 0
+    },
   },
   {
     tableName: 'card_db',
