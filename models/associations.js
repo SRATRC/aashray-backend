@@ -32,7 +32,6 @@ import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
 import GuestRoomBooking from './guest_room_booking.model.js';
 import GuestFoodDb from './guest_food_db.model.js';
-import ShibirGuestBookingDb from './guest_shibir_booking_db.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
