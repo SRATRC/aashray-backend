@@ -47,7 +47,8 @@ export async function checkFlatAlreadyBooked(checkin, checkout, flat_no,card_no)
         }
       ],
       flatno: flat_no,
-      cardno: card_no
+      cardno: card_no,
+      guest:null
     }
   });
 
