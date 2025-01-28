@@ -257,14 +257,16 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
   });
   if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
 
-  const user_data = await CardDb.findOne({
-    where: {
-      mobno: mobno
-    }
-  });
-  if (!user_data) throw new ApiError(404, 'user not found');
-
+  
+  var cardNo;
   if (guest_id == null) {
+    const user_data = await CardDb.findOne({
+      where: {
+        mobno: mobno
+      }
+    });
+    if (!user_data) throw new ApiError(404, 'user not found');
+    cardNo=user_data.dataValues.cardno;
     if (
       await checkFlatAlreadyBooked(checkin_date, checkout_date, flat_no, user_data.dataValues.cardno)
     ) {
@@ -272,8 +274,9 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
     }
   }
   else{
+    cardNo=req.user.cardno;
     if (
-      await checkFlatAlreadyBookedForGuest(checkin_date, checkout_date, flat_no, user_data.dataValues.cardno,guest_id)
+      await checkFlatAlreadyBookedForGuest(checkin_date, checkout_date, flat_no, cardNo,guest_id)
     ) {
       throw new ApiError(400, 'Already Booked');
     }
@@ -284,7 +287,7 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
 
   const booking = await FlatBooking.create({
     bookingid: uuidv4(),
-    cardno: user_data.dataValues.cardno,
+    cardno: cardNo,
     flatno: flat_no,
     checkin: checkin_date,
     checkout: checkout_date,
@@ -344,21 +347,19 @@ UNION ALL
 SELECT 
     t1.bookingid, 
     COALESCE(t1.guest, 'NA') AS bookedFor,
-    t3.name AS name,
-    t1.roomno, 
+    t2.name AS name,
+    t1.flatno, 
     t1.checkin, 
     t1.checkout, 
     t1.nights, 
-    t1.roomtype, 
+    'FLat', 
     t1.status, 
-    t1.gender, 
-    COALESCE(t2.amount, 0) AS amount, 
-    t2.status AS transaction_status
-FROM guest_room_booking t1
-LEFT JOIN transactions t2 
-    ON t1.bookingid = t2.bookingid AND t2.category = :guest_category
-LEFT JOIN guest_db t3 
-    ON t3.id = t1.guest
+    'Flat', 
+    0 AS amount, 
+    'completed' AS transaction_status
+FROM flat_booking t1
+LEFT JOIN guest_db t2 
+    ON t2.id = t1.guest
 WHERE t1.cardno = :cardno
 
 ORDER BY checkin DESC
