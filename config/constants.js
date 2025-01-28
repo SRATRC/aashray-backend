@@ -22,7 +22,7 @@ export const NAC_ROOM_PRICE = 400;
 export const AC_ROOM_PRICE = 600;
 export const TRAVEL_PRICE = 350;
 export const FULL_TRAVEL_PRICE = 2300;
-export const RAZORPAY_FEE = 0.02; // 2%
+export const RAZORPAY_FEE = 0.005; // 0.5%
 
 // STATUS
 export const STATUS_WAITING = 'waiting';
@@ -71,7 +71,6 @@ export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 
-
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno Not Provided';
 export const ERR_CARD_NOT_FOUND = 'Card Does Not Exist';
@@ -83,7 +82,8 @@ export const ERR_ROOM_NO_BED_AVAILABLE = 'No Beds Available';
 export const ERR_ROOM_ALREADY_BOOKED = 'Room Already Booked';
 export const ERR_ROOM_INVALID_DURATION = 'Invalid Booking Duration';
 export const ERR_ROOM_FAILED_TO_BOOK = 'Failed To Book A Bed';
-export const ERR_ROOM_MUST_BE_BOOKED = 'Must Have Room Booked On One Or More Selected Dates';
+export const ERR_ROOM_MUST_BE_BOOKED =
+  'Must Have Room Booked On One Or More Selected Dates';
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan Already Booked';
 export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan Not Found';
 export const ERR_BOOKING_NOT_FOUND = 'Booking Not Found';
