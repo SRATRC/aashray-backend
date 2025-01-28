@@ -58,33 +58,37 @@ export async function createPendingTransaction(cardno, bookingid, category, amou
 }
 
 export async function adminCancelTransaction(user, transaction, t) {
+  await cancelTransaction(user, transaction, t, true);
+}
 
-  // STATUS_PAYMENT_PENDING,
-  // STATUS_PAYMENT_COMPLETED,
-  // STATUS_CASH_PENDING,
-  // STATUS_CASH_COMPLETED,
-  // STATUS_CANCELLED,
-  // STATUS_ADMIN_CANCELLED,
-  // STATUS_CREDITED
+export async function userCancelTransaction(user, transaction, t) {
+  await cancelTransaction(user, transaction, t, false);
+}
+
+// STATUS_PAYMENT_PENDING,
+// STATUS_PAYMENT_COMPLETED,
+// STATUS_CASH_PENDING,
+// STATUS_CASH_COMPLETED,
+// STATUS_CANCELLED,
+// STATUS_ADMIN_CANCELLED,
+// STATUS_CREDITED
+async function cancelTransaction(user, transaction, t, admin=false) {
+  var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
 
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
-      await addCredit(user, transaction, t);
+      // TODO: transaction.amount or transaction.discount
+      if (transaction.discount > 0) {
+        await addCredit(user, transaction, t);
+        // status = STATUS_CREDITED;
+      }
       break;
 
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
-      await transaction.update(
-        {
-          status: STATUS_ADMIN_CANCELLED,
-          updatedBy: user.username
-        },
-        { transaction: t }
-      );
       break;
 
-    // TODO: Should we allow these or throw error?
     case STATUS_CANCELLED:
     case STATUS_ADMIN_CANCELLED:
     // TODO: When is a transaction's status CREDITED?
@@ -94,12 +98,17 @@ export async function adminCancelTransaction(user, transaction, t) {
     default:
       throw new ApiError(400, 'Invalid status provided');
   }
+
+  await transaction.update(
+    {
+      status,
+      updatedBy: user.username
+    },
+    { transaction: t }
+  );
 }
 
 async function addCredit(user, transaction, t) {
-  if (transaction.discount <= 0) 
-    return;
-
   const card = await CardDb.findOne({
     where: { cardno: transaction.cardno }
   });
@@ -120,7 +129,6 @@ async function addCredit(user, transaction, t) {
       discount: 0,
       amount: transaction.amount + transaction.discount,
       description: `credits added: ${transaction.discount}`,
-      status: STATUS_ADMIN_CANCELLED,
       updatedBy: user.username
     },
     { transaction: t }
@@ -146,6 +154,7 @@ export async function useCredit(user, cardno, transaction, amount, t) {
         status,
         discount: Math.min(amount, card.credits),
         amount: Math.max(0, amount - card.credits),
+        // set to discount amount
         description: `credits used: ${card.credits}`,
         updatedBy: user.username
       },

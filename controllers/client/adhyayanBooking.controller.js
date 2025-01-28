@@ -11,15 +11,18 @@ import {
   STATUS_CONFIRMED,
   STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
-  STATUS_PAYMENT_COMPLETED,
   TYPE_ADHYAYAN,
-  TYPE_GUEST_ADHYAYAN,
-  STATUS_CASH_PENDING,
-  STATUS_CASH_COMPLETED,
-  STATUS_CREDITED
+  ERR_BOOKING_NOT_FOUND
 } from '../../config/constants.js';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
+import { 
+  openAdhyayanSeat, 
+  validateAdhyayans
+} from '../../helpers/adhyayanBooking.helper.js';
+import { 
+  userCancelTransaction 
+} from '../../helpers/transactions.helper.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -67,49 +70,28 @@ export const FetchBookedShibir = async (req, res) => {
 
   const shibirs = await database.query(
     `SELECT 
-	t1.bookingid, 
-  NULL AS bookedFor,
-  NULL AS name,
-	t1.shibir_id, 
-	t1.status, 
-	t2.name AS shibir_name, 
-	t2.speaker, 
-	t2.start_date, 
-	t2.end_date, 
-  t3.amount, 
-  t3.status as transaction_status
-FROM shibir_booking_db t1
-JOIN shibir_db t2 ON t1.shibir_id = t2.id
-JOIN transactions t3 ON t1.bookingid = t3.bookingid AND t3.category = :category
-WHERE t1.cardno = :cardno
-
-UNION ALL
-
-SELECT 
-	t1.bookingid, 
-  COALESCE(t1.guest, 'NA') AS bookedFor,
-  t4.name AS name,
-	t1.shibir_id, 
-	t1.status, 
-	t2.name AS shibir_name, 
-	t2.speaker, 
-	t2.start_date, 
-	t2.end_date, 
-  t3.amount, 
-  t3.status as transaction_status
-FROM guest_shibir_booking t1
-JOIN shibir_db t2 ON t1.shibir_id = t2.id
-JOIN guest_db t4 ON t4.id = t1.guest
-JOIN transactions t3 ON t1.bookingid = t3.bookingid AND t3.category = :guest_category
-WHERE t1.cardno = :cardno
-
-ORDER BY start_date DESC
-LIMIT :limit OFFSET :offset`,
+      t1.bookingid, 
+      COALESCE(t1.guest, 'NA') AS bookedFor,
+      t4.name AS name,
+      t1.shibir_id, 
+      t1.status, 
+      t2.name AS shibir_name, 
+      t2.speaker, 
+      t2.start_date, 
+      t2.end_date, 
+      COALESCE(t3.amount, 0) AS amount,
+      t3.status AS transaction_status
+    FROM shibir_booking_db t1
+    JOIN shibir_db t2 ON t1.shibir_id = t2.id
+    LEFT JOIN transactions t3 ON t1.bookingid = t3.bookingid AND t3.category = :category
+    LEFT JOIN guest_db t4 ON t4.id = t1.guest
+    WHERE t1.cardno = :cardno
+    ORDER BY start_date DESC
+    LIMIT :limit OFFSET :offset`,
     {
       replacements: {
         cardno: req.user.cardno,
         category: TYPE_ADHYAYAN,
-        guest_category: TYPE_GUEST_ADHYAYAN,
         limit: pageSize,
         offset: offset
       },
@@ -123,168 +105,51 @@ LIMIT :limit OFFSET :offset`,
 export const CancelShibir = async (req, res) => {
   const { cardno, shibir_id, bookedFor } = req.body;
 
+  const adhyayan = (await validateAdhyayans(shibir_id))[0];
+
   const t = await database.transaction();
   req.transaction = t;
 
-  if (bookedFor == null) {
-    const isBooked = await ShibirBookingDb.findOne({
-      where: {
-        shibir_id: shibir_id,
-        cardno: cardno,
-        guest: null,
-        status: {
-          [Sequelize.Op.in]: [
-            STATUS_CONFIRMED,
-            STATUS_WAITING,
-            STATUS_PAYMENT_PENDING
-          ]
-        }
-      }
-    });
-
-    if (!isBooked) {
-      throw new ApiError(404, 'Shibir booking not found');
+  const booking = await ShibirBookingDb.findOne({
+    where: {
+      shibir_id: shibir_id,
+      cardno: cardno,
+      guest: bookedFor == undefined ? null : bookedFor,
+      status: [
+        STATUS_CONFIRMED,
+        STATUS_WAITING,
+        STATUS_PAYMENT_PENDING
+      ]
     }
+  });
 
-    isBooked.status = STATUS_CANCELLED;
-    await isBooked.save({ transaction: t });
-
-    const adhyayanBookingTransaction = await Transactions.findOne({
-      where: {
-        cardno: req.user.cardno,
-        bookingid: isBooked.dataValues.bookingid,
-        category: TYPE_ADHYAYAN,
-        status: {
-          [Sequelize.Op.in]: [
-            STATUS_PAYMENT_PENDING,
-            STATUS_PAYMENT_COMPLETED,
-            STATUS_CASH_PENDING,
-            STATUS_CASH_COMPLETED
-          ]
-        }
-      }
-    });
-
-    if (adhyayanBookingTransaction == undefined) {
-      throw new ApiError(404, 'unable to find selected booking transaction');
-    }
-
-    if (
-      adhyayanBookingTransaction.status == STATUS_PAYMENT_PENDING ||
-      adhyayanBookingTransaction.status == STATUS_CASH_PENDING
-    ) {
-      adhyayanBookingTransaction.status = STATUS_CANCELLED;
-      await adhyayanBookingTransaction.save({ transaction: t });
-    } else if (
-      adhyayanBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
-      adhyayanBookingTransaction.status == STATUS_CASH_COMPLETED
-    ) {
-      adhyayanBookingTransaction.status = STATUS_CREDITED;
-      // TODO: add credited transaction to its table
-      await adhyayanBookingTransaction.save({ transaction: t });
-    }
-
-    const waitlist = await ShibirBookingDb.findOne({
-      where: {
-        shibir_id: shibir_id,
-        status: STATUS_WAITING
-      },
-      order: [['createdAt', 'ASC']]
-    });
-
-    //TODO: send notification and email to user
-    if (waitlist) {
-      waitlist.status = STATUS_PAYMENT_PENDING;
-      await waitlist.save({ transaction: t });
-    }
-  } else {
-    const isBooked = await ShibirBookingDb.findOne({
-      where: {
-        shibir_id: shibir_id,
-        cardno: cardno,
-        guest: bookedFor,
-        status: [
-          STATUS_CONFIRMED,
-          STATUS_WAITING,
-          STATUS_PAYMENT_PENDING
-        ]
-      }
-    });
-
-    if (!isBooked) {
-      throw new ApiError(404, 'Shibir booking not found');
-    }
-
-    isBooked.status = STATUS_CANCELLED;
-    await isBooked.save({ transaction: t });
-
-    const adhyayanGuestBookingTransaction = await Transactions.findOne({
-      where: {
-        cardno: req.user.cardno,
-        bookingid: isBooked.dataValues.bookingid,
-        category: TYPE_GUEST_ADHYAYAN,
-        status: {
-          [Sequelize.Op.in]: [
-            STATUS_PAYMENT_PENDING,
-            STATUS_PAYMENT_COMPLETED,
-            STATUS_CASH_PENDING,
-            STATUS_CASH_COMPLETED
-          ]
-        }
-      }
-    });
-
-    if (adhyayanGuestBookingTransaction == undefined) {
-      throw new ApiError(404, 'unable to find selected booking transaction');
-    }
-
-    if (
-      adhyayanGuestBookingTransaction.status == STATUS_PAYMENT_PENDING ||
-      adhyayanGuestBookingTransaction.status == STATUS_CASH_PENDING
-    ) {
-      adhyayanGuestBookingTransaction.status = STATUS_CANCELLED;
-      await adhyayanGuestBookingTransaction.save({ transaction: t });
-    } else if (
-      adhyayanGuestBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
-      adhyayanGuestBookingTransaction.status == STATUS_CASH_COMPLETED
-    ) {
-      adhyayanGuestBookingTransaction.status = STATUS_CREDITED;
-      // TODO: add credited transaction to its table
-      await adhyayanGuestBookingTransaction.save({ transaction: t });
-    }
-
-    const waitlist = await ShibirBookingDb.findOne({
-      where: {
-        shibir_id: shibir_id,
-        cardno: req.user.cardno,
-        guest: bookedFor,
-        status: STATUS_WAITING
-      },
-      order: [['createdAt', 'ASC']]
-    });
-
-    //TODO: send notification and email to user
-    if (waitlist) {
-      waitlist.status = STATUS_PAYMENT_PENDING;
-      await waitlist.save({ transaction: t });
-    }
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const update_shibir = await ShibirDb.findOne({
-    where: {
-      id: shibir_id
-    },
-    transaction: t,
-    lock: Sequelize.Transaction.LOCK.UPDATE
+  // TODO: Can a booking have multiple transactions?
+  var transaction = await Transactions.findOne({
+    where: { bookingid: booking.dataValues.bookingid }
   });
 
   if (
-    update_shibir &&
-    update_shibir.available_seats < update_shibir.total_seats
+    booking.dataValues.status == STATUS_CONFIRMED ||
+    booking.dataValues.status == STATUS_PAYMENT_PENDING
   ) {
-    update_shibir.available_seats += 1;
-    await update_shibir.save({ transaction: t });
+    await openAdhyayanSeat(adhyayan, t);
   }
+
+  if (transaction) {
+    await userCancelTransaction(req.user, transaction, t);
+  }
+
+  await booking.update(
+    {
+      status: STATUS_CANCELLED,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
 
   await t.commit();
 
@@ -294,7 +159,7 @@ export const CancelShibir = async (req, res) => {
     template: 'rajAdhyayanCancellation',
     context: {
       name: req.user.issuedto,
-      adhyayanName: update_shibir.dataValues.name
+      adhyayanName: adhyayan.dataValues.name
     }
   });
 
@@ -332,77 +197,4 @@ export const FetchShibirInRange = async (req, res) => {
   });
 
   return res.status(200).send({ data: shibirs });
-};
-
-function findClosestSum(arr, target) {
-  let closestSum = null;
-  let closestIndices = null;
-
-  function findExactSum(
-    arr,
-    n,
-    target,
-    currentSum = 0,
-    currentIndices = [],
-    index = 0
-  ) {
-    if (currentSum === target) {
-      closestSum = currentSum;
-      closestIndices = [...currentIndices];
-      return true;
-    }
-    if (index === n || currentSum > target) {
-      return false;
-    }
-
-    return (
-      findExactSum(
-        arr,
-        n,
-        target,
-        currentSum + arr[index],
-        [...currentIndices, index],
-        index + 1
-      ) || findExactSum(arr, n, target, currentSum, currentIndices, index + 1)
-    );
-  }
-
-  function findClosestSubsetSum(
-    arr,
-    target,
-    index,
-    currentSum,
-    currentIndices
-  ) {
-    if (index === arr.length) {
-      if (
-        closestSum === null ||
-        Math.abs(target - currentSum) < Math.abs(target - closestSum)
-      ) {
-        closestSum = currentSum;
-        closestIndices = [...currentIndices];
-      }
-      return;
-    }
-
-    findClosestSubsetSum(arr, target, index + 1, currentSum, currentIndices);
-    findClosestSubsetSum(arr, target, index + 1, currentSum + arr[index], [
-      ...currentIndices,
-      index
-    ]);
-  }
-
-  if (arr.includes(target)) {
-    closestSum = target;
-    closestIndices = [arr.indexOf(target)];
-    return { closestSum, closestIndices };
-  }
-
-  if (findExactSum(arr, arr.length, target)) {
-    return { closestSum, closestIndices };
-  }
-
-  findClosestSubsetSum(arr, target, 0, 0, []);
-
-  return { closestSum, closestIndices };
 }

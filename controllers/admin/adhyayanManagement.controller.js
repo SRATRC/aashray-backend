@@ -19,7 +19,12 @@ import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
 import { adminCancelTransaction, createPendingTransaction, useCredit } from '../../helpers/transactions.helper.js';
-import { reserveAdhyayanSeat, unreserveAdhyayanSeat, validateAdhyayanBooking, validateAdhyayans } from '../../helpers/adhyayanBooking.helper.js';
+import { 
+  reserveAdhyayanSeat, 
+  openAdhyayanSeat, 
+  validateAdhyayanBooking, 
+  validateAdhyayans 
+} from '../../helpers/adhyayanBooking.helper.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -226,12 +231,16 @@ export const adhyayanStatusUpdate = async (req, res) => {
     where: { bookingid: bookingid }
   });
 
+
+  // Dont allow changing status of CANCELLED or ADMIN_CANCELLED bookings
+  
   // 1. Booking Status = WAITING, Transaction is Not Created
   // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
   // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
   // 4. Booking Status = CANCELLED OR ADMIN_CANCELLED, Transaction is Not Created or Status = CANCELLED OR ADMIN_CANCELLED
   switch (status) {
     case STATUS_CONFIRMED:
+      // TODO: only allow if adhyayan seats > 0
       if (!transaction) {
         transaction = await createPendingTransaction(
           booking.dataValues.cardno,
@@ -254,6 +263,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
         t
       );
       // TODO: how is upi_ref passed? how do we handle CASH_COMPLETED
+      // TODO: only update the tranasction here, if any payments are pending
       await transaction.update( 
         {
           upi_ref: upi_ref || 'NA',
@@ -263,15 +273,14 @@ export const adhyayanStatusUpdate = async (req, res) => {
         { transaction: t }
       );
 
-      // TODO: what if available_seats == 0?
       await reserveAdhyayanSeat(adhyayan, t);
 
       break;
 
     case STATUS_PAYMENT_PENDING:
-      // TODO: Do we allow CONFIRMED => STATUS_PAYMENT_PENDING? Why?
       if (booking.dataValues.status == STATUS_CONFIRMED) {
-        await unreserveAdhyayanSeat(adhyayan, t);
+        // TODO: throw error saying that Confirmed booking can't be changed to Payment
+        await openAdhyayanSeat(adhyayan, t);
       } 
 
       if (!transaction) {
@@ -284,7 +293,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
           t
         );
       }
-      // TODO: should we apply credits here?
+      // TODO: apply credits and confirm the booking if possible
       await transaction.update( 
         {
           status: STATUS_PAYMENT_PENDING,
@@ -293,29 +302,22 @@ export const adhyayanStatusUpdate = async (req, res) => {
         { transaction: t }
       );
 
+      await reserveAdhyayanSeat(adhyayan, t);
+
       break;
   
 
     case STATUS_ADMIN_CANCELLED:
-      // TODO: why only if available_seats > 0?
-      // what if it is == 0? 
-      // can it be < 0?
-      if (booking.dataValues.status == STATUS_CONFIRMED) {
-        await unreserveAdhyayanSeat(adhyayan, t);
-      }
-
-      if (transaction) {
-        await adminCancelTransaction(req.user, transaction, t);
-      }
-
-      break;
-
     case STATUS_WAITING:
       // TODO: Should this behavior be same as ADMIN_CANCELLED?
-      if (booking.dataValues.status == STATUS_CONFIRMED) {
-        await unreserveAdhyayanSeat(adhyayan, t);
-      } 
-
+      // TODO: Can't put a booking to WAITING status
+      if (
+        booking.dataValues.status == STATUS_CONFIRMED ||
+        booking.dataValues.status == STATUS_PAYMENT_PENDING
+      ) {
+        await openAdhyayanSeat(adhyayan, t);
+      }
+      
       if (transaction) {
         await adminCancelTransaction(req.user, transaction, t);
       }

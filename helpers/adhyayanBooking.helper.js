@@ -120,13 +120,32 @@ export async function reserveAdhyayanSeat(adhyayan, t) {
   }
 }
 
-export async function unreserveAdhyayanSeat(adhyayan, t) {
-  if (adhyayan.dataValues.available_seats > 0) {
-    await adhyayan.update(
+export async function openAdhyayanSeat(adhyayan, t) {
+  const waiting = await ShibirBookingDb.findOne({
+    where: {
+      shibir_id: adhyayan.dataValues.id,
+      status: STATUS_WAITING
+    },
+    order: [['createdAt', 'ASC']]
+  });
+
+  //TODO: send notification and email to user
+  // apply credits if available
+  if (waiting) {
+    await waiting.update(
       {
-        available_seats: adhyayan.dataValues.available_seats + 1
+        status: STATUS_PAYMENT_PENDING
       },
       { transaction: t }
     );
+  } else {
+    if (adhyayan.dataValues.available_seats >= 0) {
+      await adhyayan.update(
+        {
+          available_seats: adhyayan.dataValues.available_seats + 1
+        },
+        { transaction: t }
+      );
+    }
   }
 }

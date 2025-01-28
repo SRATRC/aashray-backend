@@ -145,7 +145,7 @@ export const validateBooking = async (req, res) => {
 
         case TYPE_FOOD:
           foodDetails = await checkFoodAvailability(addon);
-          // totalCharge += foodDetails.charge;
+          // food charges are not added for Mumukshus
           break;
 
         case TYPE_ADHYAYAN:
@@ -333,6 +333,8 @@ async function bookFood(data, t) {
 
   const allDates = getDates(start_date, end_date);
   const bookings = await getFoodBookings(mumukshus, allDates);
+
+  // todo: check for room bookings as well, just like self booking
 
   var bookingsToCreate = [];
   for (const group of mumukshuGroup) {

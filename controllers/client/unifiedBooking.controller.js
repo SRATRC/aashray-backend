@@ -121,6 +121,7 @@ export const validateBooking = async (req, res) => {
         req.user,
         req.body.primary_booking
       );
+      // food charges are not added for Mumukshus
       break;
 
     case TYPE_TRAVEL:
