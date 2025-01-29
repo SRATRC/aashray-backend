@@ -127,16 +127,15 @@ export const CancelShibir = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  // TODO: Can a booking have multiple transactions?
   var transaction = await Transactions.findOne({
-    where: { bookingid: booking.dataValues.bookingid }
+    where: { bookingid: booking.bookingid }
   });
 
   if (
-    booking.dataValues.status == STATUS_CONFIRMED ||
-    booking.dataValues.status == STATUS_PAYMENT_PENDING
+    booking.status == STATUS_CONFIRMED ||
+    booking.status == STATUS_PAYMENT_PENDING
   ) {
-    await openAdhyayanSeat(adhyayan, t);
+    await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
   }
 
   if (transaction) {

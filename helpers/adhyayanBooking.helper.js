@@ -1,5 +1,6 @@
 import {
   ERR_ADHYAYAN_ALREADY_BOOKED,
+  ERR_ADHYAYAN_NO_SEATS_AVAILABLE,
   ERR_ADHYAYAN_NOT_FOUND,
   ERR_BOOKING_NOT_FOUND,
   ERR_TRANSACTION_NOT_FOUND,
@@ -19,6 +20,7 @@ import {
 } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
+import { createPendingTransaction, useCredit } from './transactions.helper.js';
 
 export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
   const booking = await ShibirBookingDb.findOne({
@@ -63,7 +65,7 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(
-  shibirs,
+  adhyayans,
   transaction_type,
   upi_ref,
   t,
@@ -73,79 +75,112 @@ export async function createAdhyayanBooking(
   var transactions = [];
 
   for (const mumukshu of mumukshus) {
-    for (const shibir of shibirs) {
-      const bookingId = uuidv4();
+    for (const adhyayan of adhyayans) {
 
-      let status = STATUS_WAITING;
+      if (adhyayan.available_seats > 0) {
 
-      // TODO: Apply Discounts on credits left
-      if (shibir.dataValues.available_seats > 0) {
-        status = STATUS_PAYMENT_PENDING;
+        await reserveAdhyayanSeat(adhyayan, t);
 
-        shibir.available_seats -= 1;
-        await shibir.save({ transaction: t });
+        const booking = await ShibirBookingDb.create(
+          {
+            bookingid: uuidv4(),
+            cardno: mumukshu,
+            shibir_id: adhyayan.id,
+            status: STATUS_PAYMENT_PENDING
+          },
+          { transaction: t }
+        );
 
-        transactions.push({
-          cardno: mumukshu,
-          bookingid: bookingId,
-          category: TYPE_ADHYAYAN,
-          amount: shibir.dataValues.amount,
-          status: STATUS_PAYMENT_PENDING
-        });
+        const transaction = await createPendingTransaction(
+          mumukshu,
+          booking.bookingid,
+          TYPE_ADHYAYAN,
+          adhyayan.amount,
+          'USER',
+          t
+        );
+
+        await useCredit(
+          mumukshu,
+          booking,
+          transaction,
+          adhyayan.amount,
+          'USER',
+          t
+        );
+      } else {
+        await ShibirBookingDb.create(
+          {
+            bookingid: uuidv4(),
+            cardno: mumukshu,
+            shibir_id: adhyayan.id,
+            status: STATUS_WAITING
+          },
+          { transaction: t }
+        );
       }
-
-      bookings.push({
-        cardno: mumukshu,
-        bookingid: bookingId,
-        shibir_id: shibir.dataValues.id,
-        status: status
-      });
     }
   }
-
-  await ShibirBookingDb.bulkCreate(bookings, { transaction: t });
-  await Transactions.bulkCreate(transactions, { transaction: t });
 
   return t;
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {
-  if (adhyayan.dataValues.available_seats > 0) {
-    await adhyayan.update(
-      {
-        available_seats: adhyayan.dataValues.available_seats - 1
-      },
-      { transaction: t }
-    );
-  }
+  if (adhyayan.available_seats <= 0) {
+    throw new ApiError(400, ERR_ADHYAYAN_NO_SEATS_AVAILABLE);
+  }     
+
+  await adhyayan.update(
+    {
+      available_seats: adhyayan.dataValues.available_seats - 1
+    },
+    { transaction: t }
+  );
 }
 
-export async function openAdhyayanSeat(adhyayan, t) {
-  const waiting = await ShibirBookingDb.findOne({
+export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
+  const booking = await ShibirBookingDb.findOne({
     where: {
-      shibir_id: adhyayan.dataValues.id,
+      shibir_id: adhyayan.id,
       status: STATUS_WAITING
     },
     order: [['createdAt', 'ASC']]
   });
 
-  //TODO: send notification and email to user
-  // apply credits if available
-  if (waiting) {
-    await waiting.update(
+  if (booking) {
+    await booking.update(
       {
         status: STATUS_PAYMENT_PENDING
       },
       { transaction: t }
     );
+
+    // for a booking in waiting status, there should be no existing transaction
+    const transaction = await createPendingTransaction(
+      cardno,
+      booking.bookingid,
+      TYPE_ADHYAYAN,
+      adhyayan.amount,
+      updatedBy,
+      t
+    );
+
+    await useCredit(
+      cardno,
+      booking,
+      transaction,
+      adhyayan.amount,
+      updatedBy,
+      t
+    );
+
+    // TODO: send notification and email to user
   } else {
-    if (adhyayan.dataValues.available_seats >= 0) {
-      await adhyayan.update(
-        {
-          available_seats: adhyayan.dataValues.available_seats + 1
-        },
-        { transaction: t }
-      );
-    }
+    await adhyayan.update(
+      {
+        available_seats: adhyayan.dataValues.available_seats + 1
+      },
+      { transaction: t }
+    );
   }
 }

@@ -11,11 +11,9 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
   STATUS_CASH_PENDING,
-  STATUS_CREDITED
+  STATUS_CREDITED,
+  STATUS_CONFIRMED
 } from '../config/constants.js';
-import Sequelize from 'sequelize';
-import getDates from '../utils/getDates.js';
-import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 
 export async function createTransaction(cardno, bookingid, category, amount, upi_ref, type, updatedBy, t) {
@@ -75,13 +73,14 @@ export async function userCancelTransaction(user, transaction, t) {
 async function cancelTransaction(user, transaction, t, admin=false) {
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
 
+  var amount = transaction.amount + transaction.discount;
+
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
-      // TODO: transaction.amount or transaction.discount
-      if (transaction.discount > 0) {
-        await addCredit(user, transaction, t);
-        // status = STATUS_CREDITED;
+      if (amount > 0) {
+        await addCredit(user, transaction, amount, t);
+        status = STATUS_CREDITED;
       }
       break;
 
@@ -91,7 +90,6 @@ async function cancelTransaction(user, transaction, t, admin=false) {
 
     case STATUS_CANCELLED:
     case STATUS_ADMIN_CANCELLED:
-    // TODO: When is a transaction's status CREDITED?
     case STATUS_CREDITED:
       throw new ApiError(400, 'Cannot cancel already cancelled or credited transaction');
 
@@ -108,7 +106,7 @@ async function cancelTransaction(user, transaction, t, admin=false) {
   );
 }
 
-async function addCredit(user, transaction, t) {
+async function addCredit(user, transaction, amount, t) {
   const card = await CardDb.findOne({
     where: { cardno: transaction.cardno }
   });
@@ -118,7 +116,7 @@ async function addCredit(user, transaction, t) {
 
   await card.update(
     {
-      credits: card.credits + transaction.discount,
+      credits: card.credits + amount,
       updatedBy: user.username
     },
     { transaction: t }
@@ -127,15 +125,17 @@ async function addCredit(user, transaction, t) {
   await transaction.update(
     {
       discount: 0,
-      amount: transaction.amount + transaction.discount,
-      description: `credits added: ${transaction.discount}`,
+      amount,
+      description: `credits added: ${amount}`,
       updatedBy: user.username
     },
     { transaction: t }
   )
 }
 
-export async function useCredit(user, cardno, transaction, amount, t) {
+// TODO: For guests, credits will be added to the 
+// Card that made the booking
+export async function useCredit(cardno, booking, transaction, amount, updatedBy, t) {
   const card = await CardDb.findOne({
     where: { cardno: cardno }
   });
@@ -143,30 +143,45 @@ export async function useCredit(user, cardno, transaction, amount, t) {
   if (!card)
     new ApiError(400, ERR_CARD_NOT_FOUND);
 
-  if (card.credits > 0) {
-    const status = amount > card.credits 
-      ? STATUS_PAYMENT_PENDING
-      : STATUS_PAYMENT_COMPLETED;
+  if (card.credits <= 0) {
+    return;
+  }
+  
+  const status = amount > card.credits 
+    ? STATUS_PAYMENT_PENDING
+    : STATUS_PAYMENT_COMPLETED;
 
-    // TODO: check if this makes sense
-    transaction.update(
-      {
-        status,
-        discount: Math.min(amount, card.credits),
-        amount: Math.max(0, amount - card.credits),
-        // set to discount amount
-        description: `credits used: ${card.credits}`,
-        updatedBy: user.username
-      },
-      { transaction: t }
-    );
+  const creditsUsed = Math.min(amount, card.credits);
+  transaction.update(
+    {
+      status,
+      discount: creditsUsed,
+      amount: amount - creditsUsed,
+      // set to discount amount
+      description: `credits used: ${creditsUsed}`,
+      updatedBy
+    },
+    { transaction: t }
+  );
 
-    await card.update(
+  // After applying credits, if the transaction is complete
+  // then confirm the booking.
+  if (status == STATUS_PAYMENT_COMPLETED) {
+    booking.update(
       {
-        credits: Math.max(0, card.credits - amount),
-        updatedBy: user.username
+        status: STATUS_CONFIRMED,
+        updatedBy
       },
       { transaction: t }
     );
   }
+
+  await card.update(
+    {
+      credits: card.credits - creditsUsed,
+      updatedBy
+    },
+    { transaction: t }
+  );
+
 }

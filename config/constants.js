@@ -86,7 +86,9 @@ export const ERR_ROOM_MUST_BE_BOOKED =
   'Must Have Room Booked On One Or More Selected Dates';
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan Already Booked';
 export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan Not Found';
+export const ERR_ADHYAYAN_NO_SEATS_AVAILABLE = 'Selected Raj Adhyayan doesn\'t have any available seats.';
 export const ERR_BOOKING_NOT_FOUND = 'Booking Not Found';
+export const ERR_BOOKING_ALREADY_CANCELLED = 'Cannot change status of already cancelled booking';
 export const ERR_TRANSACTION_NOT_FOUND = 'Booking Transaction Not Found';
 
 export const ERR_FOOD_ALREADY_BOOKED = 'Food Already Booked';

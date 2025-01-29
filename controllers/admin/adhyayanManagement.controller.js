@@ -11,7 +11,9 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
   STATUS_CASH_COMPLETED,
-  TYPE_ADHYAYAN
+  TYPE_ADHYAYAN,
+  ERR_BOOKING_ALREADY_CANCELLED,
+  ERR_ADHYAYAN_NO_SEATS_AVAILABLE
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize, { QueryTypes } from 'sequelize';
@@ -154,8 +156,8 @@ export const updateAdhyayan = async (req, res) => {
   const adhyayanId = req.params.id;
   const adhyayan = (await validateAdhyayans(adhyayanId))[0];
 
-  const diff = total_seats - adhyayan.dataValues.total_seats;
-  const available_seats = Math.max(0, adhyayan.dataValues.available_seats + diff);
+  const diff = total_seats - adhyayan.total_seats;
+  const available_seats = Math.max(0, adhyayan.available_seats + diff);
   const month = moment(start_date).format('MMMM');
 
   await adhyayan.update({
@@ -220,109 +222,132 @@ export const adhyayanWaitlist = async (req, res) => {
 export const adhyayanStatusUpdate = async (req, res) => {
   const { shibir_id, bookingid, status, upi_ref, description } = req.body;
 
+  var newBookingStatus = status;
+
   const t = await database.transaction();
   req.transaction = t;
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
   const booking = await validateAdhyayanBooking(bookingid, shibir_id);
 
+  if (status == booking.status) {
+    throw new ApiError(400, 'Status is same as before');
+  }
+
+  if (
+    booking.status == STATUS_ADMIN_CANCELLED ||
+    booking.status == STATUS_CANCELLED
+  ) {
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+
+  
+
   // TODO: Can a booking have multiple transactions?
   var transaction = await Transactions.findOne({
     where: { bookingid: bookingid }
   });
 
-
-  // Dont allow changing status of CANCELLED or ADMIN_CANCELLED bookings
-  
   // 1. Booking Status = WAITING, Transaction is Not Created
   // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
   // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
   // 4. Booking Status = CANCELLED OR ADMIN_CANCELLED, Transaction is Not Created or Status = CANCELLED OR ADMIN_CANCELLED
   switch (status) {
+    // Only Waiting & Payment Pending booking can be changed to
+    // Confirmed 
     case STATUS_CONFIRMED:
-      // TODO: only allow if adhyayan seats > 0
+      if (booking.status == STATUS_WAITING) {
+        await reserveAdhyayanSeat(adhyayan, t);
+      }
+
       if (!transaction) {
         transaction = await createPendingTransaction(
-          booking.dataValues.cardno,
+          booking.cardno,
           bookingid,
           TYPE_ADHYAYAN,
-          adhyayan.dataValues.amount,
+          adhyayan.amount,
           req.user.username,
           t
         );
       }
-      // TODO: should we apply credits here?
-      // TODO: this can be problematic if Admin CONFIRMS a WAITING or PAYMENT_PENDING booking which would
-      //       mark the transaction as PAYMENT_COMPLETED and then if the booking is 
-      //       CANCELLED, credits will be added to the Card.
+
       await useCredit(
-        req.user,
         transaction.cardno,
+        booking,
         transaction,
-        adhyayan.dataValues.amount,
+        adhyayan.amount,
+        req.user.username,
         t
       );
-      // TODO: how is upi_ref passed? how do we handle CASH_COMPLETED
-      // TODO: only update the tranasction here, if any payments are pending
-      await transaction.update( 
-        {
-          upi_ref: upi_ref || 'NA',
-          status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
 
-      await reserveAdhyayanSeat(adhyayan, t);
+      // After applying credits, if the status is still payment pending
+      // then accept the UPI or cash payment and mark is complete.
+      if (transaction.status == STATUS_PAYMENT_PENDING) {
+        await transaction.update(
+          {
+            upi_ref: upi_ref || 'NA',
+            status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      }
 
       break;
 
     case STATUS_PAYMENT_PENDING:
-      if (booking.dataValues.status == STATUS_CONFIRMED) {
-        // TODO: throw error saying that Confirmed booking can't be changed to Payment
-        await openAdhyayanSeat(adhyayan, t);
-      } 
+      if (booking.status == STATUS_CONFIRMED) {
+        throw new ApiError(400, 'Confirmed booking\'s status cannot be changed to Payment Pending');
+      }
 
-      if (!transaction) {
-        transaction = await createPendingTransaction(
-          booking.dataValues.cardno,
-          bookingid,
-          TYPE_ADHYAYAN,
-          adhyayan.dataValues.amount,
+      // Only Waiting booking can be changed to Payment Pending
+      if (booking.status == STATUS_WAITING) {
+        await reserveAdhyayanSeat(adhyayan, t);
+
+        if (!transaction) {
+          transaction = await createPendingTransaction(
+            booking.cardno,
+            bookingid,
+            TYPE_ADHYAYAN,
+            adhyayan.amount,
+            req.user.username,
+            t
+          );
+        }
+
+        await useCredit(
+          transaction.cardno,
+          booking,
+          transaction,
+          adhyayan.amount,
           req.user.username,
           t
         );
-      }
-      // TODO: apply credits and confirm the booking if possible
-      await transaction.update( 
-        {
-          status: STATUS_PAYMENT_PENDING,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
 
-      await reserveAdhyayanSeat(adhyayan, t);
+        // After applying credits, if the transaction is complete
+        // then confirm the booking.
+        if (transaction.status == STATUS_PAYMENT_COMPLETED) {
+          newBookingStatus = STATUS_CONFIRMED;
+        }
+      }
 
       break;
   
-
     case STATUS_ADMIN_CANCELLED:
-    case STATUS_WAITING:
-      // TODO: Should this behavior be same as ADMIN_CANCELLED?
-      // TODO: Can't put a booking to WAITING status
       if (
-        booking.dataValues.status == STATUS_CONFIRMED ||
-        booking.dataValues.status == STATUS_PAYMENT_PENDING
+        booking.status == STATUS_CONFIRMED ||
+        booking.status == STATUS_PAYMENT_PENDING
       ) {
-        await openAdhyayanSeat(adhyayan, t);
+        await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
       }
       
       if (transaction) {
         await adminCancelTransaction(req.user, transaction, t);
       }
-
       break;
+
+    case STATUS_WAITING:
+      throw new ApiError(400, 'Booking\'s status cannot be changed to Waiting');
 
     default:
       throw new ApiError(400, 'Invalid status provided');
@@ -330,7 +355,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
   await booking.update(
     {
-      status,
+      status: newBookingStatus,
       updatedBy: req.user.username
     },
     { transaction: t }
