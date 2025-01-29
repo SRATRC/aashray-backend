@@ -25,6 +25,14 @@ const RoomBooking = sequelize.define(
         key: 'cardno'
       }
     },
+    guest: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
+    },
     roomno: {
       type: DataTypes.STRING,
       allowNull: false,
