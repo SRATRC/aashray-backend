@@ -35,9 +35,7 @@ import {
   calculateNights,
   validateDate
 } from '../helper.js';
-import {
-  checkRoomAlreadyBooked
-} from '../../helpers/roomBooking.helper.js';
+import { checkRoomAlreadyBooked } from '../../helpers/roomBooking.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';
@@ -247,8 +245,8 @@ export const BookingForGuest = async (req, res) => {
 };
 
 export const FlatBookingForMumukshuAndGuest = async (req, res) => {
-  const { flat_no, mobno, checkin_date, checkout_date,guest_id } = req.body;
-  
+  const { flat_no, mobno, checkin_date, checkout_date, guest_id } = req.body;
+
   const ownFlat = await FlatDb.findOne({
     where: {
       flatno: flat_no,
@@ -257,7 +255,6 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
   });
   if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
 
-  
   var cardNo;
   if (guest_id == null) {
     const user_data = await CardDb.findOne({
@@ -266,17 +263,27 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
       }
     });
     if (!user_data) throw new ApiError(404, 'user not found');
-    cardNo=user_data.dataValues.cardno;
+    cardNo = user_data.dataValues.cardno;
     if (
-      await checkFlatAlreadyBooked(checkin_date, checkout_date, flat_no, user_data.dataValues.cardno)
+      await checkFlatAlreadyBooked(
+        checkin_date,
+        checkout_date,
+        flat_no,
+        user_data.dataValues.cardno
+      )
     ) {
       throw new ApiError(400, 'Already Booked');
     }
-  }
-  else{
-    cardNo=req.user.cardno;
+  } else {
+    cardNo = req.user.cardno;
     if (
-      await checkFlatAlreadyBookedForGuest(checkin_date, checkout_date, flat_no, cardNo,guest_id)
+      await checkFlatAlreadyBookedForGuest(
+        checkin_date,
+        checkout_date,
+        flat_no,
+        cardNo,
+        guest_id
+      )
     ) {
       throw new ApiError(400, 'Already Booked');
     }
@@ -292,8 +299,8 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
     checkin: checkin_date,
     checkout: checkout_date,
     nights: nights,
-    guest:guest_id,
-    status:ROOM_STATUS_PENDING_CHECKIN
+    guest: guest_id,
+    status: ROOM_STATUS_PENDING_CHECKIN
   });
 
   if (!booking) {
@@ -314,9 +321,6 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
 
   return res.status(201).send({ message: 'booked successfully' });
 };
-
-
-
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -448,39 +452,41 @@ export const CancelBooking = async (req, res) => {
     booking.status = STATUS_CANCELLED;
     await booking.save({ transaction: t });
 
-    const roomBookingTransaction = await Transactions.findOne({
-      where: {
-        cardno: req.user.cardno,
-        bookingid: bookingid,
-        category: TYPE_ROOM,
-        status: {
-          [Sequelize.Op.in]: [
-            STATUS_PAYMENT_PENDING,
-            STATUS_PAYMENT_COMPLETED,
-            STATUS_CASH_PENDING,
-            STATUS_CASH_COMPLETED
-          ]
+    if (booking.dataValues.nights > 0) {
+      const roomBookingTransaction = await Transactions.findOne({
+        where: {
+          cardno: req.user.cardno,
+          bookingid: bookingid,
+          category: TYPE_ROOM,
+          status: {
+            [Sequelize.Op.in]: [
+              STATUS_PAYMENT_PENDING,
+              STATUS_PAYMENT_COMPLETED,
+              STATUS_CASH_PENDING,
+              STATUS_CASH_COMPLETED
+            ]
+          }
         }
+      });
+
+      if (roomBookingTransaction == undefined) {
+        throw new ApiError(404, 'unable to find selected booking');
       }
-    });
 
-    if (roomBookingTransaction == undefined) {
-      throw new ApiError(404, 'unable to find selected booking');
-    }
-
-    if (
-      roomBookingTransaction.status == STATUS_PAYMENT_PENDING ||
-      roomBookingTransaction.status == STATUS_CASH_PENDING
-    ) {
-      roomBookingTransaction.status = STATUS_CANCELLED;
-      await roomBookingTransaction.save({ transaction: t });
-    } else if (
-      roomBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
-      roomBookingTransaction.status == STATUS_CASH_COMPLETED
-    ) {
-      roomBookingTransaction.status = STATUS_CREDITED;
-      // TODO: add credited transaction to its table
-      await roomBookingTransaction.save({ transaction: t });
+      if (
+        roomBookingTransaction.status == STATUS_PAYMENT_PENDING ||
+        roomBookingTransaction.status == STATUS_CASH_PENDING
+      ) {
+        roomBookingTransaction.status = STATUS_CANCELLED;
+        await roomBookingTransaction.save({ transaction: t });
+      } else if (
+        roomBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
+        roomBookingTransaction.status == STATUS_CASH_COMPLETED
+      ) {
+        roomBookingTransaction.status = STATUS_CREDITED;
+        // TODO: add credited transaction to its table
+        await roomBookingTransaction.save({ transaction: t });
+      }
     }
   }
 

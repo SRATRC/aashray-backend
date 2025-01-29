@@ -26,6 +26,7 @@
     "mysql2": "^3.9.8",
     "nodemailer": "^6.9.9",
     "nodemailer-express-handlebars": "^6.1.2",
+    "razorpay": "^2.9.5",
     "sequelize": "^6.34.0",
     "uuid": "^9.0.1"
   },
