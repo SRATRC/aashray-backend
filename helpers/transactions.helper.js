@@ -233,7 +233,7 @@ export const generateOrderId = async (amount) => {
   });
 
   const options = {
-    amount: amount,
+    amount: amount * 100,
     currency: 'INR',
     receipt: uuidv4()
   };
