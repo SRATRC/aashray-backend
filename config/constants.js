@@ -93,3 +93,7 @@ export const ERR_TRANSACTION_NOT_FOUND = 'Booking Transaction Not Found';
 
 export const ERR_FOOD_ALREADY_BOOKED = 'Food Already Booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel Already Booked';
+
+export const MSG_BOOKING_SUCCESSFUL = 'Booking Successful';
+export const MSG_UPDATE_SUCCESSFUL = 'Update Successful';
+export const MSG_CANCEL_SUCCESSFUL = 'Cancel Successful';

@@ -11,7 +11,8 @@ import {
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
-  ERR_ROOM_MUST_BE_BOOKED
+  ERR_ROOM_MUST_BE_BOOKED,
+  MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -97,7 +98,7 @@ export const unifiedBooking = async (req, res) => {
   const order = await generateOrderId(amount);
 
   await t.commit();
-  return res.status(200).send({ message: 'Booking Successful', data: order });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
 export const validateBooking = async (req, res) => {
@@ -236,7 +237,13 @@ async function bookRoom(body, user, data, t) {
   const nights = await calculateNights(checkin_date, checkout_date);
 
   if (nights == 0) {
-    await bookDayVisit(user.cardno, checkin_date, checkout_date, t);
+    await bookDayVisit(
+      user.cardno,
+      checkin_date,
+      checkout_date,
+      'USER',
+      t
+    );
   } else {
     await createRoomBooking(
       user.cardno,
@@ -246,8 +253,7 @@ async function bookRoom(body, user, data, t) {
       room_type,
       user.gender,
       floor_pref,
-      body.transaction_ref,
-      body.transaction_type,
+      'USER',
       t
     );
   }

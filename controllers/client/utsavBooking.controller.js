@@ -11,7 +11,8 @@ import {
   STATUS_CASH_PENDING,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_COMPLETED,
-  STATUS_CREDITED
+  STATUS_CREDITED,
+  MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   UtsavDb,
@@ -145,7 +146,7 @@ export const BookUtsav = async (req, res) => {
 
   await t.commit();
 
-  return res.status(200).send({ message: 'Booking successful' });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const BookGuestUtsav = async (req, res) => {
@@ -261,7 +262,7 @@ export const BookGuestUtsav = async (req, res) => {
   ]);
 
   await t.commit();
-  res.status(200).send({ message: 'Booking Successful' });
+  res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const ViewUtsavBookings = async (req, res) => {

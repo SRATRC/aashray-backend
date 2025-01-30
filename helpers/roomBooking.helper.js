@@ -15,7 +15,7 @@ import {
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
-import { createTransaction } from './transactions.helper.js';
+import { createPendingTransaction } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
@@ -57,7 +57,7 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   }
 }
 
-export async function bookDayVisit(cardno, checkin, checkout, transaction) {
+export async function bookDayVisit(cardno, checkin, checkout, updatedBy, t) {
   const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
@@ -68,9 +68,10 @@ export async function bookDayVisit(cardno, checkin, checkout, transaction) {
       roomtype: 'NA',
       gender: 'NA',
       nights: 0,
-      status: ROOM_STATUS_PENDING_CHECKIN,      
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      updatedBy      
     },
-    { transaction }
+    { transaction: t }
   );
 
   if (!booking) {
@@ -91,12 +92,7 @@ export async function findRoom(checkin, checkout, room_type, gender) {
                     SELECT roomno 
                     FROM room_booking 
                     WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
-                )`),
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                  SELECT roomno 
-                  FROM guest_room_booking 
-                  WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
-              )`)
+                )`)
       },
       roomstatus: STATUS_AVAILABLE,
       roomtype: room_type,
@@ -120,8 +116,7 @@ export async function createRoomBooking(
   roomtype, 
   user_gender, 
   floor_pref,
-  upi_ref, 
-  transaction_type, 
+  updatedBy,
   t
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
@@ -140,7 +135,8 @@ export async function createRoomBooking(
       checkout,
       nights,
       roomtype,
-      gender
+      gender,
+      updatedBy
     },
     { transaction: t }
   );
@@ -154,14 +150,12 @@ export async function createRoomBooking(
 
   const amount = roomCharge(roomtype) * nights;
 
-  const transaction = await createTransaction(
-    cardno, 
-    booking.dataValues.bookingid, 
-    TYPE_ROOM, 
+  const transaction = await createPendingTransaction(
+    cardno,
+    booking.bookingid,
+    TYPE_ROOM,
     amount,
-    upi_ref, 
-    transaction_type, 
-    'USER',
+    updatedBy,
     t
   );
 

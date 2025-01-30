@@ -9,6 +9,7 @@ import sendMail from '../../utils/sendMail.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import {
+  MSG_UPDATE_SUCCESSFUL,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_REFUND,
   STATUS_CANCELLED,
@@ -152,7 +153,7 @@ export const updateBookingStatus = async (req, res) => {
 
   return res
     .status(200)
-    .send({ message: 'Successfully updated booking status' });
+    .send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateTransactionStatus = async (req, res) => {
@@ -202,5 +203,5 @@ export const updateTransactionStatus = async (req, res) => {
   );
 
   await t.commit();
-  return res.status(200).send({ message: 'Successfully updated transaction' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };

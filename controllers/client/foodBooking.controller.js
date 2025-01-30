@@ -4,7 +4,7 @@ import {
   GuestFoodDb,
   Menu
 } from '../../models/associations.js';
-import { STATUS_RESIDENT } from '../../config/constants.js';
+import { MSG_BOOKING_SUCCESSFUL, MSG_CANCEL_SUCCESSFUL, STATUS_RESIDENT } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
   checkSpecialAllowance,
@@ -82,7 +82,7 @@ export const RegisterFood = async (req, res) => {
   await FoodDb.bulkCreate(food_data);
 
   return res.status(201).send({
-    message: 'Food Booked successfully'
+    message: MSG_BOOKING_SUCCESSFUL
   });
 };
 
@@ -189,7 +189,7 @@ export const RegisterForGuest = async (req, res) => {
   await t.commit();
 
   return res.status(200).json({
-    message: 'Food booking successful'
+    message: MSG_BOOKING_SUCCESSFUL
   });
 };
 
@@ -451,7 +451,7 @@ export const CancelFood = async (req, res) => {
   await t.commit();
   return res
     .status(200)
-    .send({ message: 'Successfully Canceled Food Booking' });
+    .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const fetchMenu = async (req, res) => {

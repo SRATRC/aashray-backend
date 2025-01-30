@@ -13,7 +13,8 @@ import {
   DINNER_PRICE,
   ERR_CARD_NOT_FOUND,
   TYPE_TRAVEL,
-  ERR_INVALID_DATE
+  ERR_INVALID_DATE,
+  MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
 import { calculateNights, validateDate } from '../helper.js';
 import {
@@ -87,7 +88,7 @@ export const mumukshuBooking = async (req, res) => {
   }
 
   await t.commit();
-  return res.status(200).send({ message: 'Booking Successful' });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const validateBooking = async (req, res) => {
@@ -262,6 +263,7 @@ async function bookRoom(body, data, t) {
           card.dataValues.cardno,
           checkin_date,
           checkout_date,
+          'USER',
           t
         );
       } else {
@@ -273,8 +275,7 @@ async function bookRoom(body, data, t) {
           roomType,
           card.dataValues.gender,
           floorType,
-          body.transaction_ref || 'NA',
-          body.transaction_type,
+          'USER',
           t
         );
       }

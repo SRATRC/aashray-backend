@@ -17,7 +17,6 @@ import {
   STATUS_PAYMENT_COMPLETED,
   TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
-  TYPE_GUEST_ROOM,
   TYPE_GUEST_ADHYAYAN,
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
@@ -29,7 +28,9 @@ import {
   ERR_FOOD_ALREADY_BOOKED,
   LUNCH_PRICE,
   BREAKFAST_PRICE,
-  DINNER_PRICE
+  DINNER_PRICE,
+  MSG_BOOKING_SUCCESSFUL,
+  MSG_UPDATE_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -44,7 +45,7 @@ import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
 import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
-import { createTransaction } from '../../helpers/transactions.helper.js';
+import { createPendingTransaction } from '../../helpers/transactions.helper.js';
 
 // TODO: charge money for guest food
 export const guestBooking = async (req, res) => {
@@ -91,7 +92,7 @@ export const guestBooking = async (req, res) => {
   }
 
   await t.commit();
-  return res.status(200).send({ message: 'Booking Successful' });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const validateBooking = async (req, res) => {
@@ -363,13 +364,11 @@ async function bookRoomForSingleGuest(
 
   const amount = roomCharge(roomtype) * nights;
 
-  const transaction = await createTransaction(
-    user.cardno, 
-    booking.dataValues.bookingid, 
-    TYPE_GUEST_ROOM, 
+  const transaction = await createPendingTransaction(
+    user.cardno,
+    booking.bookingid,
+    TYPE_ROOM,
     amount,
-    body.transaction_ref || 'NA',
-    body.transaction_type, 
     'USER',
     t
   );
@@ -667,7 +666,7 @@ export const createGuests = async (req, res) => {
   await t.commit();
 
   return res.status(200).send({
-    message: 'Guests updated successfully',
+    message: MSG_UPDATE_SUCCESSFUL,
     guests: allGuests
   });
 };

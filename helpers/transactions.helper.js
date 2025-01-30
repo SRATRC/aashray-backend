@@ -39,7 +39,7 @@ export async function createTransaction(
       category,
       amount,
       upi_ref,
-      status,
+      status: STATUS_PAYMENT_PENDING,
       updatedBy
     },
     { transaction: t }

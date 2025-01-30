@@ -19,7 +19,12 @@ import {
   STATUS_WAITING,
   STATUS_CANCELLED,
   NAC_ROOM_PRICE,
-  AC_ROOM_PRICE
+  AC_ROOM_PRICE,
+  ERR_BOOKING_NOT_FOUND,
+  ERR_ROOM_ALREADY_BOOKED,
+  ERR_CARD_NOT_FOUND,
+  MSG_BOOKING_SUCCESSFUL,
+  MSG_UPDATE_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -27,7 +32,9 @@ import {
   validateDate
 } from '../helper.js';
 import {
-  checkRoomAlreadyBooked
+  bookDayVisit,
+  checkRoomAlreadyBooked,
+  createRoomBooking
 } from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import Sequelize, { where } from 'sequelize';
@@ -51,14 +58,14 @@ export const manualCheckin = async (req, res) => {
   });
 
   if (!booking) {
-    throw new ApiError(404, 'Booking not found');
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   booking.status = ROOM_STATUS_CHECKEDIN;
   booking.updatedBy = req.user.username;
   await booking.save();
 
-  return res.status(200).send({ message: 'User Checked in', data: booking });
+  return res.status(200).send({ message: 'User checked in', data: booking });
 };
 
 export const manualCheckout = async (req, res) => {
@@ -73,7 +80,7 @@ export const manualCheckout = async (req, res) => {
     order: [['checkin', 'ASC']]
   });
 
-  if (!booking) throw new ApiError(404, 'Booking not found');
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
   const today = moment().format('YYYY-MM-DD');
 
@@ -120,154 +127,65 @@ export const roomBooking = async (req, res) => {
     req.body;
   validateDate(checkin_date, checkout_date);
 
-  const t = await database.transaction();
-  req.transaction = t;
+  const card = mobno ? 
+    await CardDb.findOne({ where: { mobno } }) :
+    await CardDb.findOne({ where: { cardno } });
 
-  if (mobno) {
-    const user = await CardDb.findOne({
-      where: {
-        mobno: mobno
-      }
-    });
-    if (user) req.mumukshu = user;
-  } else {
-    const user = await CardDb.findOne({
-      where: {
-        cardno: cardno
-      }
-    });
-    if (user) req.mumukshu = user;
+  if (!card) {
+    throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
   if (
     await checkRoomAlreadyBooked(
       checkin_date,
       checkout_date,
-      req.mumukshu.cardno
+      card.cardno
     )
   ) {
-    throw new ApiError(400, 'Already Booked');
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  const gender = req.mumukshu.gender;
+  const t = await database.transaction();
+  req.transaction = t;
+
   const nights = await calculateNights(checkin_date, checkout_date);
-  var roomno = undefined;
-  var booking = undefined;
-
-  if (nights > 0) {
-    roomno = await RoomDb.findOne({
-      attributes: ['roomno'],
-      where: {
-        roomno: {
-          [Sequelize.Op.notLike]: 'NA%',
-          [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= ${checkin_date} OR checkin >= ${checkout_date})
-                )`)
-        },
-        roomstatus: 'available',
-        roomtype: room_type,
-        gender: floor_pref + gender
-      },
-      order: [
-        Sequelize.literal(
-          `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-        ),
-        Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-      ],
-      limit: 1
-    });
-    if (roomno == undefined) {
-      throw new ApiError(400, 'No Beds Available');
-    }
-
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: req.mumukshu.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: room_type,
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
+  if (nights == 0) {
+    await bookDayVisit(
+      card.cardno, 
+      checkin_date, 
+      checkout_date,
+      req.user.username,
+      t
     );
-
-    if (booking == undefined) {
-      throw new ApiError(400, 'Failed to book a bed');
-    }
-
-    const transaction = await RoomBookingTransaction.create(
-      {
-        cardno: req.mumukshu.cardno,
-        bookingid: booking.dataValues.bookingid,
-        type: TYPE_EXPENSE,
-        amount:
-          req.body.room_type == 'nac'
-            ? NAC_ROOM_PRICE * nights
-            : AC_ROOM_PRICE * nights,
-        description: `Room Booked for ${nights} nights`,
-        status: STATUS_PAYMENT_PENDING,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
-
-    if (transaction == undefined) {
-      throw new ApiError(400, 'Failed to book a bed');
-    }
   } else {
-    roomno = await RoomDb.findOne({
-      where: {
-        roomno: { [Sequelize.Op.like]: 'NA%' },
-        roomtype: room_type,
-        gender: floor_pref + gender,
-        roomstatus: ROOM_STATUS_AVAILABLE
-      },
-      attributes: ['roomno']
-    });
-
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: req.mumukshu.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: room_type,
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
+    await createRoomBooking(
+      card.cardno,
+      checkin_date,
+      checkout_date,
+      nights,
+      room_type,
+      card.gender,
+      floor_pref,
+      req.user.username,
+      t
     );
-
-    if (booking == undefined) {
-      throw new ApiError(400, 'Failed to book a bed');
-    }
   }
 
   await t.commit();
 
   SendMail({
-    email: req.mumukshu.email,
+    email: card.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
     template: 'rajSharan',
     context: {
-      name: req.mumukshu.issuedto,
-      bookingid: booking.dataValues.bookingid,
-      checkin: booking.dataValues.checkin,
-      checkout: booking.dataValues.checkout
+      name: card.issuedto,
+      bookingid: booking.bookingid,
+      checkin: booking.checkin,
+      checkout: booking.checkout
     }
   });
 
-  return res.status(201).send({ message: 'booked successfully' });
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const flatBooking = async (req, res) => {
@@ -336,7 +254,7 @@ export const flatBooking = async (req, res) => {
     message
   });
 
-  return res.status(201).send({ message: 'booked successfully' });
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
@@ -453,7 +371,7 @@ export const updateRoomBooking = async (req, res) => {
 
   await t.commit();
 
-  return res.status(200).send({ message: 'updated booking successfully' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateFlatBooking = async (req, res) => {
@@ -494,7 +412,7 @@ export const updateFlatBooking = async (req, res) => {
   booking.updatedBy = req.user.username;
   await booking.save();
 
-  return res.status(201).send({ message: 'booking updated successfully' });
+  return res.status(201).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const checkinReport = async (req, res) => {

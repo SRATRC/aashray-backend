@@ -10,7 +10,8 @@ import {
   BREAKFAST_PRICE,
   LUNCH_PRICE,
   DINNER_PRICE,
-  TYPE_EXPENSE
+  TYPE_EXPENSE,
+  MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -217,7 +218,7 @@ export const cancelFoodByCard = async (req, res) => {
   await t.commit();
   return res
     .status(200)
-    .send({ message: 'Successfully Canceled Food Booking' });
+    .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const cancelFoodByMob = async (req, res) => {
@@ -260,7 +261,7 @@ export const cancelFoodByMob = async (req, res) => {
   await t.commit();
   return res
     .status(200)
-    .send({ message: 'Successfully Canceled Food Booking' });
+    .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const bookFoodForGuest = async (req, res) => {

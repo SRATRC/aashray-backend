@@ -7,7 +7,8 @@ import {
   TYPE_ROOM,
   ERR_BOOKING_NOT_FOUND,
   STATUS_WAITING,
-  ROOM_STATUS_PENDING_CHECKIN
+  ROOM_STATUS_PENDING_CHECKIN,
+  MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -155,7 +156,7 @@ export const FlatBookingForMumukshuAndGuest = async (req, res) => {
     }
   });
 
-  return res.status(201).send({ message: 'booked successfully' });
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const ViewAllBookings = async (req, res) => {
