@@ -1,25 +1,12 @@
 import {
   RoomDb,
-  RoomBooking,
-  RoomBookingTransaction,
-  FlatDb,
-  FlatBooking,
-  CardDb,
-  GuestRoomBooking,
-  GuestDb
+  RoomBooking
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_AVAILABLE,
-  STATUS_WAITING,
   STATUS_CANCELLED,
-  ROOM_WL,
-  ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
-  TYPE_EXPENSE,
   STATUS_PAYMENT_COMPLETED,
-  STATUS_AVAILABLE,
-  NAC_ROOM_PRICE,
-  AC_ROOM_PRICE,
   TYPE_ROOM,
   STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
@@ -28,16 +15,9 @@ import {
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-import { v4 as uuidv4 } from 'uuid';
 import {
-  checkFlatAlreadyBooked,
-  checkFlatAlreadyBookedForGuest,
-  calculateNights,
   validateDate
 } from '../helper.js';
-import {
-  checkRoomAlreadyBooked
-} from '../../helpers/roomBooking.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';
@@ -263,60 +243,4 @@ export const CancelBooking = async (req, res) => {
   });
 
   res.status(200).send({ message: 'booking canceled' });
-};
-
-// TODO: DEPRECATE THIS ENDPOINT
-export const AddWaitlist = async (req, res) => {
-  if (
-    await checkRoomAlreadyBooked(
-      req.body.checkin_date,
-      req.body.checkout_date,
-      req.user.cardno
-    )
-  ) {
-    return res.status(200).send({ message: 'Already Booked' });
-  }
-
-  validateDate(req.body.checkin_date, req.body.checkout_date);
-
-  const nights = await calculateNights(
-    req.body.checkin_date,
-    req.body.checkout_date
-  );
-
-  const roomno = await RoomDb.findOne({
-    attributes: ['roomno'],
-    where: {
-      roomtype: req.body.room_type,
-      gender: req.user.gender,
-      roomno: { [Sequelize.Op.like]: ROOM_WL + '%' }
-    }
-  });
-
-  const booking = await RoomBooking.create({
-    cardno: req.user.cardno,
-    guest_name: req.user.issuedto,
-    roomno: roomno.dataValues.roomno,
-    checkin: req.body.checkin_date,
-    checkout: req.body.checkout_date,
-    nights: nights,
-    roomtype: req.body.room_type,
-    status: STATUS_WAITING,
-    gender: req.user.gender,
-    bookingid: uuidv4()
-  });
-
-  sendMail({
-    email: req.user.email,
-    subject: `You have been added to Waitlist for Stay at SRATRC`,
-    template: 'rajSharanWaitlist',
-    context: {
-      name: req.user.issuedto,
-      bookingid: booking.dataValues.bookingid,
-      checkin: booking.dataValues.checkin,
-      checkout: booking.dataValues.checkout
-    }
-  });
-
-  return res.status(200).send({ message: 'waitlist added' });
 };
