@@ -29,7 +29,6 @@ import Countries from './countries.model.js';
 import States from './states.model.js';
 import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
-import GuestRoomBooking from './guest_room_booking.model.js';
 import GuestFoodDb from './guest_food_db.model.js';
 
 // CardDb
@@ -124,12 +123,6 @@ CardDb.hasMany(Transactions, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(GuestDb, {
-  foreignKey: 'cardno',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-CardDb.hasMany(GuestRoomBooking, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -443,25 +436,15 @@ GuestFoodDb.belongsTo(GuestDb, {
   foreignKey: 'guest',
   targetKey: 'id'
 });
-GuestDb.hasMany(GuestRoomBooking, {
+GuestDb.hasMany(RoomBooking, {
   foreignKey: 'guest',
   sourceKey: 'id',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
 });
 GuestDb.hasMany(FlatBooking, {
   foreignKey: 'guest',
   sourceKey: 'id',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
-});
-GuestRoomBooking.belongsTo(GuestDb, {
-  foreignKey: 'guest',
-  targetKey: 'id'
-});
-GuestRoomBooking.belongsTo(CardDb, {
-  foreignKey: 'cardno',
-  targetKey: 'cardno'
 });
 
 export {
@@ -496,6 +479,5 @@ export {
   Cities,
   States,
   Countries,
-  GuestDb,
-  GuestRoomBooking
+  GuestDb
 };
