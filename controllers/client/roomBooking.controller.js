@@ -6,9 +6,7 @@ import {
   ROOM_STATUS_AVAILABLE,
   TYPE_ROOM,
   ERR_BOOKING_NOT_FOUND,
-  STATUS_CONFIRMED,
   STATUS_WAITING,
-  STATUS_PAYMENT_PENDING,
   ROOM_STATUS_PENDING_CHECKIN
 } from '../../config/constants.js';
 import database from '../../config/database.js';
@@ -82,6 +80,84 @@ export const AvailabilityCalender = async (req, res) => {
   });
 };
 
+export const FlatBookingForMumukshuAndGuest = async (req, res) => {
+  const { flat_no, mobno, checkin_date, checkout_date, guest_id } = req.body;
+
+  const ownFlat = await FlatDb.findOne({
+    where: {
+      flatno: flat_no,
+      owner: req.user.cardno
+    }
+  });
+  if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
+
+  var cardNo;
+  if (guest_id == null) {
+    const user_data = await CardDb.findOne({
+      where: {
+        mobno: mobno
+      }
+    });
+    if (!user_data) throw new ApiError(404, 'user not found');
+    cardNo = user_data.dataValues.cardno;
+    if (
+      await checkFlatAlreadyBooked(
+        checkin_date,
+        checkout_date,
+        flat_no,
+        user_data.dataValues.cardno
+      )
+    ) {
+      throw new ApiError(400, 'Already Booked');
+    }
+  } else {
+    cardNo = req.user.cardno;
+    if (
+      await checkFlatAlreadyBookedForGuest(
+        checkin_date,
+        checkout_date,
+        flat_no,
+        cardNo,
+        guest_id
+      )
+    ) {
+      throw new ApiError(400, 'Already Booked');
+    }
+  }
+  validateDate(checkin_date, checkout_date);
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+
+  const booking = await FlatBooking.create({
+    bookingid: uuidv4(),
+    cardno: cardNo,
+    flatno: flat_no,
+    checkin: checkin_date,
+    checkout: checkout_date,
+    nights: nights,
+    guest: guest_id,
+    status: ROOM_STATUS_PENDING_CHECKIN
+  });
+
+  if (!booking) {
+    throw new ApiError(500, 'Failed to book your flat');
+  }
+
+  sendMail({
+    email: req.user.email,
+    subject: `Your Booking Confirmation for Stay at SRATRC`,
+    template: 'rajSharan',
+    context: {
+      name: req.user.issuedto,
+      bookingid: booking.dataValues.id,
+      checkin: booking.dataValues.checkin,
+      checkout: booking.dataValues.checkout
+    }
+  });
+
+  return res.status(201).send({ message: 'booked successfully' });
+};
+
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
@@ -135,9 +211,7 @@ export const CancelBooking = async (req, res) => {
       cardno: req.user.cardno,
       guest: bookedFor == undefined ? null : bookedFor,
       status: [
-        STATUS_CONFIRMED,
         STATUS_WAITING,
-        STATUS_PAYMENT_PENDING,
         ROOM_STATUS_PENDING_CHECKIN
       ]
     }
