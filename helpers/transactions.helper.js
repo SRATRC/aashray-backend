@@ -55,6 +55,24 @@ export async function createPendingTransaction(cardno, bookingid, category, amou
   return transaction;
 }
 
+export async function userCancelBooking(user, booking, t) {
+  var transaction = await Transactions.findOne({
+    where: { bookingid: booking.bookingid }
+  });
+
+  if (transaction) {
+    await userCancelTransaction(user, transaction, t);
+  }
+
+  await booking.update(
+    {
+      status: STATUS_CANCELLED,
+      updatedBy: user.username
+    },
+    { transaction: t }
+  );
+}
+
 export async function adminCancelTransaction(user, transaction, t) {
   await cancelTransaction(user, transaction, t, true);
 }

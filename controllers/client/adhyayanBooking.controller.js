@@ -1,7 +1,6 @@
 import {
   ShibirDb,
-  ShibirBookingDb,
-  Transactions
+  ShibirBookingDb
 } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -9,7 +8,6 @@ import moment from 'moment';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
-  STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
   ERR_BOOKING_NOT_FOUND
@@ -21,7 +19,7 @@ import {
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
 import { 
-  userCancelTransaction 
+  userCancelBooking
 } from '../../helpers/transactions.helper.js';
 
 export const FetchAllShibir = async (req, res) => {
@@ -116,7 +114,6 @@ export const CancelShibir = async (req, res) => {
       cardno: cardno,
       guest: bookedFor == undefined ? null : bookedFor,
       status: [
-        STATUS_CONFIRMED,
         STATUS_WAITING,
         STATUS_PAYMENT_PENDING
       ]
@@ -127,10 +124,6 @@ export const CancelShibir = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  var transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
-  });
-
   if (
     booking.status == STATUS_CONFIRMED ||
     booking.status == STATUS_PAYMENT_PENDING
@@ -138,23 +131,12 @@ export const CancelShibir = async (req, res) => {
     await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
   }
 
-  if (transaction) {
-    await userCancelTransaction(req.user, transaction, t);
-  }
-
-  await booking.update(
-    {
-      status: STATUS_CANCELLED,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-
+  await userCancelBooking(req.user, booking, t);
   await t.commit();
 
   sendMail({
     email: req.user.email,
-    subject: 'Shibir Booking Cancellation',
+    subject: 'Your Raj Adhyayan Booking has been canceled',
     template: 'rajAdhyayanCancellation',
     context: {
       name: req.user.issuedto,
