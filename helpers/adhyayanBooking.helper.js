@@ -3,14 +3,9 @@ import {
   ERR_ADHYAYAN_NO_SEATS_AVAILABLE,
   ERR_ADHYAYAN_NOT_FOUND,
   ERR_BOOKING_NOT_FOUND,
-  ERR_TRANSACTION_NOT_FOUND,
-  STATUS_CASH_COMPLETED,
   STATUS_CONFIRMED,
-  STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
-  TRANSACTION_TYPE_CASH,
-  TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN
 } from '../config/constants.js';
 import {
@@ -58,7 +53,7 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
   });
 
   if (!booking) {
-    throw new ApiError(400, ERR_BOOKING_NOT_FOUND);
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   return booking;

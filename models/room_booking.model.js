@@ -62,12 +62,12 @@ const RoomBooking = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: false,
       values: [
-        ROOM_STATUS_CHECKEDIN,
-        STATUS_CANCELLED,
-        STATUS_ADMIN_CANCELLED,
         STATUS_WAITING,
+        ROOM_STATUS_PENDING_CHECKIN,
+        ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_CHECKEDOUT,
-        ROOM_STATUS_PENDING_CHECKIN
+        STATUS_CANCELLED,
+        STATUS_ADMIN_CANCELLED
       ]
     },
     gender: {

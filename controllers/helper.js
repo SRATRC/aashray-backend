@@ -20,9 +20,42 @@ import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
+import BlockDates from '../models/block_dates.model.js';
 
 
-export async function checkFlatAlreadyBooked(checkin, checkout, flat_no,card_no) {
+export async function getBlockedDates(checkin_date, checkout_date) {
+  const startDate = new Date(checkin_date);
+  const endDate = new Date(checkout_date);
+
+  const blockedDates = await BlockDates.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: startDate } },
+            { checkout: { [Sequelize.Op.gte]: startDate } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: endDate } },
+            { checkout: { [Sequelize.Op.gte]: endDate } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: startDate } },
+            { checkin: { [Sequelize.Op.lte]: endDate } }
+          ]
+        }
+      ]
+    }
+  });
+
+  return blockedDates;
+}
+
+export async function checkFlatAlreadyBooked(checkin, checkout, flat_no, card_no) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -47,7 +80,7 @@ export async function checkFlatAlreadyBooked(checkin, checkout, flat_no,card_no)
       ],
       flatno: flat_no,
       cardno: card_no,
-      guest:null
+      guest: null
     }
   });
 

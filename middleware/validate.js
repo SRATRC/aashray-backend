@@ -9,6 +9,7 @@ import {
   ERR_CARD_NOT_PROVIDED,
   ERR_BLOCKED_DATES
 } from '../config/constants.js';
+import { getBlockedDates } from '../controllers/helper.js';
 
 export const validateCard = catchAsync(async (req, res, next) => {
   const cardno = req.params.cardno || req.body.cardno || req.query.cardno;
@@ -27,35 +28,11 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
 
   if (!checkin_date || !checkout_date) return next();
 
-  const startDate = new Date(checkin_date);
-  const endDate = new Date(checkout_date);
+  const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
-  const blockdates = await BlockDates.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: startDate } },
-            { checkout: { [Sequelize.Op.gte]: startDate } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: endDate } },
-            { checkout: { [Sequelize.Op.gte]: endDate } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: startDate } },
-            { checkin: { [Sequelize.Op.lte]: endDate } }
-          ]
-        }
-      ]
-    }
-  });
-  if (blockdates.length > 0) {
-    throw new ApiError(400, ERR_BLOCKED_DATES, blockdates);
+  if (blockedDates.length > 0) {
+    throw new ApiError(400, ERR_BLOCKED_DATES, blockedDates);
   }
+
   next();
 });
