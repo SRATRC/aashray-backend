@@ -2,8 +2,8 @@ import {
   GateRecord,
   CardDb,
   FlatBooking,
-  GuestRoomBooking,
-  GuestDb
+  GuestDb,
+  RoomBooking
 } from '../../models/associations.js';
 import {
   STATUS_ONPREM,
@@ -102,25 +102,26 @@ export const gateExit = async (req, res) => {
 
 export const guestList = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
-  const guestBookings = await GuestRoomBooking.findAll({
+  const guestBookings = await RoomBooking.findAll({
     attributes: ['cardno', 'guest'],
     include: [
       {
         model: CardDb,
         attributes: ['mobno', 'issuedto'],
-        where: { cardno: Sequelize.col('GuestRoomBooking.cardno') }
+        where: { cardno: Sequelize.col('RoomBooking.cardno') }
       },
       {
         model: GuestDb,
         attributes: ['name'],
-        where: { id: Sequelize.col('GuestRoomBooking.guest') }
+        where: { id: Sequelize.col('RoomBooking.guest') }
       }
     ],
     where: {
       checkin: { [Sequelize.Op.eq]: today },
-      status: {
-        [Sequelize.Op.in]: [ROOM_STATUS_PENDING_CHECKIN, ROOM_STATUS_CHECKEDIN]
-      }
+      status: [
+        ROOM_STATUS_PENDING_CHECKIN, 
+        ROOM_STATUS_CHECKEDIN
+      ]
     }
   });
 

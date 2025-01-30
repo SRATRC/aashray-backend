@@ -176,6 +176,10 @@ RoomBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
+RoomBooking.belongsTo(GuestDb, {
+  foreignKey: 'guest',
+  targetKey: 'id'
+});
 RoomBooking.belongsTo(RoomDb, {
   foreignKey: 'roomno',
   targetKey: 'roomno'
