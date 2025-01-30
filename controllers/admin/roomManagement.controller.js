@@ -43,6 +43,7 @@ import { v4 as uuidv4 } from 'uuid';
 import SendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import sendMail from '../../utils/sendMail.js';
 
 // TODO: early checkin??
 export const manualCheckin = async (req, res) => {
@@ -149,8 +150,10 @@ export const roomBooking = async (req, res) => {
   req.transaction = t;
 
   const nights = await calculateNights(checkin_date, checkout_date);
+
+  var booking = undefined;
   if (nights == 0) {
-    await bookDayVisit(
+    booking = await bookDayVisit(
       card.cardno, 
       checkin_date, 
       checkout_date,
@@ -158,7 +161,7 @@ export const roomBooking = async (req, res) => {
       t
     );
   } else {
-    await createRoomBooking(
+    booking = await createRoomBooking(
       card.cardno,
       checkin_date,
       checkout_date,
@@ -171,9 +174,7 @@ export const roomBooking = async (req, res) => {
     );
   }
 
-  await t.commit();
-
-  SendMail({
+  sendMail({
     email: card.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
     template: 'rajSharan',
@@ -185,6 +186,7 @@ export const roomBooking = async (req, res) => {
     }
   });
 
+  await t.commit();
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 

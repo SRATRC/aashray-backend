@@ -162,6 +162,8 @@ export async function createRoomBooking(
   if (!transaction) {
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
+
+  return booking;
 }
 
 export function roomCharge(roomtype) {
