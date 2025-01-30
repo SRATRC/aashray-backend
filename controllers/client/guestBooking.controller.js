@@ -1,9 +1,9 @@
 import {
   ShibirDb,
-  GuestRoomBooking,
   GuestFoodDb,
   GuestDb,
-  ShibirBookingDb
+  ShibirBookingDb,
+  RoomBooking
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -296,7 +296,7 @@ async function bookRoom(body, user, data, t) {
 }
 
 async function bookDayVisitForGuest(user, guest, checkin, checkout, transaction) {
-  const booking = await GuestRoomBooking.create(
+  const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
       cardno: user.cardno,
@@ -341,7 +341,7 @@ async function bookRoomForSingleGuest(
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
 
-  const booking = await GuestRoomBooking.create(
+  const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
       cardno: user.cardno,

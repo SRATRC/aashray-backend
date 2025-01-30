@@ -5,7 +5,6 @@ import {
   FoodDb,
   ShibirBookingDb,
   ShibirDb,
-  GuestRoomBooking,
   GuestFoodDb
 } from '../models/associations.js';
 import {
@@ -272,9 +271,9 @@ export async function checkGuestRoomAlreadyBooked(
   checkin,
   checkout,
   cardno,
-  guest
+  guests
 ) {
-  const result = await GuestRoomBooking.findAll({
+  const result = await RoomBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
         {
@@ -297,7 +296,7 @@ export async function checkGuestRoomAlreadyBooked(
         }
       ],
       cardno: cardno,
-      guest: { [Sequelize.Op.in]: guest },
+      guest: guests,
       status: {
         [Sequelize.Op.in]: [
           STATUS_WAITING,
