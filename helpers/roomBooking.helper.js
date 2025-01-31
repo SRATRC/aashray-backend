@@ -42,6 +42,7 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
         }
     ],
     cardno: cardnos,
+    guest: null,
     status: [
         STATUS_WAITING,
         ROOM_STATUS_CHECKEDIN,
