@@ -12,7 +12,8 @@ import {
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
   ERR_ROOM_MUST_BE_BOOKED,
-  MSG_BOOKING_SUCCESSFUL
+  MSG_BOOKING_SUCCESSFUL,
+  ERR_TRAVEL_ALREADY_BOOKED
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -42,60 +43,77 @@ import {
 import { generateOrderId } from '../../helpers/transactions.helper.js';
 
 export const unifiedBooking = async (req, res) => {
-  const { primary_booking, addons, amount } = req.body;
+  const { primary_booking, addons } = req.body;
 
   var t = await database.transaction();
   req.transaction = t;
 
-  if (!primary_booking || !amount) throw new ApiError(400, 'Invalid Request');
+  let amount = 0;
 
-  // switch (primary_booking.booking_type) {
-  //   case TYPE_ROOM:
-  //     t = await bookRoom(req.body, req.user, req.body.primary_booking, t);
-  //     break;
+  if (!primary_booking) throw new ApiError(400, 'Invalid Request');
 
-  //   case TYPE_FOOD:
-  //     t = await bookFood(req.body, req.user, req.body.primary_booking, t);
-  //     break;
+  switch (primary_booking.booking_type) {
+    case TYPE_ROOM:
+      const roomResult = await bookRoom(req.user, req.body.primary_booking, t);
+      t = roomResult.t;
+      amount += roomResult.amount;
+      break;
 
-  //   case TYPE_TRAVEL:
-  //     t = await bookTravel(req.user, req.body.primary_booking, t);
-  //     break;
+    case TYPE_FOOD:
+      t = await bookFood(req.body, req.user, req.body.primary_booking, t);
+      break;
 
-  //   case TYPE_ADHYAYAN:
-  //     t = await bookAdhyayan(req.body, req.user, req.body.primary_booking, t);
-  //     break;
+    case TYPE_TRAVEL:
+      t = await bookTravel(req.user, req.body.primary_booking, t);
+      break;
 
-  //   default:
-  //     throw new ApiError(400, 'Invalid Booking Type');
-  // }
+    case TYPE_ADHYAYAN:
+      const adhyayanResult = await bookAdhyayan(
+        req.user,
+        req.body.primary_booking,
+        t
+      );
+      t = adhyayanResult.t;
+      amount += adhyayanResult.amount;
+      break;
 
-  // if (addons) {
-  //   for (const addon of addons) {
-  //     switch (addon.booking_type) {
-  //       case TYPE_ROOM:
-  //         t = await bookRoom(req.body, req.user, addon, t);
-  //         break;
+    default:
+      throw new ApiError(400, 'Invalid Booking Type');
+  }
 
-  //       case TYPE_FOOD:
-  //         t = await bookFood(req.body, req.user, addon, t);
-  //         break;
+  if (addons) {
+    for (const addon of addons) {
+      switch (addon.booking_type) {
+        case TYPE_ROOM:
+          const roomResult = await bookRoom(req.user, addon, t);
+          t = roomResult.t;
+          amount += roomResult.amount;
+          break;
 
-  //       case TYPE_TRAVEL:
-  //         t = await bookTravel(req.user, addon, t);
-  //         break;
+        case TYPE_FOOD:
+          t = await bookFood(req.body, req.user, addon, t);
+          break;
 
-  //       case TYPE_ADHYAYAN:
-  //         t = await bookAdhyayan(req.body, req.user, addon, t);
-  //         break;
+        case TYPE_TRAVEL:
+          t = await bookTravel(req.user, addon, t);
+          break;
 
-  //       default:
-  //         throw new ApiError(400, 'Invalid Booking type');
-  //     }
-  //   }
-  // }
+        case TYPE_ADHYAYAN:
+          const adhyayanResult = await bookAdhyayan(req.user, addon, t);
+          t = adhyayanResult.t;
+          amount += adhyayanResult.amount;
+          break;
 
-  const order = await generateOrderId(amount);
+        default:
+          throw new ApiError(400, 'Invalid Booking type');
+      }
+    }
+  }
+
+  const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
+  const finalAmount = amount + taxes;
+
+  const order = await generateOrderId(finalAmount);
 
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
@@ -225,7 +243,7 @@ async function checkRoomAvailability(user, data) {
   };
 }
 
-async function bookRoom(body, user, data, t) {
+async function bookRoom(user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, user.cardno)) {
@@ -236,16 +254,11 @@ async function bookRoom(body, user, data, t) {
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
+  let amount = 0;
   if (nights == 0) {
-    await bookDayVisit(
-      user.cardno,
-      checkin_date,
-      checkout_date,
-      'USER',
-      t
-    );
+    await bookDayVisit(user.cardno, checkin_date, checkout_date, 'USER', t);
   } else {
-    await createRoomBooking(
+    const result = await createRoomBooking(
       user.cardno,
       checkin_date,
       checkout_date,
@@ -256,6 +269,8 @@ async function bookRoom(body, user, data, t) {
       'USER',
       t
     );
+    t = result.t;
+    amount = result.discountedAmount;
   }
 
   //   sendMail({
@@ -270,7 +285,7 @@ async function bookRoom(body, user, data, t) {
   //     }
   //   });
 
-  return t;
+  return { t, amount };
 }
 
 async function checkFoodAvailability(body, user, data) {
@@ -358,35 +373,23 @@ async function bookFood(body, user, data, t) {
 }
 
 async function checkTravelAvailability(data) {
-  // const { date, pickup_point, drop_point, type } = data.details;
+  const { date, pickup_point, drop_point, type } = data.details;
 
-  // // TODO: check if the status is CONFIRMED or WAITING and return status accordingly
-  // const whereCondition = {
-  //   status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
-  //   date: { [Sequelize.Op.eq]: date }
-  // };
+  const whereCondition = {
+    status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
+    date: { [Sequelize.Op.eq]: date }
+  };
 
-  // if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
-  // else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
+  if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
+  else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
 
-  // const travelBookings = await TravelDb.findAll({
-  //   where: whereCondition
-  // });
+  const travelBookings = await TravelDb.findAll({
+    where: whereCondition
+  });
 
-  // var travelStatus = STATUS_WAITING;
-  // var charge = 0;
-
-  // if (type == TRAVEL_TYPE_FULL) {
-  //   if (travelBookings.length == 0) {
-  //     travelStatus = STATUS_AVAILABLE;
-  //     charge = FULL_TRAVEL_PRICE;
-  //   }
-  // } else {
-  //   if (travelBookings.length < 5) {
-  //     travelStatus = STATUS_AVAILABLE;
-  //     charge = TRAVEL_PRICE;
-  //   }
-  // }
+  if (travelBookings.length > 0) {
+    throw new ApiError(400, ERR_TRAVEL_ALREADY_BOOKED);
+  }
 
   return {
     status: STATUS_WAITING,
@@ -472,19 +475,16 @@ async function checkAdhyayanAvailability(user, data) {
   return adhyayanDetails;
 }
 
-async function bookAdhyayan(body, user, data, t) {
+async function bookAdhyayan(user, data, t) {
   const { shibir_ids } = data.details;
+  let amount = 0;
 
   await checkAdhyayanAlreadyBooked(shibir_ids, user.cardno);
   const shibirs = await validateAdhyayans(shibir_ids);
 
-  await createAdhyayanBooking(
-    shibirs,
-    body.transaction_type,
-    body.transaction_ref || 'NA',
-    t,
-    user.cardno
-  );
+  const result = await createAdhyayanBooking(shibirs, t, user.cardno);
+  t = result.t;
+  amount = result.amount;
 
-  return t;
+  return { t, amount };
 }
