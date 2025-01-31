@@ -1,7 +1,4 @@
-import {
-  TravelDb,
-  FoodDb,
-} from '../../models/associations.js';
+import { TravelDb, FoodDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
@@ -14,7 +11,8 @@ import {
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
-  ERR_ROOM_MUST_BE_BOOKED
+  ERR_ROOM_MUST_BE_BOOKED,
+  MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -36,65 +34,71 @@ import {
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import { 
-  checkAdhyayanAlreadyBooked, 
-  createAdhyayanBooking, 
-  validateAdhyayans 
+import {
+  checkAdhyayanAlreadyBooked,
+  createAdhyayanBooking,
+  validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
 
 export const unifiedBooking = async (req, res) => {
-  const { primary_booking, addons } = req.body;
+  const { primary_booking, addons, amount } = req.body;
+
   var t = await database.transaction();
   req.transaction = t;
 
-  switch (primary_booking.booking_type) {
-    case TYPE_ROOM:
-      t = await bookRoom(req.body, req.user, req.body.primary_booking, t);
-      break;
+  if (!primary_booking || !amount) throw new ApiError(400, 'Invalid Request');
 
-    case TYPE_FOOD:
-      t = await bookFood(req.body, req.user, req.body.primary_booking, t);
-      break;
+  // switch (primary_booking.booking_type) {
+  //   case TYPE_ROOM:
+  //     t = await bookRoom(req.body, req.user, req.body.primary_booking, t);
+  //     break;
 
-    case TYPE_TRAVEL:
-      t = await bookTravel(req.user, req.body.primary_booking, t);
-      break;
+  //   case TYPE_FOOD:
+  //     t = await bookFood(req.body, req.user, req.body.primary_booking, t);
+  //     break;
 
-    case TYPE_ADHYAYAN:
-      t = await bookAdhyayan(req.body, req.user, req.body.primary_booking, t);
-      break;
+  //   case TYPE_TRAVEL:
+  //     t = await bookTravel(req.user, req.body.primary_booking, t);
+  //     break;
 
-    default:
-      throw new ApiError(400, 'Invalid Booking Type');
-  }
+  //   case TYPE_ADHYAYAN:
+  //     t = await bookAdhyayan(req.body, req.user, req.body.primary_booking, t);
+  //     break;
 
-  if (addons) {
-    for (const addon of addons) {
-      switch (addon.booking_type) {
-        case TYPE_ROOM:
-          t = await bookRoom(req.body, req.user, addon, t);
-          break;
+  //   default:
+  //     throw new ApiError(400, 'Invalid Booking Type');
+  // }
 
-        case TYPE_FOOD:
-          t = await bookFood(req.body, req.user, addon, t);
-          break;
+  // if (addons) {
+  //   for (const addon of addons) {
+  //     switch (addon.booking_type) {
+  //       case TYPE_ROOM:
+  //         t = await bookRoom(req.body, req.user, addon, t);
+  //         break;
 
-        case TYPE_TRAVEL:
-          t = await bookTravel(req.user, addon, t);
-          break;
+  //       case TYPE_FOOD:
+  //         t = await bookFood(req.body, req.user, addon, t);
+  //         break;
 
-        case TYPE_ADHYAYAN:
-          t = await bookAdhyayan(req.body, req.user, addon, t);
-          break;
+  //       case TYPE_TRAVEL:
+  //         t = await bookTravel(req.user, addon, t);
+  //         break;
 
-        default:
-          throw new ApiError(400, 'Invalid Booking type');
-      }
-    }
-  }
+  //       case TYPE_ADHYAYAN:
+  //         t = await bookAdhyayan(req.body, req.user, addon, t);
+  //         break;
+
+  //       default:
+  //         throw new ApiError(400, 'Invalid Booking type');
+  //     }
+  //   }
+  // }
+
+  const order = await generateOrderId(amount);
 
   await t.commit();
-  return res.status(200).send({ message: 'Booking Successful' });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
 export const validateBooking = async (req, res) => {
@@ -121,6 +125,7 @@ export const validateBooking = async (req, res) => {
         req.user,
         req.body.primary_booking
       );
+      // food charges are not added for Mumukshus
       break;
 
     case TYPE_TRAVEL:
@@ -152,11 +157,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          foodDetails = await checkFoodAvailability(
-            req.body,
-            req.user,
-            addon
-          );
+          foodDetails = await checkFoodAvailability(req.body, req.user, addon);
           break;
 
         case TYPE_TRAVEL:
@@ -178,14 +179,14 @@ export const validateBooking = async (req, res) => {
     }
   }
 
-  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100)/100;
+  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100) / 100;
   return res.status(200).send({
     data: {
       roomDetails: roomDetails,
       foodDetails: foodDetails,
       adhyayanDetails: adhyayanDetails,
       travelDetails: travelDetails,
-      taxes: taxes, 
+      taxes: taxes,
       totalCharge: totalCharge + taxes
     }
   });
@@ -226,7 +227,7 @@ async function checkRoomAvailability(user, data) {
 
 async function bookRoom(body, user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
-  
+
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, user.cardno)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
@@ -234,12 +235,13 @@ async function bookRoom(body, user, data, t) {
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
-  
+
   if (nights == 0) {
     await bookDayVisit(
       user.cardno,
       checkin_date,
       checkout_date,
+      'USER',
       t
     );
   } else {
@@ -251,10 +253,9 @@ async function bookRoom(body, user, data, t) {
       room_type,
       user.gender,
       floor_pref,
-      body.transaction_ref,
-      body.transaction_type,
+      'USER',
       t
-    )
+    );
   }
 
   //   sendMail({
@@ -286,30 +287,20 @@ async function checkFoodAvailability(body, user, data) {
 }
 
 async function validateFood(body, user, start_date, end_date) {
-  if (!(
-    (await checkRoomBookingProgress(
-      start_date,
-      end_date,
-      body.primary_booking,
-      body.addons
-    )) ||
-    (await checkRoomAlreadyBooked(
-      start_date,
-      end_date,
-      user.cardno
-    )) ||
-    (await checkFlatAlreadyBooked(
-      start_date,
-      end_date,
-      user.cardno
-    )) ||
-    user.res_status === STATUS_RESIDENT ||
-    (await checkSpecialAllowance(
-      start_date,
-      end_date,
-      user.cardno
-    ))
-  )) {
+  if (
+    !(
+      (await checkRoomBookingProgress(
+        start_date,
+        end_date,
+        body.primary_booking,
+        body.addons
+      )) ||
+      (await checkRoomAlreadyBooked(start_date, end_date, user.cardno)) ||
+      (await checkFlatAlreadyBooked(start_date, end_date, user.cardno)) ||
+      user.res_status === STATUS_RESIDENT ||
+      (await checkSpecialAllowance(start_date, end_date, user.cardno))
+    )
+  ) {
     throw new ApiError(403, ERR_ROOM_MUST_BE_BOOKED);
   }
 }
@@ -337,16 +328,15 @@ async function bookFood(body, user, data, t) {
 
   for (const booking of bookingsToUpdate) {
     meals.forEach(({ type, toBook }) => {
-      if (toBook && !booking[type])
-        booking[type] = toBook;
+      if (toBook && !booking[type]) booking[type] = toBook;
     });
     booking.hightea = high_tea || 'NONE';
     booking.spicy = spicy;
     await booking.save({ transaction: t });
   }
 
-  const bookedDates = bookingsToUpdate.map(booking => booking.date);
-  const remainingDates = allDates.filter(date => !bookedDates.includes(date));
+  const bookedDates = bookingsToUpdate.map((booking) => booking.date);
+  const remainingDates = allDates.filter((date) => !bookedDates.includes(date));
 
   var bookingsToCreate = [];
   for (var date of remainingDates) {
@@ -489,11 +479,11 @@ async function bookAdhyayan(body, user, data, t) {
   const shibirs = await validateAdhyayans(shibir_ids);
 
   await createAdhyayanBooking(
-    shibirs, 
+    shibirs,
     body.transaction_type,
     body.transaction_ref || 'NA',
     t,
-    user.cardno, 
+    user.cardno
   );
 
   return t;

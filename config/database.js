@@ -10,8 +10,9 @@ const sequelize = new Sequelize(
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     dialect: 'mysql',
-    dialectOptions: process.env.NODE_ENV == 'prod' && {
-      ssl: {
+    dialectOptions: {
+      decimalNumbers: true,
+      ssl: process.env.NODE_ENV == 'prod' && {
         ca: private_key
       }
     },

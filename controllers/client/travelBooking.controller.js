@@ -11,7 +11,8 @@ import {
   STATUS_PAYMENT_PENDING,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_PENDING,
-  STATUS_CASH_COMPLETED
+  STATUS_CASH_COMPLETED,
+  MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
@@ -151,7 +152,7 @@ export const CancelTravel = async (req, res) => {
 
   await t.commit();
 
-  return res.status(200).send({ message: 'Successfully cancelled booking' });
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const ViewAllTravel = async (req, res) => {

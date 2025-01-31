@@ -25,6 +25,14 @@ const RoomBooking = sequelize.define(
         key: 'cardno'
       }
     },
+    guest: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
+    },
     roomno: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -54,12 +62,12 @@ const RoomBooking = sequelize.define(
       type: DataTypes.ENUM,
       allowNull: false,
       values: [
-        ROOM_STATUS_CHECKEDIN,
-        STATUS_CANCELLED,
-        STATUS_ADMIN_CANCELLED,
         STATUS_WAITING,
+        ROOM_STATUS_PENDING_CHECKIN,
+        ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_CHECKEDOUT,
-        ROOM_STATUS_PENDING_CHECKIN
+        STATUS_CANCELLED,
+        STATUS_ADMIN_CANCELLED
       ]
     },
     gender: {

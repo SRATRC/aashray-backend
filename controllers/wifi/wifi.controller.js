@@ -5,11 +5,14 @@ import {
   STATUS_INACTIVE
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
+import Sequelize from 'sequelize';
+import moment from 'moment';
 
 export const generatePassword = async (req, res) => {
   const isCheckedin = await RoomBooking.findOne({
     where: {
       cardno: req.user.cardno,
+      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
       status: ROOM_STATUS_CHECKEDIN
     }
   });
@@ -61,12 +64,13 @@ export const getPassword = async (req, res) => {
   const isCheckedIn = await RoomBooking.findOne({
     where: {
       cardno: req.user.cardno,
+      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
       status: ROOM_STATUS_CHECKEDIN
     }
   });
 
   if (!isCheckedIn) {
-    throw new APIError(401, 'User not checkedin');
+    return res.status(200).send({ message: 'Wifi Passwords', data: [] });
   }
 
   const passwords = await WifiDb.findAll({

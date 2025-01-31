@@ -2,8 +2,8 @@ import {
   GateRecord,
   CardDb,
   FlatBooking,
-  GuestRoomBooking,
-  GuestDb
+  GuestDb,
+  RoomBooking
 } from '../../models/associations.js';
 import {
   STATUS_ONPREM,

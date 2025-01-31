@@ -1,5 +1,5 @@
 import { CardDb } from '../../models/associations.js';
-import { STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
+import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
@@ -25,10 +25,12 @@ export const createCard = async (req, res) => {
   } = req.body;
 
   const alreadyExists = await CardDb.findOne({
-    where: { cardno: cardno, status: STATUS_ACTIVE }
+    where: { cardno: cardno }
   });
 
-  if (alreadyExists) throw new ApiError(500, 'Card already exists');
+  if (alreadyExists) {
+    throw new ApiError(400, 'Card already exists');
+  }
 
   const user = await CardDb.create({
     cardno: cardno,
@@ -55,7 +57,7 @@ export const createCard = async (req, res) => {
 
   return res
     .status(200)
-    .send({ message: 'Successfully registered card', data: user.dataValues });
+    .send({ message: 'Successfully registered card', data: user });
 };
 
 export const fetchAllCards = async (req, res) => {
@@ -106,7 +108,15 @@ export const updateCard = async (req, res) => {
     res_status
   } = req.body;
 
-  const [itemsUpdated] = await CardDb.update(
+  const card = await CardDb.findOne({
+    where: { cardno: cardno }
+  });
+
+  if (!card) {
+    throw new ApiError(400, ERR_CARD_NOT_FOUND);
+  }
+
+  await card.update(
     {
       issuedto: issuedto,
       gender: gender,
@@ -123,74 +133,54 @@ export const updateCard = async (req, res) => {
       status: status,
       res_status: res_status,
       updatedBy: req.user.username
-    },
-    {
-      where: {
-        cardno: cardno
-      }
     }
   );
 
-  if (itemsUpdated === 0) throw new ApiError(500, 'Error updating the card');
-
-  return res.status(200).send({ message: 'Updated record' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const transferCard = async (req, res) => {
   const { cardno, new_cardno } = req.body;
-  const [itemsUpdated, _data] = await CardDb.update(
+
+  const card = await CardDb.findOne({
+    where: { cardno: cardno }
+  });
+
+  if (!card) {
+    throw new ApiError(400, ERR_CARD_NOT_FOUND);
+  }
+
+  await card.update(
     {
       cardno: new_cardno,
       updatedBy: req.user.username
-    },
-    {
-      where: {
-        cardno: cardno
-      }
     }
   );
-  if (itemsUpdated === 0) throw new ApiError(500, 'Error transfering the card');
 
-  return res.status(200).send({ message: 'Card transferred successfully' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
-// TODO: Add more balance endpoints if required
+// TODO: FIX this
 export const fetchTotalTransactions = async (req, res) => {
   const cardno = req.params.cardno;
 
-  const [results, _] = await database.query(`SELECT 
-  transaction_type,
-  total_expense,
-  total_refund,
-  total_expense - total_refund AS net_amount
-FROM (
-  SELECT 
-      'Room' AS transaction_type,
-      COALESCE(SUM(CASE WHEN type = 'expense' AND status='payment pending' THEN amount ELSE 0 END), 0) AS total_expense,
-      COALESCE(SUM(CASE WHEN type = 'refund' AND status='awaiting refund' THEN amount ELSE 0 END), 0) AS total_refund
-  FROM 
-      room_booking_transaction 
-  WHERE 
-      cardno = ${cardno}
-  UNION ALL
-  SELECT 
-      'Travel' AS transaction_type,
-      COALESCE(SUM(CASE WHEN type = 'expense' AND status='payment pending' THEN amount ELSE 0 END), 0) AS total_expense,
-      COALESCE(SUM(CASE WHEN type = 'refund' AND status='awaiting refund' THEN amount ELSE 0 END), 0) AS total_refund
-  FROM 
-      travel_booking_transaction 
-  WHERE 
-      cardno = ${cardno}
-  UNION ALL
-  SELECT 
-      'Guest Food' AS transaction_type,
-      COALESCE(SUM(CASE WHEN type = 'expense' AND status='payment pending' THEN amount ELSE 0 END), 0) AS total_expense,
-      COALESCE(SUM(CASE WHEN type = 'refund' AND status='awaiting refund' THEN amount ELSE 0 END), 0) AS total_refund
-  FROM 
-      guest_food_transaction 
-  WHERE
-      cardno = ${cardno}
-) as t;`);
+  const [results, _] = await database.query(
+    `SELECT 
+      category,
+      total_expense,
+      total_refund,
+      total_expense - total_refund AS net_amount
+    FROM (
+      SELECT 
+          category,
+          SUM(CASE WHEN status='pending' THEN amount ELSE 0 END) AS total_expense,
+          SUM(CASE WHEN status='credited' THEN amount ELSE 0 END) AS total_refund
+      FROM 
+          transactions 
+      WHERE 
+          cardno = ${cardno}
+      GROUP BY 
+          category) as t;`);
 
   return res
     .status(200)

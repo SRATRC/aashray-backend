@@ -6,5 +6,5 @@ import CatchAsync from '../../utils/CatchAsync.js';
 
 router.post('/entry/:cardno', validateCard, CatchAsync(gateEntry));
 router.post('/exit/:cardno', validateCard, CatchAsync(gateExit));
-router.get('/guestList/', CatchAsync(guestList));
+router.get('/guestList', CatchAsync(guestList));
 export default router;

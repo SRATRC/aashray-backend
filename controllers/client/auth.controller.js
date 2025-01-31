@@ -1,3 +1,4 @@
+import { MSG_UPDATE_SUCCESSFUL } from '../../config/constants.js';
 import { CardDb } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
@@ -50,7 +51,7 @@ export const updatePassword = async (req, res) => {
    
   details.password = "";
 
-  return res.status(200).send({ message: 'Password updated successfully', data: details });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL, data: details });
 
 };
 
