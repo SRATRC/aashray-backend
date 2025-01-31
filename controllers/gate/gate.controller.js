@@ -101,28 +101,57 @@ export const gateExit = async (req, res) => {
 };
 
 export const guestList = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
-  const guestBookings = await GuestRoomBooking.findAll({
-    attributes: ['cardno', 'guest'],
-    include: [
-      {
-        model: CardDb,
-        attributes: ['mobno', 'issuedto'],
-        where: { cardno: Sequelize.col('GuestRoomBooking.cardno') }
-      },
-      {
-        model: GuestDb,
-        attributes: ['name'],
-        where: { id: Sequelize.col('GuestRoomBooking.guest') }
-      }
-    ],
-    where: {
-      checkin: { [Sequelize.Op.eq]: today },
-      status: {
-        [Sequelize.Op.in]: [ROOM_STATUS_PENDING_CHECKIN, ROOM_STATUS_CHECKEDIN]
-      }
-    }
-  });
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+  const offset = (page - 1) * pageSize;
 
-  return res.status(200).send({ message: 'Success', data: guestBookings });
+  const user_bookings = await database.query(
+    `
+    SELECT 
+        t1.bookingid, 
+        t1.guest,
+        t2.name AS name,
+        t1.flatno, 
+        t1.checkin, 
+        t1.checkout, 
+        t1.nights, 
+        'FLat', 
+        t1.status, 
+        'Flat' ,
+        'completed' AS transaction_status
+    FROM flat_booking t1
+    JOIN guest_db t2 
+        ON t2.id = t1.guest
+    WHERE t1.checkin = CURRENT_DATE()
+
+    UNION ALL
+
+    SELECT 
+        t1.bookingid, 
+        t1.guest,
+        t2.name AS name,
+        t1.roomno, 
+        t1.checkin, 
+        t1.checkout, 
+        t1.nights, 
+        roomtype, 
+        t1.status, 
+        t1.gender,
+        'completed' AS transaction_status
+    FROM guest_room_booking t1
+    JOIN guest_db t2 
+        ON t2.id = t1.guest
+    WHERE t1.checkin = CURRENT_DATE()
+
+LIMIT :limit OFFSET :offset;
+`,
+    {
+      replacements: {
+        limit: pageSize,
+        offset: offset
+      },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
+  return res.status(200).send(user_bookings);
 };
