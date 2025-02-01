@@ -14,8 +14,6 @@ import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
   TYPE_FOOD,
-  STATUS_PAYMENT_COMPLETED,
-  TRANSACTION_TYPE_UPI,
   TYPE_ADHYAYAN,
   TYPE_GUEST_ADHYAYAN,
   RAZORPAY_FEE,
@@ -39,13 +37,17 @@ import {
   checkGuestFoodAlreadyBooked
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
+import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import {
+  createPendingTransaction,
+  useCredit,
+  generateOrderId
+} from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
-import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
-import { createPendingTransaction } from '../../helpers/transactions.helper.js';
 
 // TODO: charge money for guest food
 export const guestBooking = async (req, res) => {
@@ -53,17 +55,23 @@ export const guestBooking = async (req, res) => {
   var t = await database.transaction();
   req.transaction = t;
 
+  let amount = 0;
+
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      t = await bookRoom(req.body, req.user, req.body.primary_booking, t);
+      const roomResult = await bookRoom(req.user, primary_booking, t);
+      t = roomResult.t;
+      amount += roomResult.amount;
       break;
 
     case TYPE_FOOD:
-      t = await bookFood(req, req.user, req.body.primary_booking, t);
+      t = await bookFood(req.user, primary_booking, t);
       break;
 
     case TYPE_ADHYAYAN:
-      t = await bookAdhyayan(req.body, req.user, req.body.primary_booking, t);
+      const adhyayanResult = await bookAdhyayan(req.user, primary_booking, t);
+      t = adhyayanResult.t;
+      amount += adhyayanResult.amount;
       break;
 
     default:
@@ -74,15 +82,19 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          t = await bookRoom(req.body, req.user, addon, t);
+          const roomResult = await bookRoom(req.user, addon, t);
+          t = roomResult.t;
+          amount += roomResult.amount;
           break;
 
         case TYPE_FOOD:
-          t = await bookFood(req, req.user, addon, t);
+          t = await bookFood(req.user, addon, t);
           break;
 
         case TYPE_ADHYAYAN:
-          t = await bookAdhyayan(req.body, req.user, addon, t);
+          const adhyayanResult = await bookAdhyayan(req.user, addon, t);
+          t = adhyayanResult.t;
+          amount += adhyayanResult.amount;
           break;
 
         default:
@@ -91,8 +103,13 @@ export const guestBooking = async (req, res) => {
     }
   }
 
+  const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
+  const finalAmount = amount + taxes;
+
+  const order = await generateOrderId(finalAmount);
+
   await t.commit();
-  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
 export const validateBooking = async (req, res) => {
@@ -220,7 +237,7 @@ async function checkRoomAvailability(user, data) {
           roomType,
           gender
         );
-  
+
         if (room) {
           status = STATUS_AVAILABLE;
           charge = roomCharge(roomType) * nights;
@@ -241,9 +258,11 @@ async function checkRoomAvailability(user, data) {
   return roomDetails;
 }
 
-async function bookRoom(body, user, data, t) {
+async function bookRoom(user, data, t) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
   validateDate(checkin_date, checkout_date);
+
+  let amount = 0;
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
@@ -270,16 +289,9 @@ async function bookRoom(body, user, data, t) {
 
     for (const guest of guests) {
       if (nights == 0) {
-        await bookDayVisitForGuest(
-          user,
-          guest,
-          checkin_date,
-          checkout_date,
-          t
-        );
+        await bookDayVisitForGuest(user, guest, checkin_date, checkout_date, t);
       } else {
-        await bookRoomForSingleGuest(
-          body,
+        const result = await bookRoomForSingleGuest(
           user,
           guest,
           guest_details,
@@ -290,13 +302,21 @@ async function bookRoom(body, user, data, t) {
           nights,
           t
         );
+        t = result.t;
+        amount += result.discountedAmount;
       }
     }
   }
-  return t;
+  return { t, amount };
 }
 
-async function bookDayVisitForGuest(user, guest, checkin, checkout, transaction) {
+async function bookDayVisitForGuest(
+  user,
+  guest,
+  checkin,
+  checkout,
+  transaction
+) {
   const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
@@ -316,12 +336,11 @@ async function bookDayVisitForGuest(user, guest, checkin, checkout, transaction)
   if (!booking) {
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
-  
+
   return booking;
 }
 
 async function bookRoomForSingleGuest(
-  body,
   user,
   guest,
   guest_details,
@@ -377,7 +396,16 @@ async function bookRoomForSingleGuest(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  return t;
+  const discountedAmount = await useCredit(
+    user.cardno,
+    booking,
+    transaction,
+    amount,
+    'USER',
+    t
+  );
+
+  return { t, discountedAmount };
 }
 
 async function checkFoodAvailability(data) {
@@ -411,7 +439,7 @@ async function checkFoodAvailability(data) {
   };
 }
 
-async function bookFood(req, user, data, t) {
+async function bookFood(user, data, t) {
   const { start_date, end_date, guestGroup } = data.details;
 
   validateDate(start_date, end_date);
@@ -526,18 +554,15 @@ async function checkAdhyayanAvailability(user, data) {
   return adhyayanDetails;
 }
 
-async function bookAdhyayan(body, user, data, t) {
+async function bookAdhyayan(user, data, t) {
   const { shibir_ids, guests } = data.details;
+  let amount = 0;
 
   const isBooked = await ShibirBookingDb.findAll({
     where: {
       shibir_id: shibir_ids,
       guest: guests,
-      status: [
-        STATUS_CONFIRMED,
-        STATUS_WAITING,
-        STATUS_PAYMENT_PENDING
-      ]
+      status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING]
     }
   });
 
@@ -570,10 +595,7 @@ async function bookAdhyayan(body, user, data, t) {
           shibir_id: shibir.dataValues.id,
           cardno: user.cardno,
           guest: guest,
-          status:
-            body.transaction_type == TRANSACTION_TYPE_UPI
-              ? STATUS_CONFIRMED
-              : STATUS_PAYMENT_PENDING
+          status: STATUS_PAYMENT_PENDING
         });
 
         shibir.available_seats -= 1;
@@ -585,12 +607,10 @@ async function bookAdhyayan(body, user, data, t) {
           category: TYPE_GUEST_ADHYAYAN,
           type: TYPE_EXPENSE,
           amount: shibir.dataValues.amount,
-          upi_ref: body.transaction_ref ? body.transaction_ref : 'NA',
-          status:
-            body.transaction_type == TRANSACTION_TYPE_UPI
-              ? STATUS_PAYMENT_COMPLETED
-              : STATUS_PAYMENT_PENDING
+          status: STATUS_PAYMENT_PENDING
         });
+
+        amount += shibir.dataValues.amount;
       } else {
         booking_data.push({
           bookingid: bookingid,
@@ -606,7 +626,7 @@ async function bookAdhyayan(body, user, data, t) {
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
-  return t;
+  return { t, amount };
 }
 
 export const fetchGuests = async (req, res) => {

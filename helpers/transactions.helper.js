@@ -186,18 +186,19 @@ export async function useCredit(
   if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
 
   if (card.credits <= 0) {
-    return;
+    return amount;
   }
 
   const status =
     amount > card.credits ? STATUS_PAYMENT_PENDING : STATUS_PAYMENT_COMPLETED;
 
   const creditsUsed = Math.min(amount, card.credits);
+  const discountedAmount = amount - creditsUsed;
   transaction.update(
     {
       status,
       discount: creditsUsed,
-      amount: amount - creditsUsed,
+      amount: discountedAmount,
       // set to discount amount
       description: `credits used: ${creditsUsed}`,
       updatedBy
@@ -224,6 +225,8 @@ export async function useCredit(
     },
     { transaction: t }
   );
+
+  return discountedAmount;
 }
 
 export const generateOrderId = async (amount) => {
