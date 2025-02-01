@@ -4,7 +4,11 @@ import {
   GuestFoodDb,
   Menu
 } from '../../models/associations.js';
-import { MSG_BOOKING_SUCCESSFUL, MSG_CANCEL_SUCCESSFUL, STATUS_RESIDENT } from '../../config/constants.js';
+import {
+  MSG_BOOKING_SUCCESSFUL,
+  MSG_CANCEL_SUCCESSFUL,
+  STATUS_RESIDENT
+} from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
   checkSpecialAllowance,
@@ -14,9 +18,7 @@ import {
   checkGuestRoomAlreadyBooked,
   checkGuestSpecialAllowance
 } from '../helper.js';
-import {
-  checkRoomAlreadyBooked
-} from '../../helpers/roomBooking.helper.js';
+import { checkRoomAlreadyBooked } from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -367,6 +369,7 @@ export const FetchGuestsForFilter = async (req, res) => {
   });
 };
 
+// TODO: Canceling guest food booking should credit the amount
 export const CancelFood = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
@@ -449,9 +452,7 @@ export const CancelFood = async (req, res) => {
   });
 
   await t.commit();
-  return res
-    .status(200)
-    .send({ message: MSG_CANCEL_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const fetchMenu = async (req, res) => {
