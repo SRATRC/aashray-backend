@@ -8,11 +8,7 @@ import {
   STATUS_WAITING,
   TYPE_ADHYAYAN
 } from '../config/constants.js';
-import {
-  ShibirBookingDb,
-  ShibirDb,
-  Transactions
-} from '../models/associations.js';
+import { ShibirBookingDb, ShibirDb } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
@@ -59,21 +55,11 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
   return booking;
 }
 
-export async function createAdhyayanBooking(
-  adhyayans,
-  transaction_type,
-  upi_ref,
-  t,
-  ...mumukshus
-) {
-  var bookings = [];
-  var transactions = [];
-
+export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
+  let amount = 0;
   for (const mumukshu of mumukshus) {
     for (const adhyayan of adhyayans) {
-
       if (adhyayan.available_seats > 0) {
-
         await reserveAdhyayanSeat(adhyayan, t);
 
         const booking = await ShibirBookingDb.create(
@@ -95,7 +81,7 @@ export async function createAdhyayanBooking(
           t
         );
 
-        await useCredit(
+        const discountedAmount = await useCredit(
           mumukshu,
           booking,
           transaction,
@@ -103,6 +89,7 @@ export async function createAdhyayanBooking(
           'USER',
           t
         );
+        amount += discountedAmount;
       } else {
         await ShibirBookingDb.create(
           {
@@ -117,13 +104,13 @@ export async function createAdhyayanBooking(
     }
   }
 
-  return t;
+  return { t, amount };
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {
   if (adhyayan.available_seats <= 0) {
     throw new ApiError(400, ERR_ADHYAYAN_NO_SEATS_AVAILABLE);
-  }     
+  }
 
   await adhyayan.update(
     {

@@ -64,6 +64,7 @@ export const ViewAllTravel = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
+  // TODO: include guest information
   const data = await database.query(
     `SELECT 
       t1.bookingid, 
