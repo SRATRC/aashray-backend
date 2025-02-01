@@ -40,6 +40,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
+  useCredit,
   generateOrderId
 } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
