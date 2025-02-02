@@ -90,6 +90,7 @@ export const manualCheckout = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   if (today != booking.checkout) {
+    // TODO: Throw error if checkout after booking's original checkout date
     const nights = await calculateNights(booking.checkin, today);
 
     booking.checkout = today;
@@ -403,8 +404,6 @@ export const updateFlatBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  // TODO: cancellation needs to be handled properly
-  // TODO: do we need to update the transaction?
   await booking.update(
     {
       flatno,

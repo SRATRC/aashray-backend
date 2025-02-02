@@ -274,6 +274,8 @@ export const bookFoodForGuest = async (req, res) => {
   const allDates = getDates(start_date, end_date);
   const days = allDates.length;
 
+  // TODO: get guest details
+  // TODO: take phone number of the Mumukshu
   var food_data = [];
   const bookingid = uuidv4();
   for (var date of allDates) {

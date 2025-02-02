@@ -89,6 +89,7 @@ export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
           'USER',
           t
         );
+        
         amount += discountedAmount;
       } else {
         await ShibirBookingDb.create(

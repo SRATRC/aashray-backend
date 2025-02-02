@@ -1,7 +1,6 @@
 import express from 'express';
 const router = express.Router();
 import {
-  AvailabilityCalender,
   ViewAllBookings,
   CancelBooking,
   FlatBookingForMumukshuAndGuest
@@ -11,7 +10,6 @@ import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
 
 router.use(validateCard);
 
-router.get('/availablity', CatchAsync(AvailabilityCalender));
 router.post('/cancel', CatchAsync(CancelBooking));
 router.post('/flat', CatchAsync(FlatBookingForMumukshuAndGuest));
 router.get('/bookings', CatchAsync(ViewAllBookings));

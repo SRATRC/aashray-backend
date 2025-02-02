@@ -169,8 +169,6 @@ async function addCredit(user, transaction, amount, t) {
   );
 }
 
-// TODO: For guests, credits will be added to the
-// Card that made the booking
 export async function useCredit(
   cardno,
   booking,

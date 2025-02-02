@@ -241,9 +241,6 @@ export const adhyayanStatusUpdate = async (req, res) => {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
-  
-
-  // TODO: Can a booking have multiple transactions?
   var transaction = await Transactions.findOne({
     where: { bookingid: bookingid }
   });

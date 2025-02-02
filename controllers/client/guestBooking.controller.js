@@ -422,6 +422,7 @@ async function checkFoodAvailability(data) {
   for (const group of guestGroup) {
     const { meals, guests } = group;
 
+    // TODO: check the price when the food booking is updated
     const groupCharge =
       allDates.length *
       guests.length *

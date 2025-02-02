@@ -22,65 +22,6 @@ import {
   userCancelBooking 
 } from '../../helpers/transactions.helper.js';
 
-// TODO: DEPRECATE THIS ENDPOINT
-export const AvailabilityCalender = async (req, res) => {
-  const startDate = new Date(req.body.checkin_date);
-  const endDate = new Date(req.body.checkout_date);
-  if (startDate != endDate) endDate.setDate(endDate.getDate() - 1);
-
-  validateDate(req.body.checkin_date, req.body.checkout_date);
-
-  const allDates = getDates(startDate, endDate);
-
-  const gender = req.body.gender || req.user.gender;
-  const total_beds = await RoomDb.count({
-    where: {
-      roomtype: req.body.room_type,
-      gender: req.body.floor_pref + gender,
-      roomstatus: ROOM_STATUS_AVAILABLE
-    }
-  });
-
-  var beds_occupied = [];
-  for (const i of allDates) {
-    const res = await RoomBooking.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            'SUM',
-            Sequelize.literal(`CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END`)
-          ),
-          'nac'
-        ],
-        [
-          Sequelize.fn(
-            'SUM',
-            Sequelize.literal(`CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END`)
-          ),
-          'ac'
-        ]
-      ],
-      where: {
-        checkin: { [Sequelize.Op.lte]: i },
-        checkout: { [Sequelize.Op.gt]: i },
-        status: {
-          [Sequelize.Op.in]: ['pending checkin', 'checkedin', 'checkedout']
-        },
-        gender: gender
-      },
-      group: 'checkin'
-    });
-    beds_occupied.push({
-      dtbooked: i,
-      count: res[0]
-    });
-  }
-  return res.status(200).send({
-    message: 'fetched availiblity calender',
-    data: { total_beds: total_beds, beds_occupied: beds_occupied }
-  });
-};
-
 export const FlatBookingForMumukshuAndGuest = async (req, res) => {
   const { flat_no, mobno, checkin_date, checkout_date, guest_id } = req.body;
 
