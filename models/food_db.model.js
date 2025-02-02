@@ -16,6 +16,14 @@ const FoodDb = sequelize.define(
       type: DataTypes.DATEONLY,
       allowNull: false
     },
+    guest: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
+    },
     breakfast: {
       type: DataTypes.BOOLEAN,
       allowNull: false
