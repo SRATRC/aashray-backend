@@ -57,7 +57,7 @@ export async function getBlockedDates(checkin_date, checkout_date) {
 export async function checkFlatAlreadyBooked(
   checkin,
   checkout,
-  flat_no,
+  // flat_no,
   card_no
 ) {
   const result = await FlatBooking.findAll({
@@ -82,7 +82,7 @@ export async function checkFlatAlreadyBooked(
           ]
         }
       ],
-      flatno: flat_no,
+      // flatno: flat_no,
       cardno: card_no,
       guest: null
     }
@@ -98,7 +98,7 @@ export async function checkFlatAlreadyBooked(
 export async function checkFlatAlreadyBookedForGuest(
   checkin,
   checkout,
-  flat_no,
+  // flat_no,
   guest_id
 ) {
   const result = await FlatBooking.findAll({

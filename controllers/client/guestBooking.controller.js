@@ -730,7 +730,7 @@ export const guestBookingFlat = async (req, res) => {
       await checkFlatAlreadyBookedForGuest(
         startDay,
         endDay,
-        flatDb.dataValues.flatno,
+        // flatDb.dataValues.flatno,
         guest['id']
       )
     ) {

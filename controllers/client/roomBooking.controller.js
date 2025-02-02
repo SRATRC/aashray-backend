@@ -45,7 +45,7 @@ export const FlatBookingMumukshu = async (req, res) => {
       await checkFlatAlreadyBooked(
         startDay,
         endDay,
-        flatDb.dataValues.flatno,
+        // flatDb.dataValues.flatno,
         mumukshu['cardno']
       )
     ) {
