@@ -3,7 +3,9 @@ import {
   GuestFoodDb,
   GuestDb,
   ShibirBookingDb,
-  RoomBooking
+  RoomBooking,
+  FlatBooking,
+  FlatDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -34,7 +36,8 @@ import {
   calculateNights,
   validateDate,
   checkGuestRoomAlreadyBooked,
-  checkGuestFoodAlreadyBooked
+  checkGuestFoodAlreadyBooked,
+  checkFlatAlreadyBookedForGuest
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
@@ -257,6 +260,58 @@ async function checkRoomAvailability(user, data) {
 
   return roomDetails;
 }
+
+export const guestBookingFlat = async (req, res) => {
+  const { flat_no, guests, checkin_date, checkout_date, } = req.body;
+
+  const ownFlat = await FlatDb.findOne({
+    where: {
+      flatno: flat_no,
+      owner: req.user.cardno
+    }
+  });
+  if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
+
+  validateDate(checkin_date, checkout_date);
+  
+  for(var guest of guests){
+    if (
+      await checkFlatAlreadyBookedForGuest(
+        checkin_date,
+        checkout_date,
+        flat_no,
+        req.user.cardno,
+        guest["id"]
+      )
+    ) {
+      throw new ApiError(400, 'Already Booked');
+    }
+  } 
+  
+  const nights = await calculateNights(checkin_date, checkout_date);
+  var t = await database.transaction();
+
+  for(var guest of guests){
+    
+    const booking = await FlatBooking.create({
+      bookingid: uuidv4(),
+      cardno: req.user.cardno,
+      flatno: flat_no,
+      checkin: checkin_date,
+      checkout: checkout_date,
+      nights: nights,
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      guest:guest["id"]
+    });
+    if (!booking) {
+      throw new ApiError(500, 'Failed to book your flat');
+    }
+  }
+
+  await t.commit();
+
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+};
 
 async function bookRoom(user, data, t) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
