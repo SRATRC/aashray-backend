@@ -94,7 +94,6 @@ export const FlatBookingMumukshu = async (req, res) => {
       owner: req.user.cardno
     }
   });
-  console.log(flatDb);
 
   if (!flatDb) throw new ApiError(404, 'Flat not found');
 

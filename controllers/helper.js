@@ -22,7 +22,6 @@ import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 
-
 export async function getBlockedDates(checkin_date, checkout_date) {
   const startDate = new Date(checkin_date);
   const endDate = new Date(checkout_date);
@@ -55,7 +54,12 @@ export async function getBlockedDates(checkin_date, checkout_date) {
   return blockedDates;
 }
 
-export async function checkFlatAlreadyBooked(checkin, checkout, flat_no, card_no) {
+export async function checkFlatAlreadyBooked(
+  checkin,
+  checkout,
+  flat_no,
+  card_no
+) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -91,7 +95,12 @@ export async function checkFlatAlreadyBooked(checkin, checkout, flat_no, card_no
   }
 }
 
-export async function checkFlatAlreadyBookedForGuest(checkin, checkout, flat_no,card_no,guest_id) {
+export async function checkFlatAlreadyBookedForGuest(
+  checkin,
+  checkout,
+  flat_no,
+  guest_id
+) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -115,8 +124,7 @@ export async function checkFlatAlreadyBookedForGuest(checkin, checkout, flat_no,
         }
       ],
       flatno: flat_no,
-      cardno: card_no,
-      guest:guest_id
+      guest: guest_id
     }
   });
 
@@ -126,7 +134,6 @@ export async function checkFlatAlreadyBookedForGuest(checkin, checkout, flat_no,
     return false;
   }
 }
-
 
 export async function calculateNights(checkin, checkout) {
   const date1 = new Date(checkin);

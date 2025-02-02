@@ -261,58 +261,6 @@ async function checkRoomAvailability(user, data) {
   return roomDetails;
 }
 
-export const guestBookingFlat = async (req, res) => {
-  const { flat_no, guests, checkin_date, checkout_date, } = req.body;
-
-  const ownFlat = await FlatDb.findOne({
-    where: {
-      flatno: flat_no,
-      owner: req.user.cardno
-    }
-  });
-  if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
-
-  validateDate(checkin_date, checkout_date);
-  
-  for(var guest of guests){
-    if (
-      await checkFlatAlreadyBookedForGuest(
-        checkin_date,
-        checkout_date,
-        flat_no,
-        req.user.cardno,
-        guest["id"]
-      )
-    ) {
-      throw new ApiError(400, 'Already Booked');
-    }
-  } 
-  
-  const nights = await calculateNights(checkin_date, checkout_date);
-  var t = await database.transaction();
-
-  for(var guest of guests){
-    
-    const booking = await FlatBooking.create({
-      bookingid: uuidv4(),
-      cardno: req.user.cardno,
-      flatno: flat_no,
-      checkin: checkin_date,
-      checkout: checkout_date,
-      nights: nights,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      guest:guest["id"]
-    });
-    if (!booking) {
-      throw new ApiError(500, 'Failed to book your flat');
-    }
-  }
-
-  await t.commit();
-
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
-};
-
 async function bookRoom(user, data, t) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
   validateDate(checkin_date, checkout_date);
@@ -760,4 +708,54 @@ export const checkGuests = async (req, res) => {
   } else {
     return res.status(200).send({ message: 'Guest found', data: isGuest });
   }
+};
+
+export const guestBookingFlat = async (req, res) => {
+  const { guests, startDay, endDay } = req.body;
+
+  const flatDb = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: req.user.cardno
+    }
+  });
+
+  if (!flatDb) throw new ApiError(404, 'Flat not found');
+
+  validateDate(startDay, endDay);
+
+  for (var guest of guests) {
+    if (
+      await checkFlatAlreadyBookedForGuest(
+        startDay,
+        endDay,
+        flatDb.dataValues.flatno,
+        guest['id']
+      )
+    ) {
+      throw new ApiError(400, 'Already Booked');
+    }
+  }
+
+  const nights = await calculateNights(startDay, endDay);
+  var t = await database.transaction();
+
+  let booking = [];
+  for (var guest of guests) {
+    booking.push({
+      bookingid: uuidv4(),
+      cardno: req.user.cardno,
+      flatno: flatDb.dataValues.flatno,
+      checkin: startDay,
+      checkout: endDay,
+      nights: nights,
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      guest: guest['id'],
+      updatedBy: req.user.cardno
+    });
+  }
+
+  await FlatBooking.bulkCreate(booking, { transaction: t });
+  await t.commit();
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
