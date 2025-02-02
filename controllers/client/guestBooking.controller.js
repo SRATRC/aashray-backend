@@ -3,7 +3,9 @@ import {
   GuestFoodDb,
   GuestDb,
   ShibirBookingDb,
-  RoomBooking
+  RoomBooking,
+  FlatBooking,
+  FlatDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -34,12 +36,14 @@ import {
   calculateNights,
   validateDate,
   checkGuestRoomAlreadyBooked,
-  checkGuestFoodAlreadyBooked
+  checkGuestFoodAlreadyBooked,
+  checkFlatAlreadyBookedForGuest
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
+  useCredit,
   generateOrderId
 } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
@@ -705,4 +709,54 @@ export const checkGuests = async (req, res) => {
   } else {
     return res.status(200).send({ message: 'Guest found', data: isGuest });
   }
+};
+
+export const guestBookingFlat = async (req, res) => {
+  const { guests, startDay, endDay } = req.body;
+
+  const flatDb = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: req.user.cardno
+    }
+  });
+
+  if (!flatDb) throw new ApiError(404, 'Flat not found');
+
+  validateDate(startDay, endDay);
+
+  for (var guest of guests) {
+    if (
+      await checkFlatAlreadyBookedForGuest(
+        startDay,
+        endDay,
+        flatDb.dataValues.flatno,
+        guest['id']
+      )
+    ) {
+      throw new ApiError(400, 'Already Booked');
+    }
+  }
+
+  const nights = await calculateNights(startDay, endDay);
+  var t = await database.transaction();
+
+  let booking = [];
+  for (var guest of guests) {
+    booking.push({
+      bookingid: uuidv4(),
+      cardno: req.user.cardno,
+      flatno: flatDb.dataValues.flatno,
+      checkin: startDay,
+      checkout: endDay,
+      nights: nights,
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      guest: guest['id'],
+      updatedBy: req.user.cardno
+    });
+  }
+
+  await FlatBooking.bulkCreate(booking, { transaction: t });
+  await t.commit();
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
