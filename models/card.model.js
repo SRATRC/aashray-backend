@@ -110,7 +110,8 @@ const CardDb = sequelize.define(
     },
     password: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      defaultValue: "$2b$10$kyNWZgMVhB0/YIEwJaKhP.JwugrOTUojN.8jPpwS6Tc1O7Wi2yadC"
     },
     credits: {
       type: DataTypes.DECIMAL,
