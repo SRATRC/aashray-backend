@@ -112,8 +112,21 @@ GROUP BY
       type: QueryTypes.SELECT
     }
   );
-  return res.status(200).send({ message: 'fetched results', data: shibirs });
+  return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
+
+export const fetchAdhyayan = async (req, res) => {
+  const { id } = req.params;
+  await validateAdhyayans(id);
+
+  const adhyayan = await ShibirDb.findOne({
+    where: { id: id }
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'Fetched Adhyayan', data: adhyayan });
+}
 
 export const fetchAdhyayanBookings = async (req, res) => {
   const { id } = req.params;
