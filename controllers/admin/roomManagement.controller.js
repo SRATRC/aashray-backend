@@ -390,14 +390,6 @@ export const updateFlatBooking = async (req, res) => {
 
   validateDate(checkin_date, checkout_date);
 
-  // TODO: Why do we need this?
-  // if (await checkFlatAlreadyBooked(
-  //   checkin_date, 
-  //   checkout_date, 
-  //   flatno,
-  //   cardno)) {
-  //   throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
-  // }
   const nights = await calculateNights(checkin_date, checkout_date);
   const booking = await FlatBooking.findByPk(bookingid);
   if (!booking) {

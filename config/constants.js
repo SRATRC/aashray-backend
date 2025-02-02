@@ -72,31 +72,34 @@ export const ROLE_FOOD_ADMIN = 'foodAdmin';
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 
 // ERROR MESSAGES
-export const ERR_CARD_NOT_PROVIDED = 'Cardno Not Provided';
-export const ERR_CARD_NOT_FOUND = 'Card Does Not Exist';
+export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
+export const ERR_CARD_NOT_FOUND = 'Card does not exist';
 
-export const ERR_INVALID_BOOKING_TYPE = 'Invalid Booking Type';
-export const ERR_INVALID_DATE = 'Invalid Date';
-export const ERR_BLOCKED_DATES = 'Dates Are Blocked';
-export const ERR_ROOM_NO_BED_AVAILABLE = 'No Beds Available';
-export const ERR_ROOM_ALREADY_BOOKED = 'Room Already Booked';
-export const ERR_ROOM_NOT_FOUND = 'Room Not Found';
-export const ERR_ROOM_INVALID_DURATION = 'Invalid Booking Duration';
-export const ERR_ROOM_FAILED_TO_BOOK = 'Failed To Book A Bed';
+export const ERR_INVALID_BOOKING_TYPE = 'Invalid booking type';
+export const ERR_INVALID_DATE = 'Invalid date';
+export const ERR_INVALID_MEAL_TIME = 'Invalid meal time';
+export const ERR_BLOCKED_DATES = 'Dates are blocked';
+
+export const ERR_ROOM_NO_BED_AVAILABLE = 'No beds available';
+export const ERR_ROOM_ALREADY_BOOKED = 'Room already booked';
+export const ERR_ROOM_NOT_FOUND = 'Room not found';
+export const ERR_ROOM_INVALID_DURATION = 'Invalid booking duration';
+export const ERR_ROOM_FAILED_TO_BOOK = 'Failed to book a room';
 export const ERR_ROOM_MUST_BE_BOOKED =
-  'Must Have Room Booked On One Or More Selected Dates';
-export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan Already Booked';
-export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan Not Found';
+  'Must have room booked on one or more selected dates';
+
+export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan already booked';
+export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan not found';
 export const ERR_ADHYAYAN_NO_SEATS_AVAILABLE = 'Selected Raj Adhyayan doesn\'t have any available seats.';
-export const ERR_BOOKING_NOT_FOUND = 'Booking Not Found';
+
+export const ERR_BOOKING_NOT_FOUND = 'Booking not found';
 export const ERR_BOOKING_ALREADY_CANCELLED = 'Cannot change status of already cancelled booking';
-export const ERR_TRANSACTION_NOT_FOUND = 'Booking Transaction Not Found';
+export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 
-export const ERR_FOOD_ALREADY_BOOKED = 'Food Already Booked';
-export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel Already Booked';
+export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
+export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
+export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
 
-export const ERR_FLAT_ALREADY_BOOKED = 'Flat Already Booked';
-
-export const MSG_BOOKING_SUCCESSFUL = 'Booking Successful';
-export const MSG_UPDATE_SUCCESSFUL = 'Update Successful';
-export const MSG_CANCEL_SUCCESSFUL = 'Cancel Successful';
+export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
+export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
+export const MSG_CANCEL_SUCCESSFUL = 'Cancel successful';

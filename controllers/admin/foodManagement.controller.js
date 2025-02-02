@@ -11,10 +11,16 @@ import {
   LUNCH_PRICE,
   DINNER_PRICE,
   TYPE_EXPENSE,
-  MSG_CANCEL_SUCCESSFUL
+  MSG_CANCEL_SUCCESSFUL,
+  ERR_BOOKING_NOT_FOUND,
+  ERR_INVALID_MEAL_TIME,
+  ERR_FOOD_ALREADY_BOOKED,
+  ERR_ROOM_MUST_BE_BOOKED,
+  MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
+  checkSpecialAllowance,
   isFoodBooked
 } from '../helper.js';
 import {
@@ -26,68 +32,59 @@ import moment from 'moment';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
+import { userIsPR } from '../../helpers/card.helper.js';
 
-//FIXME: logic is flawed, need to be fixed
 export const issuePlate = async (req, res) => {
-  const currentTime = moment();
+  const currentTime = moment.utc();
   const mealTimes = {
-    breakfast: {
-      end: moment().hour(10).minute(0).second(0),
-      field: 'breakfast',
-      plateField: 'breakfast_plate_issued'
-    },
-    lunch: {
-      end: moment().hour(14).minute(0).second(0),
-      field: 'lunch',
-      plateField: 'lunch_plate_issued'
-    },
-    dinner: {
-      end: moment().hour(19).minute(0).second(0),
-      field: 'dinner',
-      plateField: 'dinner_plate_issued'
-    }
+    breakfast: moment.utc().hour(4).minute(30).second(0),
+    lunch: moment.utc().hour(8).minute(30).second(0),
+    dinner: moment.utc().hour(13).minute(30).second(0)
   };
 
-  const food_booking = await FoodDb.findOne({
+  const booking = await FoodDb.findOne({
     where: {
       cardno: req.params.cardno,
       date: currentTime.format('YYYY-MM-DD')
     }
   });
 
-  if (!food_booking) {
-    throw new ApiError(404, 'booking not found');
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   // Determine current meal period
   let currentMeal = null;
-  if (currentTime.isBefore(mealTimes.breakfast.end)) {
-    currentMeal = mealTimes.breakfast;
-  } else if (currentTime.isBefore(mealTimes.lunch.end)) {
-    currentMeal = mealTimes.lunch;
-  } else if (currentTime.isBefore(mealTimes.dinner.end)) {
-    currentMeal = mealTimes.dinner;
+  for (const meal of ['breakfast', 'lunch', 'dinner']) {
+    if (currentTime.isSameOrBefore(mealTimes[meal])) {
+      currentMeal = meal;
+      break;
+    }
   }
 
   if (!currentMeal) {
-    throw new ApiError(404, 'Invalid meal time');
+    throw new ApiError(400, ERR_INVALID_MEAL_TIME);
   }
 
   // Check if meal is booked
-  if (!food_booking[currentMeal.field]) {
-    throw new ApiError(404, `${currentMeal.field} not booked`);
+  if (!booking[currentMeal]) {
+    throw new ApiError(400, `${currentMeal} not booked`);
   }
 
   // Check if plate is already issued
-  if (food_booking[currentMeal.plateField]) {
-    throw new ApiError(400, 'Plate already issued');
+  const plateField = `${currentMeal}_plate_issued`;
+  if (booking[plateField]) {
+    throw new ApiError(400, `Plate for ${currentMeal} already issued`);
   }
 
   // Issue plate
-  food_booking[currentMeal.plateField] = true;
-  await food_booking.save();
+  await booking.update(
+    {
+      [plateField]: true
+    }
+  );
 
-  return res.status(200).send({ message: 'Plate issued successfully' });
+  return res.status(200).send({ message: `Plate for ${currentMeal} issued successfully` });
 };
 
 export const physicalPlatesIssued = async (req, res) => {
@@ -134,46 +131,58 @@ export const fetchPhysicalPlateIssued = async (req, res) => {
 };
 
 export const bookFoodForMumukshu = async (req, res) => {
+  const { 
+    cardno, 
+    start_date, 
+    end_date, 
+    breakfast, 
+    lunch,
+    dinner,
+    spicy,
+    high_tea
+   } = req.body;
+
   if (
-    await isFoodBooked(req.body.start_date, req.body.end_date, req.body.cardno)
+    await isFoodBooked(start_date, end_date, cardno)
   ) {
     return res
-      .status(200)
-      .send({ message: 'Food Already booked on one on more of the dates' });
+      .status(400)
+      .send({ message: ERR_FOOD_ALREADY_BOOKED });
   }
 
-  if (
-    !(
-      (await checkRoomAlreadyBooked(
-        req.body.start_date,
-        req.body.end_date,
-        req.body.cardno
-      )) ||
-      (await checkFlatAlreadyBooked(
-        req.body.start_date,
-        req.body.end_date,
-        req.body.cardno
-      ))
-    )
-  ) {
-    throw new ApiError(
-      403,
-      'You do not have a room booked on one or more dates selected'
-    );
+  if (!(
+    (await checkRoomAlreadyBooked(
+      start_date,
+      end_date,
+      cardno
+    )) ||
+    (await checkFlatAlreadyBooked(
+      start_date,
+      end_date,
+      cardno
+    )) ||
+    (await checkSpecialAllowance(
+      start_date,
+      end_date,
+      cardno
+    )) ||
+    (await userIsPR(cardno))
+  )) {
+    throw new ApiError(400, ERR_ROOM_MUST_BE_BOOKED);
   }
 
-  const allDates = getDates(req.body.start_date, req.body.end_date);
+  const allDates = getDates(start_date, end_date);
 
   var food_data = [];
   for (var date of allDates) {
     food_data.push({
-      cardno: req.body.cardno,
-      date: date,
-      breakfast: req.body.breakfast,
-      lunch: req.body.lunch,
-      dinner: req.body.dinner,
-      hightea: req.body.high_tea,
-      spicy: req.body.spicy,
+      cardno,
+      date,
+      breakfast,
+      lunch,
+      dinner,
+      hightea: high_tea,
+      spicy,
       plateissued: 0,
       updatedBy: req.user.username
     });
@@ -181,9 +190,7 @@ export const bookFoodForMumukshu = async (req, res) => {
 
   await FoodDb.bulkCreate(food_data);
 
-  return res.status(201).send({
-    message: 'Food Booked successfully'
-  });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const cancelFoodByCard = async (req, res) => {
