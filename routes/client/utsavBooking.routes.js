@@ -4,6 +4,7 @@ import {
   FetchUpcoming,
   BookUtsav,
   BookGuestUtsav,
+  BookMumukshuUtsav,
   ViewUtsavBookings,
   CancelUtsavBooking
 } from '../../controllers/client/utsavBooking.controller.js';
@@ -17,5 +18,6 @@ router.get('/booking', CatchAsync(ViewUtsavBookings));
 router.post('/booking', CatchAsync(BookUtsav));
 router.delete('/booking', CatchAsync(CancelUtsavBooking));
 router.post('/guest', CatchAsync(BookGuestUtsav));
+router.post('/mumukshu', CatchAsync(BookMumukshuUtsav));
 
 export default router;
