@@ -23,9 +23,7 @@ import {
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import getDates from '../../utils/getDates.js';
-import { 
-  userCancelBooking 
-} from '../../helpers/transactions.helper.js';
+import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 
 // TODO: DEPRECATE THIS ENDPOINT
@@ -88,56 +86,58 @@ export const AvailabilityCalender = async (req, res) => {
 };
 
 export const FlatBookingMumukshu = async (req, res) => {
-  const { flat_no, mumukshus, checkin_date, checkout_date, } = req.body;
+  const { mumukshus, startDay, endDay } = req.body;
 
-  const ownFlat = await FlatDb.findOne({
+  const flatDb = await FlatDb.findOne({
+    attributes: ['flatno'],
     where: {
-      flatno: flat_no,
       owner: req.user.cardno
     }
   });
-  if (!ownFlat) throw new ApiError(404, 'Flat not owned by you');
+  console.log(flatDb);
 
-  validateDate(checkin_date, checkout_date);
-  
-  for(var mumukshu of mumukshus){
+  if (!flatDb) throw new ApiError(404, 'Flat not found');
+
+  validateDate(startDay, endDay);
+
+  for (var mumukshu of mumukshus) {
     if (
       await checkFlatAlreadyBooked(
-        checkin_date,
-        checkout_date,
-        flat_no,
-        mumukshu["cardno"]
+        startDay,
+        endDay,
+        flatDb.dataValues.flatno,
+        mumukshu['cardno']
       )
     ) {
       throw new ApiError(400, 'Already Booked');
     }
-  } 
-  
-  const nights = await calculateNights(checkin_date, checkout_date);
-  var t = await database.transaction();
-
-  for(var mumukshu of mumukshus){
-    console.log(mumukshu["cardno"]);
-    const booking = await FlatBooking.create({
-      bookingid: uuidv4(),
-      cardno: mumukshu["cardno"],
-      flatno: flat_no,
-      checkin: checkin_date,
-      checkout: checkout_date,
-      nights: nights,
-      status: ROOM_STATUS_PENDING_CHECKIN
-    });
-    if (!booking) {
-      throw new ApiError(500, 'Failed to book your flat');
-    }
   }
+
+  const nights = await calculateNights(startDay, endDay);
+  const t = await database.transaction();
+  req.transaction = t;
+
+  let flat_bookings = [];
+
+  for (var mumukshu of mumukshus) {
+    flat_bookings.push({
+      bookingid: uuidv4(),
+      cardno: mumukshu['cardno'],
+      flatno: flatDb.dataValues.flatno,
+      checkin: startDay,
+      checkout: endDay,
+      nights: nights,
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      updatedBy: req.user.cardno
+    });
+  }
+
+  await FlatBooking.bulkCreate(flat_bookings, { transaction: t });
 
   await t.commit();
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
-
-
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -191,10 +191,7 @@ export const CancelBooking = async (req, res) => {
       bookingid: bookingid,
       cardno: req.user.cardno,
       guest: bookedFor == undefined ? null : bookedFor,
-      status: [
-        STATUS_WAITING,
-        ROOM_STATUS_PENDING_CHECKIN
-      ]
+      status: [STATUS_WAITING, ROOM_STATUS_PENDING_CHECKIN]
     }
   });
 
