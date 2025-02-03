@@ -35,6 +35,8 @@ import {
 import { checkTravelAlreadyBooked } from '../../helpers/travelBooking.helper.js';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
+import { bookFoodForMumukshus, getFoodBookings } from '../../helpers/foodBooking.helper.js';
+import { validateCards } from '../../helpers/card.helper.js';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -47,7 +49,7 @@ export const mumukshuBooking = async (req, res) => {
       break;
 
     case TYPE_FOOD:
-      t = await bookFood(req.body.primary_booking, t);
+      t = await bookFood(req.body, req.body.primary_booking, t);
       break;
 
     case TYPE_TRAVEL:
@@ -70,7 +72,7 @@ export const mumukshuBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          t = await bookFood(addon, t);
+          t = await bookFood(req.body, addon, t);
           break;
 
         case TYPE_TRAVEL:
@@ -186,7 +188,7 @@ async function checkRoomAvailability(data) {
   validateDate(checkin_date, checkout_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  const cardDb = await validateMumukshus(mumukshus);
+  const cardDb = await validateCards(mumukshus);
 
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
@@ -242,7 +244,7 @@ async function bookRoom(body, data, t) {
   validateDate(checkin_date, checkout_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  const cardDb = await validateMumukshus(mumukshus);
+  const cardDb = await validateCards(mumukshus);
 
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
@@ -290,10 +292,10 @@ async function checkFoodAvailability(data) {
   validateDate(start_date, end_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  await validateMumukshus(mumukshus);
+  await validateCards(mumukshus);
 
   const allDates = getDates(start_date, end_date);
-  const bookings = await getFoodBookings(mumukshus, allDates);
+  const bookings = await getFoodBookings(allDates, ...mumukshus);
 
   var charge = 0;
 
@@ -325,56 +327,24 @@ async function checkFoodAvailability(data) {
   };
 }
 
-async function bookFood(data, t) {
+async function bookFood(body, data, t) {
   const { start_date, end_date, mumukshuGroup } = data.details;
-  validateDate(start_date, end_date);
 
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  await validateMumukshus(mumukshus);
-
-  const allDates = getDates(start_date, end_date);
-  const bookings = await getFoodBookings(mumukshus, allDates);
-
-  // todo: check for room bookings as well, just like self booking
-
-  var bookingsToCreate = [];
-  for (const group of mumukshuGroup) {
-    const { meals, spicy, high_tea, mumukshus } = group;
-
-    for (const date of allDates) {
-      for (const mumukshu of mumukshus) {
-        const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
-        if (booking) {
-          ['breakfast', 'lunch', 'dinner'].forEach((type) => {
-            if (meals.includes(type) && !booking[type]) booking[type] = 1;
-          });
-          booking['spicy'] = spicy;
-          booking['hightea'] = high_tea;
-          await booking.save({ transaction: t });
-        } else {
-          bookingsToCreate.push({
-            cardno: mumukshu,
-            date,
-            spicy,
-            breakfast: meals.includes('breakfast'),
-            lunch: meals.includes('lunch'),
-            dinner: meals.includes('dinner'),
-            hightea: high_tea,
-            plateissued: 0
-          });
-        }
-      }
-    }
-  }
-
-  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    t
+  );
   return t;
 }
 
 async function checkAdhyayanAvailability(data) {
   const { shibir_ids, mumukshus } = data.details;
 
-  await validateMumukshus(mumukshus);
+  await validateCards(mumukshus);
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
   const shibirs = await validateAdhyayans(shibir_ids);
 
@@ -404,14 +374,12 @@ async function checkAdhyayanAvailability(data) {
 async function bookAdhyayan(body, data, t) {
   const { shibir_ids, mumukshus } = data.details;
 
-  await validateMumukshus(mumukshus);
+  await validateCards(mumukshus);
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
   const shibirs = await validateAdhyayans(shibir_ids);
 
   await createAdhyayanBooking(
     shibirs,
-    body.transaction_type,
-    body.transaction_ref || 'NA',
     t,
     ...mumukshus
   );
@@ -427,7 +395,7 @@ async function checkTravelAvailability(data) {
   }
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  await validateMumukshus(mumukshus);
+  await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
 
   return {
@@ -444,7 +412,7 @@ async function bookTravel(data, t) {
   }
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  await validateMumukshus(mumukshus);
+  await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
 
   var bookingsToCreate = [];
@@ -469,36 +437,6 @@ async function bookTravel(data, t) {
 
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
-}
-
-async function validateMumukshus(mumukshus) {
-  const cardDb = await CardDb.findAll({
-    where: { cardno: mumukshus },
-    attributes: ['id', 'cardno', 'gender']
-  });
-
-  if (cardDb.length != mumukshus.length) {
-    throw new ApiError(400, ERR_CARD_NOT_FOUND);
-  }
-
-  return cardDb;
-}
-
-async function getFoodBookings(mumukshus, allDates) {
-  const bookings = await FoodDb.findAll({
-    where: {
-      date: allDates,
-      cardno: mumukshus
-    }
-  });
-
-  const mumukshuBookings = {};
-  for (const booking of bookings) {
-    mumukshuBookings[booking.cardno] ||= {};
-    mumukshuBookings[booking.cardno][booking.date] = booking;
-  }
-
-  return mumukshuBookings;
 }
 
 export const checkMumukshu = async (req, res) => {

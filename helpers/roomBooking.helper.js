@@ -48,11 +48,7 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
     }
   });
 
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
+  return result.length > 0;
 }
 
 export async function bookDayVisit(cardno, checkin, checkout, updatedBy, t) {

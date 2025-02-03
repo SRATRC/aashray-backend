@@ -57,7 +57,6 @@ export async function getBlockedDates(checkin_date, checkout_date) {
 export async function checkFlatAlreadyBooked(
   checkin,
   checkout,
-  // flat_no,
   card_no
 ) {
   const result = await FlatBooking.findAll({
@@ -82,23 +81,17 @@ export async function checkFlatAlreadyBooked(
           ]
         }
       ],
-      // flatno: flat_no,
       cardno: card_no,
       guest: null
     }
   });
 
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
+  return result.length > 0;
 }
 
 export async function checkFlatAlreadyBookedForGuest(
   checkin,
   checkout,
-  // flat_no,
   guest_id
 ) {
   const result = await FlatBooking.findAll({
@@ -123,16 +116,11 @@ export async function checkFlatAlreadyBookedForGuest(
           ]
         }
       ],
-      flatno: flat_no,
       guest: guest_id
     }
   });
 
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
+  return result.length > 0;
 }
 
 export async function calculateNights(checkin, checkout) {
@@ -189,16 +177,13 @@ export async function checkSpecialAllowance(start_date, end_date, cardno) {
     where: {
       cardno: cardno,
       guest: null,
-      status: {
-        [Sequelize.Op.in]: [STATUS_CONFIRMED]
-      }
+      status: STATUS_CONFIRMED
     }
   });
 
-  if (adhyayans) {
-    for (var data of adhyayans) {
-      if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
-    }
+  for (var data of adhyayans) {
+    if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) 
+      return true;
   }
 
   return false;
@@ -210,12 +195,8 @@ export async function checkRoomBookingProgress(
   primary_booking,
   addons
 ) {
-  if (!addons) return;
 
-  var addon = undefined;
-  for (var i of addons) {
-    if (i.booking_type == TYPE_ROOM) addon = i;
-  }
+  var addon = addons && addons.find((addon) => addon.booking_type == TYPE_ROOM);
 
   if (primary_booking.booking_type == TYPE_ROOM || addon) {
     const startDate = new Date(start_date);
@@ -227,11 +208,10 @@ export async function checkRoomBookingProgress(
       primary_booking.details.checkout_date || addon.details.checkout_date
     );
 
-    if (startDate >= checkinDate && endDate <= checkoutDate) return true;
-    else return false;
-  } else {
-    return false;
+    return startDate >= checkinDate && endDate <= checkoutDate;
   }
+    
+  return false;
 }
 
 export function findClosestSum(arr, target) {

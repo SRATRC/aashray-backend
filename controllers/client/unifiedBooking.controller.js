@@ -41,6 +41,7 @@ import {
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
+import { bookFoodForMumukshus, getFoodBookings, validateFood } from '../../helpers/foodBooking.helper.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -291,9 +292,24 @@ async function bookRoom(user, data, t) {
 async function checkFoodAvailability(body, user, data) {
   const { start_date, end_date } = data.details;
 
+  const mumukshuGroup = createMumukshuGroup(
+    user,
+    breakfast,
+    lunch,
+    dinner, 
+    spicy,
+    high_tea
+  );
+
   validateDate(start_date, end_date);
 
-  await validateFood(body, user, start_date, end_date);
+  await validateFood(
+    start_date, 
+    end_date, 
+    body.primary_booking, 
+    body.addons, 
+    user
+  );
 
   return {
     status: STATUS_AVAILABLE,
@@ -301,73 +317,36 @@ async function checkFoodAvailability(body, user, data) {
   };
 }
 
-async function validateFood(body, user, start_date, end_date) {
-  if (
-    !(
-      (await checkRoomBookingProgress(
-        start_date,
-        end_date,
-        body.primary_booking,
-        body.addons
-      )) ||
-      (await checkRoomAlreadyBooked(start_date, end_date, user.cardno)) ||
-      (await checkFlatAlreadyBooked(start_date, end_date, user.cardno)) ||
-      user.res_status === STATUS_RESIDENT ||
-      (await checkSpecialAllowance(start_date, end_date, user.cardno))
-    )
-  ) {
-    throw new ApiError(403, ERR_ROOM_MUST_BE_BOOKED);
-  }
-}
-
 async function bookFood(body, user, data, t) {
-  const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
-    data.details;
+  const { 
+    start_date, 
+    end_date, 
+    breakfast, 
+    lunch, 
+    dinner, 
+    spicy, 
+    high_tea 
+  } = data.details;
 
-  const meals = [
-    { type: 'breakfast', toBook: breakfast },
-    { type: 'lunch', toBook: lunch },
-    { type: 'dinner', toBook: dinner }
-  ];
+  const mumukshuGroup = createMumukshuGroup(
+    user,
+    breakfast,
+    lunch,
+    dinner, 
+    spicy,
+    high_tea
+  );
 
-  validateDate(start_date, end_date);
-  await validateFood(body, user, start_date, end_date);
+  console.log("MUMU: " + JSON.stringify(mumukshuGroup));
 
-  const allDates = getDates(start_date, end_date);
-  const bookingsToUpdate = await FoodDb.findAll({
-    where: {
-      cardno: user.cardno,
-      date: { [Sequelize.Op.in]: allDates }
-    }
-  });
-
-  for (const booking of bookingsToUpdate) {
-    meals.forEach(({ type, toBook }) => {
-      if (toBook && !booking[type]) booking[type] = toBook;
-    });
-    booking.hightea = high_tea || 'NONE';
-    booking.spicy = spicy;
-    await booking.save({ transaction: t });
-  }
-
-  const bookedDates = bookingsToUpdate.map((booking) => booking.date);
-  const remainingDates = allDates.filter((date) => !bookedDates.includes(date));
-
-  var bookingsToCreate = [];
-  for (var date of remainingDates) {
-    bookingsToCreate.push({
-      cardno: user.cardno,
-      date: date,
-      breakfast: breakfast,
-      lunch: lunch,
-      dinner: dinner,
-      hightea: high_tea || 'NONE',
-      spicy: spicy,
-      plateissued: 0
-    });
-  }
-
-  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    t
+  );
 
   return t;
 }
@@ -487,4 +466,27 @@ async function bookAdhyayan(user, data, t) {
   amount = result.amount;
 
   return { t, amount };
+}
+
+
+function createMumukshuGroup(
+  user,
+  breakfast,
+  lunch,
+  dinner, 
+  spicy,
+  high_tea
+) {
+
+  const meals = []
+  if (breakfast) meals.push('breakfast');
+  if (lunch) meals.push('lunch');
+  if (dinner) meals.push('dinner');
+
+  return [{
+    mumukshus: [ user.cardno ],
+    meals,
+    spicy,
+    high_tea
+  }];
 }

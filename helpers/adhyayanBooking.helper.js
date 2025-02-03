@@ -56,8 +56,12 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
+
+  console.log("MUMUM: " + mumukshus);
+
   let amount = 0;
   for (const mumukshu of mumukshus) {
+    console.log("MUMUM: " + mumukshu);
     for (const adhyayan of adhyayans) {
       if (adhyayan.available_seats > 0) {
         await reserveAdhyayanSeat(adhyayan, t);
