@@ -1,4 +1,10 @@
-import { CardDb } from '../../models/associations.js';
+import database from '../../config/database.js';
+import getDates from '../../utils/getDates.js';
+import ApiError from '../../utils/ApiError.js';
+import moment from 'moment';
+import { 
+  CardDb 
+} from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
@@ -16,26 +22,31 @@ import {
   ERR_INVALID_DATE,
   MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
-import { calculateNights, validateDate } from '../helper.js';
+import { 
+  calculateNights, 
+  validateDate 
+} from '../helper.js';
 import {
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
   findRoom,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
-import database from '../../config/database.js';
-import getDates from '../../utils/getDates.js';
-import ApiError from '../../utils/ApiError.js';
 import {
-  checkAdhyayanAlreadyBooked,
-  validateAdhyayans,
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
-import { bookTravelForMumukshus, checkTravelAlreadyBooked } from '../../helpers/travelBooking.helper.js';
-import moment from 'moment';
-import { bookFoodForMumukshus, getFoodBookings } from '../../helpers/foodBooking.helper.js';
-import { validateCards } from '../../helpers/card.helper.js';
+import { 
+  bookTravelForMumukshus, 
+  checkTravelAlreadyBooked 
+} from '../../helpers/travelBooking.helper.js';
+import { 
+  bookFoodForMumukshus, 
+  getFoodBookings 
+} from '../../helpers/foodBooking.helper.js';
+import { 
+  validateCards 
+} from '../../helpers/card.helper.js';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
