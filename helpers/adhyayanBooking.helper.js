@@ -191,3 +191,36 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
     );
   }
 }
+
+export async function checkAdhyayanAvailabilityForMumukshus(
+  shibir_ids, 
+  mumukshus
+) {
+
+  console.log(mumukshus);
+  await validateCards(mumukshus);
+  await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
+  const shibirs = await validateAdhyayans(shibir_ids);
+
+  var adhyayanDetails = [];
+  for (var shibir of shibirs) {
+    var available = mumukshus.length;
+    var waiting = 0;
+    var charge = 0;
+
+    if (shibir.dataValues.available_seats < mumukshus.length) {
+      available = shibir.dataValues.available_seats;
+      waiting = mumukshus.length - shibir.dataValues.available_seats;
+    }
+    charge = available * shibir.dataValues.amount;
+
+    adhyayanDetails.push({
+      shibirId: shibir.dataValues.id,
+      available: available,
+      waiting: waiting,
+      charge: charge
+    });
+  }
+
+  return adhyayanDetails;
+}

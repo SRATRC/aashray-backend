@@ -27,10 +27,10 @@ import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import {
-  createAdhyayanBooking,
   checkAdhyayanAlreadyBooked,
   validateAdhyayans,
-  bookAdhyayanForMumukshus
+  bookAdhyayanForMumukshus,
+  checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
 import { bookTravelForMumukshus, checkTravelAlreadyBooked } from '../../helpers/travelBooking.helper.js';
 import moment from 'moment';
@@ -56,7 +56,7 @@ export const mumukshuBooking = async (req, res) => {
       break;
 
     case TYPE_ADHYAYAN:
-      t = await bookAdhyayan(req.body, req.body.primary_booking, t);
+      t = await bookAdhyayan(req.body.primary_booking, t);
       break;
 
     default:
@@ -79,7 +79,7 @@ export const mumukshuBooking = async (req, res) => {
           break;
 
         case TYPE_ADHYAYAN:
-          t = await bookAdhyayan(req.body, addon, t);
+          t = await bookAdhyayan(addon, t);
           break;
 
         default:
@@ -95,92 +95,69 @@ export const mumukshuBooking = async (req, res) => {
 export const validateBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
-  var roomDetails = [];
-  var adhyayanDetails = [];
-  var foodDetails = {};
-  var travelDetails = {};
-  var totalCharge = 0;
+  const response = {
+    roomDetails: [],
+    adhyayanDetails: [],
+    foodDetails: {},
+    travelDetails: {},
+    taxes: 0,
+    totalCharge: 0
+  }
 
-  switch (primary_booking.booking_type) {
+  await validate(primary_booking, response);
+
+  if (addons) {
+    for (const addon of addons) {
+      await validate(addon, response);
+    }
+  }
+
+  return res.status(200).send({ data: response });
+};
+
+async function validate(data, response) {
+  let totalCharge = 0;
+  switch (data.booking_type) {
     case TYPE_ROOM:
-      roomDetails = await checkRoomAvailability(req.body.primary_booking);
-      totalCharge += roomDetails.reduce(
+      response.roomDetails = await checkRoomAvailability(data);
+      totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
       );
       break;
 
     case TYPE_FOOD:
-      foodDetails = await checkFoodAvailability(req.body.primary_booking);
+      response.foodDetails = await checkFoodAvailability(data);
       // totalCharge += foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
-      adhyayanDetails = await checkAdhyayanAvailability(
-        req.body.primary_booking
+      response.adhyayanDetails = await checkAdhyayanAvailabilityForMumukshus(
+        data.details.shibir_ids,
+        data.details.mumukshus
       );
-      totalCharge += adhyayanDetails.reduce(
+      totalCharge += response.adhyayanDetails.reduce(
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
         0
       );
       break;
 
     case TYPE_TRAVEL:
-      travelDetails = await checkTravelAvailability(req.body.primary_booking);
-      totalCharge += travelDetails.charge;
+      response.travelDetails = await checkTravelAvailability(data);
+      totalCharge += response.travelDetails.charge;
       break;
 
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
 
-  if (addons) {
-    for (const addon of addons) {
-      switch (addon.booking_type) {
-        case TYPE_ROOM:
-          roomDetails = await checkRoomAvailability(addon);
-          totalCharge += roomDetails.reduce(
-            (partialSum, room) => partialSum + room.charge,
-            0
-          );
-          break;
-
-        case TYPE_FOOD:
-          foodDetails = await checkFoodAvailability(addon);
-          // food charges are not added for Mumukshus
-          break;
-
-        case TYPE_ADHYAYAN:
-          adhyayanDetails = await checkAdhyayanAvailability(addon);
-          totalCharge += adhyayanDetails.reduce(
-            (partialSum, adhyayan) => partialSum + adhyayan.charge,
-            0
-          );
-          break;
-
-        case TYPE_TRAVEL:
-          travelDetails = await checkTravelAvailability(addon);
-          totalCharge += travelDetails.charge;
-          break;
-
-        default:
-          throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
-      }
-    }
-  }
-
   const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100) / 100;
-  return res.status(200).send({
-    data: {
-      roomDetails,
-      adhyayanDetails,
-      foodDetails,
-      travelDetails,
-      taxes,
-      totalCharge: totalCharge + taxes
-    }
-  });
-};
+
+  response.taxes += taxes;
+  response.totalCharge += totalCharge + taxes;
+
+  return response;
+}
 
 async function checkRoomAvailability(data) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
@@ -251,6 +228,32 @@ async function bookRoom(data, t) {
   return t;
 }
 
+async function bookFood(body, data, t) {
+  const { start_date, end_date, mumukshuGroup } = data.details;
+
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    t
+  );
+  return t;
+}
+
+async function bookAdhyayan(data, t) {
+  const { shibir_ids, mumukshus } = data.details;
+
+  await bookAdhyayanForMumukshus(
+    shibir_ids,
+    mumukshus,
+    t
+  );
+
+  return t;
+}
+
 async function checkFoodAvailability(data) {
   const { start_date, end_date, mumukshuGroup } = data.details;
   validateDate(start_date, end_date);
@@ -289,62 +292,6 @@ async function checkFoodAvailability(data) {
     status: STATUS_AVAILABLE,
     charge
   };
-}
-
-async function bookFood(body, data, t) {
-  const { start_date, end_date, mumukshuGroup } = data.details;
-
-  await bookFoodForMumukshus(
-    start_date,
-    end_date,
-    mumukshuGroup,
-    body.primary_booking,
-    body.addons,
-    t
-  );
-  return t;
-}
-
-async function checkAdhyayanAvailability(data) {
-  const { shibir_ids, mumukshus } = data.details;
-
-  await validateCards(mumukshus);
-  await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
-  const shibirs = await validateAdhyayans(shibir_ids);
-
-  var adhyayanDetails = [];
-  for (var shibir of shibirs) {
-    var available = mumukshus.length;
-    var waiting = 0;
-    var charge = 0;
-
-    if (shibir.dataValues.available_seats < mumukshus.length) {
-      available = shibir.dataValues.available_seats;
-      waiting = mumukshus.length - shibir.dataValues.available_seats;
-    }
-    charge = available * shibir.dataValues.amount;
-
-    adhyayanDetails.push({
-      shibirId: shibir.dataValues.id,
-      available: available,
-      waiting: waiting,
-      charge: charge
-    });
-  }
-
-  return adhyayanDetails;
-}
-
-async function bookAdhyayan(body, data, t) {
-  const { shibir_ids, mumukshus } = data.details;
-
-  await bookAdhyayanForMumukshus(
-    shibir_ids,
-    mumukshus,
-    t
-  );
-
-  return t;
 }
 
 async function checkTravelAvailability(data) {
