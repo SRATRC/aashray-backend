@@ -88,6 +88,20 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
+export const checkMumukshu = async (req, res) => {
+  const { mobno } = req.query;
+  const cardDb = await CardDb.findOne({
+    where: { mobno: mobno },
+    attributes: ['cardno', 'issuedto', 'mobno']
+  });
+
+  if (!cardDb) {
+    throw new ApiError(404, ERR_CARD_NOT_FOUND);
+  }
+
+  return res.status(200).send({ data: cardDb });
+};
+
 async function book(body, data, t) {
   switch (data.booking_type) {
     case TYPE_ROOM:
@@ -155,6 +169,57 @@ async function validate(data, response) {
   return response;
 }
 
+async function bookRoom(data, t) {
+  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
+
+  await bookRoomForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshuGroup,
+    t
+  );
+
+  return t;
+}
+
+async function bookFood(body, data, t) {
+  const { start_date, end_date, mumukshuGroup } = data.details;
+
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    t
+  );
+  return t;
+}
+
+async function bookAdhyayan(data, t) {
+  const { shibir_ids, mumukshus } = data.details;
+
+  await bookAdhyayanForMumukshus(
+    shibir_ids,
+    mumukshus,
+    t
+  );
+
+  return t;
+}
+
+async function bookTravel(data, t) {
+  const { date, mumukshuGroup } = data.details;
+
+  await bookTravelForMumukshus(
+    date,
+    mumukshuGroup,
+    t
+  );
+
+  return t;
+}
+
 async function checkRoomAvailability(data) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
@@ -209,45 +274,6 @@ async function checkRoomAvailability(data) {
   }
 
   return roomDetails;
-}
-
-async function bookRoom(data, t) {
-  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
-
-  await bookRoomForMumukshus(
-    checkin_date,
-    checkout_date,
-    mumukshuGroup,
-    t
-  );
-
-  return t;
-}
-
-async function bookFood(body, data, t) {
-  const { start_date, end_date, mumukshuGroup } = data.details;
-
-  await bookFoodForMumukshus(
-    start_date,
-    end_date,
-    mumukshuGroup,
-    body.primary_booking,
-    body.addons,
-    t
-  );
-  return t;
-}
-
-async function bookAdhyayan(data, t) {
-  const { shibir_ids, mumukshus } = data.details;
-
-  await bookAdhyayanForMumukshus(
-    shibir_ids,
-    mumukshus,
-    t
-  );
-
-  return t;
 }
 
 async function checkFoodAvailability(data) {
@@ -306,29 +332,3 @@ async function checkTravelAvailability(data) {
     charge: 0
   };
 }
-
-async function bookTravel(data, t) {
-  const { date, mumukshuGroup } = data.details;
-
-  await bookTravelForMumukshus(
-    date,
-    mumukshuGroup,
-    t
-  );
-
-  return t;
-}
-
-export const checkMumukshu = async (req, res) => {
-  const { mobno } = req.query;
-  const cardDb = await CardDb.findOne({
-    where: { mobno: mobno },
-    attributes: ['cardno', 'issuedto', 'mobno']
-  });
-
-  if (!cardDb) {
-    throw new ApiError(404, ERR_CARD_NOT_FOUND);
-  }
-
-  return res.status(200).send({ data: cardDb });
-};
