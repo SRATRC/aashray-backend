@@ -9,7 +9,6 @@ import {
   TYPE_ADHYAYAN,
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
-  ERR_ROOM_ALREADY_BOOKED,
   MSG_BOOKING_SUCCESSFUL,
   ERR_TRAVEL_ALREADY_BOOKED
 } from '../../config/constants.js';
@@ -21,9 +20,7 @@ import {
   validateDate,
 } from '../helper.js';
 import {
-  bookDayVisit,
-  checkRoomAlreadyBooked,
-  createRoomBooking,
+  bookRoomForMumukshus,
   findRoom,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
@@ -50,7 +47,6 @@ export const unifiedBooking = async (req, res) => {
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(req.user, req.body.primary_booking, t);
-      t = roomResult.t;
       amount += roomResult.amount;
       break;
 
@@ -68,7 +64,6 @@ export const unifiedBooking = async (req, res) => {
         req.body.primary_booking,
         t
       );
-      t = adhyayanResult.t;
       amount += adhyayanResult.amount;
       break;
 
@@ -81,7 +76,6 @@ export const unifiedBooking = async (req, res) => {
       switch (addon.booking_type) {
         case TYPE_ROOM:
           const roomResult = await bookRoom(req.user, addon, t);
-          t = roomResult.t;
           amount += roomResult.amount;
           break;
 
@@ -95,7 +89,6 @@ export const unifiedBooking = async (req, res) => {
 
         case TYPE_ADHYAYAN:
           const adhyayanResult = await bookAdhyayan(req.user, addon, t);
-          t = adhyayanResult.t;
           amount += adhyayanResult.amount;
           break;
 
@@ -108,7 +101,7 @@ export const unifiedBooking = async (req, res) => {
   const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
   const finalAmount = amount + taxes;
 
-  const order = await generateOrderId(finalAmount);
+  const order = process.env.NODE_ENV == 'prod' ? (await generateOrderId(finalAmount)) : [];
 
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
@@ -241,46 +234,18 @@ async function checkRoomAvailability(user, data) {
 async function bookRoom(user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, user.cardno)) {
-    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
-  }
+  const result = await bookRoomForMumukshus(
+    checkin_date,
+    checkout_date,
+    [{
+      mumukshus: [ user.cardno ],
+      roomType: room_type,
+      floorType: floor_pref
+    }],
+    t
+  );
 
-  validateDate(checkin_date, checkout_date);
-
-  const nights = await calculateNights(checkin_date, checkout_date);
-
-  let amount = 0;
-  if (nights == 0) {
-    await bookDayVisit(user.cardno, checkin_date, checkout_date, 'USER', t);
-  } else {
-    const result = await createRoomBooking(
-      user.cardno,
-      checkin_date,
-      checkout_date,
-      nights,
-      room_type,
-      user.gender,
-      floor_pref,
-      'USER',
-      t
-    );
-    t = result.t;
-    amount = result.discountedAmount;
-  }
-
-  //   sendMail({
-  //     email: user.email,
-  //     subject: `Your Booking Confirmation for Stay at SRATRC`,
-  //     template: 'rajSharan',
-  //     context: {
-  //       name: user.issuedto,
-  //       bookingid: booking.dataValues.bookingid,
-  //       checkin: booking.dataValues.checkin,
-  //       checkout: booking.dataValues.checkout
-  //     }
-  //   });
-
-  return { t, amount };
+  return result;
 }
 
 async function checkFoodAvailability(body, user, data) {
@@ -474,4 +439,13 @@ function createMumukshuGroup(
     spicy,
     high_tea
   }];
+}
+
+function createRoomMumukshuGroup(
+  user,
+  roomType, 
+  floorType,
+) {
+
+  return 
 }

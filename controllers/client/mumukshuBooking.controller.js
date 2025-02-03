@@ -19,6 +19,7 @@ import {
 import { calculateNights, validateDate } from '../helper.js';
 import {
   bookDayVisit,
+  bookRoomForMumukshus,
   checkRoomAlreadyBooked,
   createRoomBooking,
   findRoom,
@@ -45,7 +46,7 @@ export const mumukshuBooking = async (req, res) => {
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      t = await bookRoom(req.body, req.body.primary_booking, t);
+      t = await bookRoom(req.body.primary_booking, t);
       break;
 
     case TYPE_FOOD:
@@ -239,50 +240,15 @@ async function checkRoomAvailability(data) {
   return roomDetails;
 }
 
-async function bookRoom(body, data, t) {
+async function bookRoom(data, t) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
-  validateDate(checkin_date, checkout_date);
 
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  const cardDb = await validateCards(mumukshus);
-
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
-    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
-  }
-
-  const nights = await calculateNights(checkin_date, checkout_date);
-
-  for (const group of mumukshuGroup) {
-    const { roomType, floorType, mumukshus } = group;
-
-    for (const mumukshu of mumukshus) {
-      const card = cardDb.filter(
-        (item) => item.dataValues.cardno == mumukshu
-      )[0];
-
-      if (nights == 0) {
-        await bookDayVisit(
-          card.dataValues.cardno,
-          checkin_date,
-          checkout_date,
-          'USER',
-          t
-        );
-      } else {
-        await createRoomBooking(
-          card.dataValues.cardno,
-          checkin_date,
-          checkout_date,
-          nights,
-          roomType,
-          card.dataValues.gender,
-          floorType,
-          'USER',
-          t
-        );
-      }
-    }
-  }
+  await bookRoomForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshuGroup,
+    t
+  );
 
   return t;
 }

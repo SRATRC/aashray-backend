@@ -8,12 +8,15 @@ import {
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
   TYPE_ROOM,
-  ERR_ROOM_NO_BED_AVAILABLE
+  ERR_ROOM_NO_BED_AVAILABLE,
+  ERR_ROOM_ALREADY_BOOKED
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
+import { calculateNights, validateDate } from '../controllers/helper.js';
+import { validateCards } from './card.helper.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -100,6 +103,61 @@ export async function findRoom(checkin, checkout, room_type, gender) {
     ],
     limit: 1
   });
+}
+
+export async function bookRoomForMumukshus(
+  checkin_date,
+  checkout_date,
+  mumukshuGroup,
+  t
+) {
+  validateDate(checkin_date, checkout_date);
+
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  const cardDb = await validateCards(mumukshus);
+
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+
+  let amount = 0;
+  for (const group of mumukshuGroup) {
+    const { roomType, floorType, mumukshus } = group;
+
+    for (const mumukshu of mumukshus) {
+      const card = cardDb.filter(
+        (item) => item.cardno == mumukshu
+      )[0];
+
+      if (nights == 0) {
+        await bookDayVisit(
+          card.cardno,
+          checkin_date,
+          checkout_date,
+          'USER',
+          t
+        );
+      } else {
+        const result = await createRoomBooking(
+          card.cardno,
+          checkin_date,
+          checkout_date,
+          nights,
+          roomType,
+          card.gender,
+          floorType,
+          'USER',
+          t
+        );
+
+        amount += result.discountedAmount;
+      }
+    }
+  }
+
+  return { t, amount };
 }
 
 export async function createRoomBooking(
