@@ -36,71 +36,22 @@ import { bookTravelForMumukshus } from '../../helpers/travelBooking.helper.js';
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
+  if (!primary_booking) throw new ApiError(400, 'Invalid Request');
+
   var t = await database.transaction();
   req.transaction = t;
 
-  let amount = 0;
-
-  if (!primary_booking) throw new ApiError(400, 'Invalid Request');
-
-  switch (primary_booking.booking_type) {
-    case TYPE_ROOM:
-      const roomResult = await bookRoom(req.user, req.body.primary_booking, t);
-      amount += roomResult.amount;
-      break;
-
-    case TYPE_FOOD:
-      t = await bookFood(req.body, req.user, req.body.primary_booking, t);
-      break;
-
-    case TYPE_TRAVEL:
-      t = await bookTravel(req.user, req.body.primary_booking, t);
-      break;
-
-    case TYPE_ADHYAYAN:
-      const adhyayanResult = await bookAdhyayan(
-        req.user,
-        req.body.primary_booking,
-        t
-      );
-      amount += adhyayanResult.amount;
-      break;
-
-    default:
-      throw new ApiError(400, 'Invalid Booking Type');
-  }
+  let amount = await book(req.user, req.body, primary_booking, t);
 
   if (addons) {
     for (const addon of addons) {
-      switch (addon.booking_type) {
-        case TYPE_ROOM:
-          const roomResult = await bookRoom(req.user, addon, t);
-          amount += roomResult.amount;
-          break;
-
-        case TYPE_FOOD:
-          t = await bookFood(req.body, req.user, addon, t);
-          break;
-
-        case TYPE_TRAVEL:
-          t = await bookTravel(req.user, addon, t);
-          break;
-
-        case TYPE_ADHYAYAN:
-          const adhyayanResult = await bookAdhyayan(req.user, addon, t);
-          amount += adhyayanResult.amount;
-          break;
-
-        default:
-          throw new ApiError(400, 'Invalid Booking type');
-      }
+      amount += await book(req.user, req.body, addon, t);
     }
   }
 
-  const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
-  const finalAmount = amount + taxes;
-
-  const order = process.env.NODE_ENV == 'prod' ? (await generateOrderId(finalAmount)) : [];
+  const order = process.env.NODE_ENV == 'prod' 
+    ? (await generateOrderId(amount)) 
+    : { amount };
 
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
@@ -128,6 +79,35 @@ export const validateBooking = async (req, res) => {
 
   return res.status(200).send({ data: response });
 };
+
+async function book(user, body, data, t) {
+  let amount = 0;
+  switch (data.booking_type) {
+    case TYPE_ROOM:
+      const roomResult = await bookRoom(user, data, t);
+      amount += roomResult.amount;
+      break;
+
+    case TYPE_FOOD:
+      t = await bookFood(body, user, data, t);
+      break;
+
+    case TYPE_TRAVEL:
+      t = await bookTravel(user, data, t);
+      break;
+
+    case TYPE_ADHYAYAN:
+      const adhyayanResult = await bookAdhyayan(user, data, t);
+      amount += adhyayanResult.amount;
+      break;
+
+    default:
+      throw new ApiError(400, 'Invalid Booking Type');
+  }
+
+  const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
+  return amount + taxes;
+}
 
 async function validate(body, user, data, response) {
   let totalCharge = 0;
