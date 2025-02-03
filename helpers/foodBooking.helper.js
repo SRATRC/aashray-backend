@@ -47,8 +47,6 @@ export async function bookFoodForMumukshus(
 
   validateDate(start_date, end_date);
 
-  console.log("MUMU: " + JSON.stringify(mumukshuGroup));
-
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cards = await validateCards(mumukshus);
   for (const card of cards) {
