@@ -26,6 +26,7 @@ import {
 } from '../../helpers/roomBooking.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import {
+  bookAdhyayanForMumukshus,
   checkAdhyayanAlreadyBooked,
   createAdhyayanBooking,
   validateAdhyayans
@@ -380,18 +381,15 @@ async function checkAdhyayanAvailability(user, data) {
 
 async function bookAdhyayan(user, data, t) {
   const { shibir_ids } = data.details;
-  let amount = 0;
 
-  await checkAdhyayanAlreadyBooked(shibir_ids, user.cardno);
-  const shibirs = await validateAdhyayans(shibir_ids);
+  const result = await bookAdhyayanForMumukshus(
+    shibir_ids,
+    [ user.cardno ],
+    t
+  );
 
-  const result = await createAdhyayanBooking(shibirs, t, user.cardno);
-  t = result.t;
-  amount = result.amount;
-
-  return { t, amount };
+  return result;
 }
-
 
 function createMumukshuGroup(
   user,

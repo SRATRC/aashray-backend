@@ -12,6 +12,26 @@ import { ShibirBookingDb, ShibirDb } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
+import { validateCards } from './card.helper.js';
+
+export async function bookAdhyayanForMumukshus(
+  shibir_ids,
+  mumukshus,
+  t
+) {
+
+  await validateCards(mumukshus);
+  await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
+  const shibirs = await validateAdhyayans(shibir_ids);
+
+  const result = await createAdhyayanBooking(
+    shibirs,
+    t,
+    ...mumukshus
+  );
+
+  return result;
+}
 
 export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
   const booking = await ShibirBookingDb.findOne({

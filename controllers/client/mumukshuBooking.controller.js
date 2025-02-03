@@ -29,7 +29,8 @@ import ApiError from '../../utils/ApiError.js';
 import {
   createAdhyayanBooking,
   checkAdhyayanAlreadyBooked,
-  validateAdhyayans
+  validateAdhyayans,
+  bookAdhyayanForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
 import { bookTravelForMumukshus, checkTravelAlreadyBooked } from '../../helpers/travelBooking.helper.js';
 import moment from 'moment';
@@ -337,14 +338,10 @@ async function checkAdhyayanAvailability(data) {
 async function bookAdhyayan(body, data, t) {
   const { shibir_ids, mumukshus } = data.details;
 
-  await validateCards(mumukshus);
-  await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
-  const shibirs = await validateAdhyayans(shibir_ids);
-
-  await createAdhyayanBooking(
-    shibirs,
-    t,
-    ...mumukshus
+  await bookAdhyayanForMumukshus(
+    shibir_ids,
+    mumukshus,
+    t
   );
 
   return t;
