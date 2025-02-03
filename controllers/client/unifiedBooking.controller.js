@@ -286,15 +286,6 @@ async function bookRoom(user, data, t) {
 async function checkFoodAvailability(body, user, data) {
   const { start_date, end_date } = data.details;
 
-  const mumukshuGroup = createMumukshuGroup(
-    user,
-    breakfast,
-    lunch,
-    dinner, 
-    spicy,
-    high_tea
-  );
-
   validateDate(start_date, end_date);
 
   await validateFood(
