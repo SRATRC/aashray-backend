@@ -1,4 +1,4 @@
-import { TravelDb, FoodDb } from '../../models/associations.js';
+import { TravelDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
@@ -6,12 +6,10 @@ import {
   STATUS_WAITING,
   TYPE_TRAVEL,
   TYPE_FOOD,
-  STATUS_RESIDENT,
   TYPE_ADHYAYAN,
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
-  ERR_ROOM_MUST_BE_BOOKED,
   MSG_BOOKING_SUCCESSFUL,
   ERR_TRAVEL_ALREADY_BOOKED
 } from '../../config/constants.js';
@@ -19,11 +17,8 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  checkFlatAlreadyBooked,
-  checkSpecialAllowance,
   calculateNights,
   validateDate,
-  checkRoomBookingProgress
 } from '../helper.js';
 import {
   bookDayVisit,
@@ -32,7 +27,6 @@ import {
   findRoom,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
-import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
 import {
@@ -41,7 +35,7 @@ import {
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
-import { bookFoodForMumukshus, getFoodBookings, validateFood } from '../../helpers/foodBooking.helper.js';
+import { bookFoodForMumukshus, validateFood } from '../../helpers/foodBooking.helper.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
