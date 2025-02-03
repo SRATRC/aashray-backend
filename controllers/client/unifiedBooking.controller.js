@@ -25,7 +25,6 @@ import {
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import ApiError from '../../utils/ApiError.js';
-import moment from 'moment';
 import {
   checkAdhyayanAlreadyBooked,
   createAdhyayanBooking,
@@ -33,6 +32,7 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
 import { bookFoodForMumukshus, validateFood } from '../../helpers/foodBooking.helper.js';
+import { bookTravelForMumukshus } from '../../helpers/travelBooking.helper.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -287,8 +287,6 @@ async function bookFood(body, user, data, t) {
     high_tea
   );
 
-  console.log("MUMU: " + JSON.stringify(mumukshuGroup));
-
   await bookFoodForMumukshus(
     start_date,
     end_date,
@@ -327,51 +325,27 @@ async function checkTravelAvailability(data) {
 }
 
 async function bookTravel(user, data, t) {
-  const { date, pickup_point, drop_point, luggage, comments, type } =
-    data.details;
+  const { 
+    date, 
+    pickup_point, 
+    drop_point, 
+    luggage, 
+    comments, 
+    type 
+  } = data.details;
 
-  const today = moment().format('YYYY-MM-DD');
-  if (date <= today) {
-    throw new ApiError(400, 'Invalid Date');
-  }
-
-  const isBooked = await TravelDb.findOne({
-    where: {
-      cardno: user.cardno,
-      status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
-      date: date
-    }
-  });
-  if (isBooked) {
-    throw new ApiError(400, 'Travel already booked on the selected date');
-  }
-
-  await TravelDb.create(
-    {
-      bookingid: uuidv4(),
-      cardno: user.cardno,
-      date: date,
-      type: type,
-      pickup_point: pickup_point,
-      drop_point: drop_point,
-      luggage: luggage,
-      comments: comments,
-      status: STATUS_WAITING
-    },
-    { transaction: t }
+  await bookTravelForMumukshus(
+    date,
+    [{
+      mumukshus: [ user.cardno ],
+      pickup_point,
+      drop_point,
+      luggage,
+      comments,
+      type
+    }],
+    t
   );
-  //   sendMail({
-  //     email: user.email,
-  //     subject: 'Your Booking for RajPravas',
-  //     template: 'rajPravas',
-  //     context: {
-  //       name: user.issuedto,
-  //       bookingid: booking.dataValues.bookingid,
-  //       date: date,
-  //       pickup: pickup_point,
-  //       dropoff: drop_point
-  //     }
-  //   });
 
   return t;
 }

@@ -1,4 +1,4 @@
-import { CardDb, FoodDb, TravelDb } from '../../models/associations.js';
+import { CardDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
@@ -18,10 +18,8 @@ import {
 } from '../../config/constants.js';
 import { calculateNights, validateDate } from '../helper.js';
 import {
-  bookDayVisit,
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
-  createRoomBooking,
   findRoom,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
@@ -33,9 +31,8 @@ import {
   checkAdhyayanAlreadyBooked,
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
-import { checkTravelAlreadyBooked } from '../../helpers/travelBooking.helper.js';
+import { bookTravelForMumukshus, checkTravelAlreadyBooked } from '../../helpers/travelBooking.helper.js';
 import moment from 'moment';
-import { v4 as uuidv4 } from 'uuid';
 import { bookFoodForMumukshus, getFoodBookings } from '../../helpers/foodBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
 
@@ -372,36 +369,13 @@ async function checkTravelAvailability(data) {
 
 async function bookTravel(data, t) {
   const { date, mumukshuGroup } = data.details;
-  const today = moment().format('YYYY-MM-DD');
-  if (date <= today) {
-    throw new ApiError(400, ERR_INVALID_DATE);
-  }
 
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  await validateCards(mumukshus);
-  await checkTravelAlreadyBooked(date, mumukshus);
+  await bookTravelForMumukshus(
+    date,
+    mumukshuGroup,
+    t
+  );
 
-  var bookingsToCreate = [];
-  for (const group of mumukshuGroup) {
-    const { pickup_point, drop_point, luggage, comments, type, mumukshus } =
-      group;
-
-    for (const mumukshu of mumukshus) {
-      bookingsToCreate.push({
-        bookingid: uuidv4(),
-        cardno: mumukshu,
-        status: STATUS_WAITING,
-        date,
-        type,
-        pickup_point,
-        drop_point,
-        luggage,
-        comments
-      });
-    }
-  }
-
-  await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
 }
 
