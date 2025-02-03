@@ -53,49 +53,11 @@ export const mumukshuBooking = async (req, res) => {
   var t = await database.transaction();
   req.transaction = t;
 
-  switch (primary_booking.booking_type) {
-    case TYPE_ROOM:
-      t = await bookRoom(req.body.primary_booking, t);
-      break;
-
-    case TYPE_FOOD:
-      t = await bookFood(req.body, req.body.primary_booking, t);
-      break;
-
-    case TYPE_TRAVEL:
-      t = await bookTravel(req.body.primary_booking, t);
-      break;
-
-    case TYPE_ADHYAYAN:
-      t = await bookAdhyayan(req.body.primary_booking, t);
-      break;
-
-    default:
-      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
-  }
+  await book(req.body, primary_booking, t);
 
   if (addons) {
     for (const addon of addons) {
-      switch (addon.booking_type) {
-        case TYPE_ROOM:
-          t = await bookRoom(req.body, addon, t);
-          break;
-
-        case TYPE_FOOD:
-          t = await bookFood(req.body, addon, t);
-          break;
-
-        case TYPE_TRAVEL:
-          t = await bookTravel(addon, t);
-          break;
-
-        case TYPE_ADHYAYAN:
-          t = await bookAdhyayan(addon, t);
-          break;
-
-        default:
-          throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
-      }
+      await book(req.body, addon, t);
     }
   }
 
@@ -125,6 +87,29 @@ export const validateBooking = async (req, res) => {
 
   return res.status(200).send({ data: response });
 };
+
+async function book(body, data, t) {
+  switch (data.booking_type) {
+    case TYPE_ROOM:
+      await bookRoom(data, t);
+      break;
+
+    case TYPE_FOOD:
+      await bookFood(body, data, t);
+      break;
+
+    case TYPE_TRAVEL:
+      await bookTravel(data, t);
+      break;
+
+    case TYPE_ADHYAYAN:
+      await bookAdhyayan(data, t);
+      break;
+
+    default:
+      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
+  }
+}
 
 async function validate(data, response) {
   let totalCharge = 0;
