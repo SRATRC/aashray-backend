@@ -171,33 +171,24 @@ export const bookFoodForMumukshu = async (req, res) => {
 };
 
 export const cancelFoodByCard = async (req, res) => {
-  const updateData = req.body.food_data;
+  const { food_data, cardno } = req.body;
 
   const t = await database.transaction();
 
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await FoodDb.findOne({
+  for (const item of food_data) {
+    const booking = await FoodDb.findOne({
       where: {
-        cardno: req.body.cardno,
-        date: req.body.food_data[i].date
+        cardno: cardno,
+        date: item.date
       }
     });
-    if (isAvailable) {
-      isAvailable.breakfast = req.body.food_data[i].breakfast;
-      isAvailable.lunch = req.body.food_data[i].lunch;
-      isAvailable.dinner = req.body.food_data[i].dinner;
-      await isAvailable.save({ transaction: t });
+    if (booking) {
+      booking.breakfast = item.breakfast;
+      booking.lunch = item.lunch;
+      booking.dinner = item.dinner;
+      await booking.save({ transaction: t });
     }
   }
-
-  await FoodDb.destroy({
-    where: {
-      breakfast: false,
-      lunch: false,
-      dinner: false
-    },
-    transaction: t
-  });
 
   await t.commit();
   return res
@@ -206,41 +197,33 @@ export const cancelFoodByCard = async (req, res) => {
 };
 
 export const cancelFoodByMob = async (req, res) => {
-  const updateData = req.body.food_data;
+  const { food_data, mobno } = req.body;
+
+  const card = await CardDb.findOne({
+    where: { mobno }
+  });
+
+  if (!card) {
+    throw new ApiError(404, 'No user found with given mobile number');
+  }
 
   const t = await database.transaction();
 
-  const userData = await CardDb.findOne({
-    where: {
-      mobno: req.body.mobno
-    }
-  });
-  if (!userData)
-    throw new ApiError(404, 'No user found with given mobile number');
-
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await FoodDb.findOne({
+  for (const item of food_data) {
+    const booking = await FoodDb.findOne({
       where: {
-        cardno: userData.dataValues.cardno,
-        date: req.body.food_data[i].date
+        cardno: card.cardno,
+        date: item.date
       }
     });
-    if (isAvailable) {
-      isAvailable.breakfast = req.body.food_data[i].breakfast;
-      isAvailable.lunch = req.body.food_data[i].lunch;
-      isAvailable.dinner = req.body.food_data[i].dinner;
-      await isAvailable.save({ transaction: t });
+
+    if (booking) {
+      booking.breakfast = item.breakfast;
+      booking.lunch = item.lunch;
+      booking.dinner = item.dinner;
+      await booking.save({ transaction: t });
     }
   }
-
-  await FoodDb.destroy({
-    where: {
-      breakfast: false,
-      lunch: false,
-      dinner: false
-    },
-    transaction: t
-  });
 
   await t.commit();
   return res
