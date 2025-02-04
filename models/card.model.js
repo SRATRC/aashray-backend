@@ -78,7 +78,7 @@ const CardDb = sequelize.define(
     },
     pfp: {
       type: DataTypes.TEXT,
-      allowNull: false
+      allowNull: true
     },
     token: {
       type: DataTypes.TEXT,
