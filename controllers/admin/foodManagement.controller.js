@@ -22,7 +22,8 @@ import {
 import {
   checkFlatAlreadyBooked,
   checkSpecialAllowance,
-  isFoodBooked
+  isFoodBooked,
+  validateDate
 } from '../helper.js';
 import {
   checkRoomAlreadyBooked
@@ -232,30 +233,42 @@ export const cancelFoodByMob = async (req, res) => {
 };
 
 export const bookFoodForGuest = async (req, res) => {
-  const { start_date, end_date, guest_count, breakfast, lunch, dinner } =
-    req.body;
+  const { 
+    start_date, 
+    end_date, 
+    breakfast, 
+    lunch, 
+    dinner, 
+    spicy, 
+    hightea, 
+    guests 
+  } = req.body;
 
   const t = await database.transaction();
   req.transaction = t;
 
+  validateDate(start_date, end_date);
   const allDates = getDates(start_date, end_date);
+  
   const days = allDates.length;
 
   // TODO: get guest details
   // TODO: take phone number of the Mumukshu
   var food_data = [];
   const bookingid = uuidv4();
-  for (var date of allDates) {
-    food_data.push({
-      bookingid: bookingid,
-      cardno: req.body.cardno,
-      date: date,
-      guest_count: guest_count,
-      breakfast: req.body.breakfast,
-      lunch: req.body.lunch,
-      dinner: req.body.dinner,
-      updatedBy: req.user.username
-    });
+  for (const date of allDates) {
+    for (const guestId of guests) {
+      food_data.push({
+        bookingid: bookingid,
+        cardno: req.body.cardno,
+        date: date,
+        guest_count: guest_count,
+        breakfast: req.body.breakfast,
+        lunch: req.body.lunch,
+        dinner: req.body.dinner,
+        updatedBy: req.user.username
+      });
+    }
   }
 
   await GuestFoodDb.bulkCreate(food_data, { transaction: t });
@@ -280,7 +293,7 @@ export const bookFoodForGuest = async (req, res) => {
 
   await t.commit();
 
-  return res.status(201).send({ message: 'successfully booked guest food' });
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const cancelFoodForGuest = async (req, res) => {
@@ -391,13 +404,12 @@ GROUP BY
 
   const physical_plates = await FoodPhysicalPlate.findAll({
     attributes: ['date', 'type', 'count'],
-    where: {
-      date: date
-    }
+    where: { date }
   });
+  
   const data = {
     report: report[0],
-    physical_plates: physical_plates ? physical_plates : []
+    physical_plates
   };
 
   return res.status(200).send({ data: data });
@@ -438,13 +450,13 @@ export const fetchMenu = async (req, res) => {
 export const addMenu = async (req, res) => {
   const { date, breakfast, lunch, dinner } = req.body;
 
-  const checkMenu = await Menu.findOne({
-    where: {
-      date: date
-    }
+  const menu = await Menu.findOne({
+    where: { date }
   });
 
-  if (checkMenu) throw new ApiError(400, 'Menu already exists for given date');
+  if (menu) {
+    throw new ApiError(400, 'Menu already exists for given date');
+  }
 
   await Menu.create({
     date,
@@ -454,30 +466,31 @@ export const addMenu = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  return res.status(200).send({ message: 'Menu Added' });
+  return res.status(200).send({ message: 'Menu added' });
 };
 
 export const updateMenu = async (req, res) => {
   const { old_date, date, breakfast, lunch, dinner } = req.body;
 
-  const [itemsUpdated] = await Menu.update(
+  const menu = await Menu.findOne({
+    where: { date: old_date }
+  });
+
+  if (!menu) {
+    throw new ApiError(404, 'Menu not found');
+  }
+
+  await menu.update(
     {
       date,
       breakfast,
       lunch,
       dinner,
       updatedBy: req.user.username
-    },
-    {
-      where: {
-        date: old_date
-      }
     }
   );
 
-  if (itemsUpdated == 0) throw new ApiError(500, 'Menu Item not found');
-
-  return res.status(200).send({ message: 'Menu Item Updated' });
+  return res.status(200).send({ message: 'Menu updated' });
 };
 
 export const deleteMenu = async (req, res) => {
@@ -489,7 +502,7 @@ export const deleteMenu = async (req, res) => {
     }
   });
 
-  if (item == 0) throw new ApiError(500, 'Menu Item not found');
+  if (item == 0) throw new ApiError(404, 'Menu not found');
 
-  return res.status(200).send({ message: 'Menu Item Deleted' });
+  return res.status(200).send({ message: 'Menu deleted' });
 };
