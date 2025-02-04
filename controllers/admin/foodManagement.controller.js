@@ -144,6 +144,9 @@ export const bookFoodForMumukshu = async (req, res) => {
     high_tea
    } = req.body;
 
+   var t = await database.transaction();
+   req.transaction = t;
+
   const mumukshuGroup = createGroupFoodRequest(
     cardno,
     breakfast,
@@ -163,6 +166,7 @@ export const bookFoodForMumukshu = async (req, res) => {
     t
   );
 
+  await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
