@@ -139,15 +139,15 @@ export async function isFoodBooked(start_date, end_date, cardno) {
   const endDate = new Date(end_date);
 
   const allDates = getDates(startDate, endDate);
+  
   const food_bookings = await FoodDb.findAll({
     where: {
       cardno: cardno,
-      date: { [Sequelize.Op.in]: allDates }
+      date: allDates
     }
   });
 
-  if (food_bookings.length > 0) return true;
-  else return false;
+  return food_bookings.length > 0;
 }
 
 export function validateDate(start_date, end_date) {
@@ -198,7 +198,10 @@ export async function checkRoomBookingProgress(
 
   var addon = addons && addons.find((addon) => addon.booking_type == TYPE_ROOM);
 
-  if (primary_booking.booking_type == TYPE_ROOM || addon) {
+  if (
+    (primary_booking && primary_booking.booking_type == TYPE_ROOM) 
+    || addon
+  ) {
     const startDate = new Date(start_date);
     const endDate = new Date(end_date);
     const checkinDate = new Date(

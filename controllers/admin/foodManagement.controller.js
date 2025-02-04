@@ -16,7 +16,8 @@ import {
   ERR_INVALID_MEAL_TIME,
   ERR_FOOD_ALREADY_BOOKED,
   ERR_ROOM_MUST_BE_BOOKED,
-  MSG_BOOKING_SUCCESSFUL
+  MSG_BOOKING_SUCCESSFUL,
+  MSG_FETCH_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -33,6 +34,7 @@ import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 import { userIsPR } from '../../helpers/card.helper.js';
+import { bookFoodForMumukshus, createGroupFoodRequest } from '../../helpers/foodBooking.helper.js';
 
 export const issuePlate = async (req, res) => {
   const currentTime = moment.utc();
@@ -99,7 +101,7 @@ export const physicalPlatesIssued = async (req, res) => {
   if (alreadyExists)
     throw new ApiError(
       400,
-      'Physical plate count already exists for given date and type'
+      `Physical plate count already exists for ${type} on ${date}`
     );
 
   await FoodPhysicalPlate.create({
@@ -110,8 +112,8 @@ export const physicalPlatesIssued = async (req, res) => {
   });
 
   return res
-    .status(201)
-    .send({ message: 'successfully added physical plate count' });
+    .status(200)
+    .send({ message: 'Added plate count successfully' });
 };
 
 export const fetchPhysicalPlateIssued = async (req, res) => {
@@ -127,7 +129,7 @@ export const fetchPhysicalPlateIssued = async (req, res) => {
 
   return res
     .status(200)
-    .send({ message: 'fetched physical plate count', data: data });
+    .send({ message: MSG_FETCH_SUCCESSFUL, data: data });
 };
 
 export const bookFoodForMumukshu = async (req, res) => {
@@ -142,53 +144,24 @@ export const bookFoodForMumukshu = async (req, res) => {
     high_tea
    } = req.body;
 
-  if (
-    await isFoodBooked(start_date, end_date, cardno)
-  ) {
-    return res
-      .status(400)
-      .send({ message: ERR_FOOD_ALREADY_BOOKED });
-  }
-
-  if (!(
-    (await checkRoomAlreadyBooked(
-      start_date,
-      end_date,
-      cardno
-    )) ||
-    (await checkFlatAlreadyBooked(
-      start_date,
-      end_date,
-      cardno
-    )) ||
-    (await checkSpecialAllowance(
-      start_date,
-      end_date,
-      cardno
-    )) ||
-    (await userIsPR(cardno))
-  )) {
-    throw new ApiError(400, ERR_ROOM_MUST_BE_BOOKED);
-  }
-
-  const allDates = getDates(start_date, end_date);
-
-  var food_data = [];
-  for (var date of allDates) {
-    food_data.push({
-      cardno,
-      date,
-      breakfast,
-      lunch,
-      dinner,
-      hightea: high_tea,
-      spicy,
-      plateissued: 0,
-      updatedBy: req.user.username
-    });
-  }
-
-  await FoodDb.bulkCreate(food_data);
+  const mumukshuGroup = createGroupFoodRequest(
+    cardno,
+    breakfast,
+    lunch,
+    dinner, 
+    spicy,
+    high_tea
+  );
+  
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    null,
+    null,
+    req.user.username,
+    t
+  );
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

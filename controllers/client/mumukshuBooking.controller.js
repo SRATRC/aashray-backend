@@ -191,6 +191,7 @@ async function bookFood(body, data, t) {
     mumukshuGroup,
     body.primary_booking,
     body.addons,
+    'USER',
     t
   );
   return t;

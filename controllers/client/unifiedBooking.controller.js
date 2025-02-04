@@ -36,6 +36,7 @@ import {
 } from '../../helpers/transactions.helper.js';
 import {
   bookFoodForMumukshus,
+  createGroupFoodRequest,
   validateFood
 } from '../../helpers/foodBooking.helper.js';
 import {
@@ -195,8 +196,8 @@ async function bookFood(body, user, data, t) {
     high_tea 
   } = data.details;
 
-  const mumukshuGroup = createMumukshuGroup(
-    user,
+  const mumukshuGroup = createGroupFoodRequest(
+    user.cardno,
     breakfast,
     lunch,
     dinner, 
@@ -210,6 +211,7 @@ async function bookFood(body, user, data, t) {
     mumukshuGroup,
     body.primary_booking,
     body.addons,
+    'USER',
     t
   );
 
@@ -357,26 +359,4 @@ async function checkAdhyayanAvailability(user, data) {
   }
 
   return adhyayanDetails;
-}
-
-function createMumukshuGroup(
-  user,
-  breakfast,
-  lunch,
-  dinner, 
-  spicy,
-  high_tea
-) {
-
-  const meals = []
-  if (breakfast) meals.push('breakfast');
-  if (lunch) meals.push('lunch');
-  if (dinner) meals.push('dinner');
-
-  return [{
-    mumukshus: [ user.cardno ],
-    meals,
-    spicy,
-    high_tea
-  }];
 }
