@@ -29,7 +29,8 @@ import {
   BREAKFAST_PRICE,
   DINNER_PRICE,
   MSG_BOOKING_SUCCESSFUL,
-  MSG_UPDATE_SUCCESSFUL
+  MSG_UPDATE_SUCCESSFUL,
+  TYPE_GUEST_FOOD
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -500,6 +501,7 @@ async function bookFood(data, t, user) {
   }
 
   var bookingsToCreate = [];
+  var transactionsToCreate = [];
   for (const group of guestGroup) {
     const { meals, spicy, high_tea, guests } = group;
 
@@ -515,6 +517,7 @@ async function bookFood(data, t, user) {
 
         if (booking) {
           // Only charge for meals that weren't previously booked
+          // TODO: How to update exisisting transactions?
           amount += breakfast && !booking.breakfast ? BREAKFAST_PRICE : 0;
           amount += lunch && !booking.lunch ? LUNCH_PRICE : 0;
           amount += dinner && !booking.dinner ? DINNER_PRICE : 0;
@@ -532,12 +535,17 @@ async function bookFood(data, t, user) {
           );
         } else {
           // Charge for all new meals
-          amount += breakfast ? BREAKFAST_PRICE : 0;
-          amount += lunch ? LUNCH_PRICE : 0;
-          amount += dinner ? DINNER_PRICE : 0;
+          let guestAmount = 0;
+          guestAmount += breakfast ? BREAKFAST_PRICE : 0;
+          guestAmount += lunch ? LUNCH_PRICE : 0;
+          guestAmount += dinner ? DINNER_PRICE : 0;
+
+          amount += guestAmount;
+
+          const bookingId = uuidv4();
 
           bookingsToCreate.push({
-            id: uuidv4(),
+            id: bookingId,
             cardno: user.cardno,
             date,
             breakfast,
@@ -549,12 +557,22 @@ async function bookFood(data, t, user) {
             updatedBy: user.cardno,
             guest: guest
           });
+
+          transactionsToCreate.push({
+            cardno: user.cardno,
+            bookingid: bookingId,
+            category: TYPE_GUEST_FOOD,
+            amount: guestAmount,
+            status: STATUS_PAYMENT_PENDING,
+            updatedBy: user.cardno
+          });
         }
       }
     }
   }
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
   return { t, amount };
 }
 
