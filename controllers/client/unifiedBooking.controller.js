@@ -20,6 +20,7 @@ import {
 import {
   calculateNights,
   validateDate,
+  sendUnifiedEmail
 } from '../helper.js';
 import {
   bookRoomForMumukshus,
@@ -49,20 +50,23 @@ export const unifiedBooking = async (req, res) => {
 
   var t = await database.transaction();
   req.transaction = t;
+  let bookingIds=[];
 
-  let amount = await book(req.user, req.body, primary_booking, t);
+  let amount = await book(req.user, req.body, primary_booking,bookingIds, t);
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.user, req.body, addon, t);
+      amount += await book(req.user, req.body, addon,bookingIds, t);
     }
   }
 
+  
   const order = process.env.NODE_ENV == 'prod' 
     ? (await generateOrderId(amount)) 
     : { amount };
 
   await t.commit();
+  sendUnifiedEmail(req.user,bookingIds);
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -89,12 +93,14 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-async function book(user, body, data, t) {
+async function book(user, body, data,bookingIds,t) {
   let amount = 0;
+  
   switch (data.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(user, data, t);
       amount += roomResult.amount;
+      bookingIds[TYPE_ROOM]= roomResult.bookingIds;
       break;
 
     case TYPE_FOOD:
@@ -102,12 +108,14 @@ async function book(user, body, data, t) {
       break;
 
     case TYPE_TRAVEL:
-      t = await bookTravel(user, data, t);
+      const travelResult = await bookTravel(user, data, t);
+      bookingIds[TYPE_TRAVEL]=travelResult.bookingIds;
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(user, data, t);
       amount += adhyayanResult.amount;
+      bookingIds[TYPE_ADHYAYAN]=adhyayanResult.bookingIds;
       break;
 
     default:
@@ -115,6 +123,7 @@ async function book(user, body, data, t) {
   }
 
   const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
+ 
   return amount + taxes;
 }
 
@@ -226,7 +235,7 @@ async function bookTravel(user, data, t) {
     type 
   } = data.details;
 
-  await bookTravelForMumukshus(
+  const result=await bookTravelForMumukshus(
     date,
     [{
       mumukshus: [ user.cardno ],
@@ -239,7 +248,8 @@ async function bookTravel(user, data, t) {
     t
   );
 
-  return t;
+  const bookingIds=result.bookingIds;
+  return {t,bookingIds};
 }
 
 async function bookAdhyayan(user, data, t) {

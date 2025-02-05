@@ -153,5 +153,7 @@ LIMIT :limit OFFSET :offset;
       type: Sequelize.QueryTypes.SELECT
     }
   );
+
+  console.log("user_bookings"+user_bookings);
   return res.status(200).send(user_bookings);
 };

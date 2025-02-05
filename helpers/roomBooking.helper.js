@@ -122,7 +122,7 @@ export async function bookRoomForMumukshus(
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
-  let amount = 0;
+  let amount = 0,bookingIds=[],idx=0;;
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
@@ -153,11 +153,12 @@ export async function bookRoomForMumukshus(
         );
 
         amount += result.discountedAmount;
+        bookingIds[idx++]=result.bookingId;
       }
     }
   }
 
-  return { t, amount };
+  return { t, amount,bookingIds };
 }
 
 export async function createRoomBooking(
@@ -176,10 +177,10 @@ export async function createRoomBooking(
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
-
+ let bookingId = uuidv4();
   const booking = await RoomBooking.create(
     {
-      bookingid: uuidv4(),
+      bookingid: bookingId,
       roomno: roomno.dataValues.roomno,
       status: ROOM_STATUS_PENDING_CHECKIN,
       cardno,
@@ -221,7 +222,7 @@ export async function createRoomBooking(
     t
   );
 
-  return { t, discountedAmount };
+  return { t, discountedAmount ,bookingId};
 }
 
 export function roomCharge(roomtype) {

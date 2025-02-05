@@ -5,7 +5,9 @@ import {
   FoodDb,
   ShibirBookingDb,
   ShibirDb,
-  GuestFoodDb
+  GuestFoodDb,
+  TravelDb,
+  CardDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -14,6 +16,8 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
   TYPE_ROOM,
+  TYPE_TRAVEL,
+  TYPE_ADHYAYAN,
   ERR_INVALID_DATE
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
@@ -21,6 +25,9 @@ import getDates from '../utils/getDates.js';
 import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
+import sendMail from '../utils/sendMail.js';
+import fs from 'fs';
+import { roomBooking } from './admin/roomManagement.controller.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   const startDate = new Date(checkin_date);
@@ -383,3 +390,118 @@ export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
 
   return false;
 }
+
+export async function sendUnifiedEmail(user,bookingIds) {
+
+  let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
+  let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
+  let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
+
+  let adhyanContent = "", roombookingContent = "", rajpravasContent = "";
+  //GetData for adhyan
+
+  if (wasAdhyanBooked) {
+    adhyanContent = fs.readFileSync(process.cwd() + '/emails/rajAdhyayan.hbs', 'utf8'); 
+    let adhyanBookingDetail="";
+    const adhyanBookings = await ShibirBookingDb.findAll({
+    
+      include: [
+        {
+          model: ShibirDb,
+          attributes: ['name','speaker','month','start_date','end_date'],
+          where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
+        }
+      ],
+      where: {
+        bookingId : {[Sequelize.Op.in]:bookingIds[TYPE_ADHYAYAN]}
+      }
+      
+    });
+
+    adhyanBookings.forEach( 
+      (adhyanBooking) => { 
+        adhyanBookingDetail="<tr><td>"+adhyanBooking.bookingid+"/td><td>"+adhyanBooking.dataValues.ShibirDb.name+"/td>";
+        adhyanBookingDetail+="<td>"+adhyanBooking.dataValues.ShibirDb.speaker+"/td> ";
+        adhyanBookingDetail+="<td>"+adhyanBooking.dataValues.ShibirDb.start_date+"/td>";
+        adhyanBookingDetail+="<td>"+adhyanBooking.dataValues.ShibirDb.end_date+"/td> ";
+        adhyanBookingDetail+="<td>"+adhyanBooking.status+"/td> </tr>";
+        
+      }
+    );
+   adhyanContent=adhyanContent.replace("{{rajAdhyanContent}}",adhyanBookingDetail); 
+  }
+
+  if (wasRajprvasBooked) {
+    const travelBookings = await TravelDb.findAll({ 
+      where: {
+        bookingId : {[Sequelize.Op.in]:bookingIds[TYPE_TRAVEL]}
+      }  
+    });
+
+    let travelBookingDetail="";
+    travelBookings.forEach( 
+      (travelBooking) => { 
+        travelBookingDetail="<tr><td>"+travelBooking.bookingid+"/td>";
+        travelBookingDetail+="<td>"+travelBooking.date+"/td> ";
+        travelBookingDetail+="<td>"+travelBooking.pickup_point+"/td>";
+        travelBookingDetail+="<td>"+travelBooking.drop_point+"/td> </tr>";
+      }
+    );
+    rajpravasContent = fs.readFileSync(process.cwd() + '/emails/rajPravas.hbs', 'utf8')
+    rajpravasContent=rajpravasContent.replace("{{rajPravasContent}}",travelBookingDetail)
+
+}
+  if (wasRoomBooked) {
+
+    const roomBookings = await RoomBooking.findAll({
+      where: {
+        bookingid : {[Sequelize.Op.in]:bookingIds[TYPE_ROOM]}
+      }   
+    });
+
+    let roomBookingDetail="";
+    roomBookings.forEach( 
+      (roomBooking) => { 
+        roomBookingDetail="<tr><td>"+roomBooking.bookingid+"/td>";
+        roomBookingDetail+="<td>"+roomBooking.checkin+"/td> ";
+        roomBookingDetail+="<td>"+roomBooking.checkout+"/td></tr>";
+      }
+    );
+    roombookingContent = fs.readFileSync(process.cwd() + '/emails/rajSharan.hbs', 'utf8')
+    roombookingContent=roombookingContent.replace("{{roomBookingContent}}",roomBookingDetail);
+
+  }
+
+  const userInfo = await CardDb.findOne({
+    where: {
+      cardno : user.cardno
+    }   
+  });
+ 
+//send email to me
+  //sendMail({
+
+  //  email: "pallavi.v.savla@gmail.com",
+
+   // subject: `Your Booking Confirmation for Stay at SRATRC`,
+
+   // template: 'unifiedBookingEmail',
+
+   // context: {
+
+   //   name: userInfo.issuedto,
+
+  //    adhyanContent: adhyanContent,
+
+//      roombookingContent: roombookingContent,
+
+  //    rajpravasContent: rajpravasContent
+
+  //  }
+
+  //});
+
+  //send email
+
+};
+

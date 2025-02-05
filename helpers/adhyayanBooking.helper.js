@@ -76,21 +76,22 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
-  let amount = 0;
+  let amount = 0,bookingIds=[],idx=0,bookingId;
   for (const mumukshu of mumukshus) {
     for (const adhyayan of adhyayans) {
       if (adhyayan.available_seats > 0) {
         await reserveAdhyayanSeat(adhyayan, t);
-
+        bookingId=uuidv4();
         const booking = await ShibirBookingDb.create(
           {
-            bookingid: uuidv4(),
+            bookingid: bookingId,
             cardno: mumukshu,
             shibir_id: adhyayan.id,
             status: STATUS_PAYMENT_PENDING
           },
           { transaction: t }
         );
+        bookingIds[idx++]=bookingId;
 
         const transaction = await createPendingTransaction(
           mumukshu,
@@ -100,7 +101,7 @@ export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
           'USER',
           t
         );
-
+        
         const discountedAmount = await useCredit(
           mumukshu,
           booking,
@@ -112,20 +113,22 @@ export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
         
         amount += discountedAmount;
       } else {
-        await ShibirBookingDb.create(
+        bookingId=uuidv4();
+        const booking =  await ShibirBookingDb.create(
           {
-            bookingid: uuidv4(),
+            bookingid:bookingId,
             cardno: mumukshu,
             shibir_id: adhyayan.id,
             status: STATUS_WAITING
           },
           { transaction: t }
         );
+        bookingIds[idx++]=bookingId;
       }
     }
   }
-
-  return { t, amount };
+  
+  return { t, amount,bookingIds };
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {
@@ -193,7 +196,7 @@ export async function checkAdhyayanAvailabilityForMumukshus(
   mumukshus
 ) {
 
-  console.log(mumukshus);
+  
   await validateCards(mumukshus);
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
   const shibirs = await validateAdhyayans(shibir_ids);
@@ -219,4 +222,24 @@ export async function checkAdhyayanAvailabilityForMumukshus(
   }
 
   return adhyayanDetails;
+}
+
+export async function getAdhyayanBookings(bookingIds) {
+
+  const adhyanBookings = await ShibirBookingDb.findOne({
+    
+    include: [
+      {
+        model: ShibirDb,
+        attributes: ['name','speaker','month','start_date','end_date'],
+        where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
+      }
+    ],
+    where: {
+      [Op.in]:bookingIds
+    }
+    
+  });
+
+  return adhyanBookings;
 }

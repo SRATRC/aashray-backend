@@ -39,14 +39,16 @@ export async function bookTravelForMumukshus(
   await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
 
-  var bookingsToCreate = [];
+  var bookingsToCreate = [],bookingIds = [],bookingId,idx=0;
   for (const group of mumukshuGroup) {
     const { pickup_point, drop_point, luggage, comments, type, mumukshus } =
       group;
 
     for (const mumukshu of mumukshus) {
+      bookingId=uuidv4();
+      bookingIds[idx++]=bookingId;
       bookingsToCreate.push({
-        bookingid: uuidv4(),
+        bookingid: bookingId,
         cardno: mumukshu,
         status: STATUS_WAITING,
         date,
@@ -60,5 +62,5 @@ export async function bookTravelForMumukshus(
   }
 
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return t;
+  return {t,bookingIds};
 }
