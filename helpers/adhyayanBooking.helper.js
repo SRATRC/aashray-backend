@@ -14,21 +14,12 @@ import ApiError from '../utils/ApiError.js';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
 import { validateCards } from './card.helper.js';
 
-export async function bookAdhyayanForMumukshus(
-  shibir_ids,
-  mumukshus,
-  t
-) {
-
+export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   await validateCards(mumukshus);
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
   const shibirs = await validateAdhyayans(shibir_ids);
 
-  const result = await createAdhyayanBooking(
-    shibirs,
-    t,
-    ...mumukshus
-  );
+  const result = await createAdhyayanBooking(shibirs, t, ...mumukshus, user);
 
   return result;
 }
@@ -75,7 +66,7 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
   return booking;
 }
 
-export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
+export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
   let amount = 0,bookingIds=[],idx=0,bookingId;
   for (const mumukshu of mumukshus) {
     for (const adhyayan of adhyayans) {
@@ -98,7 +89,7 @@ export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
           booking.bookingid,
           TYPE_ADHYAYAN,
           adhyayan.amount,
-          'USER',
+          user.cardno,
           t
         );
         
@@ -107,10 +98,10 @@ export async function createAdhyayanBooking(adhyayans, t, ...mumukshus) {
           booking,
           transaction,
           adhyayan.amount,
-          'USER',
+          user.cardno,
           t
         );
-        
+
         amount += discountedAmount;
       } else {
         bookingId=uuidv4();
@@ -192,10 +183,9 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
 }
 
 export async function checkAdhyayanAvailabilityForMumukshus(
-  shibir_ids, 
+  shibir_ids,
   mumukshus
 ) {
-
   
   await validateCards(mumukshus);
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);

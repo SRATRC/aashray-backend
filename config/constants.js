@@ -103,3 +103,4 @@ export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_CANCEL_SUCCESSFUL = 'Cancel successful';
+export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfuly';

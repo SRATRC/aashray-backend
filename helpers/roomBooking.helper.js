@@ -14,9 +14,9 @@ import {
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
-import ApiError from '../utils/ApiError.js';
 import { calculateNights, validateDate } from '../controllers/helper.js';
 import { validateCards } from './card.helper.js';
+import ApiError from '../utils/ApiError.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -40,10 +40,10 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
             { checkout: { [Sequelize.Op.gte]: checkout } }
           ]
         }
-    ],
-    cardno: cardnos,
-    guest: null,
-    status: [
+      ],
+      cardno: cardnos,
+      guest: null,
+      status: [
         STATUS_WAITING,
         ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_PENDING_CHECKIN
@@ -109,7 +109,8 @@ export async function bookRoomForMumukshus(
   checkin_date,
   checkout_date,
   mumukshuGroup,
-  t
+  t,
+  user
 ) {
   validateDate(checkin_date, checkout_date);
 
@@ -127,16 +128,14 @@ export async function bookRoomForMumukshus(
     const { roomType, floorType, mumukshus } = group;
 
     for (const mumukshu of mumukshus) {
-      const card = cardDb.filter(
-        (item) => item.cardno == mumukshu
-      )[0];
+      const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
 
       if (nights == 0) {
         await bookDayVisit(
           card.cardno,
           checkin_date,
           checkout_date,
-          'USER',
+          user.cardno,
           t
         );
       } else {
@@ -148,7 +147,7 @@ export async function bookRoomForMumukshus(
           roomType,
           card.gender,
           floorType,
-          'USER',
+          user.cardno,
           t
         );
 
@@ -218,7 +217,7 @@ export async function createRoomBooking(
     booking,
     transaction,
     amount,
-    'USER',
+    updatedBy,
     t
   );
 

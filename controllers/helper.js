@@ -1,17 +1,14 @@
 import {
-  RoomDb,
   RoomBooking,
   FlatBooking,
   FoodDb,
   ShibirBookingDb,
   ShibirDb,
-  GuestFoodDb,
   TravelDb,
   CardDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
-  STATUS_AVAILABLE,
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
@@ -61,11 +58,7 @@ export async function getBlockedDates(checkin_date, checkout_date) {
   return blockedDates;
 }
 
-export async function checkFlatAlreadyBooked(
-  checkin,
-  checkout,
-  card_no
-) {
+export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -146,15 +139,15 @@ export async function isFoodBooked(start_date, end_date, cardno) {
   const endDate = new Date(end_date);
 
   const allDates = getDates(startDate, endDate);
+
   const food_bookings = await FoodDb.findAll({
     where: {
       cardno: cardno,
-      date: { [Sequelize.Op.in]: allDates }
+      date: allDates
     }
   });
 
-  if (food_bookings.length > 0) return true;
-  else return false;
+  return food_bookings.length > 0;
 }
 
 export function validateDate(start_date, end_date) {
@@ -189,8 +182,7 @@ export async function checkSpecialAllowance(start_date, end_date, cardno) {
   });
 
   for (var data of adhyayans) {
-    if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) 
-      return true;
+    if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
   }
 
   return false;
@@ -202,10 +194,9 @@ export async function checkRoomBookingProgress(
   primary_booking,
   addons
 ) {
-
   var addon = addons && addons.find((addon) => addon.booking_type == TYPE_ROOM);
 
-  if (primary_booking.booking_type == TYPE_ROOM || addon) {
+  if ((primary_booking && primary_booking.booking_type == TYPE_ROOM) || addon) {
     const startDate = new Date(start_date);
     const endDate = new Date(end_date);
     const checkinDate = new Date(
@@ -217,7 +208,7 @@ export async function checkRoomBookingProgress(
 
     return startDate >= checkinDate && endDate <= checkoutDate;
   }
-    
+
   return false;
 }
 
@@ -350,7 +341,7 @@ export async function checkGuestFoodAlreadyBooked(
   const endDate = new Date(end_date);
 
   const allDates = getDates(startDate, endDate);
-  const food_bookings = await GuestFoodDb.findAll({
+  const food_bookings = await FoodDb.findAll({
     where: {
       date: { [Sequelize.Op.in]: allDates },
       guest: { [Sequelize.Op.in]: guests }

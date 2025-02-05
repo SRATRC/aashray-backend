@@ -2,9 +2,7 @@ import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import { 
-  CardDb 
-} from '../../models/associations.js';
+import { CardDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
@@ -22,10 +20,7 @@ import {
   ERR_INVALID_DATE,
   MSG_BOOKING_SUCCESSFUL
 } from '../../config/constants.js';
-import { 
-  calculateNights, 
-  validateDate 
-} from '../helper.js';
+import { calculateNights, validateDate } from '../helper.js';
 import {
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
@@ -36,28 +31,26 @@ import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
-import { 
-  bookTravelForMumukshus, 
-  checkTravelAlreadyBooked 
+import {
+  bookTravelForMumukshus,
+  checkTravelAlreadyBooked
 } from '../../helpers/travelBooking.helper.js';
-import { 
-  bookFoodForMumukshus, 
-  getFoodBookings 
+import {
+  bookFoodForMumukshus,
+  getFoodBookings
 } from '../../helpers/foodBooking.helper.js';
-import { 
-  validateCards 
-} from '../../helpers/card.helper.js';
+import { validateCards } from '../../helpers/card.helper.js';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
   var t = await database.transaction();
   req.transaction = t;
 
-  await book(req.body, primary_booking, t);
+  await book(req.body, primary_booking, t, req.user);
 
   if (addons) {
     for (const addon of addons) {
-      await book(req.body, addon, t);
+      await book(req.body, addon, t, req.user);
     }
   }
 
@@ -75,7 +68,7 @@ export const validateBooking = async (req, res) => {
     travelDetails: {},
     taxes: 0,
     totalCharge: 0
-  }
+  };
 
   await validate(primary_booking, response);
 
@@ -102,22 +95,22 @@ export const checkMumukshu = async (req, res) => {
   return res.status(200).send({ data: cardDb });
 };
 
-async function book(body, data, t) {
+async function book(body, data, t, user) {
   switch (data.booking_type) {
     case TYPE_ROOM:
-      await bookRoom(data, t);
+      await bookRoom(data, t, user);
       break;
 
     case TYPE_FOOD:
-      await bookFood(body, data, t);
+      await bookFood(body, data, t, user);
       break;
 
     case TYPE_TRAVEL:
-      await bookTravel(data, t);
+      await bookTravel(data, t, user);
       break;
 
     case TYPE_ADHYAYAN:
-      await bookAdhyayan(data, t);
+      await bookAdhyayan(data, t, user);
       break;
 
     default:
@@ -169,20 +162,21 @@ async function validate(data, response) {
   return response;
 }
 
-async function bookRoom(data, t) {
+async function bookRoom(data, t, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
 
   await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     mumukshuGroup,
-    t
+    t,
+    user
   );
 
   return t;
 }
 
-async function bookFood(body, data, t) {
+async function bookFood(body, data, t, user) {
   const { start_date, end_date, mumukshuGroup } = data.details;
 
   await bookFoodForMumukshus(
@@ -191,31 +185,24 @@ async function bookFood(body, data, t) {
     mumukshuGroup,
     body.primary_booking,
     body.addons,
+    user.cardno,
     t
   );
   return t;
 }
 
-async function bookAdhyayan(data, t) {
+async function bookAdhyayan(data, t, user) {
   const { shibir_ids, mumukshus } = data.details;
 
-  await bookAdhyayanForMumukshus(
-    shibir_ids,
-    mumukshus,
-    t
-  );
+  await bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user);
 
   return t;
 }
 
-async function bookTravel(data, t) {
+async function bookTravel(data, t, user) {
   const { date, mumukshuGroup } = data.details;
 
-  await bookTravelForMumukshus(
-    date,
-    mumukshuGroup,
-    t
-  );
+  await bookTravelForMumukshus(date, mumukshuGroup, t, user);
 
   return t;
 }

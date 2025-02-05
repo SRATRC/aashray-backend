@@ -42,6 +42,7 @@ export async function bookFoodForMumukshus(
   mumukshuGroup,
   primary_booking,
   addons,
+  updatedBy,
   t
 ) {
 
@@ -74,14 +75,16 @@ export async function bookFoodForMumukshus(
       for (const date of allDates) { 
         const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
         if (booking) {
-          await updateFoodBooking(
-            booking, 
-            breakfast,
-            lunch,
-            dinner,
-            spicy, 
-            high_tea, 
-            t
+          await booking.update(
+            {
+              breakfast: booking.breakfast || breakfast,
+              lunch: booking.lunch || lunch,
+              dinner: booking.dinner || dinner,
+              hightea: high_tea,
+              spicy,
+              updatedBy
+            },
+            { transaction: t }
           );
         } else {
           bookingsToCreate.push({
@@ -92,7 +95,8 @@ export async function bookFoodForMumukshus(
             dinner,
             spicy,
             hightea: high_tea,
-            plateissued: 0
+            plateissued: 0,
+            updatedBy
           });
         }
       }
@@ -101,28 +105,6 @@ export async function bookFoodForMumukshus(
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
-}
-
-async function updateFoodBooking(
-  booking, 
-  breakfast, 
-  lunch, 
-  dinner, 
-  spicy, 
-  hightea, 
-  t
-) {
-
-  booking.update(
-    {
-      breakfast: booking.breakfast || breakfast,
-      lunch: booking.lunch || lunch,
-      dinner: booking.dinner || dinner,
-      spicy,
-      hightea
-    },
-    { transaction: t }
-  );
 }
 
 export async function validateFood(
@@ -162,3 +144,24 @@ export async function validateFood(
   }
 }
 
+export function createGroupFoodRequest(
+  cardno,
+  breakfast,
+  lunch,
+  dinner, 
+  spicy,
+  high_tea
+) {
+
+  const meals = []
+  if (breakfast) meals.push('breakfast');
+  if (lunch) meals.push('lunch');
+  if (dinner) meals.push('dinner');
+
+  return [{
+    mumukshus: [ cardno ],
+    meals,
+    spicy,
+    high_tea
+  }];
+}
