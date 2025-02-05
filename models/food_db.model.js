@@ -4,6 +4,11 @@ import sequelize from '../config/database.js';
 const FoodDb = sequelize.define(
   'FoodDb',
   {
+    id: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      primaryKey: true
+    },
     cardno: {
       type: DataTypes.STRING,
       allowNull: false,

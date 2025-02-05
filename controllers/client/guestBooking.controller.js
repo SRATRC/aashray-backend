@@ -537,6 +537,7 @@ async function bookFood(data, t, user) {
           amount += dinner ? DINNER_PRICE : 0;
 
           bookingsToCreate.push({
+            id: uuidv4(),
             cardno: user.cardno,
             date,
             breakfast,
