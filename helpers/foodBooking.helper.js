@@ -1,22 +1,19 @@
-import { 
-  ERR_ROOM_MUST_BE_BOOKED, 
-  STATUS_RESIDENT 
+import {
+  ERR_ROOM_MUST_BE_BOOKED,
+  STATUS_RESIDENT
 } from '../config/constants.js';
-import { 
-  checkFlatAlreadyBooked, 
-  checkRoomBookingProgress, 
-  checkSpecialAllowance, 
+import {
+  checkFlatAlreadyBooked,
+  checkRoomBookingProgress,
+  checkSpecialAllowance,
   validateDate
 } from '../controllers/helper.js';
-import {
-  FoodDb,
-} from '../models/associations.js'
+import { FoodDb } from '../models/associations.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import { validateCards } from './card.helper.js';
-import { 
-  checkRoomAlreadyBooked 
-} from './roomBooking.helper.js';
+import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export async function getFoodBookings(allDates, ...cardnos) {
   const bookings = await FoodDb.findAll({
@@ -33,7 +30,7 @@ export async function getFoodBookings(allDates, ...cardnos) {
     bookingsByCard[booking.cardno][booking.date] = booking;
   }
 
-return bookingsByCard;
+  return bookingsByCard;
 }
 
 export async function bookFoodForMumukshus(
@@ -45,19 +42,12 @@ export async function bookFoodForMumukshus(
   updatedBy,
   t
 ) {
-
   validateDate(start_date, end_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cards = await validateCards(mumukshus);
   for (const card of cards) {
-    await validateFood(
-      start_date, 
-      end_date, 
-      primary_booking, 
-      addons, 
-      card
-    );
+    await validateFood(start_date, end_date, primary_booking, addons, card);
   }
 
   const allDates = getDates(start_date, end_date);
@@ -72,7 +62,7 @@ export async function bookFoodForMumukshus(
     const dinner = meals.includes('dinner');
 
     for (const mumukshu of mumukshus) {
-      for (const date of allDates) { 
+      for (const date of allDates) {
         const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
         if (booking) {
           await booking.update(
@@ -88,6 +78,7 @@ export async function bookFoodForMumukshus(
           );
         } else {
           bookingsToCreate.push({
+            id: uuidv4(),
             cardno: mumukshu,
             date,
             breakfast,
@@ -108,10 +99,10 @@ export async function bookFoodForMumukshus(
 }
 
 export async function validateFood(
-  start_date, 
-  end_date, 
-  primary_booking, 
-  addons, 
+  start_date,
+  end_date,
+  primary_booking,
+  addons,
   card
 ) {
   if (
@@ -122,22 +113,10 @@ export async function validateFood(
         primary_booking,
         addons
       )) ||
-      (await checkRoomAlreadyBooked(
-        start_date, 
-        end_date, 
-        card.cardno
-      )) ||
-      (await checkFlatAlreadyBooked(
-        start_date, 
-        end_date, 
-        card.cardno
-      )) ||
+      (await checkRoomAlreadyBooked(start_date, end_date, card.cardno)) ||
+      (await checkFlatAlreadyBooked(start_date, end_date, card.cardno)) ||
       card.res_status === STATUS_RESIDENT ||
-      (await checkSpecialAllowance(
-        start_date, 
-        end_date, 
-        card.cardno
-      ))
+      (await checkSpecialAllowance(start_date, end_date, card.cardno))
     )
   ) {
     throw new ApiError(400, ERR_ROOM_MUST_BE_BOOKED);
@@ -148,20 +127,21 @@ export function createGroupFoodRequest(
   cardno,
   breakfast,
   lunch,
-  dinner, 
+  dinner,
   spicy,
   high_tea
 ) {
-
-  const meals = []
+  const meals = [];
   if (breakfast) meals.push('breakfast');
   if (lunch) meals.push('lunch');
   if (dinner) meals.push('dinner');
 
-  return [{
-    mumukshus: [ cardno ],
-    meals,
-    spicy,
-    high_tea
-  }];
+  return [
+    {
+      mumukshus: [cardno],
+      meals,
+      spicy,
+      high_tea
+    }
+  ];
 }
