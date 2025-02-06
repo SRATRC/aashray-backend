@@ -385,10 +385,6 @@ export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
 
 export async function sendUnifiedEmail(user,bookingIds) {
 
-  bookingIds[TYPE_ROOM]=[ 'e3de54ba-781b-405b-a46f-d821954f18ef' ],
-  bookingIds[TYPE_TRAVEL]= [ '110badaa-1888-4916-9088-3ebdef847a2a' ],
-  bookingIds[TYPE_ADHYAYAN] = [ '1a4d3d7a-113b-405a-a3f0-deca1cc12079' ];
-
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
@@ -463,7 +459,7 @@ export async function sendUnifiedEmail(user,bookingIds) {
 //send email to me
   sendMail({
 
-    email: "pallavi.v.savla@gmail.com",
+    email: userInfo.email,
 
    subject: `Your Booking Confirmation for Stay at SRATRC`,
 
