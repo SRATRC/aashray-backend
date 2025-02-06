@@ -23,8 +23,9 @@ import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
-import fs from 'fs';
+
 import { roomBooking } from './admin/roomManagement.controller.js';
+import sequelize from '../config/database.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   const startDate = new Date(checkin_date);
@@ -384,16 +385,18 @@ export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
 
 export async function sendUnifiedEmail(user,bookingIds) {
 
+  bookingIds[TYPE_ROOM]=[ 'e3de54ba-781b-405b-a46f-d821954f18ef' ],
+  bookingIds[TYPE_TRAVEL]= [ '110badaa-1888-4916-9088-3ebdef847a2a' ],
+  bookingIds[TYPE_ADHYAYAN] = [ '1a4d3d7a-113b-405a-a3f0-deca1cc12079' ];
+
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
 
-  let adhyanContent = "", roombookingContent = "", rajpravasContent = "";
+  let adhyanBookingDetails = [], roomBookingDetails = [], travelBookingDetails = [];
   //GetData for adhyan
-
+  let idx=0;
   if (wasAdhyanBooked) {
-    adhyanContent = fs.readFileSync(process.cwd() + '/emails/rajAdhyayan.hbs', 'utf8'); 
-    let adhyanBookingDetail="";
     const adhyanBookings = await ShibirBookingDb.findAll({
     
       include: [
@@ -408,20 +411,17 @@ export async function sendUnifiedEmail(user,bookingIds) {
       }
       
     });
-
+    idx=0;
     adhyanBookings.forEach( 
       (adhyanBooking) => { 
-        adhyanBookingDetail="<tr><td>"+adhyanBooking.bookingid+"/td><td>"+adhyanBooking.dataValues.ShibirDb.name+"/td>";
-        adhyanBookingDetail+="<td>"+adhyanBooking.dataValues.ShibirDb.speaker+"/td> ";
-        adhyanBookingDetail+="<td>"+adhyanBooking.dataValues.ShibirDb.start_date+"/td>";
-        adhyanBookingDetail+="<td>"+adhyanBooking.dataValues.ShibirDb.end_date+"/td> ";
-        adhyanBookingDetail+="<td>"+adhyanBooking.status+"/td> </tr>";
+        adhyanBookingDetails[idx++]={"bookingid":adhyanBooking.bookingid,"name":adhyanBooking.dataValues.ShibirDb.name,
+          "speaker":adhyanBooking.dataValues.ShibirDb.speaker,"startdate":adhyanBooking.dataValues.ShibirDb.start_date
+        ,"enddate":adhyanBooking.dataValues.ShibirDb.end_date,"status":adhyanBooking.status};
         
       }
     );
-   adhyanContent=adhyanContent.replace("{{rajAdhyanContent}}",adhyanBookingDetail); 
+   
   }
-
   if (wasRajprvasBooked) {
     const travelBookings = await TravelDb.findAll({ 
       where: {
@@ -429,38 +429,29 @@ export async function sendUnifiedEmail(user,bookingIds) {
       }  
     });
 
-    let travelBookingDetail="";
+    idx=0;
     travelBookings.forEach( 
       (travelBooking) => { 
-        travelBookingDetail="<tr><td>"+travelBooking.bookingid+"/td>";
-        travelBookingDetail+="<td>"+travelBooking.date+"/td> ";
-        travelBookingDetail+="<td>"+travelBooking.pickup_point+"/td>";
-        travelBookingDetail+="<td>"+travelBooking.drop_point+"/td> </tr>";
+        travelBookingDetails[idx++]={"bookingid":travelBooking.bookingid,"date":travelBooking.date
+          ,"pickuppoint":travelBooking.pickup_point,"dropoffpoint":travelBooking.drop_point};
       }
     );
-    rajpravasContent = fs.readFileSync(process.cwd() + '/emails/rajPravas.hbs', 'utf8')
-    rajpravasContent=rajpravasContent.replace("{{rajPravasContent}}",travelBookingDetail)
+  } 
 
-}
   if (wasRoomBooked) {
-
     const roomBookings = await RoomBooking.findAll({
       where: {
-        bookingid : {[Sequelize.Op.in]:bookingIds[TYPE_ROOM]}
+        bookingid: {[Sequelize.Op.in]: bookingIds[TYPE_ROOM]}
       }   
     });
-
-    let roomBookingDetail="";
+    idx=0;
     roomBookings.forEach( 
       (roomBooking) => { 
-        roomBookingDetail="<tr><td>"+roomBooking.bookingid+"/td>";
-        roomBookingDetail+="<td>"+roomBooking.checkin+"/td> ";
-        roomBookingDetail+="<td>"+roomBooking.checkout+"/td></tr>";
+        roomBookingDetails[idx++]={"bookingid":roomBooking.bookingid,"checkin":roomBooking.checkin,"checkout":roomBooking.checkout};
+        
       }
     );
-    roombookingContent = fs.readFileSync(process.cwd() + '/emails/rajSharan.hbs', 'utf8')
-    roombookingContent=roombookingContent.replace("{{roomBookingContent}}",roomBookingDetail);
-
+    
   }
 
   const userInfo = await CardDb.findOne({
@@ -470,27 +461,26 @@ export async function sendUnifiedEmail(user,bookingIds) {
   });
  
 //send email to me
-  //sendMail({
+  sendMail({
 
-  //  email: "pallavi.v.savla@gmail.com",
+    email: "pallavi.v.savla@gmail.com",
 
-   // subject: `Your Booking Confirmation for Stay at SRATRC`,
+   subject: `Your Booking Confirmation for Stay at SRATRC`,
 
-   // template: 'unifiedBookingEmail',
+   template: 'unifiedBookingEmail',
 
-   // context: {
+    context: {
 
-   //   name: userInfo.issuedto,
+    showAdhyanDetail:wasAdhyanBooked,
+    showRoomDetail:wasRoomBooked,
+    showTravelDetail:wasRajprvasBooked,
+    name: userInfo.issuedto,
+    roomBookingDetails,
+    adhyanBookingDetails,
+    travelBookingDetails
+   }
 
-  //    adhyanContent: adhyanContent,
-
-//      roombookingContent: roombookingContent,
-
-  //    rajpravasContent: rajpravasContent
-
-  //  }
-
-  //});
+  });
 
   //send email
 

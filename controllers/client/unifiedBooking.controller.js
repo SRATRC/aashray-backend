@@ -51,8 +51,6 @@ export const unifiedBooking = async (req, res) => {
       amount += await book(req.user, req.body, addon,bookingIds, t);
     }
   }
-
-  
   let order = null;
   if (amount > 0)
     order =
@@ -223,7 +221,8 @@ async function bookTravel(user, data, t) {
         type
       }
     ],
-    t
+    t,
+    user
   );
 
   const bookingIds=result.bookingIds;
@@ -233,7 +232,7 @@ async function bookTravel(user, data, t) {
 async function bookAdhyayan(user, data, t) {
   const { shibir_ids } = data.details;
 
-  const result = await bookAdhyayanForMumukshus(shibir_ids, [user.cardno], t);
+  const result = await bookAdhyayanForMumukshus(shibir_ids, [user.cardno], t,user);
 
   return result;
 }

@@ -19,7 +19,7 @@ export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
   const shibirs = await validateAdhyayans(shibir_ids);
 
-  const result = await createAdhyayanBooking(shibirs, t, ...mumukshus, user);
+  const result = await createAdhyayanBooking(shibirs, t, user,...mumukshus);
 
   return result;
 }
