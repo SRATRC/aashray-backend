@@ -50,12 +50,6 @@ CardDb.hasMany(GuestFoodDb, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
-CardDb.hasMany(GuestFoodTransactionDb, {
-  foreignKey: 'cardno',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
 CardDb.hasMany(ShibirBookingDb, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
@@ -140,24 +134,15 @@ FoodDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
+FoodDb.belongsTo(GuestDb, {
+  foreignKey: 'guest',
+  targetKey: 'id'
+});
 GuestFoodDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-// GuestFoodDb.hasMany(GuestFoodTransactionDb, {
-//   foreignKey: 'bookingid',
-//   sourceKey: 'bookingid',
-//   onDelete: 'CASCADE',
-//   onUpdate: 'CASCADE'
-// });
-// GuestFoodTransactionDb.belongsTo(GuestFoodDb, {
-//   foreignKey: 'bookingid',
-//   targetKey: 'bookingid'
-// });
-GuestFoodTransactionDb.belongsTo(CardDb, {
-  foreignKey: 'cardno',
-  targetKey: 'cardno'
-});
+
 // Room
 RoomDb.hasMany(RoomBooking, {
   foreignKey: 'roomno',
@@ -426,7 +411,7 @@ GuestDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-GuestDb.hasMany(GuestFoodDb, {
+GuestDb.hasMany(FoodDb, {
   foreignKey: 'guest',
   sourceKey: 'id',
   onDelete: 'CASCADE',
@@ -438,7 +423,7 @@ GuestFoodDb.belongsTo(GuestDb, {
 });
 GuestDb.hasMany(RoomBooking, {
   foreignKey: 'guest',
-  sourceKey: 'id',
+  sourceKey: 'id'
 });
 GuestDb.hasMany(FlatBooking, {
   foreignKey: 'guest',

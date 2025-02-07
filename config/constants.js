@@ -6,6 +6,9 @@ export const TYPE_FLAT = 'flat';
 export const TYPE_GUEST_FLAT = 'guest_flat';
 export const TYPE_FOOD = 'food';
 export const TYPE_GUEST_FOOD = 'guest_food';
+export const TYPE_GUEST_BREAKFAST = 'guest_breakfast';
+export const TYPE_GUEST_LUNCH = 'guest_lunch';
+export const TYPE_GUEST_DINNER = 'guest_dinner';
 export const TYPE_TRAVEL = 'travel';
 export const TYPE_ADHYAYAN = 'adhyayan';
 export const TYPE_GUEST_ADHYAYAN = 'guest_adhyayan';
@@ -90,10 +93,12 @@ export const ERR_ROOM_MUST_BE_BOOKED =
 
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan already booked';
 export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan not found';
-export const ERR_ADHYAYAN_NO_SEATS_AVAILABLE = 'Selected Raj Adhyayan doesn\'t have any available seats.';
+export const ERR_ADHYAYAN_NO_SEATS_AVAILABLE =
+  "Selected Raj Adhyayan doesn't have any available seats.";
 
 export const ERR_BOOKING_NOT_FOUND = 'Booking not found';
-export const ERR_BOOKING_ALREADY_CANCELLED = 'Cannot change status of already cancelled booking';
+export const ERR_BOOKING_ALREADY_CANCELLED =
+  'Cannot change status of already cancelled booking';
 export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 
 export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';

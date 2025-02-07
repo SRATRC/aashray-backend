@@ -1,17 +1,11 @@
+import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
 import {
-  RoomDb,
-  RoomBooking,
-  FlatDb,
-  FlatBooking,
-  CardDb
-} from '../../models/associations.js';
-import {
-  ROOM_STATUS_AVAILABLE,
   TYPE_ROOM,
   ERR_BOOKING_NOT_FOUND,
   STATUS_WAITING,
   ROOM_STATUS_PENDING_CHECKIN,
-  MSG_BOOKING_SUCCESSFUL
+  MSG_BOOKING_SUCCESSFUL,
+  TYPE_GUEST_ROOM
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -22,7 +16,6 @@ import {
 } from '../helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
-import getDates from '../../utils/getDates.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -100,7 +93,7 @@ export const ViewAllBookings = async (req, res) => {
     t2.status AS transaction_status
 FROM room_booking t1
 LEFT JOIN transactions t2 
-    ON t1.bookingid = t2.bookingid AND t2.category = :category
+    ON t1.bookingid = t2.bookingid AND t2.category IN (:category)
 LEFT JOIN guest_db t3 ON t3.id = t1.guest
 WHERE t1.cardno = :cardno
 
@@ -110,7 +103,7 @@ LIMIT :limit OFFSET :offset;
     {
       replacements: {
         cardno: req.user.cardno,
-        category: TYPE_ROOM,
+        category: [TYPE_ROOM, TYPE_GUEST_ROOM],
         limit: pageSize,
         offset: offset
       },
