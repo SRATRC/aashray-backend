@@ -40,22 +40,30 @@ import {
   getFoodBookings
 } from '../../helpers/foodBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
   var t = await database.transaction();
   req.transaction = t;
 
-  await book(req.body, primary_booking, t, req.user);
+  let amount = await book(req.body, primary_booking, t, req.user);
 
   if (addons) {
     for (const addon of addons) {
-      await book(req.body, addon, t, req.user);
+      amount += await book(req.body, addon, t, req.user);
     }
   }
 
+  let order = null;
+
+  if (amount > 0)
+    order =
+      process.env.NODE_ENV == 'prod'
+        ? await generateOrderId(amount)
+        : { amount };
   await t.commit();
-  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, order });
 };
 
 export const validateBooking = async (req, res) => {
@@ -96,9 +104,13 @@ export const checkMumukshu = async (req, res) => {
 };
 
 async function book(body, data, t, user) {
+  let amount = 0;
+
   switch (data.booking_type) {
     case TYPE_ROOM:
-      await bookRoom(data, t, user);
+      const roomResult = await bookRoom(data, t, user);
+      amount += roomResult.amount;
+      console.log('ROOM RESULT', roomResult.amount);
       break;
 
     case TYPE_FOOD:
@@ -110,12 +122,18 @@ async function book(body, data, t, user) {
       break;
 
     case TYPE_ADHYAYAN:
-      await bookAdhyayan(data, t, user);
+      const adhyayanResult = await bookAdhyayan(data, t, user);
+      amount += adhyayanResult.amount;
+      console.log('ADHYAYAN RESULT', adhyayanResult.amount);
       break;
 
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
+
+  const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
+
+  return amount + taxes;
 }
 
 async function validate(data, response) {
@@ -165,7 +183,7 @@ async function validate(data, response) {
 async function bookRoom(data, t, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
 
-  await bookRoomForMumukshus(
+  const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     mumukshuGroup,
@@ -173,7 +191,7 @@ async function bookRoom(data, t, user) {
     user
   );
 
-  return t;
+  return result;
 }
 
 async function bookFood(body, data, t, user) {
@@ -194,9 +212,9 @@ async function bookFood(body, data, t, user) {
 async function bookAdhyayan(data, t, user) {
   const { shibir_ids, mumukshus } = data.details;
 
-  await bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user);
+  const result = await bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user);
 
-  return t;
+  return result;
 }
 
 async function bookTravel(data, t, user) {

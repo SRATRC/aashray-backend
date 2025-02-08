@@ -15,8 +15,7 @@ import {
   MSG_BOOKING_SUCCESSFUL,
   ERR_TRAVEL_ALREADY_BOOKED
 } from '../../config/constants.js';
-import { calculateNights, validateDate ,  sendUnifiedEmail
-} from '../helper.js';
+import { calculateNights, validateDate, sendUnifiedEmail } from '../helper.js';
 import {
   bookRoomForMumukshus,
   findRoom,
@@ -42,13 +41,13 @@ export const unifiedBooking = async (req, res) => {
 
   var t = await database.transaction();
   req.transaction = t;
-  let bookingIds=[];
+  let bookingIds = [];
 
-  let amount = await book(req.user, req.body, primary_booking,bookingIds, t);
+  let amount = await book(req.user, req.body, primary_booking, bookingIds, t);
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.user, req.body, addon,bookingIds, t);
+      amount += await book(req.user, req.body, addon, bookingIds, t);
     }
   }
   let order = null;
@@ -59,7 +58,7 @@ export const unifiedBooking = async (req, res) => {
         : { amount };
 
   await t.commit();
-  sendUnifiedEmail(req.user,bookingIds);
+  sendUnifiedEmail(req.user, bookingIds);
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -86,14 +85,14 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-async function book(user, body, data,bookingIds,t) {
+async function book(user, body, data, bookingIds, t) {
   let amount = 0;
-  
+
   switch (data.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(user, data, t);
       amount += roomResult.amount;
-      bookingIds[TYPE_ROOM]= roomResult.bookingIds;
+      bookingIds[TYPE_ROOM] = roomResult.bookingIds;
       break;
 
     case TYPE_FOOD:
@@ -102,13 +101,13 @@ async function book(user, body, data,bookingIds,t) {
 
     case TYPE_TRAVEL:
       const travelResult = await bookTravel(user, data, t);
-      bookingIds[TYPE_TRAVEL]=travelResult.bookingIds;
+      bookingIds[TYPE_TRAVEL] = travelResult.bookingIds;
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(user, data, t);
       amount += adhyayanResult.amount;
-      bookingIds[TYPE_ADHYAYAN]=adhyayanResult.bookingIds;
+      bookingIds[TYPE_ADHYAYAN] = adhyayanResult.bookingIds;
       break;
 
     default:
@@ -116,7 +115,7 @@ async function book(user, body, data,bookingIds,t) {
   }
 
   const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
- 
+
   return amount + taxes;
 }
 
@@ -209,7 +208,7 @@ async function bookTravel(user, data, t) {
   const { date, pickup_point, drop_point, luggage, comments, type } =
     data.details;
 
-  const result=await bookTravelForMumukshus(
+  const result = await bookTravelForMumukshus(
     date,
     [
       {
@@ -225,14 +224,19 @@ async function bookTravel(user, data, t) {
     user
   );
 
-  const bookingIds=result.bookingIds;
-  return {t,bookingIds};
+  const bookingIds = result.bookingIds;
+  return { t, bookingIds };
 }
 
 async function bookAdhyayan(user, data, t) {
   const { shibir_ids } = data.details;
 
-  const result = await bookAdhyayanForMumukshus(shibir_ids, [user.cardno], t,user);
+  const result = await bookAdhyayanForMumukshus(
+    shibir_ids,
+    [user.cardno],
+    t,
+    user
+  );
 
   return result;
 }
