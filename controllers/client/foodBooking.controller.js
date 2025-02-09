@@ -93,19 +93,27 @@ export const FetchFoodBookings = async (req, res) => {
     ].filter(Boolean); // Remove null entries (if mealType is not present)
   });
 
-  // Group into 'upcoming' and 'past'
-  const groupedData = [
-    {
+  let groupedData = [];
+  const upcomingData = formattedData.filter((item) =>
+    moment(item.date).isSameOrAfter(today)
+  );
+  const pastData = formattedData.filter((item) =>
+    moment(item.date).isBefore(today)
+  );
+
+  if (upcomingData.length > 0) {
+    groupedData.push({
       title: 'upcoming',
-      data: formattedData.filter((item) =>
-        moment(item.date).isSameOrAfter(today)
-      )
-    },
-    {
+      data: upcomingData
+    });
+  }
+
+  if (pastData.length > 0) {
+    groupedData.push({
       title: 'past',
-      data: formattedData.filter((item) => moment(item.date).isBefore(today))
-    }
-  ];
+      data: pastData
+    });
+  }
 
   return res
     .status(200)
