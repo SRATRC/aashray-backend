@@ -28,7 +28,5 @@ jobs:
     - run: |
         touch .env.dev
         echo "${{ secrets.PROD_ENV_FILE }}" > .env.dev
-    - run: |
-        whomai
-        pm2 restart BackendAPI    
+    - run: pm2 restart BackendAPI    
         
