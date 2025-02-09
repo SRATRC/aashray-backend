@@ -93,11 +93,16 @@ export const FetchFoodBookings = async (req, res) => {
     ].filter(Boolean); // Remove null entries (if mealType is not present)
   });
 
+  // Apply meal and spice filters
+  const filteredData = formattedData.filter(
+    (item) => mealFilter(item.mealType, true) && spiceFilter(item.spicy)
+  );
+
   let groupedData = [];
-  const upcomingData = formattedData.filter((item) =>
+  const upcomingData = filteredData.filter((item) =>
     moment(item.date).isSameOrAfter(today)
   );
-  const pastData = formattedData.filter((item) =>
+  const pastData = filteredData.filter((item) =>
     moment(item.date).isBefore(today)
   );
 
