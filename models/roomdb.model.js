@@ -32,7 +32,8 @@ const RoomDb = sequelize.define(
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

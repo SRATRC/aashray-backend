@@ -1,3 +1,7 @@
 node_modules
+uploads
+coverage
 .env.*
 *.pem
+.vscode
+*.mwb

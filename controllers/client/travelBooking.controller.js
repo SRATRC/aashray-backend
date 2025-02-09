@@ -1,83 +1,14 @@
 import { TravelDb } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-import sendMail from '../../utils/sendMail.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
-  STATUS_CANCELLED,
-  TYPE_TRAVEL
+  MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
 import moment from 'moment';
-import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
-
-// TODO: DEPRECATE THIS ENDPOINT
-export const BookTravel = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
-
-  const today = moment().format('YYYY-MM-DD');
-  if (req.body.date < today) {
-    throw new ApiError(400, 'Invalid Date');
-  }
-
-  const isBooked = await TravelDb.findOne({
-    where: {
-      cardno: req.body.cardno,
-      status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
-      date: req.body.date
-    }
-  });
-  if (isBooked) {
-    throw new ApiError(400, 'Already booked on the selected date');
-  }
-
-  const booking = await TravelDb.create(
-    {
-      cardno: req.user.cardno,
-      date: req.body.date,
-      pickup_point: req.body.pickup_point,
-      drop_point: req.body.drop_point,
-      luggage: req.body.luggage,
-      comments: req.body.comments,
-      bookingid: uuidv4()
-    },
-    { transaction: t }
-  );
-
-  // const bookingTransaction = await TravelBookingTransaction.create(
-  //   {
-  //     cardno: req.user.cardno,
-  //     bookingid: booking.dataValues.bookingid,
-  //     type: TYPE_EXPENSE,
-  //     amount: TRAVEL_PRICE,
-  //     status: STATUS_PAYMENT_PENDING
-  //   },
-  //   { transaction: t }
-  // );
-
-  // if (booking == undefined || bookingTransaction == undefined) {
-  //   throw new ApiError(500, 'Failed to book travel');
-  // }
-
-  sendMail({
-    email: req.user.email,
-    subject: 'Your Booking for RajPravas',
-    template: 'rajPravas',
-    context: {
-      name: req.user.issuedto,
-      bookingid: booking.dataValues.bookingid,
-      date: req.body.date,
-      pickup: req.body.pickup_point,
-      dropoff: req.body.drop_point
-    }
-  });
-
-  await t.commit();
-
-  return res.status(200).send({ message: 'travel booked' });
-};
+import { userCancelBooking } from '../../helpers/transactions.helper.js';
 
 export const FetchUpcoming = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -91,45 +22,41 @@ export const FetchUpcoming = async (req, res) => {
 };
 
 export const CancelTravel = async (req, res) => {
+  const { bookingid } = req.body;
+
   const t = await database.transaction();
   req.transaction = t;
 
-  await TravelDb.update(
-    {
-      status: STATUS_CANCELLED
-    },
-    {
-      where: {
-        cardno: req.body.cardno,
-        bookingid: req.body.bookingid
-      },
-      transaction: t
+  const booking = await TravelDb.findOne({
+    where: {
+      cardno: req.user.cardno,
+      bookingid: bookingid,
+      status: [
+        STATUS_WAITING,
+        STATUS_CONFIRMED
+      ]
     }
-  );
+  });
 
-  // TODO: SHOULD WE EVEN CANCEL THE TRANSACTIONS
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
-  // await Transactions.update(
-  //   {
-  //     status: STATUS_CANCELLED
-  //   },
-  //   {
-  //     where: {
-  //       cardno: req.user.cardno,
-  //       bookingid: req.body.bookingid,
-  //       category: TYPE_TRAVEL,
-  //       type: TYPE_EXPENSE,
-  //       status: {
-  //         [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_COMPLETED]
-  //       }
-  //     },
-  //     transaction: t
-  //   }
-  // );
-
+  await userCancelBooking(req.user, booking, t);
   await t.commit();
 
-  return res.status(200).send({ message: 'Successfully cancelled booking' });
+  // TODO: Send email
+  // sendMail({
+  //   email: req.user.email,
+  //   subject: 'Your Raj Pravas (Travel) booking has been canceled',
+  //   template: 'rajPravasCancellation',
+  //   context: {
+  //     name: req.user.issuedto,
+  //     adhyayanName: adhyayan.dataValues.name
+  //   }
+  // });
+
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const ViewAllTravel = async (req, res) => {
@@ -137,17 +64,27 @@ export const ViewAllTravel = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
 
+  // TODO: include guest information
   const data = await database.query(
-    `SELECT t1.bookingid, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, t1.comments, t1.status, t2.amount, t2.status as transaction_status
+    `SELECT 
+      t1.bookingid, 
+      t1.date, 
+      t1.pickup_point, 
+      t1.drop_point, 
+      t1.type, 
+      t1.luggage, 
+      t1.comments, 
+      t1.status, 
+      t2.amount, 
+      t2.status as transaction_status
    FROM travel_db t1
-   JOIN transactions t2 ON t1.bookingid = t2.bookingid
-   WHERE t1.cardno = :cardno AND t2.category = :category
+   LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid
+   WHERE t1.cardno = :cardno
    ORDER BY t1.date DESC
    LIMIT :limit OFFSET :offset`,
     {
       replacements: {
         cardno: req.user.cardno,
-        category: TYPE_TRAVEL,
         limit: pageSize,
         offset: offset
       },

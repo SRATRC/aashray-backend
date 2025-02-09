@@ -69,12 +69,20 @@ const CardDb = sequelize.define(
       allowNull: false
     },
     pin: {
-      type: DataTypes.INTEGER,
-      allowNull: false
-    },
-    centre: {
       type: DataTypes.STRING,
       allowNull: false
+    },
+    center: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    pfp: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    token: {
+      type: DataTypes.TEXT,
+      allowNull: true
     },
     active: {
       type: DataTypes.BOOLEAN,
@@ -99,7 +107,17 @@ const CardDb = sequelize.define(
     updatedBy: {
       type: DataTypes.STRING,
       allowNull: false
-    }
+    },
+    password: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "$2b$10$kyNWZgMVhB0/YIEwJaKhP.JwugrOTUojN.8jPpwS6Tc1O7Wi2yadC"
+    },
+    credits: {
+      type: DataTypes.DECIMAL,
+      allowNull: false,
+      defaultValue: 0
+    },
   },
   {
     tableName: 'card_db',

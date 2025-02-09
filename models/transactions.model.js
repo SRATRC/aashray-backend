@@ -7,8 +7,7 @@ import {
   STATUS_CASH_COMPLETED,
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
-  TYPE_EXPENSE,
-  TYPE_REFUND
+  STATUS_CREDITED
 } from '../config/constants.js';
 
 const Transactions = sequelize.define(
@@ -35,17 +34,12 @@ const Transactions = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
-    type: {
-      type: DataTypes.ENUM,
-      allowNull: false,
-      values: [TYPE_EXPENSE, TYPE_REFUND]
-    },
     amount: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.DECIMAL,
       allowNull: false
     },
     discount: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.DECIMAL,
       allowNull: false,
       defaultValue: 0
     },
@@ -67,12 +61,14 @@ const Transactions = sequelize.define(
         STATUS_CASH_PENDING,
         STATUS_CASH_COMPLETED,
         STATUS_CANCELLED,
-        STATUS_ADMIN_CANCELLED
+        STATUS_ADMIN_CANCELLED,
+        STATUS_CREDITED
       ]
     },
     updatedBy: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      defaultValue: 'USER'
     }
   },
   {

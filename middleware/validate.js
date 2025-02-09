@@ -4,46 +4,35 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/CatchAsync.js';
 
+import {
+  ERR_CARD_NOT_FOUND,
+  ERR_CARD_NOT_PROVIDED,
+  ERR_BLOCKED_DATES
+} from '../config/constants.js';
+import { getBlockedDates } from '../controllers/helper.js';
+
 export const validateCard = catchAsync(async (req, res, next) => {
   const cardno = req.params.cardno || req.body.cardno || req.query.cardno;
-  if (cardno === undefined) throw new ApiError(404, 'cardno not provided');
+  if (cardno === undefined) throw new ApiError(404, ERR_CARD_NOT_PROVIDED);
   const cardData = await CardDb.findOne({
     where: { cardno: cardno }
   });
-  if (!cardData) throw new ApiError(404, 'card does not exist');
+  if (!cardData) throw new ApiError(404, ERR_CARD_NOT_FOUND);
   req.user = cardData;
   next();
 });
 
 export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
   const { checkin_date, checkout_date } =
-    req.body || req.body.primary_booking.details;
+    req.body.primary_booking ? req.body.primary_booking.details : req.body;
 
   if (!checkin_date || !checkout_date) return next();
 
-  const startDate = new Date(checkin_date);
-  const endDate = new Date(checkout_date);
+  const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
-  const blockdates = await BlockDates.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: startDate } },
-            { checkout: { [Sequelize.Op.gte]: startDate } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: endDate } },
-            { checkout: { [Sequelize.Op.gte]: endDate } }
-          ]
-        }
-      ]
-    }
-  });
-  if (blockdates.length > 0) {
-    throw new ApiError(400, 'dates are blocked', blockdates);
+  if (blockedDates.length > 0) {
+    throw new ApiError(400, ERR_BLOCKED_DATES, blockedDates);
   }
+
   next();
 });

@@ -1,348 +1,269 @@
 import {
+  CardDb,
   FoodDb,
-  GuestFoodDb,
-  GuestFoodTransactionDb,
-  Menu
+  GuestDb,
+  Menu,
+  Transactions
 } from '../../models/associations.js';
 import {
-  BREAKFAST_PRICE,
-  LUNCH_PRICE,
-  DINNER_PRICE,
-  TYPE_EXPENSE,
-  STATUS_RESIDENT
+  MSG_CANCEL_SUCCESSFUL,
+  STATUS_CANCELLED,
+  STATUS_CREDITED,
+  STATUS_PAYMENT_COMPLETED,
+  STATUS_PAYMENT_PENDING,
+  TYPE_GUEST_BREAKFAST,
+  TYPE_GUEST_DINNER,
+  TYPE_GUEST_LUNCH
 } from '../../config/constants.js';
-import {
-  checkRoomAlreadyBooked,
-  checkFlatAlreadyBooked,
-  checkSpecialAllowance,
-  isFoodBooked,
-  validateDate
-} from '../helper.js';
-import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
+import Sequelize, { col, QueryTypes } from 'sequelize';
 import moment from 'moment';
-import { v4 as uuidv4 } from 'uuid';
-import ApiError from '../../utils/ApiError.js';
 
-// TODO: DEPRECATE THIS ENDPOINT
-export const RegisterFood = async (req, res) => {
-  validateDate(req.body.start_date, req.body.end_date);
-
-  if (
-    await isFoodBooked(req.body.start_date, req.body.end_date, req.user.cardno)
-  )
-    throw new ApiError(403, 'Food already booked');
-
-  if (
-    !(
-      (await checkRoomAlreadyBooked(
-        req.body.start_date,
-        req.body.end_date,
-        req.user.cardno
-      )) ||
-      (await checkFlatAlreadyBooked(
-        req.body.start_date,
-        req.body.end_date,
-        req.user.cardno
-      )) ||
-      req.user.res_status === STATUS_RESIDENT ||
-      (await checkSpecialAllowance(
-        req.body.start_date,
-        req.body.end_date,
-        req.user.cardno
-      ))
-    )
-  ) {
-    throw new ApiError(
-      403,
-      'You do not have a room booked on one or more dates selected'
-    );
-  }
-
-  const allDates = getDates(req.body.start_date, req.body.end_date);
-
-  var food_data = [];
-  for (var date of allDates) {
-    food_data.push({
-      cardno: req.user.cardno,
-      date: date,
-      breakfast: req.body.breakfast,
-      lunch: req.body.lunch,
-      dinner: req.body.dinner,
-      hightea: req.body.high_tea,
-      spicy: req.body.spicy,
-      plateissued: 0
-    });
-  }
-
-  await FoodDb.bulkCreate(food_data);
-
-  return res.status(201).send({
-    message: 'Food Booked successfully'
-  });
-};
-
-export const RegisterForGuest = async (req, res) => {
-  const { start_date, end_date, guest_count, breakfast, lunch, dinner } =
-    req.body;
-
-  validateDate(start_date, end_date);
-
-  const t = await database.transaction();
-  req.transaction = t;
-
-  const allDates = getDates(start_date, end_date);
-  const days = allDates.length;
-
-  var food_data = [];
-  const bookingid = uuidv4();
-  for (var date of allDates) {
-    food_data.push({
-      bookingid: bookingid,
-      cardno: req.user.cardno,
-      date: date,
-      guest_count: guest_count,
-      breakfast: req.body.breakfast,
-      lunch: req.body.lunch,
-      dinner: req.body.dinner
-    });
-  }
-
-  await GuestFoodDb.bulkCreate(food_data, { transaction: t });
-
-  const food_cost =
-    (breakfast ? BREAKFAST_PRICE : 0) +
-    (lunch ? LUNCH_PRICE : 0) +
-    (dinner ? DINNER_PRICE : 0);
-  const amount = food_cost * guest_count * days;
-
-  await GuestFoodTransactionDb.create(
-    {
-      cardno: req.user.cardno,
-      bookingid: bookingid,
-      type: TYPE_EXPENSE,
-      amount: amount,
-      description: `Food Booking for ${guest_count} guests`
-    },
-    { transaction: t }
-  );
-
-  await t.commit();
-
-  return res.status(201).send({ message: 'successfully booked guest food' });
-};
-
-// TODO: Implementation of this function
-export const updateGuestCount = async (req, res) => {
-  const { bookingid, guest_count } = req.body;
+const mealTimes = {
+  breakfast: '7:30 AM - 9:00 AM',
+  lunch: '12:00 PM - 2:00 PM',
+  dinner: '7:00 PM - 9:00 PM'
 };
 
 export const FetchFoodBookings = async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+  const {
+    date,
+    meal = 'all',
+    spice = 'all',
+    bookedFor = 'all',
+    page,
+    page_size
+  } = req.query;
+  const page_no = parseInt(page) || 1;
+  const pageSize = parseInt(page_size) || 10;
+  const offset = (page_no - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
+  const dateFilter = date ? { date } : {};
 
-  const data = await FoodDb.findAll({
-    attributes: ['date', 'breakfast', 'lunch', 'dinner', 'spicy'],
+  const mealFilter = (mealType, exists) => {
+    if (meal === 'all') return exists;
+    return meal.split(',').includes(mealType) && exists;
+  };
+
+  const spiceFilter = (spiceValue) => {
+    if (spice === 'all') return true;
+    return spice === 'true' ? spiceValue === true : spiceValue === false;
+  };
+
+  const isSelf = bookedFor === 'self';
+  const isGuest = !isNaN(Number(bookedFor));
+
+  const foodData = await FoodDb.findAll({
+    attributes: [
+      'id',
+      'date',
+      'breakfast',
+      'lunch',
+      'dinner',
+      'spicy',
+      [col('FoodDb.guest'), 'bookedFor']
+    ],
     where: {
-      cardno: req.query.cardno
+      cardno: req.query.cardno,
+      ...dateFilter,
+      ...(isSelf && { guest: null }),
+      ...(isGuest && { guest: bookedFor })
     },
+    include: [
+      {
+        model: GuestDb,
+        attributes: ['id', 'name']
+      }
+    ],
     order: [['date', 'DESC']],
     offset,
     limit: pageSize
   });
 
-  const groupedData = data.reduce((acc, item) => {
-    const { id, date, breakfast, lunch, dinner, spicy } = item.dataValues;
-    const classify = date > today + 1 ? 'upcoming' : 'past';
+  const formattedData = foodData.flatMap((item) => {
+    const { id, date, breakfast, lunch, dinner, spicy, bookedFor, GuestDb } =
+      item.dataValues;
+    const name = GuestDb ? GuestDb.name : null;
 
-    const meals = [
-      { type: 'breakfast', exists: breakfast },
-      { type: 'lunch', exists: lunch },
-      { type: 'dinner', exists: dinner }
-    ];
+    return [
+      breakfast && { id, date, mealType: 'breakfast', spicy, bookedFor, name },
+      lunch && { id, date, mealType: 'lunch', spicy, bookedFor, name },
+      dinner && { id, date, mealType: 'dinner', spicy, bookedFor, name }
+    ].filter(Boolean); // Remove null entries (if mealType is not present)
+  });
 
-    meals.forEach(({ type, exists }) => {
-      if (exists) {
-        const mealData = { date, mealType: type, spicy };
+  let groupedData = [];
+  const upcomingData = formattedData.filter((item) =>
+    moment(item.date).isSameOrAfter(today)
+  );
+  const pastData = formattedData.filter((item) =>
+    moment(item.date).isBefore(today)
+  );
 
-        if (!acc[classify]) {
-          acc[classify] = [];
-        }
-
-        acc[classify].push(mealData);
-      }
+  if (upcomingData.length > 0) {
+    groupedData.push({
+      title: 'upcoming',
+      data: upcomingData
     });
+  }
 
-    return acc;
-  }, {});
-
-  const responseData = Object.keys(groupedData).map((key) => ({
-    title: key,
-    data: groupedData[key]
-  }));
+  if (pastData.length > 0) {
+    groupedData.push({
+      title: 'past',
+      data: pastData
+    });
+  }
 
   return res
     .status(200)
-    .send({ message: 'fetched results', data: responseData });
+    .send({ message: 'fetched results', data: groupedData });
 };
 
-export const FetchGuestFoodBookings = async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+export const FetchGuestsForFilter = async (req, res) => {
+  const { cardno } = req.user;
 
-  const today = moment().format('YYYY-MM-DD');
+  const guests = await database.query(
+    `
+    SELECT DISTINCT f.guest, g.name, f.updatedAt
+    FROM food_db f
+    JOIN guest_db g ON f.guest = g.id
+    WHERE f.cardno = :cardno
+    ORDER BY f.updatedAt DESC;
+    `,
+    { replacements: { cardno: cardno }, type: QueryTypes.SELECT }
+  );
 
-  const data = await GuestFoodDb.findAll({
-    where: {
-      cardno: req.query.cardno,
-      date: {
-        [Sequelize.Op.gte]: today
-      }
-    },
-    order: [['date', 'ASC']],
-    offset,
-    limit: pageSize
+  const formattedGuests = guests.flat().map((guest) => ({
+    key: guest.guest,
+    value: guest.name
+  }));
+
+  var guestNames = [];
+  guestNames.push({ key: 'all', value: 'All' });
+  guestNames.push({ key: 'self', value: 'Self' });
+  guestNames.push(...formattedGuests);
+
+  return res.status(200).send({
+    message: 'fetched results',
+    data: guestNames
   });
-  return res.status(200).send({ message: 'fetched results', data: data });
 };
 
 export const CancelFood = async (req, res) => {
   const t = await database.transaction();
+  req.transaction = t;
+
+  let credits = 0;
 
   const { cardno, food_data } = req.body;
+  if (!cardno || !Array.isArray(food_data)) {
+    return res.status(400).json({ message: 'Invalid request data' });
+  }
+
   const today = moment().format('YYYY-MM-DD');
-  const foodData = food_data.filter((item) => item.date > today + 1);
+  const validFoodData = food_data.filter((item) => item.date > today + 1);
 
-  // Group updates by mealType
-  const updates = foodData.reduce((acc, item) => {
-    if (!acc[item.mealType]) {
-      acc[item.mealType] = [];
-    }
-    acc[item.mealType].push(item.date);
-    return acc;
-  }, {});
+  const cancellationPromises = validFoodData.map(async (item) => {
+    const { date, mealType, bookedFor, id } = item;
 
-  // Perform updates in bulk for each mealType
-  for (const [mealType, dates] of Object.entries(updates)) {
+    // Create the update object: setting the specific meal to 0 (cancelled)
     const updateFields = {};
-    updateFields[mealType] = 0;
-    updateFields['updatedBy'] = 'user';
+    if (mealType === 'breakfast') updateFields.breakfast = 0;
+    if (mealType === 'lunch') updateFields.lunch = 0;
+    if (mealType === 'dinner') updateFields.dinner = 0;
 
+    const whereCondition = {
+      cardno,
+      date,
+      ...(bookedFor !== null && { guest: bookedFor })
+    };
+
+    // Cancel the meal booking
     await FoodDb.update(updateFields, {
-      where: {
-        cardno: cardno,
-        date: dates
-      },
+      where: whereCondition,
       transaction: t
     });
-  }
 
+    // Handle guest meal transaction cancelation
+    if (bookedFor) {
+      const mealTypeMapping = {
+        breakfast: TYPE_GUEST_BREAKFAST,
+        lunch: TYPE_GUEST_LUNCH,
+        dinner: TYPE_GUEST_DINNER
+      };
+
+      // Find and update the transaction to mark it as credited
+      const transaction = await Transactions.findOne({
+        where: {
+          cardno,
+          bookingid: id,
+          category: mealTypeMapping[mealType]
+        }
+      });
+
+      if (transaction.status == STATUS_PAYMENT_PENDING) {
+        await transaction.update(
+          { status: STATUS_CANCELLED },
+          { transaction: t }
+        );
+      } else if (transaction.status == STATUS_PAYMENT_COMPLETED) {
+        credits += transaction.amount;
+        await transaction.update(
+          { status: STATUS_CREDITED },
+          { transaction: t }
+        );
+      }
+    }
+
+    await CardDb.increment(
+      { credits: credits },
+      { where: { cardno: cardno }, transaction: t }
+    );
+  });
+
+  await Promise.all(cancellationPromises);
+
+  // Delete rows where breakfast, lunch, and dinner are all 0 (no meals left)
   await FoodDb.destroy({
     where: {
-      cardno: cardno,
-      breakfast: false,
-      lunch: false,
-      dinner: false
+      breakfast: 0,
+      lunch: 0,
+      dinner: 0
     },
     transaction: t
   });
 
   await t.commit();
-  return res
-    .status(200)
-    .send({ message: 'Successfully Canceled Food Booking' });
-};
-
-export const CancelGuestFood = async (req, res) => {
-  const updateData = req.body.food_data;
-
-  const t = await database.transaction();
-
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await GuestFoodDb.findOne({
-      where: {
-        cardno: req.body.cardno,
-        bookingid: req.body.food_data[i].bookingid,
-        date: req.body.food_data[i].date
-      }
-    });
-    if (!isAvailable) continue;
-
-    await GuestFoodDb.update(
-      {
-        guest_count: updateData[i].guest_count,
-        breakfast: updateData[i].breakfast,
-        lunch: updateData[i].lunch,
-        dinner: updateData[i].dinner,
-        updatedBy: 'user'
-      },
-      {
-        where: {
-          id: updateData[i].id
-        },
-        transaction: t
-      }
-    );
-  }
-
-  await GuestFoodDb.destroy({
-    where: {
-      breakfast: false,
-      lunch: false,
-      dinner: false
-    },
-    transaction: t
-  });
-
-  await t.commit();
-
-  const revisedPayments = await GuestFoodDb.findAll({
-    where: {
-      bookingid: updateData[0].bookingid
-    }
-  });
-
-  var total = 0;
-
-  for (let data of revisedPayments) {
-    total +=
-      data.dataValues.guest_count *
-      ((data.dataValues.breakfast ? BREAKFAST_PRICE : 0) +
-        (data.dataValues.lunch ? LUNCH_PRICE : 0) +
-        (data.dataValues.dinner ? DINNER_PRICE : 0));
-  }
-
-  const makeTransaction = await GuestFoodTransactionDb.update(
-    {
-      amount: total,
-      updatedBy: 'user'
-    },
-    {
-      where: {
-        bookingid: updateData[0].bookingid
-      }
-    }
-  );
-
-  if (makeTransaction != 1)
-    throw new ApiError(500, 'Error occured while updating transaction');
-
-  return res.status(200).send({ message: 'Successfully deleted' });
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const fetchMenu = async (req, res) => {
-  const menu = await Menu.findAll({
+  const menuItems = await Menu.findAll({
+    attributes: ['date', 'breakfast', 'lunch', 'dinner'],
     where: {
       date: {
         [Sequelize.Op.gte]: moment().format('YYYY-MM-DD')
       }
-    }
+    },
+    order: [['date', 'ASC']]
   });
 
-  return res.status(200).send({ data: menu });
+  if (menuItems.length === 0) {
+    return res.status(404).json({ data: null, message: 'No menu available' });
+  }
+
+  const formattedMenu = menuItems.reduce(
+    (acc, { date, breakfast, lunch, dinner }) => {
+      acc[date] = [
+        { meal: 'Breakfast', name: breakfast, time: mealTimes.breakfast },
+        { meal: 'Lunch', name: lunch, time: mealTimes.lunch },
+        { meal: 'Dinner', name: dinner, time: mealTimes.dinner }
+      ];
+      return acc;
+    },
+    {}
+  );
+
+  return res.status(200).send({ data: formattedMenu });
 };

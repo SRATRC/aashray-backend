@@ -3,62 +3,63 @@ import {
   FlatBooking,
   FoodDb,
   ShibirBookingDb,
-  ShibirDb
+  ShibirDb,
+  TravelDb,
+  CardDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
-  TYPE_ROOM
+  TYPE_ROOM,
+  TYPE_TRAVEL,
+  TYPE_ADHYAYAN,
+  ERR_INVALID_DATE
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
+import BlockDates from '../models/block_dates.model.js';
+import sendMail from '../utils/sendMail.js';
 
-export async function checkRoomAlreadyBooked(checkin, checkout, cardno) {
-  const result = await RoomBooking.findAll({
+import { roomBooking } from './admin/roomManagement.controller.js';
+import sequelize from '../config/database.js';
+
+export async function getBlockedDates(checkin_date, checkout_date) {
+  const startDate = new Date(checkin_date);
+  const endDate = new Date(checkout_date);
+
+  const blockedDates = await BlockDates.findAll({
     where: {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
+            { checkin: { [Sequelize.Op.lte]: startDate } },
+            { checkout: { [Sequelize.Op.gte]: startDate } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
+            { checkin: { [Sequelize.Op.lte]: endDate } },
+            { checkout: { [Sequelize.Op.gte]: endDate } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
+            { checkin: { [Sequelize.Op.gte]: startDate } },
+            { checkin: { [Sequelize.Op.lte]: endDate } }
           ]
         }
-      ],
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
+      ]
     }
   });
 
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
+  return blockedDates;
 }
 
-export async function checkFlatAlreadyBooked(checkin, checkout, cardno) {
+export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -81,22 +82,46 @@ export async function checkFlatAlreadyBooked(checkin, checkout, cardno) {
           ]
         }
       ],
-      cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
+      cardno: card_no,
+      guest: null
     }
   });
 
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
+  return result.length > 0;
+}
+
+export async function checkFlatAlreadyBookedForGuest(
+  checkin,
+  checkout,
+  guest_id
+) {
+  const result = await FlatBooking.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: checkin } },
+            { checkin: { [Sequelize.Op.lt]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkout: { [Sequelize.Op.gt]: checkin } },
+            { checkout: { [Sequelize.Op.lte]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: checkin } },
+            { checkout: { [Sequelize.Op.gte]: checkout } }
+          ]
+        }
+      ],
+      guest: guest_id
+    }
+  });
+
+  return result.length > 0;
 }
 
 export async function calculateNights(checkin, checkout) {
@@ -115,15 +140,15 @@ export async function isFoodBooked(start_date, end_date, cardno) {
   const endDate = new Date(end_date);
 
   const allDates = getDates(startDate, endDate);
+
   const food_bookings = await FoodDb.findAll({
     where: {
       cardno: cardno,
-      date: { [Sequelize.Op.in]: allDates }
+      date: allDates
     }
   });
 
-  if (food_bookings.length > 0) return true;
-  else return false;
+  return food_bookings.length > 0;
 }
 
 export function validateDate(start_date, end_date) {
@@ -131,7 +156,7 @@ export function validateDate(start_date, end_date) {
   const checkinDate = new Date(start_date);
   const checkoutDate = new Date(end_date);
   if (today > start_date || today > end_date || checkinDate > checkoutDate) {
-    throw new ApiError(400, 'Invalid Date');
+    throw new ApiError(400, ERR_INVALID_DATE);
   }
 }
 
@@ -152,16 +177,13 @@ export async function checkSpecialAllowance(start_date, end_date, cardno) {
     ],
     where: {
       cardno: cardno,
-      status: {
-        [Sequelize.Op.in]: [STATUS_CONFIRMED]
-      }
+      guest: null,
+      status: STATUS_CONFIRMED
     }
   });
 
-  if (adhyayans) {
-    for (var data of adhyayans) {
-      if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
-    }
+  for (var data of adhyayans) {
+    if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
   }
 
   return false;
@@ -173,12 +195,9 @@ export async function checkRoomBookingProgress(
   primary_booking,
   addons
 ) {
-  var addon = undefined;
-  for (var i of addons) {
-    if (i.booking_type == TYPE_ROOM) addon = i;
-  }
+  var addon = addons && addons.find((addon) => addon.booking_type == TYPE_ROOM);
 
-  if (primary_booking.booking_type == TYPE_ROOM || addon) {
+  if ((primary_booking && primary_booking.booking_type == TYPE_ROOM) || addon) {
     const startDate = new Date(start_date);
     const endDate = new Date(end_date);
     const checkinDate = new Date(
@@ -188,11 +207,10 @@ export async function checkRoomBookingProgress(
       primary_booking.details.checkout_date || addon.details.checkout_date
     );
 
-    if (startDate >= checkinDate && endDate <= checkoutDate) return true;
-    else return false;
-  } else {
-    return false;
+    return startDate >= checkinDate && endDate <= checkoutDate;
   }
+
+  return false;
 }
 
 export function findClosestSum(arr, target) {
@@ -267,3 +285,200 @@ export function findClosestSum(arr, target) {
 
   return { closestSum, closestIndices };
 }
+
+export async function checkGuestRoomAlreadyBooked(
+  checkin,
+  checkout,
+  cardno,
+  guests
+) {
+  const result = await RoomBooking.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: checkin } },
+            { checkin: { [Sequelize.Op.lt]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkout: { [Sequelize.Op.gt]: checkin } },
+            { checkout: { [Sequelize.Op.lte]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: checkin } },
+            { checkout: { [Sequelize.Op.gte]: checkout } }
+          ]
+        }
+      ],
+      cardno: cardno,
+      guest: guests,
+      status: {
+        [Sequelize.Op.in]: [
+          STATUS_WAITING,
+          ROOM_STATUS_CHECKEDIN,
+          ROOM_STATUS_PENDING_CHECKIN
+        ]
+      }
+    }
+  });
+
+  if (result.length > 0) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+export async function checkGuestFoodAlreadyBooked(
+  start_date,
+  end_date,
+  guests
+) {
+  const startDate = new Date(start_date);
+  const endDate = new Date(end_date);
+
+  const allDates = getDates(startDate, endDate);
+  const food_bookings = await FoodDb.findAll({
+    where: {
+      date: { [Sequelize.Op.in]: allDates },
+      guest: { [Sequelize.Op.in]: guests }
+    }
+  });
+
+  if (food_bookings.length > 0) return true;
+  else return false;
+}
+
+export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
+  const adhyayans = await ShibirBookingDb.findAll({
+    include: [
+      {
+        model: ShibirDb,
+        where: {
+          start_date: {
+            [Sequelize.Op.lte]: start_date
+          },
+          end_date: {
+            [Sequelize.Op.gte]: end_date
+          }
+        }
+      }
+    ],
+    where: {
+      guest: guests,
+      status: STATUS_CONFIRMED
+    }
+  });
+
+  if (adhyayans) {
+    for (var data of adhyayans) {
+      if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
+    }
+  }
+
+  return false;
+}
+
+export async function sendUnifiedEmail(user,bookingIds) {
+
+  let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
+  let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
+  let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
+
+  let adhyanBookingDetails = [], roomBookingDetails = [], travelBookingDetails = [];
+  //GetData for adhyan
+  let idx=0;
+  if (wasAdhyanBooked) {
+    const adhyanBookings = await ShibirBookingDb.findAll({
+    
+      include: [
+        {
+          model: ShibirDb,
+          attributes: ['name','speaker','month','start_date','end_date'],
+          where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
+        }
+      ],
+      where: {
+        bookingId : {[Sequelize.Op.in]:bookingIds[TYPE_ADHYAYAN]}
+      }
+      
+    });
+    idx=0;
+    adhyanBookings.forEach( 
+      (adhyanBooking) => { 
+        adhyanBookingDetails[idx++]={"bookingid":adhyanBooking.bookingid,"name":adhyanBooking.dataValues.ShibirDb.name,
+          "speaker":adhyanBooking.dataValues.ShibirDb.speaker,"startdate":adhyanBooking.dataValues.ShibirDb.start_date
+        ,"enddate":adhyanBooking.dataValues.ShibirDb.end_date,"status":adhyanBooking.status};
+        
+      }
+    );
+   
+  }
+  if (wasRajprvasBooked) {
+    const travelBookings = await TravelDb.findAll({ 
+      where: {
+        bookingId : {[Sequelize.Op.in]:bookingIds[TYPE_TRAVEL]}
+      }  
+    });
+
+    idx=0;
+    travelBookings.forEach( 
+      (travelBooking) => { 
+        travelBookingDetails[idx++]={"bookingid":travelBooking.bookingid,"date":travelBooking.date
+          ,"pickuppoint":travelBooking.pickup_point,"dropoffpoint":travelBooking.drop_point};
+      }
+    );
+  } 
+
+  if (wasRoomBooked) {
+    const roomBookings = await RoomBooking.findAll({
+      where: {
+        bookingid: {[Sequelize.Op.in]: bookingIds[TYPE_ROOM]}
+      }   
+    });
+    idx=0;
+    roomBookings.forEach( 
+      (roomBooking) => { 
+        roomBookingDetails[idx++]={"bookingid":roomBooking.bookingid,"checkin":roomBooking.checkin,"checkout":roomBooking.checkout};
+        
+      }
+    );
+    
+  }
+
+  const userInfo = await CardDb.findOne({
+    where: {
+      cardno : user.cardno
+    }   
+  });
+ 
+//send email to me
+  sendMail({
+
+    email: userInfo.email,
+
+   subject: `Your Booking Confirmation for Stay at SRATRC`,
+
+   template: 'unifiedBookingEmail',
+
+    context: {
+
+    showAdhyanDetail:wasAdhyanBooked,
+    showRoomDetail:wasRoomBooked,
+    showTravelDetail:wasRajprvasBooked,
+    name: userInfo.issuedto,
+    roomBookingDetails,
+    adhyanBookingDetails,
+    travelBookingDetails
+   }
+
+  });
+
+  //send email
+
+};
+

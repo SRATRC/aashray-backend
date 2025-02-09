@@ -1,6 +1,6 @@
 import { Sequelize } from 'sequelize';
 const { private_key } =
-  process.env.NODE_ENV == 'pord' && JSON.parse(process.env.DB_CERT);
+  process.env.NODE_ENV == 'prod' && JSON.parse(process.env.DB_CERT);
 
 const sequelize = new Sequelize(
   process.env.DB_NAME,
@@ -10,8 +10,9 @@ const sequelize = new Sequelize(
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     dialect: 'mysql',
-    dialectOptions: process.env.NODE_ENV == 'pord' && {
-      ssl: {
+    dialectOptions: {
+      decimalNumbers: true,
+      ssl: process.env.NODE_ENV == 'prod' && {
         ca: private_key
       }
     },

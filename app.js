@@ -19,6 +19,8 @@ import utsavBookingRoutes from './routes/client/utsavBooking.routes.js';
 import maintenanceRoutes from './routes/client/maintenaneRequest.routes.js';
 import profileRoutes from './routes/client/profile.routes.js';
 import locationRoutes from './routes/client/location.routes.js';
+import guestRoutes from './routes/client/guestBooking.routes.js';
+import mumukshuRoutes from './routes/client/mumukshuBooking.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -93,6 +95,8 @@ app.use('/api/v1/admin/travel', travelManagementRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
+app.use('/api/v1/guest', guestRoutes);
+app.use('/api/v1/mumukshu', mumukshuRoutes);
 
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {
@@ -101,6 +105,9 @@ app.use((_req, _res) => {
 app.use(ErrorHandler);
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`server is listning on port ${port}...`);
 });
+
+// Export the app and a function to close the database connection
+export { app, sequelize, server };

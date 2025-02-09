@@ -4,6 +4,11 @@ import sequelize from '../config/database.js';
 const FoodDb = sequelize.define(
   'FoodDb',
   {
+    id: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      primaryKey: true
+    },
     cardno: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -15,6 +20,14 @@ const FoodDb = sequelize.define(
     date: {
       type: DataTypes.DATEONLY,
       allowNull: false
+    },
+    guest: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'guest_db',
+        key: 'id'
+      }
     },
     breakfast: {
       type: DataTypes.BOOLEAN,
@@ -46,7 +59,8 @@ const FoodDb = sequelize.define(
     hightea: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: ['TEA', 'COFFEE', 'NONE']
+      values: ['TEA', 'COFFEE', 'NONE'],
+      defaultValue: 'NONE'
     },
     spicy: {
       type: DataTypes.BOOLEAN,

@@ -2,25 +2,31 @@ import {
   ShibirDb,
   ShibirBookingDb,
   CardDb,
-  ShibirBookingTransaction
 } from '../../models/associations.js';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
-  TYPE_EXPENSE,
-  TYPE_REFUND,
   STATUS_PAYMENT_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
-  STATUS_AWAITING_REFUND,
-  TYPE_ADHYAYAN
+  STATUS_CASH_COMPLETED,
+  TYPE_ADHYAYAN,
+  ERR_BOOKING_ALREADY_CANCELLED,
+  ERR_ADHYAYAN_NO_SEATS_AVAILABLE
 } from '../../config/constants.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
+import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
+import { adminCancelTransaction, createPendingTransaction, useCredit } from '../../helpers/transactions.helper.js';
+import { 
+  reserveAdhyayanSeat, 
+  openAdhyayanSeat, 
+  validateAdhyayanBooking, 
+  validateAdhyayans 
+} from '../../helpers/adhyayanBooking.helper.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -68,26 +74,84 @@ export const fetchAllAdhyayan = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
-  const shibirs = await ShibirDb.findAll({
-    where: {
-      start_date: {
-        [Sequelize.Op.gte]: today
-      }
-    },
-    offset,
-    limit: pageSize,
-    order: [['start_date', 'ASC']]
-  });
-  return res.status(200).send({ message: 'fetched results', data: shibirs });
+  const shibirs = await database.query(
+    `SELECT 
+		shibir_db.id,
+    shibir_db.name,
+    shibir_db.speaker,
+    shibir_db.month,
+    shibir_db.start_date,
+    shibir_db.end_date,
+    shibir_db.total_seats,
+    shibir_db.available_seats,
+    COUNT(shibir_booking_db.status) AS waitlist_count,
+    shibir_db.food_allowed,
+    shibir_db.comments,
+    shibir_db.status,
+    shibir_db.updatedBy
+FROM 
+    shibir_db
+LEFT JOIN 
+    shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+GROUP BY 
+    shibir_db.id,
+    shibir_db.name,
+    shibir_db.speaker,
+    shibir_db.month,
+    shibir_db.start_date,
+    shibir_db.end_date,
+    shibir_db.total_seats,
+    shibir_db.available_seats,
+    shibir_db.food_allowed,
+    shibir_db.comments,
+    shibir_db.status,
+    shibir_db.updatedBy
+    
+    LIMIT ${pageSize} OFFSET ${offset};`,
+    {
+      type: QueryTypes.SELECT
+    }
+  );
+  return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
 
 export const fetchAdhyayan = async (req, res) => {
-  const adhyayanId = req.params.id;
-  const adhyayanData = await ShibirDb.findByPk(adhyayanId);
-  if(adhyayanData ===  null) {
-    return res.status(404).send({message: 'No Adhyayan found with given id'})
-  }
-  return res.status(200).send({message: 'found adhyayan', data: adhyayanData});
+  const { id } = req.params;
+  await validateAdhyayans(id);
+
+  const adhyayan = await ShibirDb.findOne({
+    where: { id: id }
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'Fetched Adhyayan', data: adhyayan });
+}
+
+export const fetchAdhyayanBookings = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.query;
+
+  await validateAdhyayans(id);
+
+  const adhyayanData = await ShibirBookingDb.findAll({
+    attributes: ['bookingid', 'status', 'updatedBy'],
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center']
+      }
+      // TODO: include Guest Details if booked for Guest
+    ],
+    where: {
+      shibir_id: id,
+      status: status
+    }
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'Found Adhyayan', data: adhyayanData });
 };
 
 export const updateAdhyayan = async (req, res) => {
@@ -103,54 +167,25 @@ export const updateAdhyayan = async (req, res) => {
   } = req.body;
 
   const adhyayanId = req.params.id;
-  const data = await ShibirDb.findByPk(adhyayanId);
+  const adhyayan = (await validateAdhyayans(adhyayanId))[0];
 
-  console.log("Updating Adhyayan - " + data.dataValues.name);
-
-  var available_seats = data.dataValues.available_seats;
-  const diff = Math.abs(data.dataValues.total_seats - total_seats);
-  if (data.dataValues.total_seats > total_seats) {
-    available_seats -= diff;
-    if (available_seats < 0) available_seats = 0;
-  } else if (data.dataValues.total_seats < total_seats) {
-    available_seats += diff;
-  }
-
+  const diff = total_seats - adhyayan.total_seats;
+  const available_seats = Math.max(0, adhyayan.available_seats + diff);
   const month = moment(start_date).format('MMMM');
-  console.log("Month of Adhyayan: " + month);
-  console.log("End Date: " + end_date);
-  try{
-    const updatedItem = await ShibirDb.update(
-      {
-        name: name,
-        speaker: speaker,
-        month: month,
-        start_date: start_date,
-        end_date: end_date,
-        total_seats: total_seats,
-        amount: amount,
-        available_seats: available_seats,
-        food_allowed: food_allowed,
-        comments: comments,
-        updatedBy: req.user.username
-      },
-      {
-        where: {
-          id: adhyayanId
-        },
-      },
-    );
-  
-    console.log("Database Update response: " + updatedItem);
-    if (updatedItem != 1) {
-      console.log("Error. Returning 500")
-      throw new ApiError(500, 'Error occured while updating adhyayan');
-    } 
-  
-  }
-  catch(error) {
-    console.log("Error: " + error);
-  }
+
+  await adhyayan.update({
+    name,
+    speaker,
+    month,
+    start_date,
+    end_date,
+    total_seats,
+    amount,
+    available_seats,
+    food_allowed,
+    comments,
+    updatedBy: req.user.username
+  });
 
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
@@ -182,9 +217,10 @@ export const adhyayanWaitlist = async (req, res) => {
       },
       {
         model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
+        attributes: ['issuedto', 'mobno', 'center'],
         required: true
       }
+      // TODO: include Guest Details if booked for Guest
     ],
     where: {
       status: STATUS_WAITING
@@ -199,289 +235,147 @@ export const adhyayanWaitlist = async (req, res) => {
 export const adhyayanStatusUpdate = async (req, res) => {
   const { shibir_id, bookingid, status, upi_ref, description } = req.body;
 
+  var newBookingStatus = status;
+
   const t = await database.transaction();
   req.transaction = t;
 
-  const shibir = await ShibirDb.findOne({
-    where: {
-      id: shibir_id
-    }
+  const adhyayan = (await validateAdhyayans(shibir_id))[0];
+  const booking = await validateAdhyayanBooking(bookingid, shibir_id);
+
+  if (status == booking.status) {
+    throw new ApiError(400, 'Status is same as before');
+  }
+
+  if (
+    booking.status == STATUS_ADMIN_CANCELLED ||
+    booking.status == STATUS_CANCELLED
+  ) {
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+
+  var transaction = await Transactions.findOne({
+    where: { bookingid: bookingid }
   });
 
-  const booking = await ShibirBookingDb.findOne({
-    where: {
-      bookingid: bookingid
-    }
-  });
-
+  // 1. Booking Status = WAITING, Transaction is Not Created
+  // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
+  // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
+  // 4. Booking Status = CANCELLED OR ADMIN_CANCELLED, Transaction is Not Created or Status = CANCELLED OR ADMIN_CANCELLED
   switch (status) {
+    // Only Waiting & Payment Pending booking can be changed to
+    // Confirmed 
     case STATUS_CONFIRMED:
-      if (booking.dataValues.status == STATUS_PAYMENT_PENDING) {
-        await Transactions.create(
+      if (booking.status == STATUS_WAITING) {
+        await reserveAdhyayanSeat(adhyayan, t);
+      }
+
+      if (!transaction) {
+        transaction = await createPendingTransaction(
+          booking.cardno,
+          bookingid,
+          TYPE_ADHYAYAN,
+          adhyayan.amount,
+          req.user.username,
+          t
+        );
+      }
+
+      await useCredit(
+        transaction.cardno,
+        booking,
+        transaction,
+        adhyayan.amount,
+        req.user.username,
+        t
+      );
+
+      // After applying credits, if the status is still payment pending
+      // then accept the UPI or cash payment and mark is complete.
+      if (transaction.status == STATUS_PAYMENT_PENDING) {
+        await transaction.update(
           {
-            cardno: booking.dataValues.cardno,
-            bookingid: booking.dataValues.bookingid,
-            category: TYPE_ADHYAYAN,
-            type: TYPE_EXPENSE,
-            amount: shibir.dataValues.amount,
-            upi_ref: upi_ref ? upi_ref : 'NA',
-            status: STATUS_PAYMENT_COMPLETED,
+            upi_ref: upi_ref || 'NA',
+            status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
             updatedBy: req.user.username
           },
           { transaction: t }
         );
-
-        booking.status = STATUS_CONFIRMED;
-        booking.updatedBy = req.user.username;
-        await booking.save({ transaction: t });
-      } else if (
-        booking.dataValues.status == STATUS_CANCELLED ||
-        booking.dataValues.status == STATUS_ADMIN_CANCELLED ||
-        booking.dataValues.status == STATUS_WAITING
-      ) {
-        const payment = await Transactions.findOne({
-          where: {
-            cardno: booking.dataValues.cardno,
-            bookingid: booking.dataValues.bookingid,
-            category: TYPE_ADHYAYAN,
-            type: TYPE_EXPENSE,
-            status: STATUS_PAYMENT_COMPLETED
-          }
-        });
-
-        if (!payment) {
-          booking.status = STATUS_PAYMENT_PENDING;
-          booking.updatedBy = req.user.username;
-          await booking.save({ transaction: t });
-        } else {
-          booking.status = STATUS_CONFIRMED;
-          booking.updatedBy = req.user.username;
-          await booking.save({ transaction: t });
-        }
       }
-
-      if (shibir.dataValues.available_seats > 0) {
-        shibir.available_seats -= 1;
-        await shibir.save({ transaction: t });
-      }
-
-      break;
-
-    case STATUS_ADMIN_CANCELLED:
-      if (booking.dataValues.status == STATUS_CONFIRMED) {
-        await ShibirBookingTransaction.create(
-          {
-            cardno: booking.dataValues.cardno,
-            bookingid: bookingid,
-            type: TYPE_REFUND,
-            amount: shibir.dataValues.amount,
-            description: description,
-            status: STATUS_AWAITING_REFUND,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
-
-        booking_transaction.status = STATUS_ADMIN_CANCELLED;
-        booking_transaction.updatedBy = req.user.username;
-        await booking_transaction.save({ transaction: t });
-
-        if (shibir.dataValues.available_seats > 0) {
-          shibir.available_seats += 1;
-          await shibir.save({ transaction: t });
-        }
-      } else if (booking.dataValues.status == STATUS_PAYMENT_PENDING) {
-        booking_transaction.status = STATUS_ADMIN_CANCELLED;
-        booking_transaction.updatedBy = req.user.username;
-        await booking_transaction.save({ transaction: t });
-
-        if (booking_transaction.dataValues.discount > 0) {
-          await ShibirBookingTransaction.create(
-            {
-              cardno: booking.dataValues.cardno,
-              bookingid: bookingid,
-              type: TYPE_REFUND,
-              amount: booking_transaction.dataValues.discount,
-              description: description,
-              status: STATUS_AWAITING_REFUND,
-              updatedBy: req.user.username
-            },
-            { transaction: t }
-          );
-        }
-      }
-
-      booking.status = STATUS_ADMIN_CANCELLED;
-      booking.updatedBy = req.user.username;
-      await booking.save({ transaction: t });
 
       break;
 
     case STATUS_PAYMENT_PENDING:
-      if (booking.dataValues.status == STATUS_CONFIRMED) {
-        booking_transaction.status = STATUS_PAYMENT_PENDING;
-        booking_transaction.updatedBy = req.user.username;
-        await booking_transaction.save({ transaction: t });
+      if (booking.status == STATUS_CONFIRMED) {
+        throw new ApiError(400, 'Confirmed booking\'s status cannot be changed to Payment Pending');
+      }
 
-        if (shibir.dataValues.available_seats > 0) {
-          shibir.available_seats += 1;
-          await shibir.save({ transaction: t });
+      // Only Waiting booking can be changed to Payment Pending
+      if (booking.status == STATUS_WAITING) {
+        await reserveAdhyayanSeat(adhyayan, t);
+
+        if (!transaction) {
+          transaction = await createPendingTransaction(
+            booking.cardno,
+            bookingid,
+            TYPE_ADHYAYAN,
+            adhyayan.amount,
+            req.user.username,
+            t
+          );
         }
-      } else if (
-        booking.dataValues.status == STATUS_WAITING ||
-        booking.dataValues.status == STATUS_ADMIN_CANCELLED ||
-        booking.dataValues.status == STATUS_CANCELLED
-      ) {
-        const refund_amounts = await ShibirBookingTransaction.findAll({
-          where: {
-            cardno: booking.dataValues.cardno,
-            type: TYPE_REFUND,
-            status: STATUS_AWAITING_REFUND
-          }
-        });
-        if (refund_amounts.length > 0) {
-          const amounts = refund_amounts.map(
-            (refund) => refund.dataValues.amount
-          );
-          const targetAmount = shibir.dataValues.amount;
-          const { closestSum, closestIndices } = findClosestSum(
-            amounts,
-            targetAmount
-          );
 
-          const bookingIds = [];
-          for (var index of closestIndices) {
-            await ShibirBookingTransaction.update(
-              {
-                status: STATUS_PAYMENT_COMPLETED,
-                description: `compensated with transactions:${bookingid}`,
-                updatedBy: req.user.username
-              },
-              {
-                where: {
-                  id: refund_amounts[index].dataValues.id
-                },
-                transaction: t
-              }
-            );
-            bookingIds.push(refund_amounts[index].dataValues.id);
-            await refund_amounts[index].save({ transaction: t });
-          }
-          if (closestSum >= targetAmount) {
-            await ShibirBookingTransaction.create(
-              {
-                cardno: booking.dataValues.cardno,
-                bookingid: bookingid,
-                type: TYPE_EXPENSE,
-                amount: targetAmount,
-                description: `compensated with pending refunds: ${bookingIds}`,
-                status: STATUS_PAYMENT_COMPLETED,
-                updatedBy: req.user.username
-              },
-              { transaction: t }
-            );
-            if (closestSum > targetAmount) {
-              await ShibirBookingTransaction.create(
-                {
-                  cardno: booking.dataValues.cardno,
-                  bookingid: bookingid,
-                  type: TYPE_REFUND,
-                  amount: closestSum - targetAmount,
-                  description: `remaining amounts for transactions: ${bookingIds}`,
-                  status: STATUS_AWAITING_REFUND,
-                  updatedBy: req.user.username
-                },
-                { transaction: t }
-              );
-            }
-            shibir.available_seats -= 1;
-            await shibir.save({ transaction: t });
-          } else if (closestSum < targetAmount) {
-            await ShibirBookingTransaction.create(
-              {
-                cardno: booking.dataValues.cardno,
-                bookingid: bookingid,
-                type: TYPE_EXPENSE,
-                amount: targetAmount - closestSum,
-                discount: closestSum,
-                description: `compensated with pending refunds: ${bookingIds}`,
-                status: STATUS_PAYMENT_PENDING,
-                updatedBy: req.user.username
-              },
-              { transaction: t }
-            );
-          }
-        } else {
-          await ShibirBookingTransaction.create(
-            {
-              cardno: booking.dataValues.cardno,
-              bookingid: bookingid,
-              type: TYPE_EXPENSE,
-              amount: shibir.dataValues.amount,
-              upi_ref: 'NA',
-              status: STATUS_PAYMENT_PENDING,
-              updatedBy: req.user.username
-            },
-            { transaction: t }
-          );
+        await useCredit(
+          transaction.cardno,
+          booking,
+          transaction,
+          adhyayan.amount,
+          req.user.username,
+          t
+        );
+
+        // After applying credits, if the transaction is complete
+        // then confirm the booking.
+        if (transaction.status == STATUS_PAYMENT_COMPLETED) {
+          newBookingStatus = STATUS_CONFIRMED;
         }
       }
 
-      booking.status = STATUS_PAYMENT_PENDING;
-      booking.updatedBy = req.user.username;
-      await booking.save({ transaction: t });
-
+      break;
+  
+    case STATUS_ADMIN_CANCELLED:
+      if (
+        booking.status == STATUS_CONFIRMED ||
+        booking.status == STATUS_PAYMENT_PENDING
+      ) {
+        await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
+      }
+      
+      if (transaction) {
+        await adminCancelTransaction(req.user, transaction, t);
+      }
       break;
 
     case STATUS_WAITING:
-      if (booking.dataValues.status == STATUS_CONFIRMED) {
-        booking_transaction.status = STATUS_ADMIN_CANCELLED;
-        booking_transaction.updatedBy = req.user.username;
-        await booking_transaction.save({ transaction: t });
-
-        if (shibir.dataValues.available_seats > 0) {
-          shibir.available_seats += 1;
-          await shibir.save({ transaction: t });
-        }
-
-        booking_transaction.status = STATUS_ADMIN_CANCELLED;
-        booking_transaction.updatedBy = req.user.username;
-        await booking_transaction.save({ transaction: t });
-      } else if (booking.dataValues.status == STATUS_PAYMENT_PENDING) {
-        if (booking_transaction.dataValues.discount > 0) {
-          await ShibirBookingTransaction.create(
-            {
-              cardno: booking.dataValues.cardno,
-              bookingid: bookingid,
-              type: TYPE_REFUND,
-              amount: booking_transaction.dataValues.discount,
-              description: description,
-              status: STATUS_AWAITING_REFUND,
-              updatedBy: req.user.username
-            },
-            { transaction: t }
-          );
-        }
-        booking_transaction.status = STATUS_ADMIN_CANCELLED;
-        booking_transaction.updatedBy = req.user.username;
-        await booking_transaction.save({ transaction: t });
-      }
-
-      booking.status = STATUS_WAITING;
-      booking.updatedBy = req.user.username;
-      await booking.save({ transaction: t });
-
-      break;
+      throw new ApiError(400, 'Booking\'s status cannot be changed to Waiting');
 
     default:
       throw new ApiError(400, 'Invalid status provided');
   }
 
+  await booking.update(
+    {
+      status: newBookingStatus,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
   await t.commit();
-  return res.status(200).send({ message: 'Confirmed Booking' });
+  return res.status(200).send({ message: 'Updated booking status' });
 };
 
-export const openCloseAdhyayan = async (req, res) => {
+export const activateAdhyayan = async (req, res) => {
   const itemUpdated = await ShibirDb.update(
     {
       status: req.params.activate,
@@ -495,81 +389,6 @@ export const openCloseAdhyayan = async (req, res) => {
   );
 
   if (itemUpdated != 1)
-    throw new ApiError(500, 'Error occured while closing adhyayan');
+    throw new ApiError(500, 'Error occured while activating adhyayan');
   res.status(200).send({ message: 'Adhyayan status updated' });
 };
-
-function findClosestSum(arr, target) {
-  let closestSum = null;
-  let closestIndices = null;
-
-  function findExactSum(
-    arr,
-    n,
-    target,
-    currentSum = 0,
-    currentIndices = [],
-    index = 0
-  ) {
-    if (currentSum === target) {
-      closestSum = currentSum;
-      closestIndices = [...currentIndices];
-      return true;
-    }
-    if (index === n || currentSum > target) {
-      return false;
-    }
-
-    return (
-      findExactSum(
-        arr,
-        n,
-        target,
-        currentSum + arr[index],
-        [...currentIndices, index],
-        index + 1
-      ) || findExactSum(arr, n, target, currentSum, currentIndices, index + 1)
-    );
-  }
-
-  function findClosestSubsetSum(
-    arr,
-    target,
-    index,
-    currentSum,
-    currentIndices
-  ) {
-    if (index === arr.length) {
-      if (
-        closestSum === null ||
-        Math.abs(target - currentSum) < Math.abs(target - closestSum)
-      ) {
-        closestSum = currentSum;
-        closestIndices = [...currentIndices];
-      }
-      return;
-    }
-
-    findClosestSubsetSum(arr, target, index + 1, currentSum, currentIndices);
-    findClosestSubsetSum(arr, target, index + 1, currentSum + arr[index], [
-      ...currentIndices,
-      index
-    ]);
-  }
-
-  if (arr.includes(target)) {
-    closestSum = target;
-    closestIndices = [arr.indexOf(target)];
-    return { closestSum, closestIndices };
-  }
-
-  if (findExactSum(arr, arr.length, target)) {
-    return { closestSum, closestIndices };
-  }
-
-  findClosestSubsetSum(arr, target, 0, 0, []);
-
-  return { closestSum, closestIndices };
-}
-
-//TODO: admin can cancel booking and confirm from waitlist

@@ -2,8 +2,8 @@ import {
   CardDb,
   RoomDb,
   RoomBooking,
-  RoomBookingTransaction,
-  FlatBooking
+  FlatBooking,
+  Transactions
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
@@ -11,22 +11,32 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_CHECKEDOUT,
-  TYPE_EXPENSE,
-  STATUS_PAYMENT_PENDING,
   ROOM_BLOCKED,
   ROOM_STATUS_AVAILABLE,
   STATUS_INACTIVE,
   STATUS_WAITING,
   STATUS_CANCELLED,
-  NAC_ROOM_PRICE,
-  AC_ROOM_PRICE
+  ERR_BOOKING_NOT_FOUND,
+  ERR_ROOM_ALREADY_BOOKED,
+  ERR_CARD_NOT_FOUND,
+  MSG_BOOKING_SUCCESSFUL,
+  MSG_UPDATE_SUCCESSFUL,
+  ERR_TRANSACTION_NOT_FOUND,
+  ERR_ROOM_NOT_FOUND,
+  STATUS_ADMIN_CANCELLED
 } from '../../config/constants.js';
 import {
-  checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
   calculateNights,
-  validateDate
+  validateDate,
+  getBlockedDates
 } from '../helper.js';
+import {
+  bookDayVisit,
+  checkRoomAlreadyBooked,
+  createRoomBooking,
+  roomCharge
+} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import Sequelize, { where } from 'sequelize';
 import moment from 'moment';
@@ -34,6 +44,7 @@ import { v4 as uuidv4 } from 'uuid';
 import SendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import sendMail from '../../utils/sendMail.js';
 
 // TODO: early checkin??
 export const manualCheckin = async (req, res) => {
@@ -48,15 +59,16 @@ export const manualCheckin = async (req, res) => {
     }
   });
 
+  // TODO: should the transaction be marked as payment complete here?
   if (!booking) {
-    throw new ApiError(404, 'Booking not found');
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   booking.status = ROOM_STATUS_CHECKEDIN;
   booking.updatedBy = req.user.username;
   await booking.save();
 
-  return res.status(200).send({ message: 'User Checked in', data: booking });
+  return res.status(200).send({ message: 'Successfully checked in', data: booking });
 };
 
 export const manualCheckout = async (req, res) => {
@@ -71,46 +83,44 @@ export const manualCheckout = async (req, res) => {
     order: [['checkin', 'ASC']]
   });
 
-  if (!booking) throw new ApiError(404, 'Booking not found');
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
   const today = moment().format('YYYY-MM-DD');
 
-  if (today != booking.dataValues.checkout) {
-    const nights = await calculateNights(booking.dataValues.checkin, today);
+  if (today != booking.checkout) {
+    // TODO: Throw error if checkout after booking's original checkout date
+    const nights = await calculateNights(booking.checkin, today);
 
     booking.checkout = today;
     booking.nights = nights;
-    booking.status = ROOM_STATUS_CHECKEDOUT;
-    booking.updatedBy = req.user.username;
-    await booking.save({ transaction: t });
 
-    const [transactionItemsUpdated] = await RoomBookingTransaction.update(
+    // TODO: Do we need to add credits here or take balance payment here?
+    const [transactionItemsUpdated] = await Transactions.update(
       {
-        amount:
-          booking.dataValues.roomtype == 'nac'
-            ? NAC_ROOM_PRICE * nights
-            : AC_ROOM_PRICE * nights,
+        amount: roomCharge(booking.roomtype) * nights,
         updatedBy: req.user.username
       },
       {
         where: {
-          bookingid: booking.dataValues.bookingid
+          bookingid: booking.bookingid
         },
         transaction: t
       }
     );
 
     if (transactionItemsUpdated != 1) {
-      throw new ApiError(500, 'Unexpected error occured in checkout');
+      throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
     }
-  } else {
-    booking.status = ROOM_STATUS_CHECKEDOUT;
-    booking.updatedBy = req.user.username;
-    await booking.save({ transaction: t });
   }
 
+  booking.status = ROOM_STATUS_CHECKEDOUT;
+  booking.updatedBy = req.user.username;
+  await booking.save({ transaction: t });
+
   await t.commit();
-  return res.status(200).send({ message: 'Successfully checkedout' });
+  return res.status(200).send({ message: 'Successfully checked out' });
 };
 
 export const roomBooking = async (req, res) => {
@@ -118,154 +128,66 @@ export const roomBooking = async (req, res) => {
     req.body;
   validateDate(checkin_date, checkout_date);
 
-  const t = await database.transaction();
-  req.transaction = t;
+  const card = mobno ? 
+    await CardDb.findOne({ where: { mobno } }) :
+    await CardDb.findOne({ where: { cardno } });
 
-  if (mobno) {
-    const user = await CardDb.findOne({
-      where: {
-        mobno: mobno
-      }
-    });
-    if (user) req.mumukshu = user;
-  } else {
-    const user = await CardDb.findOne({
-      where: {
-        cardno: cardno
-      }
-    });
-    if (user) req.mumukshu = user;
+  if (!card) {
+    throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
   if (
     await checkRoomAlreadyBooked(
       checkin_date,
       checkout_date,
-      req.mumukshu.cardno
+      card.cardno
     )
   ) {
-    throw new ApiError(400, 'Already Booked');
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  const gender = req.mumukshu.gender;
+  const t = await database.transaction();
+  req.transaction = t;
+
   const nights = await calculateNights(checkin_date, checkout_date);
-  var roomno = undefined;
+
   var booking = undefined;
-
-  if (nights > 0) {
-    roomno = await RoomDb.findOne({
-      attributes: ['roomno'],
-      where: {
-        roomno: {
-          [Sequelize.Op.notLike]: 'NA%',
-          [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= ${checkin_date} OR checkin >= ${checkout_date})
-                )`)
-        },
-        roomstatus: 'available',
-        roomtype: room_type,
-        gender: floor_pref + gender
-      },
-      order: [
-        Sequelize.literal(
-          `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-        ),
-        Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-      ],
-      limit: 1
-    });
-    if (roomno == undefined) {
-      throw new ApiError(400, 'No Beds Available');
-    }
-
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: req.mumukshu.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: room_type,
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
+  if (nights == 0) {
+    booking = await bookDayVisit(
+      card.cardno, 
+      checkin_date, 
+      checkout_date,
+      req.user.username,
+      t
     );
-
-    if (booking == undefined) {
-      throw new ApiError(400, 'Failed to book a bed');
-    }
-
-    const transaction = await RoomBookingTransaction.create(
-      {
-        cardno: req.mumukshu.cardno,
-        bookingid: booking.dataValues.bookingid,
-        type: TYPE_EXPENSE,
-        amount:
-          req.body.room_type == 'nac'
-            ? NAC_ROOM_PRICE * nights
-            : AC_ROOM_PRICE * nights,
-        description: `Room Booked for ${nights} nights`,
-        status: STATUS_PAYMENT_PENDING,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
-
-    if (transaction == undefined) {
-      throw new ApiError(400, 'Failed to book a bed');
-    }
   } else {
-    roomno = await RoomDb.findOne({
-      where: {
-        roomno: { [Sequelize.Op.like]: 'NA%' },
-        roomtype: room_type,
-        gender: floor_pref + gender,
-        roomstatus: ROOM_STATUS_AVAILABLE
-      },
-      attributes: ['roomno']
-    });
-
-    booking = await RoomBooking.create(
-      {
-        bookingid: uuidv4(),
-        cardno: req.mumukshu.cardno,
-        roomno: roomno.dataValues.roomno,
-        checkin: checkin_date,
-        checkout: checkout_date,
-        nights: nights,
-        roomtype: room_type,
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        gender: gender,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
+    booking = await createRoomBooking(
+      card.cardno,
+      checkin_date,
+      checkout_date,
+      nights,
+      room_type,
+      card.gender,
+      floor_pref,
+      req.user.username,
+      t
     );
-
-    if (booking == undefined) {
-      throw new ApiError(400, 'Failed to book a bed');
-    }
   }
 
-  await t.commit();
-
-  SendMail({
-    email: req.mumukshu.email,
+  sendMail({
+    email: card.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
     template: 'rajSharan',
     context: {
-      name: req.mumukshu.issuedto,
-      bookingid: booking.dataValues.bookingid,
-      checkin: booking.dataValues.checkin,
-      checkout: booking.dataValues.checkout
+      name: card.issuedto,
+      bookingid: booking.bookingid,
+      checkin: booking.checkin,
+      checkout: booking.checkout
     }
   });
 
-  return res.status(201).send({ message: 'booked successfully' });
+  await t.commit();
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const flatBooking = async (req, res) => {
@@ -322,10 +244,10 @@ export const flatBooking = async (req, res) => {
 			
 			Your Room Number will be provided from office upon checkin.<br><br>
 
-			<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Centre
+			<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Center
 			We hope you have a spiritually blissful stay. <br><br>
 			
-			Research Centre Admin office, <br>
+			Research Center Admin office, <br>
 			7875432613 / 9004273512`;
 
   SendMail({
@@ -334,7 +256,7 @@ export const flatBooking = async (req, res) => {
     message
   });
 
-  return res.status(201).send({ message: 'booked successfully' });
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
@@ -401,9 +323,6 @@ export const fetchFlatBookingsByCard = async (req, res) => {
 
 // TODO: update room should be able to change dates too
 export const updateRoomBooking = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
-
   const {
     bookingid,
     cardno,
@@ -414,85 +333,81 @@ export const updateRoomBooking = async (req, res) => {
     status
   } = req.body;
 
-  const old_booking = await RoomBooking.findOne({
-    where: { bookingid: bookingid }
+  const booking = await RoomBooking.findOne({
+    where: { 
+      cardno: cardno,
+      bookingid: bookingid 
+    }
   });
 
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
   // TODO: check if roomno is not taken
-  var room_no;
   if (roomno) {
-    room_no = await RoomDb.findOne({
+    const room = await RoomDb.findOne({
       where: {
         roomno: roomno,
         gender: gender,
         roomtype: room_type
       }
     });
-    if (!room_no)
-      throw new ApiError(404, 'unable to find room with that number');
-    if (room_no == ROOM_BLOCKED)
-      throw new ApiError(403, 'selected room is blocked');
+
+    if (!room) {
+      throw new ApiError(404, 'Unable to find room with that room number, gender and type.');
+    }
+    
+    if (room.roomstatus == ROOM_BLOCKED)
+      throw new ApiError(403, 'Selected room is blocked.');
   }
 
-  const updatedBooking = await RoomBooking.update(
+  await booking.update(
     {
-      roomno: roomno,
-      checkout_date: checkout_date,
+      roomno,
+      // TODO: do we need to update the transaction
+      // to give refunds or take more payment
+      checkout: checkout_date,
       roomtype: room_type,
-      status: status,
+      // Same - if the booking gets cancelled, do we need to handle that
+      status,
       updatedBy: req.user.username
     },
-    { where: { bookingid: bookingid, cardno: cardno }, transaction: t }
+    { transaction: t }
   );
-
-  if (updatedBooking != 1) {
-    throw new ApiError(500, 'Failed to update booking');
-  }
 
   await t.commit();
 
-  return res.status(200).send({ message: 'updated booking successfully' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateFlatBooking = async (req, res) => {
   const { bookingid, cardno, flatno, checkin_date, checkout_date, status } =
     req.body;
 
-  if (await checkFlatAlreadyBooked(req, cardno)) {
-    throw new ApiError(400, 'Already Booked');
+  validateDate(checkin_date, checkout_date);
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const booking = await FlatBooking.findByPk(bookingid);
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const today = moment().format('YYYY-MM-DD');
-  const checkinDate = new Date(req.body.checkin_date);
-  const checkoutDate = new Date(req.body.checkout_date);
-  if (
-    today > req.body.checkin_date ||
-    today > req.body.checkout_date ||
-    checkinDate > checkoutDate
-  ) {
-    throw new ApiError(400, 'Invalid Date');
-  }
-
-  const nights = await calculateNights(
-    req.body.checkin_date,
-    req.body.checkout_date
+  await booking.update(
+    {
+      flatno,
+      checkin: checkin_date,
+      checkout: checkout_date,
+      nights,
+      status,
+      updatedBy: req.user.username
+    }
   );
 
-  const booking = await FlatBooking.findByPk(bookingid);
-
-  if (!booking) {
-    throw new ApiError(404, 'booking not found');
-  }
-
-  booking.flatno = flatno;
-  booking.checkin = checkin_date;
-  booking.checkout = checkout_date;
-  booking.nights = nights;
-  booking.status = status;
-  booking.updatedBy = req.user.username;
-  await booking.save();
-
-  return res.status(201).send({ message: 'booking updated successfully' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const checkinReport = async (req, res) => {
@@ -502,6 +417,7 @@ export const checkinReport = async (req, res) => {
 
   const today = moment().format('YYYY-MM-DD');
 
+  // TODO: include Guest information
   const checkedin = await RoomBooking.findAll({
     include: [CardDb],
     where: {
@@ -514,7 +430,7 @@ export const checkinReport = async (req, res) => {
 
   return res
     .status(200)
-    .send({ message: 'fetched checkin report', data: checkedin });
+    .send({ message: 'Fetched check in report', data: checkedin });
 };
 
 export const checkoutReport = async (req, res) => {
@@ -524,6 +440,7 @@ export const checkoutReport = async (req, res) => {
 
   const today = moment().format('YYYY-MM-DD');
 
+  // TODO: include Guest information
   const checkedout = await RoomBooking.findAll({
     include: [CardDb],
     where: {
@@ -539,114 +456,139 @@ export const checkoutReport = async (req, res) => {
     .send({ message: 'fetched checkout report', data: checkedout });
 };
 
+export const roomList = async (req, res) => {
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
+
+  const result = await RoomDb.findAll({
+    attributes: ['roomno', 'roomtype', 'gender', 'roomstatus'],
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%'
+      }
+    },
+    offset,
+    limit: pageSize
+  });
+
+  return res.status(200).send({ message: 'Success', data: result });
+};
+
 export const blockRoom = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const isBlocked = await RoomDb.findAll({
+  const rooms = await RoomDb.findAll({
     where: {
       roomno: {
-        [Sequelize.Op.like]: `${req.params.roomno}_`
-      }
+        [Sequelize.Op.like]: `${req.params.roomno}%`
+      },
+      roomstatus: { [Sequelize.Op.not]: ROOM_BLOCKED }
     }
   });
 
-  if (isBlocked.length == 0) {
-    throw new ApiError(400, 'room not found');
+  if (rooms.length == 0) {
+    throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
-  for (let i of isBlocked) {
-    if (i.dataValues.roomstatus == ROOM_BLOCKED) {
-      return res.status(400).send({ message: 'room already blocked' });
-    } else {
-      await RoomDb.update(
-        {
-          roomstatus: ROOM_BLOCKED,
-          updatedBy: req.user.username
-        },
-        {
-          where: {
-            roomno: i.dataValues.roomno
-          }
-        },
-        { transaction: t }
-      );
-    }
+
+  for (const room of rooms) {
+    await room.update(
+      {
+        roomstatus: ROOM_BLOCKED,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
   }
 
   await t.commit();
-  return res.status(200).send({ message: 'blocked room successfully' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const unblockRoom = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const isBlocked = await RoomDb.findAll({
+  const rooms = await RoomDb.findAll({
     where: {
       roomno: {
-        [Sequelize.Op.like]: `${req.params.roomno}_`
-      }
+        [Sequelize.Op.like]: `${req.params.roomno}%`
+      }, 
+      roomstatus: ROOM_BLOCKED
     }
   });
 
-  if (isBlocked.length == 0) {
-    throw new ApiError(400, 'room not found');
+  if (rooms.length == 0) {
+    throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
-  for (let i of isBlocked) {
-    if (i.dataValues.roomstatus == ROOM_STATUS_AVAILABLE) {
-      return res.status(400).send({ message: 'room already unblocked' });
-    } else {
-      await RoomDb.update(
-        {
-          roomstatus: ROOM_STATUS_AVAILABLE,
-          updatedBy: req.user.username
-        },
-        {
-          where: {
-            roomno: i.dataValues.roomno
-          }
-        },
-        { transaction: t }
-      );
-    }
+  for (const room of rooms) {
+    await room.update(
+      {
+        roomstatus: ROOM_STATUS_AVAILABLE,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
   }
 
   await t.commit();
-  return res.status(200).send({ message: 'unblocking room successfully' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
-export const blockRC = async (req, res) => {
-  const alreadyBlocked = await BlockDates.findOne({
+export const rcBlockList = async (req, res) => {
+  const today = moment().format('YYYY-MM-DD');
+  const blocked = await BlockDates.findAll({
+    attributes: ['id', 'checkin', 'checkout', 'comments', 'status'],
     where: {
-      checkin: req.body.checkin_date,
-      checkout: req.body.checkout_date
+      checkin: { [Sequelize.Op.gte]: today }
     }
   });
 
-  if (alreadyBlocked)
-    throw new ApiError(500, 'Already blocked on mentioned dates');
+  return res
+    .status(200)
+    .send({ message: 'Fetched RC block list', data: blocked });
+};
+
+export const blockRC = async (req, res) => {
+  const { checkin_date, checkout_date, comments } = req.body;
+
+  const blockedDates = await getBlockedDates(checkin_date, checkout_date);
+
+  if (blockedDates.length > 0) {
+    throw new ApiError(400, 
+      'Already blocked on one or more of the given dates', 
+      blockedDates
+    );
+  }
 
   const block = await BlockDates.create({
-    checkin: req.body.checkin_date,
-    checkout: req.body.checkout_date,
-    comments: req.body.comments,
+    checkin: checkin_date,
+    checkout: checkout_date,
+    comments,
     updatedBy: req.user.username
   });
 
   if (!block) {
-    throw new ApiError(500, 'Error occured while blocking RC');
+    throw new ApiError(400, 'Error occured while blocking RC');
   }
 
-  return res.status(200).send({ message: 'Blocked RC Successfully' });
+  return res.status(200).send({ message: 'Blocked RC successfully' });
 };
 
 export const unblockRC = async (req, res) => {
   const blocked = await BlockDates.findByPk(req.params.id);
-  blocked.updatedBy = req.user.username;
-  blocked.status = STATUS_INACTIVE;
-  await blocked.save();
-  return res.status(200).send({ message: 'Unblocked RC' });
+
+  await blocked.update(
+    {
+      status: STATUS_INACTIVE,
+      updatedBy: req.user.username
+    },
+  );
+
+  return res.status(200).send({ message: 'Unblocked RC successfully' });
 };
 
 export const occupancyReport = async (req, res) => {
@@ -654,12 +596,13 @@ export const occupancyReport = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
+  // TODO: include guest information
   const result = await RoomBooking.findAll({
     attributes: ['bookingid', 'roomno', 'checkin', 'checkout', 'nights'],
     include: [
       {
         model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'centre'],
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
         where: {
           res_status: STATUS_MUMUKSHU
         }
@@ -679,113 +622,61 @@ export const ReservationReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
 
-  const reservations = await RoomBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
-        required: true
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'roomtype',
-      'roomno',
-      'checkin',
-      'checkout',
-      'status',
-      'nights'
-    ],
-    where: {
-      checkin: { [Sequelize.Op.between]: [start_date, end_date] },
-      status: { [Sequelize.Op.not]: STATUS_WAITING }
-    },
-    order: [
-      ['checkin', 'ASC'],
-      ['roomno', 'ASC']
-    ],
-    offset,
-    limit: pageSize
-  });
+  const reservations = await roomBookingReport(
+    start_date,
+    end_date,
+    page,
+    pageSize,
+    // STATUS_WAITING,
+    ROOM_STATUS_PENDING_CHECKIN,
+    ROOM_STATUS_CHECKEDIN,
+    // TODO: should we include this?
+    ROOM_STATUS_CHECKEDOUT 
+    // STATUS_CANCELLED,
+    // STATUS_ADMIN_CANCELLED
+  )
 
   return res
     .status(200)
-    .send({ message: 'fetched room reservation report', data: reservations });
+    .send({ message: 'Fetched room reservation report', data: reservations });
 };
 
 export const CancellationReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  const cancellations = await RoomBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
-        required: true
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'roomtype',
-      'checkin',
-      'checkout',
-      'status',
-      'nights',
-      'updatedAt'
-    ],
-    where: {
-      checkin: { [Sequelize.Op.between]: [start_date, end_date] },
-      status: { [Sequelize.Op.eq]: STATUS_CANCELLED }
-    },
-    order: [['checkin', 'ASC']],
-    offset,
-    limit: pageSize
-  });
+  
+  const cancellations = await roomBookingReport(
+    start_date,
+    end_date,
+    page,
+    pageSize,
+    STATUS_CANCELLED, 
+    STATUS_ADMIN_CANCELLED
+  )
 
   return res
     .status(200)
-    .send({ message: 'fetched room cancellation report', data: cancellations });
+    .send({ message: 'Fetched room cancellation report', data: cancellations });
 };
 
 export const WaitlistReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
 
-  const waiting = await RoomBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno', 'centre'],
-        required: true
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'roomtype',
-      'checkin',
-      'checkout',
-      'status',
-      'nights'
-    ],
-    where: {
-      checkin: { [Sequelize.Op.between]: [start_date, end_date] },
-      status: { [Sequelize.Op.eq]: STATUS_WAITING }
-    },
-    order: [['checkin', 'ASC']],
-    offset,
-    limit: pageSize
-  });
+  const waiting = await roomBookingReport(
+    start_date,
+    end_date,
+    page,
+    pageSize,
+    STATUS_WAITING
+  )
 
   return res
     .status(200)
-    .send({ message: 'fetched room waiting report', data: waiting });
+    .send({ message: 'Fetched room waiting report', data: waiting });
 };
 
 export const dayWiseGuestCountReport = async (req, res) => {
@@ -797,7 +688,7 @@ export const dayWiseGuestCountReport = async (req, res) => {
 
   var data = [];
 
-  for (let i of allDates) {
+  for (let date of allDates) {
     const daywise_report = await RoomBooking.findAll({
       attributes: [
         [
@@ -816,25 +707,67 @@ export const dayWiseGuestCountReport = async (req, res) => {
         ]
       ],
       where: {
-        checkin: { [Sequelize.Op.lte]: i },
-        checkout: { [Sequelize.Op.gt]: i },
-        status: {
-          [Sequelize.Op.in]: ['pending checkin', 'checkedin', 'checkedout']
-        }
+        checkin: { [Sequelize.Op.lte]: date },
+        checkout: { [Sequelize.Op.gt]: date },
+        status: [
+          ROOM_STATUS_PENDING_CHECKIN,
+          ROOM_STATUS_CHECKEDIN,
+          ROOM_STATUS_CHECKEDOUT
+        ]
       },
       group: 'checkin',
       offset,
       limit: pageSize
     });
+
     if (daywise_report[0]) {
       data.push({
-        date: i,
+        date: date,
         nac: daywise_report[0].dataValues.nac,
         ac: daywise_report[0].dataValues.ac
       });
     }
   }
+
   return res
     .status(200)
-    .send({ message: 'fetched daywise report', data: data });
+    .send({ message: 'Fetched daywise report', data: data });
 };
+
+async function roomBookingReport(
+  startDate, 
+  endDate,
+  page, 
+  pageSize,
+  ...statuses
+) {
+  const offset = (page - 1) * pageSize;
+  
+  const data = await RoomBooking.findAll({
+    include: [
+      {
+        // TODO: include guest information
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        required: true
+      }
+    ],
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'checkin',
+      'checkout',
+      'status',
+      'nights'
+    ],
+    where: {
+      checkin: { [Sequelize.Op.between]: [startDate, endDate] },
+      status: statuses
+    },
+    order: [['checkin', 'ASC']],
+    offset,
+    limit: pageSize
+  });
+
+  return data;
+}

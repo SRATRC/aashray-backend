@@ -3,8 +3,12 @@ import {
   MaintenanceDb,
   Departments
 } from '../../models/associations.js';
+import {
+  ROOM_STATUS_CHECKEDIN,
+  STATUS_RESIDENT
+} from '../../config/constants.js';
+import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
-import { ROOM_STATUS_CHECKEDIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
@@ -13,22 +17,27 @@ export const CreateRequest = CatchAsync(async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const isCheckedin = await RoomBooking.findOne({
-    where: {
-      cardno: req.user.cardno,
-      status: ROOM_STATUS_CHECKEDIN
+  if (req.user.res_status != STATUS_RESIDENT) {
+    const isCheckedin = await RoomBooking.findOne({
+      where: {
+        cardno: req.user.cardno,
+        status: ROOM_STATUS_CHECKEDIN
+      }
+    });
+
+    if (!isCheckedin) {
+      throw new APIError(400, 'You are not checked in');
     }
-  });
-  if (!isCheckedin) {
-    throw new APIError(400, 'You are not checked in');
   }
 
   const request = await MaintenanceDb.create(
     {
+      bookingid: uuidv4(),
       requested_by: req.user.cardno,
       department: req.body.department,
       work_detail: req.body.work_detail,
-      area_of_work: req.body.area_of_work || null
+      area_of_work: req.body.area_of_work || null,
+      updatedBy: 'USER'
     },
     { transaction: t }
   );
@@ -60,9 +69,10 @@ export const CreateRequest = CatchAsync(async (req, res) => {
     }
   });
 
+  await t.commit();
+
   return res.status(201).send({
-    message: 'successfully created request',
-    data: request
+    message: 'successfully created request'
   });
 });
 
@@ -70,11 +80,22 @@ export const ViewRequest = CatchAsync(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const status = req.query.status?.toLowerCase() || 'all';
+
+  const whereClause = {
+    requested_by: req.user.cardno
+  };
+
+  if (status != 'all') {
+    whereClause.status = status;
+  }
 
   const data = await MaintenanceDb.findAll({
-    where: {
-      requested_by: req.user.cardno
+    where: whereClause,
+    attributes: {
+      exclude: ['updatedAt', 'updatedBy']
     },
+    order: [['createdAt', 'DESC']],
     offset,
     limit: pageSize
   });

@@ -4,10 +4,9 @@ import {
   FetchUpcoming,
   BookUtsav,
   BookGuestUtsav,
+  BookMumukshuUtsav,
   ViewUtsavBookings,
-  CancelUtsavBooking,
-  ViewUtsavGuestBookings,
-  CancelUtsavGuestBooking
+  CancelUtsavBooking
 } from '../../controllers/client/utsavBooking.controller.js';
 import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -15,11 +14,10 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.use(validateCard);
 
 router.get('/upcoming', CatchAsync(FetchUpcoming));
-router.get('/booking/:cardno', CatchAsync(ViewUtsavBookings));
+router.get('/booking', CatchAsync(ViewUtsavBookings));
 router.post('/booking', CatchAsync(BookUtsav));
 router.delete('/booking', CatchAsync(CancelUtsavBooking));
-router.get('/guest', CatchAsync(ViewUtsavGuestBookings));
 router.post('/guest', CatchAsync(BookGuestUtsav));
-router.delete('/guest', CatchAsync(CancelUtsavGuestBooking));
+router.post('/mumukshu', CatchAsync(BookMumukshuUtsav));
 
 export default router;

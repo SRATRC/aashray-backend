@@ -10,76 +10,84 @@ import {
   BREAKFAST_PRICE,
   LUNCH_PRICE,
   DINNER_PRICE,
-  TYPE_EXPENSE
+  TYPE_EXPENSE,
+  MSG_CANCEL_SUCCESSFUL,
+  ERR_BOOKING_NOT_FOUND,
+  ERR_INVALID_MEAL_TIME,
+  ERR_FOOD_ALREADY_BOOKED,
+  ERR_ROOM_MUST_BE_BOOKED,
+  MSG_BOOKING_SUCCESSFUL,
+  MSG_FETCH_SUCCESSFUL
 } from '../../config/constants.js';
 import {
-  checkRoomAlreadyBooked,
   checkFlatAlreadyBooked,
-  isFoodBooked
+  checkSpecialAllowance,
+  isFoodBooked,
+  validateDate
 } from '../helper.js';
+import {
+  checkRoomAlreadyBooked
+} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
+import { userIsPR } from '../../helpers/card.helper.js';
+import { bookFoodForMumukshus, createGroupFoodRequest } from '../../helpers/foodBooking.helper.js';
 
 export const issuePlate = async (req, res) => {
-  const currentTime = moment();
-  const breakfastEnd = moment().hour(10).minute(0).second(0); // Adjust timings as needed
-  const lunchEnd = moment().hour(14).minute(0).second(0);
-  const dinnerEnd = moment().hour(19).minute(0).second(0);
+  const currentTime = moment.utc();
+  const mealTimes = {
+    breakfast: moment.utc().hour(4).minute(30).second(0),
+    lunch: moment.utc().hour(8).minute(30).second(0),
+    dinner: moment.utc().hour(13).minute(30).second(0)
+  };
 
-  const food_booking = await FoodDb.findOne({
+  const booking = await FoodDb.findOne({
     where: {
       cardno: req.params.cardno,
       date: currentTime.format('YYYY-MM-DD')
     }
   });
 
-  if (!food_booking) throw new ApiError(404, 'booking not found');
-
-  if (currentTime.isBefore(breakfastEnd)) {
-    if (food_booking.dataValues.breakfast == 1) {
-      if (food_booking.dataValues.breakfast_plate_issued == 0) {
-        food_booking.breakfast_plate_issued = 1;
-        await food_booking.save();
-      } else {
-        throw new ApiError(400, 'Plate already issued');
-      }
-    } else {
-      throw new ApiError(404, 'Breakfast not booked');
-    }
-  } else if (
-    currentTime.isBefore(lunchEnd) &&
-    currentTime.isAfter(breakfastEnd)
-  ) {
-    if (food_booking.dataValues.lunch == 1) {
-      if (food_booking.dataValues.lunch_plate_issued == 0) {
-        food_booking.lunch_plate_issued = 1;
-        await food_booking.save();
-      } else {
-        throw new ApiError(400, 'Plate already issued');
-      }
-    } else {
-      throw new ApiError(404, 'Lunch not booked');
-    }
-  } else if (currentTime.isBefore(dinnerEnd) && currentTime.isAfter(lunchEnd)) {
-    if (food_booking.dataValues.dinner == 1) {
-      if (food_booking.dataValues.dinner_plate_issued == 0) {
-        food_booking.dinner_plate_issued = 1;
-        await food_booking.save();
-      } else {
-        throw new ApiError(400, 'Plate already issued');
-      }
-    } else {
-      throw new ApiError(404, 'Dinner not booked');
-    }
-  } else {
-    throw new ApiError(404, 'Invalid meal time');
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  return res.status(200).send({ message: 'Plate issued successfully' });
+  // Determine current meal period
+  let currentMeal = null;
+  for (const meal of ['breakfast', 'lunch', 'dinner']) {
+    if (currentTime.isSameOrBefore(mealTimes[meal])) {
+      currentMeal = meal;
+      break;
+    }
+  }
+
+  if (!currentMeal) {
+    throw new ApiError(400, ERR_INVALID_MEAL_TIME);
+  }
+
+  // Check if meal is booked
+  if (!booking[currentMeal]) {
+    throw new ApiError(400, `${currentMeal} not booked`);
+  }
+
+  // Check if plate is already issued
+  const plateField = `${currentMeal}_plate_issued`;
+  if (booking[plateField]) {
+    throw new ApiError(400, `Plate for ${currentMeal} already issued`);
+  }
+
+  // Issue plate
+  await booking.update(
+    {
+      [plateField]: true
+    }
+  );
+
+  return res.status(200).send({ message: `Plate for ${currentMeal} issued successfully` });
 };
 
 export const physicalPlatesIssued = async (req, res) => {
@@ -94,7 +102,7 @@ export const physicalPlatesIssued = async (req, res) => {
   if (alreadyExists)
     throw new ApiError(
       400,
-      'Physical plate count already exists for given date and type'
+      `Physical plate count already exists for ${type} on ${date}`
     );
 
   await FoodPhysicalPlate.create({
@@ -105,8 +113,8 @@ export const physicalPlatesIssued = async (req, res) => {
   });
 
   return res
-    .status(201)
-    .send({ message: 'successfully added physical plate count' });
+    .status(200)
+    .send({ message: 'Added plate count successfully' });
 };
 
 export const fetchPhysicalPlateIssued = async (req, res) => {
@@ -122,161 +130,145 @@ export const fetchPhysicalPlateIssued = async (req, res) => {
 
   return res
     .status(200)
-    .send({ message: 'fetched physical plate count', data: data });
+    .send({ message: MSG_FETCH_SUCCESSFUL, data: data });
 };
 
 export const bookFoodForMumukshu = async (req, res) => {
-  if (await isFoodBooked(req)) {
-    return res
-      .status(200)
-      .send({ message: 'Food Already booked on one on more of the dates' });
-  }
+  const { 
+    cardno, 
+    start_date, 
+    end_date, 
+    breakfast, 
+    lunch,
+    dinner,
+    spicy,
+    high_tea
+   } = req.body;
 
-  if (
-    !(
-      (await checkRoomAlreadyBooked(
-        req.body.start_date,
-        req.body.end_date,
-        req.body.cardno
-      )) ||
-      (await checkFlatAlreadyBooked(
-        req.body.start_date,
-        req.body.end_date,
-        req.body.cardno
-      ))
-    )
-  ) {
-    throw new ApiError(
-      403,
-      'You do not have a room booked on one or more dates selected'
-    );
-  }
+   var t = await database.transaction();
+   req.transaction = t;
 
-  const allDates = getDates(req.body.start_date, req.body.end_date);
+  const mumukshuGroup = createGroupFoodRequest(
+    cardno,
+    breakfast,
+    lunch,
+    dinner, 
+    spicy,
+    high_tea
+  );
+  
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    null,
+    null,
+    req.user.username,
+    t
+  );
 
-  var food_data = [];
-  for (var date of allDates) {
-    food_data.push({
-      cardno: req.body.cardno,
-      date: date,
-      breakfast: req.body.breakfast,
-      lunch: req.body.lunch,
-      dinner: req.body.dinner,
-      hightea: req.body.high_tea,
-      spicy: req.body.spicy,
-      plateissued: 0,
-      updatedBy: req.user.username
-    });
-  }
-
-  await FoodDb.bulkCreate(food_data);
-
-  return res.status(201).send({
-    message: 'Food Booked successfully'
-  });
+  await t.commit();
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const cancelFoodByCard = async (req, res) => {
-  const updateData = req.body.food_data;
+  const { food_data, cardno } = req.body;
 
   const t = await database.transaction();
 
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await FoodDb.findOne({
+  for (const item of food_data) {
+    const booking = await FoodDb.findOne({
       where: {
-        cardno: req.body.cardno,
-        date: req.body.food_data[i].date
+        cardno: cardno,
+        date: item.date
       }
     });
-    if (isAvailable) {
-      isAvailable.breakfast = req.body.food_data[i].breakfast;
-      isAvailable.lunch = req.body.food_data[i].lunch;
-      isAvailable.dinner = req.body.food_data[i].dinner;
-      await isAvailable.save({ transaction: t });
+    if (booking) {
+      booking.breakfast = item.breakfast;
+      booking.lunch = item.lunch;
+      booking.dinner = item.dinner;
+      await booking.save({ transaction: t });
     }
   }
-
-  await FoodDb.destroy({
-    where: {
-      breakfast: false,
-      lunch: false,
-      dinner: false
-    },
-    transaction: t
-  });
 
   await t.commit();
   return res
     .status(200)
-    .send({ message: 'Successfully Canceled Food Booking' });
+    .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const cancelFoodByMob = async (req, res) => {
-  const updateData = req.body.food_data;
+  const { food_data, mobno } = req.body;
+
+  const card = await CardDb.findOne({
+    where: { mobno }
+  });
+
+  if (!card) {
+    throw new ApiError(404, 'No user found with given mobile number');
+  }
 
   const t = await database.transaction();
 
-  const userData = await CardDb.findOne({
-    where: {
-      mobno: req.body.mobno
-    }
-  });
-  if (!userData)
-    throw new ApiError(404, 'No user found with given mobile number');
-
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await FoodDb.findOne({
+  for (const item of food_data) {
+    const booking = await FoodDb.findOne({
       where: {
-        cardno: userData.dataValues.cardno,
-        date: req.body.food_data[i].date
+        cardno: card.cardno,
+        date: item.date
       }
     });
-    if (isAvailable) {
-      isAvailable.breakfast = req.body.food_data[i].breakfast;
-      isAvailable.lunch = req.body.food_data[i].lunch;
-      isAvailable.dinner = req.body.food_data[i].dinner;
-      await isAvailable.save({ transaction: t });
+
+    if (booking) {
+      booking.breakfast = item.breakfast;
+      booking.lunch = item.lunch;
+      booking.dinner = item.dinner;
+      await booking.save({ transaction: t });
     }
   }
-
-  await FoodDb.destroy({
-    where: {
-      breakfast: false,
-      lunch: false,
-      dinner: false
-    },
-    transaction: t
-  });
 
   await t.commit();
   return res
     .status(200)
-    .send({ message: 'Successfully Canceled Food Booking' });
+    .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const bookFoodForGuest = async (req, res) => {
-  const { start_date, end_date, guest_count, breakfast, lunch, dinner } =
-    req.body;
+  const { 
+    start_date, 
+    end_date, 
+    breakfast, 
+    lunch, 
+    dinner, 
+    spicy, 
+    hightea, 
+    guests 
+  } = req.body;
 
   const t = await database.transaction();
   req.transaction = t;
 
+  validateDate(start_date, end_date);
   const allDates = getDates(start_date, end_date);
+  
   const days = allDates.length;
 
+  // TODO: get guest details
+  // TODO: take phone number of the Mumukshu
   var food_data = [];
   const bookingid = uuidv4();
-  for (var date of allDates) {
-    food_data.push({
-      bookingid: bookingid,
-      cardno: req.body.cardno,
-      date: date,
-      guest_count: guest_count,
-      breakfast: req.body.breakfast,
-      lunch: req.body.lunch,
-      dinner: req.body.dinner,
-      updatedBy: req.user.username
-    });
+  for (const date of allDates) {
+    for (const guestId of guests) {
+      food_data.push({
+        bookingid: bookingid,
+        cardno: req.body.cardno,
+        date: date,
+        guest_count: guest_count,
+        breakfast: req.body.breakfast,
+        lunch: req.body.lunch,
+        dinner: req.body.dinner,
+        updatedBy: req.user.username
+      });
+    }
   }
 
   await GuestFoodDb.bulkCreate(food_data, { transaction: t });
@@ -301,7 +293,7 @@ export const bookFoodForGuest = async (req, res) => {
 
   await t.commit();
 
-  return res.status(201).send({ message: 'successfully booked guest food' });
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const cancelFoodForGuest = async (req, res) => {
@@ -412,13 +404,12 @@ GROUP BY
 
   const physical_plates = await FoodPhysicalPlate.findAll({
     attributes: ['date', 'type', 'count'],
-    where: {
-      date: date
-    }
+    where: { date }
   });
+  
   const data = {
     report: report[0],
-    physical_plates: physical_plates ? physical_plates : []
+    physical_plates
   };
 
   return res.status(200).send({ data: data });
@@ -459,6 +450,14 @@ export const fetchMenu = async (req, res) => {
 export const addMenu = async (req, res) => {
   const { date, breakfast, lunch, dinner } = req.body;
 
+  const menu = await Menu.findOne({
+    where: { date }
+  });
+
+  if (menu) {
+    throw new ApiError(400, 'Menu already exists for given date');
+  }
+
   await Menu.create({
     date,
     breakfast,
@@ -467,30 +466,31 @@ export const addMenu = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  return res.status(200).send({ message: 'Menu Added' });
+  return res.status(200).send({ message: 'Menu added' });
 };
 
 export const updateMenu = async (req, res) => {
   const { old_date, date, breakfast, lunch, dinner } = req.body;
 
-  const [itemsUpdated] = await Menu.update(
+  const menu = await Menu.findOne({
+    where: { date: old_date }
+  });
+
+  if (!menu) {
+    throw new ApiError(404, 'Menu not found');
+  }
+
+  await menu.update(
     {
       date,
       breakfast,
       lunch,
       dinner,
       updatedBy: req.user.username
-    },
-    {
-      where: {
-        date: old_date
-      }
     }
   );
 
-  if (itemsUpdated == 0) throw new ApiError(500, 'Menu Item not found');
-
-  return res.status(200).send({ message: 'Menu Item Updated' });
+  return res.status(200).send({ message: 'Menu updated' });
 };
 
 export const deleteMenu = async (req, res) => {
@@ -502,7 +502,7 @@ export const deleteMenu = async (req, res) => {
     }
   });
 
-  if (item == 0) throw new ApiError(500, 'Menu Item not found');
+  if (item == 0) throw new ApiError(404, 'Menu not found');
 
-  return res.status(200).send({ message: 'Menu Item Deleted' });
+  return res.status(200).send({ message: 'Menu deleted' });
 };
