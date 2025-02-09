@@ -170,7 +170,22 @@ export const CancelFood = async (req, res) => {
   const validFoodData = food_data.filter((item) => item.date > today + 1);
 
   const cancellationPromises = validFoodData.map(async (item) => {
-    const { date, mealType, bookedFor, id } = item;
+    const { date, mealType, bookedFor } = item;
+
+    // Fetch the booking from the database to get the id
+    const booking = await FoodDb.findOne({
+      where: {
+        cardno,
+        date,
+        ...(bookedFor !== null && { guest: bookedFor })
+      }
+    });
+
+    if (!booking) {
+      return; // Skip if no matching booking found
+    }
+
+    const bookingId = booking.id;
 
     // Create the update object: setting the specific meal to 0 (cancelled)
     const updateFields = {};
@@ -178,19 +193,13 @@ export const CancelFood = async (req, res) => {
     if (mealType === 'lunch') updateFields.lunch = 0;
     if (mealType === 'dinner') updateFields.dinner = 0;
 
-    const whereCondition = {
-      cardno,
-      date,
-      ...(bookedFor !== null && { guest: bookedFor })
-    };
-
     // Cancel the meal booking
     await FoodDb.update(updateFields, {
-      where: whereCondition,
+      where: { id: bookingId },
       transaction: t
     });
 
-    // Handle guest meal transaction cancelation
+    // Handle guest meal transaction cancellation
     if (bookedFor) {
       const mealTypeMapping = {
         breakfast: TYPE_GUEST_BREAKFAST,
@@ -202,32 +211,37 @@ export const CancelFood = async (req, res) => {
       const transaction = await Transactions.findOne({
         where: {
           cardno,
-          bookingid: id,
+          bookingid: bookingId,
           category: mealTypeMapping[mealType]
         }
       });
 
-      if (transaction.status == STATUS_PAYMENT_PENDING) {
-        await transaction.update(
-          { status: STATUS_CANCELLED },
-          { transaction: t }
-        );
-      } else if (transaction.status == STATUS_PAYMENT_COMPLETED) {
-        credits += transaction.amount;
-        await transaction.update(
-          { status: STATUS_CREDITED },
-          { transaction: t }
-        );
+      if (transaction) {
+        if (transaction.status === STATUS_PAYMENT_PENDING) {
+          await transaction.update(
+            { status: STATUS_CANCELLED },
+            { transaction: t }
+          );
+        } else if (transaction.status === STATUS_PAYMENT_COMPLETED) {
+          credits += transaction.amount;
+          await transaction.update(
+            { status: STATUS_CREDITED },
+            { transaction: t }
+          );
+        }
       }
     }
+  });
 
+  await Promise.all(cancellationPromises);
+
+  // Update card credits after all cancellations are processed
+  if (credits > 0) {
     await CardDb.increment(
       { credits: credits },
       { where: { cardno: cardno }, transaction: t }
     );
-  });
-
-  await Promise.all(cancellationPromises);
+  }
 
   // Delete rows where breakfast, lunch, and dinner are all 0 (no meals left)
   await FoodDb.destroy({
