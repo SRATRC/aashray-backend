@@ -16,7 +16,6 @@ import WifiDb from './wifi.model.js';
 import UtsavBooking from './utsav_boking.model.js';
 import UtsavGuestBooking from './utsav_guest_booking.js';
 import UtsavBookingTransaction from './utsav_booking_transaction.model.js';
-import UtsavGuestBookingTransaction from './utsav_guest_booking_transaction.model.js';
 import UtsavDb from './utsav_db.model.js';
 import UtsavPackagesDb from './utsav_packages.model.js';
 import AdminUsers from './admin_users.model.js';
@@ -91,12 +90,6 @@ CardDb.hasMany(UtsavGuestBooking, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(UtsavBookingTransaction, {
-  foreignKey: 'cardno',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-CardDb.hasMany(UtsavGuestBookingTransaction, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -273,20 +266,6 @@ UtsavBookingTransaction.belongsTo(UtsavBooking, {
   foreignKey: 'bookingid',
   targetKey: 'bookingid'
 });
-UtsavGuestBookingTransaction.belongsTo(CardDb, {
-  foreignKey: 'cardno',
-  targetKey: 'cardno'
-});
-UtsavGuestBooking.hasMany(UtsavGuestBookingTransaction, {
-  foreignKey: 'bookingid',
-  sourceKey: 'bookingid',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-UtsavGuestBookingTransaction.belongsTo(UtsavGuestBooking, {
-  foreignKey: 'bookingid',
-  targetKey: 'bookingid'
-});
 UtsavDb.hasMany(UtsavBooking, {
   foreignKey: 'utsavid',
   sourceKey: 'id',
@@ -437,7 +416,6 @@ export {
   UtsavBooking,
   UtsavGuestBooking,
   UtsavBookingTransaction,
-  UtsavGuestBookingTransaction,
   UtsavPackagesDb,
   AdminRoles,
   AdminUsers,
