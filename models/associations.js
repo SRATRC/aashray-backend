@@ -1,7 +1,6 @@
 import CardDb from './card.model.js';
 import GateRecord from './gate_record.model.js';
 import FoodDb from './food_db.model.js';
-import GuestFoodTransactionDb from './guest_food_transaction.model.js';
 import FoodPhysicalPlate from './food_physical_plate.model.js';
 import FlatDb from './flatdb.model.js';
 import FlatBooking from './flat_booking.model.js';
@@ -29,7 +28,6 @@ import Countries from './countries.model.js';
 import States from './states.model.js';
 import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
-import GuestFoodDb from './guest_food_db.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -39,12 +37,6 @@ CardDb.hasMany(GateRecord, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(FoodDb, {
-  foreignKey: 'cardno',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-CardDb.hasMany(GuestFoodDb, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -137,10 +129,6 @@ FoodDb.belongsTo(CardDb, {
 FoodDb.belongsTo(GuestDb, {
   foreignKey: 'guest',
   targetKey: 'id'
-});
-GuestFoodDb.belongsTo(CardDb, {
-  foreignKey: 'cardno',
-  targetKey: 'cardno'
 });
 
 // Room
@@ -417,10 +405,6 @@ GuestDb.hasMany(FoodDb, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
-GuestFoodDb.belongsTo(GuestDb, {
-  foreignKey: 'guest',
-  targetKey: 'id'
-});
 GuestDb.hasMany(RoomBooking, {
   foreignKey: 'guest',
   sourceKey: 'id'
@@ -441,8 +425,6 @@ export {
   MaintenanceDb,
   GateRecord,
   FoodDb,
-  GuestFoodDb,
-  GuestFoodTransactionDb,
   FoodPhysicalPlate,
   RoomBooking,
   RoomDb,

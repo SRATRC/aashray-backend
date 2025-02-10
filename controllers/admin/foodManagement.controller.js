@@ -1,40 +1,24 @@
 import {
   CardDb,
   FoodDb,
-  GuestFoodDb,
-  GuestFoodTransactionDb,
   FoodPhysicalPlate,
   Menu
 } from '../../models/associations.js';
 import {
-  BREAKFAST_PRICE,
-  LUNCH_PRICE,
-  DINNER_PRICE,
-  TYPE_EXPENSE,
   MSG_CANCEL_SUCCESSFUL,
   ERR_BOOKING_NOT_FOUND,
   ERR_INVALID_MEAL_TIME,
-  ERR_FOOD_ALREADY_BOOKED,
-  ERR_ROOM_MUST_BE_BOOKED,
   MSG_BOOKING_SUCCESSFUL,
   MSG_FETCH_SUCCESSFUL
 } from '../../config/constants.js';
 import {
-  checkFlatAlreadyBooked,
-  checkSpecialAllowance,
-  isFoodBooked,
   validateDate
 } from '../helper.js';
-import {
-  checkRoomAlreadyBooked
-} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
-import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
-import { userIsPR } from '../../helpers/card.helper.js';
 import { bookFoodForMumukshus, cancelFood, createGroupFoodRequest } from '../../helpers/foodBooking.helper.js';
 
 export const issuePlate = async (req, res) => {
@@ -256,43 +240,6 @@ export const bookFoodForGuest = async (req, res) => {
   const days = allDates.length;
 
   // TODO: get guest details
-  // TODO: take phone number of the Mumukshu
-  var food_data = [];
-  const bookingid = uuidv4();
-  for (const date of allDates) {
-    for (const guestId of guests) {
-      food_data.push({
-        bookingid: bookingid,
-        cardno: req.body.cardno,
-        date: date,
-        guest_count: guest_count,
-        breakfast: req.body.breakfast,
-        lunch: req.body.lunch,
-        dinner: req.body.dinner,
-        updatedBy: req.user.username
-      });
-    }
-  }
-
-  await GuestFoodDb.bulkCreate(food_data, { transaction: t });
-
-  const food_cost =
-    (breakfast ? BREAKFAST_PRICE : 0) +
-    (lunch ? LUNCH_PRICE : 0) +
-    (dinner ? DINNER_PRICE : 0);
-  const amount = food_cost * guest_count * days;
-
-  await GuestFoodTransactionDb.create(
-    {
-      cardno: req.body.cardno,
-      bookingid: bookingid,
-      type: TYPE_EXPENSE,
-      amount: amount,
-      description: `Food Booking for ${guest_count} guests`,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
 
   await t.commit();
 
