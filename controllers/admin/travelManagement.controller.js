@@ -10,19 +10,23 @@ import sendMail from '../../utils/sendMail.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import {
+  ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
   MSG_UPDATE_SUCCESSFUL,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_REFUND,
   STATUS_CANCELLED,
+  STATUS_CASH_COMPLETED,
   STATUS_CONFIRMED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
   TRAVEL_PRICE,
   TYPE_EXPENSE,
-  TYPE_REFUND
+  TYPE_REFUND,
+  TYPE_TRAVEL
 } from '../../config/constants.js';
+import { adminCancelTransaction, createPendingTransaction } from '../../helpers/transactions.helper.js';
 
 //TODO: send mail
 
@@ -57,6 +61,10 @@ export const fetchUpcomingBookings = async (req, res) => {
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
 
+// valid statuses:
+// 1. waiting to payment pending
+// 2. waiting to admin cancelled
+// 3. confirmed to admin cancelled
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status } = req.body;
 
@@ -81,16 +89,61 @@ export const updateBookingStatus = async (req, res) => {
     throw new ApiError(400, 'Status is same as before');
   }
 
+  if (
+    booking.status == STATUS_ADMIN_CANCELLED ||
+    booking.status == STATUS_CANCELLED
+  ) {
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+
   var transaction = await Transactions.findOne({
     where: { bookingid: bookingid }
   });
 
   switch(status) {
     case STATUS_CONFIRMED:
+    // Transaction must be payment completed at this point
+    // because Virag Bhai only confirms once the payment is made
+      // if (!transaction) {
+      //   transaction = await createPendingTransaction(
+      //     booking.cardno,
+      //     bookingid,
+      //     TYPE_TRAVEL,
+      //     TRAVEL_PRICE,
+      //     req.user.username,
+      //     t
+      //   );
+      // }
+
+    // await useCredit(
+    //   transaction.cardno,
+    //   booking,
+    //   transaction,
+    //   TRAVEL_PRICE,
+    //   req.user.username,
+    //   t
+    // );
+
+    // // After applying credits, if the status is still payment pending
+    // // then accept the UPI or cash payment and mark is complete.
+    // if (transaction.status == STATUS_PAYMENT_PENDING) {
+    //   await transaction.update(
+    //     {
+    //       upi_ref: upi_ref || 'NA',
+    //       status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+    //       updatedBy: req.user.username
+    //     },
+    //     { transaction: t }
+    //   );
+    // }
     
+    break;
 
     case STATUS_ADMIN_CANCELLED:
-
+      if (transaction) {
+        await adminCancelTransaction(req.user, transaction, t);
+      }
+      break;
 
   }
 

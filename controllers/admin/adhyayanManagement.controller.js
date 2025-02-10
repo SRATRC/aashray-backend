@@ -262,6 +262,10 @@ export const adhyayanStatusUpdate = async (req, res) => {
   // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
   // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
   // 4. Booking Status = CANCELLED OR ADMIN_CANCELLED, Transaction is Not Created or Status = CANCELLED OR ADMIN_CANCELLED
+
+  // waiting to confirmed
+  // waiting to payment pending -- not needed
+  // 
   switch (status) {
     // Only Waiting & Payment Pending booking can be changed to
     // Confirmed 

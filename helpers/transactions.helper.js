@@ -113,6 +113,7 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
       if (amount > 0) {
+        // TODO: no credit for Adhyayan
         await addCredit(user, transaction, amount, t);
         status = STATUS_CREDITED;
       }
