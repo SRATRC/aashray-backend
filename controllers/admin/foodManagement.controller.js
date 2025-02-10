@@ -180,9 +180,11 @@ export const cancelFoodByCard = async (req, res) => {
     const booking = await FoodDb.findOne({
       where: {
         cardno: cardno,
+        guest: null,
         date: item.date
       }
     });
+
     if (booking) {
       booking.breakfast = item.breakfast;
       booking.lunch = item.lunch;
@@ -214,6 +216,7 @@ export const cancelFoodByMob = async (req, res) => {
     const booking = await FoodDb.findOne({
       where: {
         cardno: card.cardno,
+        guest: null,
         date: item.date
       }
     });
