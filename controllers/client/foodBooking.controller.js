@@ -1,23 +1,15 @@
 import {
-  CardDb,
   FoodDb,
   GuestDb,
-  Menu,
-  Transactions
+  Menu
 } from '../../models/associations.js';
 import {
-  MSG_CANCEL_SUCCESSFUL,
-  STATUS_CANCELLED,
-  STATUS_CREDITED,
-  STATUS_PAYMENT_COMPLETED,
-  STATUS_PAYMENT_PENDING,
-  TYPE_GUEST_BREAKFAST,
-  TYPE_GUEST_DINNER,
-  TYPE_GUEST_LUNCH
+  MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize, { col, QueryTypes } from 'sequelize';
 import moment from 'moment';
+import { cancelFood } from '../../helpers/foodBooking.helper.js';
 
 const mealTimes = {
   breakfast: '7:30 AM - 9:00 AM',
@@ -159,99 +151,14 @@ export const CancelFood = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  let credits = 0;
-
   const { cardno, food_data } = req.body;
-  if (!cardno || !Array.isArray(food_data)) {
-    return res.status(400).json({ message: 'Invalid request data' });
-  }
 
-  const today = moment().format('YYYY-MM-DD');
-  const validFoodData = food_data.filter((item) => item.date > today + 1);
-
-  const cancellationPromises = validFoodData.map(async (item) => {
-    const { date, mealType, bookedFor } = item;
-
-    // Fetch the booking from the database to get the id
-    const booking = await FoodDb.findOne({
-      where: {
-        cardno,
-        date,
-        ...(bookedFor !== null && { guest: bookedFor })
-      }
-    });
-
-    if (!booking) {
-      return; // Skip if no matching booking found
-    }
-
-    const bookingId = booking.id;
-
-    // Create the update object: setting the specific meal to 0 (cancelled)
-    const updateFields = {};
-    if (mealType === 'breakfast') updateFields.breakfast = 0;
-    if (mealType === 'lunch') updateFields.lunch = 0;
-    if (mealType === 'dinner') updateFields.dinner = 0;
-
-    // Cancel the meal booking
-    await FoodDb.update(updateFields, {
-      where: { id: bookingId },
-      transaction: t
-    });
-
-    // Handle guest meal transaction cancellation
-    if (bookedFor) {
-      const mealTypeMapping = {
-        breakfast: TYPE_GUEST_BREAKFAST,
-        lunch: TYPE_GUEST_LUNCH,
-        dinner: TYPE_GUEST_DINNER
-      };
-
-      // Find and update the transaction to mark it as credited
-      const transaction = await Transactions.findOne({
-        where: {
-          cardno,
-          bookingid: bookingId,
-          category: mealTypeMapping[mealType]
-        }
-      });
-
-      if (transaction) {
-        if (transaction.status === STATUS_PAYMENT_PENDING) {
-          await transaction.update(
-            { status: STATUS_CANCELLED },
-            { transaction: t }
-          );
-        } else if (transaction.status === STATUS_PAYMENT_COMPLETED) {
-          credits += transaction.amount;
-          await transaction.update(
-            { status: STATUS_CREDITED },
-            { transaction: t }
-          );
-        }
-      }
-    }
-  });
-
-  await Promise.all(cancellationPromises);
-
-  // Update card credits after all cancellations are processed
-  if (credits > 0) {
-    await CardDb.increment(
-      { credits: credits },
-      { where: { cardno: cardno }, transaction: t }
-    );
-  }
-
-  // Delete rows where breakfast, lunch, and dinner are all 0 (no meals left)
-  await FoodDb.destroy({
-    where: {
-      breakfast: 0,
-      lunch: 0,
-      dinner: 0
-    },
-    transaction: t
-  });
+  await cancelFood(
+    req.user, 
+    cardno, 
+    food_data,
+    t
+  );
 
   await t.commit();
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });

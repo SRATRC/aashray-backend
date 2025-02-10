@@ -104,7 +104,7 @@ export async function userCancelTransaction(user, transaction, t) {
 // STATUS_CANCELLED,
 // STATUS_ADMIN_CANCELLED,
 // STATUS_CREDITED
-async function cancelTransaction(user, transaction, t, admin = false) {
+export async function cancelTransaction(user, transaction, t, admin = false) {
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
 
   var amount = transaction.amount + transaction.discount;

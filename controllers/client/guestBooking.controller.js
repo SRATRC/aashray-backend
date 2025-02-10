@@ -113,7 +113,9 @@ export const guestBooking = async (req, res) => {
   const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
   const finalAmount = amount + taxes;
 
-  const order = finalAmount > 0 ? await generateOrderId(finalAmount) : null;
+  const order = process.env.NODE_ENV == 'prod' && finalAmount > 0 
+    ? await generateOrderId(finalAmount) 
+    : { amount };
 
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
