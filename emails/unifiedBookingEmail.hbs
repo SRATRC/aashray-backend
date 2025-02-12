@@ -88,16 +88,35 @@
                 </tr>
                 {{/each}}      
             </table>   
-            
+            </div>
             {{/if}} 
+          
+        {{#if showFlatDetail}}
+            <div class="details">
+             Following are bookings for Flat :
+                <table border="1">
+                <tr><th>BookingId</th><th>Flat No.</th><th>Checkin</th><th>Checkout</th></th>
+
+                {{#each flatBookingDetails}}
+                <tr>
+                    <td>{{bookingid}}</td>
+                    <td>{{flatno}}</td>
+                    <td>{{checkin}}</td>
+                    <td>{{checkout}}</td>
+                </tr>
+                {{/each}}      
+            </table>   
          
         </div>
 
+        {{/if}} 
+
         {{#if showAdhyanDetail}}
+        
        
          <div class="details" >
             
-            Following are booking for Raj Adhyayan:</p>
+            Following are bookings for Raj Adhyayan:</p>
             <table border="1">
                 <tr><th>BookingId</th><th>Adhyayan Name</th><th>Speaker</th><th>Start Date</th><th>End Date</th>
                 <th>Status</th></tr>
@@ -124,7 +143,7 @@
         {{#if showTravelDetail}}
          <div class="details" >
             
-            Following are booking for Raj Pravas:</p>
+            Following are bookings for Raj Pravas:</p>
 
             <table border="1">
                 <tr><th>BookingId</th><th>Date</th><th>Pickup Point</th><th>Dropoff Point</th>
@@ -181,7 +200,7 @@
        </div>
 
         <div>
-            <p><a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Center We hope you have a spiritually blissful stay.</p>
+            <a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Center We hope you have a spiritually blissful stay.</p>
             <p>If you have any questions or need further assistance, please feel free to contact us at <b>7875432613 / 9004273512</b></p>
         </div>      
         <div class="footer">
