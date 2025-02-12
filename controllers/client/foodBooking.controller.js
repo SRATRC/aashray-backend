@@ -1,11 +1,5 @@
-import {
-  FoodDb,
-  GuestDb,
-  Menu
-} from '../../models/associations.js';
-import {
-  MSG_CANCEL_SUCCESSFUL
-} from '../../config/constants.js';
+import { FoodDb, GuestDb, Menu } from '../../models/associations.js';
+import { MSG_CANCEL_SUCCESSFUL } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize, { col, QueryTypes } from 'sequelize';
 import moment from 'moment';
@@ -122,11 +116,13 @@ export const FetchGuestsForFilter = async (req, res) => {
 
   const guests = await database.query(
     `
-    SELECT DISTINCT f.guest, g.name, f.updatedAt
+    SELECT f.guest, g.name, MAX(f.updatedAt) AS latestUpdate
     FROM food_db f
     JOIN guest_db g ON f.guest = g.id
     WHERE f.cardno = :cardno
-    ORDER BY f.updatedAt DESC;
+    GROUP BY f.guest, g.name
+    ORDER BY latestUpdate DESC;
+
     `,
     { replacements: { cardno: cardno }, type: QueryTypes.SELECT }
   );
@@ -153,12 +149,7 @@ export const CancelFood = async (req, res) => {
 
   const { cardno, food_data } = req.body;
 
-  await cancelFood(
-    req.user, 
-    cardno, 
-    food_data,
-    t
-  );
+  await cancelFood(req.user, cardno, food_data, t);
 
   await t.commit();
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
