@@ -11,7 +11,6 @@ import ShibirBookingDb from './shibir_booking_db.model.js';
 import Departments from './departments.model.js';
 import MaintenanceDb from './maintenance_db.model.js';
 import TravelDb from './travel_db.model.js';
-import TravelBookingTransaction from './travel_booking_transaction.model.js';
 import WifiDb from './wifi.model.js';
 import UtsavBooking from './utsav_boking.model.js';
 import UtsavGuestBooking from './utsav_guest_booking.js';
@@ -67,12 +66,6 @@ CardDb.hasMany(RoomBooking, {
 });
 CardDb.hasMany(MaintenanceDb, {
   foreignKey: 'requested_by',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-CardDb.hasMany(TravelBookingTransaction, {
-  foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -208,23 +201,7 @@ GateRecord.belongsTo(CardDb, {
 });
 
 // Travel
-TravelDb.hasMany(TravelBookingTransaction, {
-  foreignKey: 'bookingid',
-  sourceKey: 'bookingid',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
 TravelDb.belongsTo(CardDb, {
-  foreignKey: 'cardno',
-  targetKey: 'cardno'
-});
-
-// Travel Transaction
-TravelBookingTransaction.belongsTo(TravelDb, {
-  foreignKey: 'bookingid',
-  targetKey: 'bookingid'
-});
-TravelBookingTransaction.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
@@ -410,7 +387,6 @@ export {
   FlatDb,
   FlatBooking,
   TravelDb,
-  TravelBookingTransaction,
   WifiDb,
   UtsavDb,
   UtsavBooking,

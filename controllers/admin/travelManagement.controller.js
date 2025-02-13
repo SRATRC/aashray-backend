@@ -1,6 +1,5 @@
 import {
   TravelDb,
-  TravelBookingTransaction,
   CardDb,
   Transactions
 } from '../../models/associations.js';
