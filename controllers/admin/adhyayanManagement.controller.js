@@ -361,8 +361,6 @@ export const adhyayanStatusUpdate = async (req, res) => {
       break;
 
     case STATUS_WAITING:
-      throw new ApiError(400, 'Booking\'s status cannot be changed to Waiting');
-
     default:
       throw new ApiError(400, 'Invalid status provided');
   }
