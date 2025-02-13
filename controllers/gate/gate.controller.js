@@ -154,6 +154,5 @@ LIMIT :limit OFFSET :offset;
     }
   );
 
-  console.log("user_bookings"+user_bookings);
   return res.status(200).send(user_bookings);
 };
