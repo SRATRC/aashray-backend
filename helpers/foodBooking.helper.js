@@ -212,6 +212,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
 
   // Delete rows where breakfast, lunch, and dinner are all 0 (no meals left)
   // TODO: should we do this? This will also destroy the transaction
+  // NEW: mark it as cancelled instead
   await FoodDb.destroy({
     where: {
       breakfast: 0,
