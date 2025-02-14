@@ -400,9 +400,9 @@ async function bookRoomForSingleGuest(
 
   const amount = roomCharge(roomtype) * nights;
 
-  const transaction = await createPendingTransaction(
-    user.cardno,
-    booking.bookingid,
+  const { transaction, discountedAmount } = await createPendingTransaction(
+    booking.cardno,
+    booking,
     TYPE_ROOM,
     amount,
     'USER',
@@ -413,16 +413,10 @@ async function bookRoomForSingleGuest(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const discountedAmount = await useCredit(
-    user.cardno,
-    booking,
-    transaction,
-    amount,
-    'USER',
-    t
-  );
+  
 
   return { t, discountedAmount,bookingId };
+  
 }
 
 async function checkFoodAvailability(data) {

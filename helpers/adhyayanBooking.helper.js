@@ -72,7 +72,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
     for (const adhyayan of adhyayans) {
       if (adhyayan.available_seats > 0) {
         await reserveAdhyayanSeat(adhyayan, t);
-        bookingId=uuidv4();
+        bookingId = uuidv4();
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
@@ -82,21 +82,12 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
           },
           { transaction: t }
         );
-        bookingIds[idx++]=bookingId;
+        bookingIds[idx++] = bookingId;
 
-        const transaction = await createPendingTransaction(
-          mumukshu,
-          booking.bookingid,
-          TYPE_ADHYAYAN,
-          adhyayan.amount,
-          user.cardno,
-          t
-        );
-        
-        const discountedAmount = await useCredit(
+        const { transaction, discountedAmount } = await createPendingTransaction(
           mumukshu,
           booking,
-          transaction,
+          TYPE_ADHYAYAN,
           adhyayan.amount,
           user.cardno,
           t
@@ -104,7 +95,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
 
         amount += discountedAmount;
       } else {
-        bookingId=uuidv4();
+        bookingId = uuidv4();
         const booking =  await ShibirBookingDb.create(
           {
             bookingid:bookingId,
@@ -114,7 +105,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
           },
           { transaction: t }
         );
-        bookingIds[idx++]=bookingId;
+        bookingIds[idx++] = bookingId;
       }
     }
   }
@@ -155,17 +146,8 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
     // for a booking in waiting status, there should be no existing transaction
     const transaction = await createPendingTransaction(
       cardno,
-      booking.bookingid,
-      TYPE_ADHYAYAN,
-      adhyayan.amount,
-      updatedBy,
-      t
-    );
-
-    await useCredit(
-      cardno,
       booking,
-      transaction,
+      TYPE_ADHYAYAN,
       adhyayan.amount,
       updatedBy,
       t

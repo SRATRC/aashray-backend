@@ -219,6 +219,7 @@ export const cancelFoodByMob = async (req, res) => {
     .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
+// TODO: implement
 export const bookFoodForGuest = async (req, res) => {
   const { 
     start_date, 

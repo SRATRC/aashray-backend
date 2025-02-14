@@ -11,11 +11,9 @@ import ShibirBookingDb from './shibir_booking_db.model.js';
 import Departments from './departments.model.js';
 import MaintenanceDb from './maintenance_db.model.js';
 import TravelDb from './travel_db.model.js';
-import TravelBookingTransaction from './travel_booking_transaction.model.js';
 import WifiDb from './wifi.model.js';
 import UtsavBooking from './utsav_boking.model.js';
 import UtsavGuestBooking from './utsav_guest_booking.js';
-import UtsavBookingTransaction from './utsav_booking_transaction.model.js';
 import UtsavDb from './utsav_db.model.js';
 import UtsavPackagesDb from './utsav_packages.model.js';
 import AdminUsers from './admin_users.model.js';
@@ -71,12 +69,6 @@ CardDb.hasMany(MaintenanceDb, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
-CardDb.hasMany(TravelBookingTransaction, {
-  foreignKey: 'cardno',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
 CardDb.hasOne(UtsavBooking, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
@@ -84,12 +76,6 @@ CardDb.hasOne(UtsavBooking, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(UtsavGuestBooking, {
-  foreignKey: 'cardno',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-CardDb.hasMany(UtsavBookingTransaction, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -208,23 +194,7 @@ GateRecord.belongsTo(CardDb, {
 });
 
 // Travel
-TravelDb.hasMany(TravelBookingTransaction, {
-  foreignKey: 'bookingid',
-  sourceKey: 'bookingid',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
 TravelDb.belongsTo(CardDb, {
-  foreignKey: 'cardno',
-  targetKey: 'cardno'
-});
-
-// Travel Transaction
-TravelBookingTransaction.belongsTo(TravelDb, {
-  foreignKey: 'bookingid',
-  targetKey: 'bookingid'
-});
-TravelBookingTransaction.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
@@ -251,20 +221,6 @@ UtsavGuestBooking.belongsTo(CardDb, {
 UtsavGuestBooking.belongsTo(UtsavDb, {
   foreignKey: 'utsavid',
   targetKey: 'id'
-});
-UtsavBookingTransaction.belongsTo(CardDb, {
-  foreignKey: 'cardno',
-  targetKey: 'cardno'
-});
-UtsavBooking.hasMany(UtsavBookingTransaction, {
-  foreignKey: 'bookingid',
-  sourceKey: 'bookingid',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-UtsavBookingTransaction.belongsTo(UtsavBooking, {
-  foreignKey: 'bookingid',
-  targetKey: 'bookingid'
 });
 UtsavDb.hasMany(UtsavBooking, {
   foreignKey: 'utsavid',
@@ -410,12 +366,10 @@ export {
   FlatDb,
   FlatBooking,
   TravelDb,
-  TravelBookingTransaction,
   WifiDb,
   UtsavDb,
   UtsavBooking,
   UtsavGuestBooking,
-  UtsavBookingTransaction,
   UtsavPackagesDb,
   AdminRoles,
   AdminUsers,

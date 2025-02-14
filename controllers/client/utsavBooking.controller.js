@@ -11,11 +11,12 @@ import {
   STATUS_CASH_PENDING,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_COMPLETED,
-  STATUS_CREDITED,
   MSG_BOOKING_SUCCESSFUL,
   STATUS_CLOSED,
-  STATUS_WAITING,
-  RAZORPAY_FEE
+  RAZORPAY_FEE,
+  ERR_BOOKING_NOT_FOUND,
+  ERR_TRANSACTION_NOT_FOUND,
+  MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   UtsavDb,
@@ -29,7 +30,8 @@ import { v4 as uuidv4 } from 'uuid';
 import Transactions from '../../models/transactions.model.js';
 import {
   createPendingTransaction,
-  generateOrderId
+  generateOrderId,
+  userCancelTransaction
 } from '../../helpers/transactions.helper.js';
 
 // TODO: sending mails
@@ -125,7 +127,7 @@ export const BookUtsav = async (req, res) => {
     throw new ApiError(400, 'Already booked');
   }
 
-  const utsav_booking = await UtsavBooking.create(
+  const booking = await UtsavBooking.create(
     {
       bookingid: uuidv4(),
       cardno: req.user.cardno,
@@ -136,22 +138,22 @@ export const BookUtsav = async (req, res) => {
     { transaction: t }
   );
 
-  const utsav_transaction = await createPendingTransaction(
+  const transaction = await createPendingTransaction(
     req.user.cardno,
-    utsav_booking.dataValues.bookingid,
+    booking,
     TYPE_UTSAV,
-    utsav_package.dataValues.amount,
+    utsav_package.amount,
     'USER',
     t
   );
 
-  if (utsav_booking == undefined || utsav_transaction == undefined) {
+  if (booking == undefined || transaction == undefined) {
     throw new ApiError(500, 'Failed to book utsav');
   }
 
   const taxes =
-    Math.round(utsav_package.dataValues.amount * RAZORPAY_FEE * 100) / 100;
-  const finalAmount = utsav_package.dataValues.amount + taxes;
+    Math.round(utsav_package.amount * RAZORPAY_FEE * 100) / 100;
+  const finalAmount = utsav_package.amount + taxes;
 
   const order = await generateOrderId(finalAmount);
 
@@ -452,95 +454,50 @@ export const CancelUtsavBooking = async (req, res) => {
         guest: bookedFor
       }
     });
-    if (booking == undefined) {
-      throw new ApiError(404, 'unable to find selected booking');
-    }
-
-    booking.status = STATUS_CANCELLED;
-    await booking.save({ transaction: t });
-
-    const guestUtsavBookingTransaction = await Transactions.findOne({
-      where: {
-        cardno: req.user.cardno,
-        bookingid: bookingid,
-        category: TYPE_GUEST_UTSAV,
-        status: {
-          [Sequelize.Op.in]: [
-            STATUS_PAYMENT_PENDING,
-            STATUS_PAYMENT_COMPLETED,
-            STATUS_CASH_PENDING,
-            STATUS_CASH_COMPLETED
-          ]
-        }
-      }
-    });
-
-    if (guestUtsavBookingTransaction == undefined) {
-      throw new ApiError(404, 'unable to find selected booking transaction');
-    }
-
-    if (
-      guestUtsavBookingTransaction.status == STATUS_PAYMENT_PENDING ||
-      guestUtsavBookingTransaction.status == STATUS_CASH_PENDING
-    ) {
-      guestUtsavBookingTransaction.status = STATUS_CANCELLED;
-      await guestUtsavBookingTransaction.save({ transaction: t });
-    } else if (
-      guestUtsavBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
-      guestUtsavBookingTransaction.status == STATUS_CASH_COMPLETED
-    ) {
-      guestUtsavBookingTransaction.status = STATUS_CREDITED;
-      // TODO: add credited transaction to its table
-      await guestUtsavBookingTransaction.save({ transaction: t });
-    }
   } else {
     booking = await UtsavBooking.findOne({
-      where: { bookingid: bookingid, cardno: req.user.cardno }
-    });
-
-    if (booking == undefined) {
-      throw new ApiError(404, 'unable to find selected booking');
-    }
-
-    booking.status = STATUS_CANCELLED;
-    await booking.save({ transaction: t });
-
-    const guestUtsavBookingTransaction = await Transactions.findOne({
-      where: {
-        cardno: req.user.cardno,
-        bookingid: bookingid,
-        category: TYPE_UTSAV,
-        status: {
-          [Sequelize.Op.in]: [
-            STATUS_PAYMENT_PENDING,
-            STATUS_PAYMENT_COMPLETED,
-            STATUS_CASH_PENDING,
-            STATUS_CASH_COMPLETED
-          ]
-        }
+      where: { 
+        bookingid: bookingid, 
+        cardno: req.user.cardno 
       }
     });
-
-    if (guestUtsavBookingTransaction == undefined) {
-      throw new ApiError(404, 'unable to find selected booking');
-    }
-
-    if (
-      guestUtsavBookingTransaction.status == STATUS_PAYMENT_PENDING ||
-      guestUtsavBookingTransaction.status == STATUS_CASH_PENDING
-    ) {
-      guestUtsavBookingTransaction.status = STATUS_CANCELLED;
-      await guestUtsavBookingTransaction.save({ transaction: t });
-    } else if (
-      guestUtsavBookingTransaction.status == STATUS_PAYMENT_COMPLETED ||
-      guestUtsavBookingTransaction.status == STATUS_CASH_COMPLETED
-    ) {
-      guestUtsavBookingTransaction.status = STATUS_CREDITED;
-      // TODO: add credited transaction to its table
-      await guestUtsavBookingTransaction.save({ transaction: t });
-    }
   }
 
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  await booking.update(
+    {
+      status: STATUS_CANCELLED,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  const transaction = await Transactions.findOne({
+    where: {
+      cardno: req.user.cardno,
+      bookingid: bookingid,
+      status: [
+        STATUS_PAYMENT_PENDING,
+        STATUS_PAYMENT_COMPLETED,
+        STATUS_CASH_PENDING,
+        STATUS_CASH_COMPLETED
+      ]
+    }
+  });
+
+  if (!transaction) {
+    throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
+  }
+
+  await userCancelTransaction(
+    req.user,
+    transaction,
+    t
+  );
+
   await t.commit();
-  return res.status(200).send({ message: 'Booking cancelled' });
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
