@@ -6,7 +6,8 @@ import {
   ShibirDb,
   TravelDb,
   CardDb,
-  FlatDb
+  FlatDb,
+  GuestDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -391,8 +392,6 @@ export async function sendUnifiedEmail(user,bookingIds) {
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
   let wasFlatBooked =  bookingIds[TYPE_FLAT] != null;
-  console.log("wasFlatBooked=="+wasFlatBooked+
-    "===="+bookingIds[TYPE_FLAT]+"====="+bookingIds[TYPE_ADHYAYAN]+"======="+bookingIds[TYPE_ROOM]+"=====");
   let adhyanBookingDetails = [], roomBookingDetails = [], travelBookingDetails = [],flatBookingDetails = [];
   //GetData for adhyan
   let idx=0;
