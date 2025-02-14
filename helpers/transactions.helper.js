@@ -16,6 +16,8 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
+import moment from 'moment';
+import { Sequelize } from 'sequelize';
 
 export async function createTransaction(
   cardno,
@@ -258,3 +260,22 @@ export const generateOrderId = async (amount) => {
   const order = await razorpay.orders.create(options);
   return order;
 };
+
+export async function cancelPendingBookings() {
+  const yesterday = moment.utc().subtract(1, 'day');
+  
+  const transactions = await Transactions.findAll({
+    where: { 
+      status: [
+        STATUS_PAYMENT_PENDING
+      ],
+      updatedAt: {
+        [Sequelize.Op.lte]: yesterday
+      }
+    }
+  });
+
+  console.log("TRANSACTIONS TO CANCEL: " + JSON.stringify(transactions));
+
+  // TODO: implement logic to cancel transactions
+}
