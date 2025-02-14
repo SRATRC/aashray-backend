@@ -111,7 +111,7 @@ export const updateBookingStatus = async (req, res) => {
       if (!transaction) {
         transaction = await createPendingTransaction(
           booking.cardno,
-          bookingid,
+          booking,
           TYPE_TRAVEL,
           travelCharge(booking.type),
           req.user.username,
@@ -119,15 +119,6 @@ export const updateBookingStatus = async (req, res) => {
         );
       }
       
-      await useCredit(
-        transaction.cardno,
-        booking,
-        transaction,
-        travelCharge(booking.type),
-        req.user.username,
-        t
-      );
-
       // After applying credits, if the transaction is complete
       // then confirm the booking.
       if (transaction.status == STATUS_PAYMENT_COMPLETED) {

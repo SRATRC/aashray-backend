@@ -277,7 +277,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
       if (!transaction) {
         transaction = await createPendingTransaction(
           booking.cardno,
-          bookingid,
+          booking,
           TYPE_ADHYAYAN,
           adhyayan.amount,
           req.user.username,
@@ -285,15 +285,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
         );
       }
 
-      await useCredit(
-        transaction.cardno,
-        booking,
-        transaction,
-        adhyayan.amount,
-        req.user.username,
-        t
-      );
-
+      // TODO: is this correct?
       // After applying credits, if the status is still payment pending
       // then accept the UPI or cash payment and mark is complete.
       if (transaction.status == STATUS_PAYMENT_PENDING) {
@@ -321,22 +313,13 @@ export const adhyayanStatusUpdate = async (req, res) => {
         if (!transaction) {
           transaction = await createPendingTransaction(
             booking.cardno,
-            bookingid,
+            booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
             req.user.username,
             t
           );
         }
-
-        await useCredit(
-          transaction.cardno,
-          booking,
-          transaction,
-          adhyayan.amount,
-          req.user.username,
-          t
-        );
 
         // After applying credits, if the transaction is complete
         // then confirm the booking.

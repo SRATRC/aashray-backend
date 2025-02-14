@@ -127,7 +127,7 @@ export const BookUtsav = async (req, res) => {
     throw new ApiError(400, 'Already booked');
   }
 
-  const utsav_booking = await UtsavBooking.create(
+  const booking = await UtsavBooking.create(
     {
       bookingid: uuidv4(),
       cardno: req.user.cardno,
@@ -138,22 +138,22 @@ export const BookUtsav = async (req, res) => {
     { transaction: t }
   );
 
-  const utsav_transaction = await createPendingTransaction(
+  const transaction = await createPendingTransaction(
     req.user.cardno,
-    utsav_booking.dataValues.bookingid,
+    booking,
     TYPE_UTSAV,
-    utsav_package.dataValues.amount,
+    utsav_package.amount,
     'USER',
     t
   );
 
-  if (utsav_booking == undefined || utsav_transaction == undefined) {
+  if (booking == undefined || transaction == undefined) {
     throw new ApiError(500, 'Failed to book utsav');
   }
 
   const taxes =
-    Math.round(utsav_package.dataValues.amount * RAZORPAY_FEE * 100) / 100;
-  const finalAmount = utsav_package.dataValues.amount + taxes;
+    Math.round(utsav_package.amount * RAZORPAY_FEE * 100) / 100;
+  const finalAmount = utsav_package.amount + taxes;
 
   const order = await generateOrderId(finalAmount);
 

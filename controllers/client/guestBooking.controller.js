@@ -267,7 +267,7 @@ async function checkRoomAvailability(user, data) {
   return roomDetails;
 }
 
-async function bookRoom(user, data, t) {
+async function bookRoom(data, t, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
   validateDate(checkin_date, checkout_date);
 
@@ -392,9 +392,9 @@ async function bookRoomForSingleGuest(
 
   const amount = roomCharge(roomtype) * nights;
 
-  const transaction = await createPendingTransaction(
-    user.cardno,
-    booking.bookingid,
+  const { transaction, discountedAmount } = await createPendingTransaction(
+    booking.cardno,
+    booking,
     TYPE_ROOM,
     amount,
     'USER',
@@ -404,15 +404,6 @@ async function bookRoomForSingleGuest(
   if (!transaction) {
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
-
-  const discountedAmount = await useCredit(
-    user.cardno,
-    booking,
-    transaction,
-    amount,
-    'USER',
-    t
-  );
 
   return { t, discountedAmount };
 }
@@ -638,7 +629,7 @@ async function checkAdhyayanAvailability(user, data) {
   return adhyayanDetails;
 }
 
-async function bookAdhyayan(user, data, t) {
+async function bookAdhyayan(data, t, user) {
   const { shibir_ids, guests } = data.details;
   let amount = 0;
 

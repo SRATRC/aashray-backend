@@ -50,7 +50,7 @@ export async function createTransaction(
 
 export async function createPendingTransaction(
   cardno,
-  bookingid,
+  booking,
   category,
   amount,
   updatedBy,
@@ -59,7 +59,7 @@ export async function createPendingTransaction(
   const transaction = await Transactions.create(
     {
       cardno,
-      bookingid,
+      bookingid: booking.bookingid,
       category,
       amount,
       status: STATUS_PAYMENT_PENDING,
@@ -68,7 +68,16 @@ export async function createPendingTransaction(
     { transaction: t }
   );
 
-  return transaction;
+  const discountedAmount = await useCredit(
+    cardno,
+    booking,
+    transaction,
+    amount,
+    updatedBy,
+    t
+  )
+
+  return { transaction, discountedAmount };
 }
 
 export async function userCancelBooking(user, booking, t) {
@@ -188,8 +197,9 @@ export async function useCredit(
     return amount;
   }
 
-  const status =
-    amount > card.credits ? STATUS_PAYMENT_PENDING : STATUS_PAYMENT_COMPLETED;
+  const status = amount > card.credits 
+    ? STATUS_PAYMENT_PENDING 
+    : STATUS_PAYMENT_COMPLETED;
 
   const creditsUsed = Math.min(amount, card.credits);
   const discountedAmount = amount - creditsUsed;
