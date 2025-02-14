@@ -222,7 +222,7 @@ export const BookGuestUtsav = async (req, res) => {
   const [utsav, utsavPackage] = await Promise.all([
     UtsavDb.findOne({ where: { id: utsavid, status: STATUS_OPEN } }),
     UtsavPackagesDb.findOne({
-      where: { id: { [Sequelize.Op.in]: totalPackageIds } }
+      where: { id: totalPackageIds }
     })
   ]);
 
@@ -233,16 +233,17 @@ export const BookGuestUtsav = async (req, res) => {
     where: {
       cardno,
       utsavid,
-      guest: { [Sequelize.Op.in]: totalGuestIds },
-      status: {
-        [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED]
-      }
+      guest: totalGuestIds,
+      status: [
+        STATUS_PAYMENT_PENDING, 
+        STATUS_CONFIRMED
+      ]
     }
   });
 
   if (isBooked.length > 0) throw new ApiError(400, 'Already booked');
 
-  const amount = utsavPackage.dataValues.amount;
+  const amount = utsavPackage.amount;
   const bookingsAndTransactions = guestsWithIds.map(({ packageid, id }) => {
     const bookingid = uuidv4();
     return {
@@ -300,9 +301,12 @@ export const BookMumukshuUtsav = async (req, res) => {
   const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
   const alreadyBooked = await UtsavBooking.findAll({
     where: {
-      cardno: { [Sequelize.Op.in]: mumukshu_cardnos },
+      cardno: mumukshu_cardnos,
       utsavid: utsavid,
-      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED] }
+      status: [
+        STATUS_PAYMENT_PENDING, 
+        STATUS_CONFIRMED
+      ]
     }
   });
 
