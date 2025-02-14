@@ -9,7 +9,9 @@ import {
   STATUS_CANCELLED,
   STATUS_CASH_PENDING,
   STATUS_CREDITED,
-  STATUS_CONFIRMED
+  STATUS_CONFIRMED,
+  TYPE_ADHYAYAN,
+  TYPE_GUEST_ADHYAYAN
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
@@ -121,8 +123,11 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
-      if (amount > 0) {
-        // TODO: no credit for Adhyayan
+      if (
+        (amount > 0) &&
+        (transaction.category != TYPE_ADHYAYAN) &&
+        (transaction.category != TYPE_GUEST_ADHYAYAN)
+      ) {
         await addCredit(user, transaction, amount, t);
         status = STATUS_CREDITED;
       }
