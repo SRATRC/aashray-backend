@@ -1,5 +1,7 @@
 import {
   ERR_ROOM_MUST_BE_BOOKED,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CANCELLED,
   STATUS_RESIDENT,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
@@ -181,17 +183,15 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       return; // Skip if no matching booking found
     }
 
-    const bookingId = booking.id;
-
     // Create the update object: setting the specific meal to 0 (cancelled)
     const updateFields = {};
     if (mealType === 'breakfast') updateFields.breakfast = 0;
     if (mealType === 'lunch') updateFields.lunch = 0;
     if (mealType === 'dinner') updateFields.dinner = 0;
 
-    // Cancel the meal booking
+    // Update the meal booking
     await FoodDb.update(updateFields, {
-      where: { id: bookingId },
+      where: { id: booking.id },
       transaction: t
     });
 
@@ -201,7 +201,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       const transaction = await Transactions.findOne({
         where: {
           cardno,
-          bookingid: bookingId,
+          bookingid: booking.id,
           category: mealTypeMapping[mealType]
         }
       });
@@ -209,16 +209,4 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       await cancelTransaction(user, transaction, t, admin);
     }
   }
-
-  // Delete rows where breakfast, lunch, and dinner are all 0 (no meals left)
-  // TODO: should we do this? This will also destroy the transaction
-  // NEW: mark it as cancelled instead
-  await FoodDb.destroy({
-    where: {
-      breakfast: 0,
-      lunch: 0,
-      dinner: 0
-    },
-    transaction: t
-  });
 }
