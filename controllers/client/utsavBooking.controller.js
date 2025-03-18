@@ -1,38 +1,30 @@
-import database from '../../config/database.js';
-import Sequelize from 'sequelize';
-import moment from 'moment';
 import {
-  STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
   STATUS_CONFIRMED,
   STATUS_OPEN,
   TYPE_UTSAV,
   TYPE_GUEST_UTSAV,
-  STATUS_CASH_PENDING,
-  STATUS_PAYMENT_COMPLETED,
-  STATUS_CASH_COMPLETED,
   MSG_BOOKING_SUCCESSFUL,
   STATUS_CLOSED,
-  RAZORPAY_FEE,
   ERR_BOOKING_NOT_FOUND,
-  ERR_TRANSACTION_NOT_FOUND,
   MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   UtsavDb,
   UtsavPackagesDb,
-  UtsavBooking,
-  UtsavGuestBooking,
-  GuestDb
+  UtsavBooking
 } from '../../models/associations.js';
-import ApiError from '../../utils/ApiError.js';
 import { v4 as uuidv4 } from 'uuid';
-import Transactions from '../../models/transactions.model.js';
 import {
   createPendingTransaction,
   generateOrderId,
-  userCancelTransaction
+  userCancelBooking
 } from '../../helpers/transactions.helper.js';
+import { createGuestsHelper } from '../helper.js';
+import moment from 'moment';
+import Sequelize from 'sequelize';
+import database from '../../config/database.js';
+import ApiError from '../../utils/ApiError.js';
 
 // TODO: sending mails
 
@@ -44,37 +36,44 @@ export const FetchUpcoming = async (req, res) => {
 
   const offset = (page - 1) * pageSize;
 
-  const utsavs = await UtsavDb.findAll({
-    attributes: ['id', 'name', 'start_date', 'end_date', 'month'],
-    include: [
-      {
-        model: UtsavPackagesDb,
-        on: {
-          id: Sequelize.col('UtsavDb.id')
-        },
-        attributes: [
-          'id',
-          'utsavid',
-          'name',
-          'start_date',
-          'end_date',
-          'amount'
-        ]
-      }
-    ],
-    where: {
-      start_date: {
-        [Sequelize.Op.gt]: today
+  const utsavs = await database.query(
+    `
+    SELECT t1.id AS utsav_id,
+       t1.name AS utsav_name,
+       t1.start_date AS utsav_start,
+       t1.end_date AS utsav_end,
+       t1.month AS utsav_month,
+       JSON_ARRAYAGG(
+           JSON_OBJECT(
+               'package_id', t2.id,
+               'package_name', t2.name,
+               'package_start', t2.start_date,
+               'package_end', t2.end_date,
+               'package_amount', t2.amount
+           )
+       ) AS packages
+    FROM utsav_db t1
+    JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
+    WHERE t1.status = 'open'
+      AND t1.start_date > :today
+    GROUP BY t1.id
+    ORDER BY t1.start_date ASC
+    LIMIT :limit
+    OFFSET :offset;
+  `,
+    {
+      replacements: {
+        today,
+        limit: pageSize,
+        offset: offset
       },
-      status: STATUS_OPEN
-    },
-    offset,
-    limit: pageSize,
-    order: [['start_date', 'ASC']]
-  });
+      type: database.QueryTypes.SELECT,
+      raw: true
+    }
+  );
 
   const groupedByMonth = utsavs.reduce((acc, event) => {
-    const month = event.month;
+    const month = event.utsav_month;
     if (!acc[month]) {
       acc[month] = [];
     }
@@ -133,7 +132,8 @@ export const BookUtsav = async (req, res) => {
       cardno: req.user.cardno,
       utsavid: utsavid,
       packageid: packageid,
-      status: STATUS_PAYMENT_PENDING
+      status: STATUS_PAYMENT_PENDING,
+      updatedBy: req.user.cardno
     },
     { transaction: t }
   );
@@ -143,7 +143,7 @@ export const BookUtsav = async (req, res) => {
     booking,
     TYPE_UTSAV,
     utsav_package.amount,
-    'USER',
+    req.user.cardno,
     t
   );
 
@@ -151,11 +151,7 @@ export const BookUtsav = async (req, res) => {
     throw new ApiError(500, 'Failed to book utsav');
   }
 
-  const taxes =
-    Math.round(utsav_package.amount * RAZORPAY_FEE * 100) / 100;
-  const finalAmount = utsav_package.amount + taxes;
-
-  const order = await generateOrderId(finalAmount);
+  const order = await generateOrderId(utsav_package.amount);
 
   await t.commit();
 
@@ -164,119 +160,70 @@ export const BookUtsav = async (req, res) => {
 
 export const BookGuestUtsav = async (req, res) => {
   const { utsavid, guests } = req.body;
-
-  const t = await database.transaction();
   const { cardno } = req.user;
 
-  const guestsToUpdate = guests.filter((guest) => guest.id);
-  const guestsToCreate = guests
-    .filter((guest) => !guest.id)
-    .map((guest) => ({ ...guest, cardno }));
+  const t = await database.transaction();
+  req.transaction = t;
 
-  if (guestsToUpdate.length > 0) {
-    await Promise.all(
-      guestsToUpdate.map(({ id, ...updateData }) =>
-        GuestDb.update(updateData, {
-          where: { id },
-          transaction: t
-        })
-      )
-    );
-  }
-
-  const createdGuests = guestsToCreate.length
-    ? await GuestDb.bulkCreate(guestsToCreate, {
-        transaction: t,
-        returning: true
-      })
-    : [];
-
-  const updatedGuests = guestsToUpdate.length
-    ? await GuestDb.findAll({
-        where: { id: guestsToUpdate.map((guest) => guest.id) },
-        attributes: ['id', 'name', 'gender', 'mobno', 'type'],
-        transaction: t
-      })
-    : [];
-
-  const allGuests = [...updatedGuests, ...createdGuests].map((guest) =>
-    guest.toJSON()
-  );
-
-  const guestIdMap = allGuests.reduce((map, guest) => {
-    const key = `${guest.name}${guest.mobno}${guest.type}${guest.gender}`;
-    map[key] = guest.id;
-    return map;
-  }, {});
-
-  const guestsWithIds = guests.map((guest) => {
-    const key = `${guest.name}${guest.mobno}${guest.type}${guest.gender}`;
-    const id = guestIdMap[key];
-    if (!id) throw new ApiError(404, `Guest not found for key: ${key}`);
-    return { ...guest, id };
-  });
-
-  const totalPackageIds = guestsWithIds.map((guest) => guest.packageid);
-  const totalGuestIds = guestsWithIds.map((guest) => guest.id);
-
-  const [utsav, utsavPackage] = await Promise.all([
-    UtsavDb.findOne({ where: { id: utsavid, status: STATUS_OPEN } }),
-    UtsavPackagesDb.findOne({
-      where: { id: totalPackageIds }
-    })
-  ]);
-
-  if (!utsav || !utsavPackage)
-    throw new ApiError(500, 'Utsav or package not found');
-
-  const isBooked = await UtsavGuestBooking.findAll({
+  const utsav = await UtsavDb.findOne({
     where: {
-      cardno,
-      utsavid,
-      guest: totalGuestIds,
-      status: [
-        STATUS_PAYMENT_PENDING, 
-        STATUS_CONFIRMED
-      ]
+      id: utsavid
     }
   });
+  if (!utsav) throw new ApiError(400, 'Utsav not found');
+  if (utsav.status === STATUS_CLOSED)
+    throw new ApiError(400, 'Utsav is closed');
 
-  if (isBooked.length > 0) throw new ApiError(400, 'Already booked');
-
-  const amount = utsavPackage.amount;
-  const bookingsAndTransactions = guestsWithIds.map(({ packageid, id }) => {
-    const bookingid = uuidv4();
-    return {
-      booking: {
-        bookingid,
-        utsavid,
-        packageid,
-        cardno,
-        guest: id,
-        status: STATUS_PAYMENT_PENDING
-      },
-      transaction: {
-        bookingid,
-        cardno,
-        category: TYPE_GUEST_UTSAV,
-        amount,
-        status: STATUS_PAYMENT_PENDING
-      }
-    };
+  const packages = await UtsavPackagesDb.findAll({
+    where: { utsavid }
   });
 
-  const [utsavBooking, utsavTransactions] = [
-    bookingsAndTransactions.map(({ booking }) => booking),
-    bookingsAndTransactions.map(({ transaction }) => transaction)
-  ];
+  const allGuests = await createGuestsHelper(cardno, guests, t);
 
-  await Promise.all([
-    UtsavGuestBooking.bulkCreate(utsavBooking, { transaction: t }),
-    Transactions.bulkCreate(utsavTransactions, { transaction: t })
-  ]);
+  let total_amount = 0;
+  const bookings = [];
+
+  for (const guest of allGuests) {
+    const bookingid = uuidv4();
+
+    const package_info = packages.find((p) => p.id === guest.packageid);
+    if (!package_info) {
+      throw new ApiError(400, `Package ${guest.packageid} not found`);
+    }
+
+    const booking = await UtsavBooking.create(
+      {
+        bookingid,
+        cardno: guest.cardno,
+        bookedBy: cardno,
+        utsavid,
+        packageid: guest.packageid,
+        status: STATUS_PAYMENT_PENDING,
+        updatedBy: cardno
+      },
+      { transaction: t }
+    );
+
+    await createPendingTransaction(
+      cardno,
+      booking,
+      TYPE_GUEST_UTSAV,
+      package_info.amount,
+      cardno,
+      t
+    );
+
+    total_amount += package_info.amount;
+    bookings.push(booking);
+  }
+
+  const order = await generateOrderId(total_amount);
 
   await t.commit();
-  res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
+  res.status(200).send({
+    message: MSG_BOOKING_SUCCESSFUL,
+    data: order
+  });
 };
 
 export const BookMumukshuUtsav = async (req, res) => {
@@ -292,10 +239,11 @@ export const BookMumukshuUtsav = async (req, res) => {
     }
   });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
-  if (utsav.status == STATUS_CLOSED) throw new ApiError(400, 'Utsav is closed');
+  if (utsav.status === STATUS_CLOSED)
+    throw new ApiError(400, 'Utsav is closed');
 
   const packages = await UtsavPackagesDb.findAll({
-    where: { utsavid: utsavid }
+    where: { utsavid }
   });
 
   const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
@@ -303,52 +251,50 @@ export const BookMumukshuUtsav = async (req, res) => {
     where: {
       cardno: mumukshu_cardnos,
       utsavid: utsavid,
-      status: [
-        STATUS_PAYMENT_PENDING, 
-        STATUS_CONFIRMED
-      ]
+      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED] }
     }
   });
 
   if (alreadyBooked.length > 0) throw new ApiError(400, 'Already booked');
 
-  let utsav_bookings = [];
-  let utsav_transactions = [];
   let total_amount = 0;
+  const bookings = [];
 
   for (const mumukshu of mumukshus) {
     const bookingid = uuidv4();
-    const package_info = packages.find((p) => p.id == mumukshu.packageid);
-    total_amount += package_info.amount;
 
-    utsav_bookings.push({
-      bookingid: bookingid,
-      utsavid: utsavid,
-      packageid: mumukshu.packageid,
-      cardno: mumukshu.cardno,
-      status: STATUS_PAYMENT_PENDING,
-      updatedBy: cardno
-    });
+    const package_info = packages.find((p) => p.id === mumukshu.packageid);
+    if (!package_info) {
+      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+    }
 
-    if (package_info.amount > 0) {
-      utsav_transactions.push({
+    const booking = await UtsavBooking.create(
+      {
+        bookingid,
+        utsavid,
         cardno: mumukshu.cardno,
-        bookingid: bookingid,
-        category: TYPE_UTSAV,
-        amount: package_info.amount,
+        bookedBy: cardno,
+        packageid: mumukshu.packageid,
         status: STATUS_PAYMENT_PENDING,
         updatedBy: cardno
-      });
-    }
+      },
+      { transaction: t }
+    );
+
+    await createPendingTransaction(
+      cardno,
+      booking,
+      TYPE_UTSAV,
+      package_info.amount,
+      cardno,
+      t
+    );
+
+    total_amount += package_info.amount;
+    bookings.push(booking);
   }
 
-  await UtsavBooking.bulkCreate(utsav_bookings, { transaction: t });
-  await Transactions.bulkCreate(utsav_transactions, { transaction: t });
-
-  const taxes = Math.round(total_amount * RAZORPAY_FEE * 100) / 100;
-  const finalAmount = total_amount + taxes;
-
-  const order = await generateOrderId(finalAmount);
+  const order = await generateOrderId(total_amount);
 
   await t.commit();
   res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
@@ -362,71 +308,32 @@ export const ViewUtsavBookings = async (req, res) => {
 
   const utsavs = await database.query(
     `
-    WITH combined_results AS (
-    SELECT 
-        t1.bookingid,
-        t1.utsavid, 
-        t2.name AS utsav_name, 
-        t2.start_date AS utsav_start_date, 
-        t2.end_date AS utsav_end_date, 
-        t2.month,
-        t1.packageid, 
-        t3.name AS package_name, 
-        t3.start_date AS package_start, 
-        t3.end_date AS package_end, 
-        NULL AS bookedFor, 
-        NULL AS guest_name, 
-        t1.status,
-        t4.status AS transaction_status,
-        t4.amount,
-        t2.createdAt AS created_at
-    FROM 
-        utsav_booking t1
-    JOIN 
-        utsav_db t2 ON t1.utsavid = t2.id
-    JOIN 
-        utsav_packages_db t3 ON t3.id = t1.packageid
-    JOIN 
-        transactions t4 ON t4.bookingid = t1.bookingid
-    WHERE 
-        t1.cardno = :cardno
-
-    UNION ALL
-
-    SELECT 
-        t1.bookingid,
-        t1.utsavid, 
-        t2.name AS utsav_name, 
-        t2.start_date AS utsav_start_date, 
-        t2.end_date AS utsav_end_date, 
-        t2.month,
-        t1.packageid, 
-        t3.name AS package_name, 
-        t3.start_date AS package_start, 
-        t3.end_date AS package_end, 
-        t4.id AS bookedFor, 
-        t4.name AS guest_name, 
-        t1.status,
-        t5.status AS transaction_status,
-        t5.amount,
-        t2.createdAt AS created_at
-    FROM 
-        utsav_guest_booking t1
-    JOIN 
-        utsav_db t2 ON t1.utsavid = t2.id
-    JOIN 
-        utsav_packages_db t3 ON t3.id = t1.packageid
-    JOIN 
-        guest_db t4 ON t1.guest = t4.id
-    JOIN 
-        transactions t5 ON t5.bookingid = t1.bookingid
-    WHERE 
-        t1.cardno = :cardno
-)
-SELECT *
-FROM combined_results
-ORDER BY created_at DESC
-LIMIT :limit OFFSET :offset
+    SELECT t1.bookingid,
+       t1.utsavid,
+       t2.name AS utsav_name,
+       t2.start_date AS utsav_start_date,
+       t2.end_date AS utsav_end_date,
+       t2.month,
+       t1.packageid,
+       t3.name AS package_name,
+       t3.start_date AS package_start,
+       t3.end_date AS package_end,
+       t1.cardno,
+       t1.bookedBy,
+       t5.issuedto AS user_name,
+       t1.status,
+       t4.status AS transaction_status,
+       t4.amount,
+       t2.createdAt AS created_at
+    FROM utsav_booking t1
+    LEFT JOIN utsav_db t2 ON t1.utsavid = t2.id
+    LEFT JOIN utsav_packages_db t3 ON t3.id = t1.packageid
+    LEFT JOIN card_db t5 ON t5.cardno = t1.cardno
+    LEFT JOIN transactions t4 ON t4.bookingid = t1.bookingid
+    WHERE t1.cardno = :cardno OR t1.bookedBy = :cardno
+    ORDER BY created_at DESC
+    LIMIT :limit
+    OFFSET :offset;
   `,
     {
       replacements: {
@@ -443,64 +350,24 @@ LIMIT :limit OFFSET :offset
 };
 
 export const CancelUtsavBooking = async (req, res) => {
-  const { bookingid, bookedFor } = req.body;
+  const { bookingid, bookedBy } = req.body;
 
   const t = await database.transaction();
   req.transaction = t;
 
-  var booking = undefined;
-
-  if (bookedFor !== null) {
-    booking = await UtsavGuestBooking.findOne({
-      where: {
-        bookingid: bookingid,
-        cardno: req.user.cardno,
-        guest: bookedFor
-      }
-    });
-  } else {
-    booking = await UtsavBooking.findOne({
-      where: { 
-        bookingid: bookingid, 
-        cardno: req.user.cardno 
-      }
-    });
-  }
+  const booking = await UtsavBooking.findOne({
+    where: {
+      bookingid: bookingid,
+      cardno: req.user.cardno,
+      bookedBy: bookedBy ? bookedBy : null
+    }
+  });
 
   if (!booking) {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  await booking.update(
-    {
-      status: STATUS_CANCELLED,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-
-  const transaction = await Transactions.findOne({
-    where: {
-      cardno: req.user.cardno,
-      bookingid: bookingid,
-      status: [
-        STATUS_PAYMENT_PENDING,
-        STATUS_PAYMENT_COMPLETED,
-        STATUS_CASH_PENDING,
-        STATUS_CASH_COMPLETED
-      ]
-    }
-  });
-
-  if (!transaction) {
-    throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
-  }
-
-  await userCancelTransaction(
-    req.user,
-    transaction,
-    t
-  );
+  await userCancelBooking(req.user, booking, t);
 
   await t.commit();
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });

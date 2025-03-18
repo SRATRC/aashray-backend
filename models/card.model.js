@@ -42,39 +42,39 @@ const CardDb = sequelize.define(
     },
     email: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     idType: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     idNo: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     address: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     country: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     state: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     city: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     pin: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     center: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     pfp: {
       type: DataTypes.TEXT,
@@ -111,13 +111,14 @@ const CardDb = sequelize.define(
     password: {
       type: DataTypes.STRING,
       allowNull: false,
-      defaultValue: "$2b$10$kyNWZgMVhB0/YIEwJaKhP.JwugrOTUojN.8jPpwS6Tc1O7Wi2yadC"
+      defaultValue:
+        '$2b$10$kyNWZgMVhB0/YIEwJaKhP.JwugrOTUojN.8jPpwS6Tc1O7Wi2yadC'
     },
     credits: {
       type: DataTypes.DECIMAL,
       allowNull: false,
       defaultValue: 0
-    },
+    }
   },
   {
     tableName: 'card_db',

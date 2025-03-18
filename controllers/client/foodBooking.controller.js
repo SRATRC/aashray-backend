@@ -1,9 +1,9 @@
-import { FoodDb, GuestDb, Menu } from '../../models/associations.js';
+import Sequelize, { QueryTypes } from 'sequelize';
+import { cancelFood } from '../../helpers/foodBooking.helper.js';
+import { Menu } from '../../models/associations.js';
 import { MSG_CANCEL_SUCCESSFUL } from '../../config/constants.js';
 import database from '../../config/database.js';
-import Sequelize, { col, QueryTypes } from 'sequelize';
 import moment from 'moment';
-import { cancelFood } from '../../helpers/foodBooking.helper.js';
 
 const mealTimes = {
   breakfast: '7:30 AM - 9:00 AM',
@@ -25,7 +25,6 @@ export const FetchFoodBookings = async (req, res) => {
   const offset = (page_no - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
-  const dateFilter = date ? { date } : {};
 
   const mealFilter = (mealType, exists) => {
     if (meal === 'all') return exists;
@@ -40,43 +39,82 @@ export const FetchFoodBookings = async (req, res) => {
   const isSelf = bookedFor === 'self';
   const isGuest = !isNaN(Number(bookedFor));
 
-  const foodData = await FoodDb.findAll({
-    attributes: [
-      'id',
-      'date',
-      'breakfast',
-      'lunch',
-      'dinner',
-      'spicy',
-      [col('FoodDb.guest'), 'bookedFor']
-    ],
-    where: {
-      cardno: req.query.cardno,
-      ...dateFilter,
-      ...(isSelf && { guest: null }),
-      ...(isGuest && { guest: bookedFor })
-    },
-    include: [
-      {
-        model: GuestDb,
-        attributes: ['id', 'name']
-      }
-    ],
-    order: [['date', 'DESC']],
-    offset,
-    limit: pageSize
-  });
+  const foodData = await database.query(
+    `
+    SELECT 
+      f.id,
+      f.date,
+      f.breakfast,
+      f.lunch,
+      f.dinner,
+      f.spicy,
+      f.bookedBy,
+      f.cardno as bookedFor,
+      c.issuedto as name
+    FROM food_db f
+    LEFT JOIN card_db c ON f.cardno = c.cardno
+    WHERE (f.cardno = :userCardno OR f.bookedBy = :userCardno)
+      ${date ? 'AND f.date = :date' : ''}
+      ${isSelf ? 'AND f.bookedBy IS NULL' : ''}
+      ${isGuest ? 'AND f.cardno = :bookedFor' : ''}
+    ORDER BY f.date DESC
+    LIMIT :limit 
+    OFFSET :offset
+    `,
+    {
+      replacements: {
+        userCardno: req.user.cardno,
+        date: date,
+        bookedFor: bookedFor,
+        limit: pageSize,
+        offset: offset
+      },
+      type: QueryTypes.SELECT
+    }
+  );
 
   const formattedData = foodData.flatMap((item) => {
-    const { id, date, breakfast, lunch, dinner, spicy, bookedFor, GuestDb } =
-      item.dataValues;
-    const name = GuestDb ? GuestDb.name : null;
+    const {
+      id,
+      date,
+      breakfast,
+      lunch,
+      dinner,
+      spicy,
+      bookedFor,
+      bookedBy,
+      name
+    } = item;
 
     return [
-      breakfast && { id, date, mealType: 'breakfast', spicy, bookedFor, name },
-      lunch && { id, date, mealType: 'lunch', spicy, bookedFor, name },
-      dinner && { id, date, mealType: 'dinner', spicy, bookedFor, name }
-    ].filter(Boolean); // Remove null entries (if mealType is not present)
+      breakfast && {
+        id,
+        date,
+        mealType: 'breakfast',
+        spicy,
+        bookedFor,
+        bookedBy,
+        name
+      },
+      lunch && {
+        id,
+        date,
+        mealType: 'lunch',
+        spicy,
+        bookedFor,
+        bookedBy,
+        name
+      },
+      dinner && {
+        id,
+        date,
+        mealType: 'dinner',
+        spicy,
+        bookedFor,
+        bookedBy,
+        name
+      }
+    ].filter(Boolean);
   });
 
   // Apply meal and spice filters
@@ -116,19 +154,18 @@ export const FetchGuestsForFilter = async (req, res) => {
 
   const guests = await database.query(
     `
-    SELECT f.guest, g.name, MAX(f.updatedAt) AS latestUpdate
+    SELECT f.cardno AS bookedFor, c.issuedto AS name, MAX(f.updatedAt) AS latestUpdate
     FROM food_db f
-    JOIN guest_db g ON f.guest = g.id
-    WHERE f.cardno = :cardno
-    GROUP BY f.guest, g.name
+    JOIN card_db c ON f.cardno = c.cardno
+    WHERE f.bookedBy = :cardno
+    GROUP BY f.cardno, c.issuedto
     ORDER BY latestUpdate DESC;
-
     `,
     { replacements: { cardno: cardno }, type: QueryTypes.SELECT }
   );
 
   const formattedGuests = guests.flat().map((guest) => ({
-    key: guest.guest,
+    key: guest.bookedFor,
     value: guest.name
   }));
 

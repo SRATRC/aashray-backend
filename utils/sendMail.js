@@ -1,6 +1,5 @@
 import nodeMailer from 'nodemailer';
 import hbs from 'nodemailer-express-handlebars';
-import path from 'path';
 
 const templateDir = process.cwd() + '/emails';
 

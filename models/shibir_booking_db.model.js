@@ -16,14 +16,6 @@ const ShibirBookingDb = sequelize.define(
       allowNull: false,
       primaryKey: true
     },
-    shibir_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      references: {
-        model: 'shibir_db',
-        key: 'id'
-      }
-    },
     cardno: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -32,11 +24,19 @@ const ShibirBookingDb = sequelize.define(
         key: 'cardno'
       }
     },
-    guest: {
-      type: DataTypes.INTEGER,
+    bookedBy: {
+      type: DataTypes.STRING,
       allowNull: true,
       references: {
-        model: 'guest_db',
+        model: 'card_db',
+        key: 'cardno'
+      }
+    },
+    shibir_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'shibir_db',
         key: 'id'
       }
     },

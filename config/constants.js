@@ -50,7 +50,7 @@ export const STATUS_OFFPREM = 'offprem';
 export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
-export const STATUS_GUEST = 'guest';
+export const STATUS_GUEST = 'GUEST';
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
