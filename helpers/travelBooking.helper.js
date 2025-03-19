@@ -1,7 +1,10 @@
 import {
   ERR_TRAVEL_ALREADY_BOOKED,
+  FULL_TRAVEL_PRICE,
   STATUS_CONFIRMED,
-  STATUS_WAITING
+  STATUS_WAITING,
+  TRAVEL_PRICE,
+  TRAVEL_TYPE_FULL
 } from '../config/constants.js';
 import { TravelDb } from '../models/associations.js';
 import ApiError from '../utils/ApiError.js';
@@ -58,4 +61,10 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
 
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   return {t,bookingIds};
+}
+
+export function travelCharge(type) {
+  return type == TRAVEL_TYPE_FULL 
+    ? FULL_TRAVEL_PRICE
+    : TRAVEL_PRICE;
 }

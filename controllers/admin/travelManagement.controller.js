@@ -1,28 +1,35 @@
 import {
   TravelDb,
-  TravelBookingTransaction,
   CardDb,
   Transactions
 } from '../../models/associations.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
+import Sequelize, { Transaction } from 'sequelize';
 import sendMail from '../../utils/sendMail.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import {
+  ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
+  ERR_TRANSACTION_NOT_FOUND,
+  FULL_TRAVEL_PRICE,
   MSG_UPDATE_SUCCESSFUL,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_REFUND,
   STATUS_CANCELLED,
+  STATUS_CASH_COMPLETED,
   STATUS_CONFIRMED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
   TRAVEL_PRICE,
+  TRAVEL_TYPE_FULL,
   TYPE_EXPENSE,
-  TYPE_REFUND
+  TYPE_REFUND,
+  TYPE_TRAVEL
 } from '../../config/constants.js';
+import { adminCancelTransaction, createPendingTransaction } from '../../helpers/transactions.helper.js';
+import { travelCharge } from '../../helpers/travelBooking.helper.js';
 
 //TODO: send mail
 
@@ -57,8 +64,15 @@ export const fetchUpcomingBookings = async (req, res) => {
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
 
+// valid statuses:
+// 1. waiting to payment pending
+// 2. waiting to admin cancelled
+// 3. confirmed to admin cancelled
+// TODO: Confirm with Harshit on valid statuses
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status } = req.body;
+
+  var newBookingStatus = status;
 
   const t = await database.transaction();
   req.transaction = t;
@@ -81,149 +95,101 @@ export const updateBookingStatus = async (req, res) => {
     throw new ApiError(400, 'Status is same as before');
   }
 
+  if (
+    booking.status == STATUS_ADMIN_CANCELLED ||
+    booking.status == STATUS_CANCELLED
+  ) {
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+
   var transaction = await Transactions.findOne({
     where: { bookingid: bookingid }
   });
 
   switch(status) {
-    case STATUS_CONFIRMED:
-    
+    case STATUS_PAYMENT_PENDING:
+      if (!transaction) {
+        transaction = await createPendingTransaction(
+          booking.cardno,
+          booking,
+          TYPE_TRAVEL,
+          travelCharge(booking.type),
+          req.user.username,
+          t
+        );
+      }
+      
+      // After applying credits, if the transaction is complete
+      // then confirm the booking.
+      if (transaction.status == STATUS_PAYMENT_COMPLETED) {
+        newBookingStatus = STATUS_CONFIRMED;
+      }
+      break;
 
     case STATUS_ADMIN_CANCELLED:
-
-
-  }
-
-  if (
-    booking.status === STATUS_WAITING &&
-    req.body.status === STATUS_CONFIRMED
-  ) {
-    await TravelBookingTransaction.create(
-      {
-        cardno: booking.dataValues.cardno,
-        bookingid: booking.dataValues.bookingid,
-        type: TYPE_EXPENSE,
-        amount: TRAVEL_PRICE,
-        status: STATUS_PAYMENT_PENDING,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
-  } else {
-    const travelBookingTransaction = await TravelBookingTransaction.findOne({
-      where: {
-        cardno: booking.dataValues.cardno,
-        bookingid: booking.dataValues.bookingid,
-        type: TYPE_EXPENSE
+      if (transaction) {
+        await adminCancelTransaction(req.user, transaction, t);
       }
-    });
+      break;
 
-    if (
-      booking.status === STATUS_CONFIRMED &&
-      req.body.status === STATUS_ADMIN_CANCELLED
-    ) {
-      await travelBookingTransaction.update(
-        {
-          status: req.body.status,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
-
-      await TravelBookingTransaction.create(
-        {
-          cardno: booking.dataValues.cardno,
-          bookingid: booking.dataValues.bookingid,
-          type: TYPE_REFUND,
-          amount: travelBookingTransaction.dataValues.amount,
-          status: STATUS_AWAITING_REFUND,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
-    } else if (
-      booking.status === STATUS_ADMIN_CANCELLED ||
-      booking.status === STATUS_CANCELLED
-    ) {
-      throw new ApiError(400, 'cannot modify cancelled booking');
-    }
+    case STATUS_CONFIRMED:
+    default:
+      throw new ApiError(400, 'Invalid status provided');
   }
 
   await booking.update(
     {
-      status: req.body.status
+      status: newBookingStatus,
+      updatedBy: req.user.username
     },
     { transaction: t }
   );
 
-  await t.commit();
+  const card = CardDb.findOne(
+    { where: { cardno: booking.cardno } }
+  );
 
+  // TODO: fix email template
   sendMail({
-    email: booking.dataValues.CardDb.email,
+    email: card.email,
     subject: 'Status changed for your Raj Pravas Booking',
-
-    // TODO: fix email template
     template: 'rajPravasStatusUpdate',
     context: {
-      name: booking.dataValues.CardDb.issuedto,
-      bookingid: booking.dataValues.bookingid,
-      date: booking.dataValues.date,
-      pickup: booking.dataValues.pickup_point,
-      drop: booking.dataValues.drop_point,
-      status: req.body.status
+      name: card.issuedto,
+      bookingid: booking.bookingid,
+      date: booking.date,
+      pickup: booking.pickup_point,
+      drop: booking.drop_point,
+      status: newBookingStatus
     }
   });
 
+  await t.commit();
   return res
     .status(200)
     .send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
+// TODO: Deprecate? where is this used?
 export const updateTransactionStatus = async (req, res) => {
+  const { cardno, bookingid, type } = req.body;
+
   const t = await database.transaction();
   req.transaction = t;
 
-  const travelBookingTransaction = await TravelBookingTransaction.findOne({
+  const transaction = await Transactions.findOne({
     where: {
-      cardno: req.body.cardno,
-      bookingid: req.body.bookingid,
-      type: req.body.type
+      cardno,
+      bookingid,
+      type
     }
   });
 
-  if (!travelBookingTransaction) {
-    throw new ApiError(404, 'invalid bookingid');
+  if (!transaction) {
+    throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
   }
 
-  if (
-    travelBookingTransaction.dataValues.status === STATUS_PAYMENT_COMPLETED &&
-    req.body.status === STATUS_ADMIN_CANCELLED
-  ) {
-    await TravelBookingTransaction.create(
-      {
-        cardno: travelBookingTransaction.dataValues.cardno,
-        bookingid: travelBookingTransaction.dataValues.bookingid,
-        type: TYPE_REFUND,
-        amount: travelBookingTransaction.dataValues.amount,
-        status: STATUS_AWAITING_REFUND,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
-  } else if (
-    travelBookingTransaction.dataValues.status === STATUS_CANCELLED ||
-    travelBookingTransaction.dataValues.status === STATUS_ADMIN_CANCELLED
-  ) {
-    throw new ApiError(400, 'cannot modify cancelled transaction');
-  }
-
-  await travelBookingTransaction.update(
-    {
-      status: req.body.status,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
+  await adminCancelTransaction(req.user, transaction, t);
 
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });

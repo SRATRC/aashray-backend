@@ -5,19 +5,22 @@ import {
   STATUS_WAITING,
   ROOM_STATUS_PENDING_CHECKIN,
   MSG_BOOKING_SUCCESSFUL,
-  TYPE_GUEST_ROOM
+  TYPE_GUEST_ROOM,
+  TYPE_FLAT
 } from '../../config/constants.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import {
   validateDate,
   calculateNights,
-  checkFlatAlreadyBooked
+  checkFlatAlreadyBooked,
+  sendUnifiedEmail
 } from '../helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
+import { flatBooking } from '../admin/roomManagement.controller.js';
 
 export const FlatBookingMumukshu = async (req, res) => {
   const { mumukshus, startDay, endDay } = req.body;
@@ -47,12 +50,14 @@ export const FlatBookingMumukshu = async (req, res) => {
   }
 
   const nights = await calculateNights(startDay, endDay);
+  
   const t = await database.transaction();
   req.transaction = t;
 
   let flat_bookings = [];
 
   for (var mumukshu of mumukshus) {
+
     flat_bookings.push({
       bookingid: uuidv4(),
       cardno: mumukshu['cardno'],
@@ -68,7 +73,17 @@ export const FlatBookingMumukshu = async (req, res) => {
   await FlatBooking.bulkCreate(flat_bookings, { transaction: t });
 
   await t.commit();
+  let bookingIdMap = {},bookingIds=[];
+  let idx=0;
 
+  flat_bookings.forEach((flatBooking) => {
+    bookingIds[idx++]=flatBooking.bookingid;
+  });
+  
+
+  bookingIdMap[TYPE_FLAT]=bookingIds;
+
+  sendUnifiedEmail(req.user,bookingIdMap);
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 

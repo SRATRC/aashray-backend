@@ -5,7 +5,9 @@ import {
   ShibirBookingDb,
   ShibirDb,
   TravelDb,
-  CardDb
+  CardDb,
+  FlatDb,
+  GuestDb
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -15,7 +17,8 @@ import {
   TYPE_ROOM,
   TYPE_TRAVEL,
   TYPE_ADHYAYAN,
-  ERR_INVALID_DATE
+  ERR_INVALID_DATE,
+  TYPE_FLAT
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -388,8 +391,8 @@ export async function sendUnifiedEmail(user,bookingIds) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-
-  let adhyanBookingDetails = [], roomBookingDetails = [], travelBookingDetails = [];
+  let wasFlatBooked =  bookingIds[TYPE_FLAT] != null;
+  let adhyanBookingDetails = [], roomBookingDetails = [], travelBookingDetails = [],flatBookingDetails = [];
   //GetData for adhyan
   let idx=0;
   if (wasAdhyanBooked) {
@@ -450,6 +453,27 @@ export async function sendUnifiedEmail(user,bookingIds) {
     
   }
 
+  if (wasFlatBooked) {
+
+    const flatBookings = await FlatBooking.findAll({
+      where: {
+        bookingid: {[Sequelize.Op.in]: bookingIds[TYPE_FLAT]}
+      }
+      
+    });
+
+    idx=0;
+    flatBookings.forEach( 
+      (flatBooking) => { 
+        flatBookingDetails[idx++]={"bookingid":flatBooking.bookingid,
+          "flatno":flatBooking.flatno,
+          "checkin":flatBooking.checkin,"checkout":flatBooking.checkout};
+        
+      }
+    );
+  }
+
+
   const userInfo = await CardDb.findOne({
     where: {
       cardno : user.cardno
@@ -466,14 +490,15 @@ export async function sendUnifiedEmail(user,bookingIds) {
    template: 'unifiedBookingEmail',
 
     context: {
-
     showAdhyanDetail:wasAdhyanBooked,
     showRoomDetail:wasRoomBooked,
     showTravelDetail:wasRajprvasBooked,
+    showFlatDetail:wasFlatBooked,
     name: userInfo.issuedto,
     roomBookingDetails,
     adhyanBookingDetails,
-    travelBookingDetails
+    travelBookingDetails,
+    flatBookingDetails
    }
 
   });

@@ -110,7 +110,6 @@ async function book(body, data, t, user) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(data, t, user);
       amount += roomResult.amount;
-      console.log('ROOM RESULT', roomResult.amount);
       break;
 
     case TYPE_FOOD:
@@ -124,7 +123,6 @@ async function book(body, data, t, user) {
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(data, t, user);
       amount += adhyayanResult.amount;
-      console.log('ADHYAYAN RESULT', adhyayanResult.amount);
       break;
 
     default:

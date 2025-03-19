@@ -9,11 +9,15 @@ import {
   STATUS_CANCELLED,
   STATUS_CASH_PENDING,
   STATUS_CREDITED,
-  STATUS_CONFIRMED
+  STATUS_CONFIRMED,
+  TYPE_ADHYAYAN,
+  TYPE_GUEST_ADHYAYAN
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
+import moment from 'moment';
+import { Sequelize } from 'sequelize';
 
 export async function createTransaction(
   cardno,
@@ -50,7 +54,7 @@ export async function createTransaction(
 
 export async function createPendingTransaction(
   cardno,
-  bookingid,
+  booking,
   category,
   amount,
   updatedBy,
@@ -59,7 +63,7 @@ export async function createPendingTransaction(
   const transaction = await Transactions.create(
     {
       cardno,
-      bookingid,
+      bookingid: booking.bookingid,
       category,
       amount,
       status: STATUS_PAYMENT_PENDING,
@@ -68,7 +72,16 @@ export async function createPendingTransaction(
     { transaction: t }
   );
 
-  return transaction;
+  const discountedAmount = await useCredit(
+    cardno,
+    booking,
+    transaction,
+    amount,
+    updatedBy,
+    t
+  )
+
+  return { transaction, discountedAmount };
 }
 
 export async function userCancelBooking(user, booking, t) {
@@ -104,7 +117,7 @@ export async function userCancelTransaction(user, transaction, t) {
 // STATUS_CANCELLED,
 // STATUS_ADMIN_CANCELLED,
 // STATUS_CREDITED
-async function cancelTransaction(user, transaction, t, admin = false) {
+export async function cancelTransaction(user, transaction, t, admin = false) {
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
 
   var amount = transaction.amount + transaction.discount;
@@ -112,7 +125,11 @@ async function cancelTransaction(user, transaction, t, admin = false) {
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
-      if (amount > 0) {
+      if (
+        (amount > 0) &&
+        (transaction.category != TYPE_ADHYAYAN) &&
+        (transaction.category != TYPE_GUEST_ADHYAYAN)
+      ) {
         await addCredit(user, transaction, amount, t);
         status = STATUS_CREDITED;
       }
@@ -187,8 +204,9 @@ export async function useCredit(
     return amount;
   }
 
-  const status =
-    amount > card.credits ? STATUS_PAYMENT_PENDING : STATUS_PAYMENT_COMPLETED;
+  const status = amount > card.credits 
+    ? STATUS_PAYMENT_PENDING 
+    : STATUS_PAYMENT_COMPLETED;
 
   const creditsUsed = Math.min(amount, card.credits);
   const discountedAmount = amount - creditsUsed;
@@ -242,3 +260,22 @@ export const generateOrderId = async (amount) => {
   const order = await razorpay.orders.create(options);
   return order;
 };
+
+export async function cancelPendingBookings() {
+  const yesterday = moment.utc().subtract(1, 'day');
+  
+  const transactions = await Transactions.findAll({
+    where: { 
+      status: [
+        STATUS_PAYMENT_PENDING
+      ],
+      updatedAt: {
+        [Sequelize.Op.lte]: yesterday
+      }
+    }
+  });
+
+  console.log("TRANSACTIONS TO CANCEL: " + JSON.stringify(transactions));
+
+  // TODO: implement logic to cancel transactions
+}

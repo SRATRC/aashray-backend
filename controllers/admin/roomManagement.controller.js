@@ -23,13 +23,16 @@ import {
   MSG_UPDATE_SUCCESSFUL,
   ERR_TRANSACTION_NOT_FOUND,
   ERR_ROOM_NOT_FOUND,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  TYPE_ROOM,
+  TYPE_FLAT
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
   calculateNights,
   validateDate,
-  getBlockedDates
+  getBlockedDates,
+  sendUnifiedEmail
 } from '../helper.js';
 import {
   bookDayVisit,
@@ -41,10 +44,9 @@ import getDates from '../../utils/getDates.js';
 import Sequelize, { where } from 'sequelize';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
-import SendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import sendMail from '../../utils/sendMail.js';
+
 
 // TODO: early checkin??
 export const manualCheckin = async (req, res) => {
@@ -173,20 +175,16 @@ export const roomBooking = async (req, res) => {
       t
     );
   }
-
-  sendMail({
-    email: card.email,
-    subject: `Your Booking Confirmation for Stay at SRATRC`,
-    template: 'rajSharan',
-    context: {
-      name: card.issuedto,
-      bookingid: booking.bookingid,
-      checkin: booking.checkin,
-      checkout: booking.checkout
-    }
-  });
+  
+  
+  
 
   await t.commit();
+  if( booking.bookingId != null ){
+  let bookingIds = {};
+  bookingIds[TYPE_ROOM]=[booking.bookingId];
+  sendUnifiedEmail(card,bookingIds);
+  }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
@@ -220,7 +218,7 @@ export const flatBooking = async (req, res) => {
   );
 
   const booking = await FlatBooking.create({
-    bookingid: uuidv4(),
+    bookingid: uuidv4(),  
     cardno: user_data.dataValues.cardno,
     flatno: req.body.flat_no,
     checkin: req.body.checkin_date,
@@ -233,28 +231,9 @@ export const flatBooking = async (req, res) => {
     throw new ApiError(400, 'Failed to book your flat');
   }
 
-  const message = `
-      Dear ${user_data.dataValues.issuedto},<br><br>
-
-			We are pleased to confirm your Flat booking as per following details:<br><br>
-			
-			<b>Booking id:</b> ${booking.dataValues.id}<br>
-			<b>Check-in Date:</b> ${booking.dataValues.checkin}<br>
-			<b>Check-out Date:</b> ${booking.dataValues.checkout}<br><br>
-			
-			Your Room Number will be provided from office upon checkin.<br><br>
-
-			<a href='http://datachef.in/sratrc/rajsharan/guidelines/rc_guidelines.pdf' target='_blank'>Please Click Here to Read</a> the guidelines for your stay at Research Center
-			We hope you have a spiritually blissful stay. <br><br>
-			
-			Research Center Admin office, <br>
-			7875432613 / 9004273512`;
-
-  SendMail({
-    email: user_data.dataValues.email,
-    subject: `Your Booking Confirmation for Stay at SRATRC`,
-    message
-  });
+  let bookingIdMap = {};
+  bookingIdMap[TYPE_FLAT]=[booking.bookingid];
+  sendUnifiedEmail(user_data.dataValues,bookingIdMap);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

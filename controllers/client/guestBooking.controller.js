@@ -38,7 +38,8 @@ import {
   calculateNights,
   validateDate,
   checkGuestRoomAlreadyBooked,
-  checkFlatAlreadyBookedForGuest
+  checkFlatAlreadyBookedForGuest,
+  sendUnifiedEmail
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
@@ -59,10 +60,11 @@ export const guestBooking = async (req, res) => {
   req.transaction = t;
 
   let amount = 0;
-
+  var bookingIdMap = {};
+  
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(primary_booking, t, req.user);
+      const roomResult = await bookRoom(primary_booking, t, req.user,bookingIdMap);
       t = roomResult.t;
       amount += roomResult.amount;
       break;
@@ -74,7 +76,7 @@ export const guestBooking = async (req, res) => {
       break;
 
     case TYPE_ADHYAYAN:
-      const adhyayanResult = await bookAdhyayan(primary_booking, t, req.user);
+      const adhyayanResult = await bookAdhyayan(primary_booking, t, req.user,bookingIdMap);
       t = adhyayanResult.t;
       amount += adhyayanResult.amount;
       break;
@@ -87,7 +89,7 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          const roomResult = await bookRoom(addon, t, req.user);
+          const roomResult = await bookRoom(addon, t, req.user,bookingIdMap);
           t = roomResult.t;
           amount += roomResult.amount;
           break;
@@ -99,7 +101,7 @@ export const guestBooking = async (req, res) => {
           break;
 
         case TYPE_ADHYAYAN:
-          const adhyayanResult = await bookAdhyayan(addon, t, req.user);
+          const adhyayanResult = await bookAdhyayan(addon, t, req.user,bookingIdMap);
           t = adhyayanResult.t;
           amount += adhyayanResult.amount;
           break;
@@ -113,9 +115,12 @@ export const guestBooking = async (req, res) => {
   const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
   const finalAmount = amount + taxes;
 
-  const order = finalAmount > 0 ? await generateOrderId(finalAmount) : null;
+  const order = process.env.NODE_ENV == 'prod' && finalAmount > 0 
+    ? await generateOrderId(finalAmount) 
+    : { amount };
 
   await t.commit();
+  sendUnifiedEmail(req.user,bookingIdMap);
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -265,15 +270,17 @@ async function checkRoomAvailability(user, data) {
   return roomDetails;
 }
 
-async function bookRoom(user, data, t) {
+async function bookRoom(data, t,user,bookingIdMap) {
+
   const { checkin_date, checkout_date, guestGroup } = data.details;
+  
   validateDate(checkin_date, checkout_date);
 
   let amount = 0;
-
+  let bookingIds=[],idx=0;
   const nights = await calculateNights(checkin_date, checkout_date);
-
   const totalGuests = guestGroup.flatMap((group) => group.guests);
+  
   const guest_db = await GuestDb.findAll({
     attributes: ['id', 'name', 'gender'],
     where: { id: totalGuests }
@@ -311,9 +318,11 @@ async function bookRoom(user, data, t) {
         );
         t = result.t;
         amount += result.discountedAmount;
+        bookingIds[idx++]=result.bookingId;
       }
     }
   }
+  bookingIdMap[TYPE_ROOM]=bookingIds;
   return { t, amount };
 }
 
@@ -368,9 +377,10 @@ async function bookRoomForSingleGuest(
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
 
+  let bookingId=uuidv4();
   const booking = await RoomBooking.create(
     {
-      bookingid: uuidv4(),
+      bookingid: bookingId,
       cardno: user.cardno,
       guest,
       roomno: roomno.dataValues.roomno,
@@ -390,9 +400,9 @@ async function bookRoomForSingleGuest(
 
   const amount = roomCharge(roomtype) * nights;
 
-  const transaction = await createPendingTransaction(
-    user.cardno,
-    booking.bookingid,
+  const { transaction, discountedAmount } = await createPendingTransaction(
+    booking.cardno,
+    booking,
     TYPE_ROOM,
     amount,
     'USER',
@@ -403,16 +413,10 @@ async function bookRoomForSingleGuest(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const discountedAmount = await useCredit(
-    user.cardno,
-    booking,
-    transaction,
-    amount,
-    'USER',
-    t
-  );
+  
 
-  return { t, discountedAmount };
+  return { t, discountedAmount,bookingId };
+  
 }
 
 async function checkFoodAvailability(data) {
@@ -636,9 +640,9 @@ async function checkAdhyayanAvailability(user, data) {
   return adhyayanDetails;
 }
 
-async function bookAdhyayan(user, data, t) {
+async function bookAdhyayan(data, t,user,bookingIdMap) {
   const { shibir_ids, guests } = data.details;
-  let amount = 0;
+  let amount = 0,idx=0;
 
   const isBooked = await ShibirBookingDb.findAll({
     where: {
@@ -666,11 +670,11 @@ async function bookAdhyayan(user, data, t) {
 
   var booking_data = [];
   var transaction_data = [];
-
+  var bookingIds=[];
   for (const guest of guests) {
     for (var shibir of shibirs) {
       const bookingid = uuidv4();
-
+      bookingIds[idx++]=bookingid;
       if (shibir.dataValues.available_seats > 0) {
         booking_data.push({
           bookingid: bookingid,
@@ -694,6 +698,7 @@ async function bookAdhyayan(user, data, t) {
 
         amount += shibir.dataValues.amount;
       } else {
+        bookingIds[idx++]=bookingid;
         booking_data.push({
           bookingid: bookingid,
           shibir_id: shibir.dataValues.id,
@@ -704,6 +709,7 @@ async function bookAdhyayan(user, data, t) {
       }
     }
   }
+  bookingIdMap[TYPE_ADHYAYAN]=bookingIds;
 
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });

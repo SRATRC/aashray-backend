@@ -1,41 +1,25 @@
 import {
   CardDb,
   FoodDb,
-  GuestFoodDb,
-  GuestFoodTransactionDb,
   FoodPhysicalPlate,
   Menu
 } from '../../models/associations.js';
 import {
-  BREAKFAST_PRICE,
-  LUNCH_PRICE,
-  DINNER_PRICE,
-  TYPE_EXPENSE,
   MSG_CANCEL_SUCCESSFUL,
   ERR_BOOKING_NOT_FOUND,
   ERR_INVALID_MEAL_TIME,
-  ERR_FOOD_ALREADY_BOOKED,
-  ERR_ROOM_MUST_BE_BOOKED,
   MSG_BOOKING_SUCCESSFUL,
   MSG_FETCH_SUCCESSFUL
 } from '../../config/constants.js';
 import {
-  checkFlatAlreadyBooked,
-  checkSpecialAllowance,
-  isFoodBooked,
   validateDate
 } from '../helper.js';
-import {
-  checkRoomAlreadyBooked
-} from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
-import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
-import { userIsPR } from '../../helpers/card.helper.js';
-import { bookFoodForMumukshus, createGroupFoodRequest } from '../../helpers/foodBooking.helper.js';
+import { bookFoodForMumukshus, cancelFood, createGroupFoodRequest } from '../../helpers/foodBooking.helper.js';
 
 export const issuePlate = async (req, res) => {
   const currentTime = moment.utc();
@@ -180,9 +164,11 @@ export const cancelFoodByCard = async (req, res) => {
     const booking = await FoodDb.findOne({
       where: {
         cardno: cardno,
+        guest: null,
         date: item.date
       }
     });
+
     if (booking) {
       booking.breakfast = item.breakfast;
       booking.lunch = item.lunch;
@@ -214,6 +200,7 @@ export const cancelFoodByMob = async (req, res) => {
     const booking = await FoodDb.findOne({
       where: {
         cardno: card.cardno,
+        guest: null,
         date: item.date
       }
     });
@@ -232,6 +219,7 @@ export const cancelFoodByMob = async (req, res) => {
     .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
+// TODO: implement
 export const bookFoodForGuest = async (req, res) => {
   const { 
     start_date, 
@@ -253,43 +241,6 @@ export const bookFoodForGuest = async (req, res) => {
   const days = allDates.length;
 
   // TODO: get guest details
-  // TODO: take phone number of the Mumukshu
-  var food_data = [];
-  const bookingid = uuidv4();
-  for (const date of allDates) {
-    for (const guestId of guests) {
-      food_data.push({
-        bookingid: bookingid,
-        cardno: req.body.cardno,
-        date: date,
-        guest_count: guest_count,
-        breakfast: req.body.breakfast,
-        lunch: req.body.lunch,
-        dinner: req.body.dinner,
-        updatedBy: req.user.username
-      });
-    }
-  }
-
-  await GuestFoodDb.bulkCreate(food_data, { transaction: t });
-
-  const food_cost =
-    (breakfast ? BREAKFAST_PRICE : 0) +
-    (lunch ? LUNCH_PRICE : 0) +
-    (dinner ? DINNER_PRICE : 0);
-  const amount = food_cost * guest_count * days;
-
-  await GuestFoodTransactionDb.create(
-    {
-      cardno: req.body.cardno,
-      bookingid: bookingid,
-      type: TYPE_EXPENSE,
-      amount: amount,
-      description: `Food Booking for ${guest_count} guests`,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
 
   await t.commit();
 
@@ -297,80 +248,21 @@ export const bookFoodForGuest = async (req, res) => {
 };
 
 export const cancelFoodForGuest = async (req, res) => {
-  const updateData = req.body.food_data;
-
   const t = await database.transaction();
+  req.transaction = t;
 
-  for (let i = 0; i < updateData.length; i++) {
-    const isAvailable = await GuestFoodDb.findOne({
-      where: {
-        cardno: req.body.cardno,
-        bookingid: req.body.food_data[i].bookingid,
-        date: req.body.food_data[i].date
-      }
-    });
-    if (!isAvailable) continue;
+  const { cardno, food_data } = req.body;
 
-    await GuestFoodDb.update(
-      {
-        guest_count: updateData[i].guest_count,
-        breakfast: updateData[i].breakfast,
-        lunch: updateData[i].lunch,
-        dinner: updateData[i].dinner,
-        updatedBy: req.user.username
-      },
-      {
-        where: {
-          id: updateData[i].id
-        },
-        transaction: t
-      }
-    );
-  }
-
-  await GuestFoodDb.destroy({
-    where: {
-      breakfast: false,
-      lunch: false,
-      dinner: false
-    },
-    transaction: t
-  });
-
-  await t.commit();
-
-  const revisedPayments = await GuestFoodDb.findAll({
-    where: {
-      bookingid: updateData[0].bookingid
-    }
-  });
-
-  var total = 0;
-
-  for (let data of revisedPayments) {
-    total +=
-      data.dataValues.guest_count *
-      ((data.dataValues.breakfast ? BREAKFAST_PRICE : 0) +
-        (data.dataValues.lunch ? LUNCH_PRICE : 0) +
-        (data.dataValues.dinner ? DINNER_PRICE : 0));
-  }
-
-  const makeTransaction = await GuestFoodTransactionDb.update(
-    {
-      amount: total,
-      updatedBy: req.user.username
-    },
-    {
-      where: {
-        bookingid: updateData[0].bookingid
-      }
-    }
+  await cancelFood(
+    req.user,
+    cardno,
+    food_data,
+    t,
+    true
   );
 
-  if (makeTransaction != 1)
-    throw new ApiError(500, 'Error occured while updating transaction');
-
-  return res.status(200).send({ message: 'Successfully deleted' });
+  await t.commit();
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const foodReport = async (req, res) => {

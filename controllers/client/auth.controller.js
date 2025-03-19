@@ -23,30 +23,29 @@ export const verifyMobno = async (req, res) => {
 };
 
 export const updatePassword = async (req, res) => {
-  const mobno = req.body.mobno;
-  const password = req.body.password;
-  const newPassword = req.body.newpassword;
+  const current_password = req.body.current_password.trim();
+  const new_password = req.body.new_password.trim();
 
-  if (!mobno || !password || !newPassword) {
+  if (!current_password || !new_password) {
     throw new ApiError(404, 'Please provide all the fields');
   }
   const details = await CardDb.findOne({
-    where: { mobno: mobno },
+    where: { cardno: req.user.cardno },
     attributes: {
       exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
     }
   });
 
-  const match = bcrypt.compareSync(password, details.password);
+  const match = bcrypt.compareSync(current_password, details.password);
   if (!match) {
-    throw new ApiError(404, 'user not found'); //login
+    throw new ApiError(404, 'incorrect password provided');
   }
 
   const salt = bcrypt.genSaltSync(10);
-  const hash = bcrypt.hashSync(newPassword, salt);
-  const result = await CardDb.update(
+  const hash = bcrypt.hashSync(new_password, salt);
+  await CardDb.update(
     { password: hash },
-    { where: { mobno: mobno } }
+    { where: { cardno: req.user.cardno } }
   );
 
   details.password = '';

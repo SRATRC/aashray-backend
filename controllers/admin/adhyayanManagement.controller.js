@@ -262,6 +262,10 @@ export const adhyayanStatusUpdate = async (req, res) => {
   // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
   // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
   // 4. Booking Status = CANCELLED OR ADMIN_CANCELLED, Transaction is Not Created or Status = CANCELLED OR ADMIN_CANCELLED
+
+  // waiting to confirmed
+  // waiting to payment pending -- not needed
+  // 
   switch (status) {
     // Only Waiting & Payment Pending booking can be changed to
     // Confirmed 
@@ -273,7 +277,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
       if (!transaction) {
         transaction = await createPendingTransaction(
           booking.cardno,
-          bookingid,
+          booking,
           TYPE_ADHYAYAN,
           adhyayan.amount,
           req.user.username,
@@ -281,15 +285,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
         );
       }
 
-      await useCredit(
-        transaction.cardno,
-        booking,
-        transaction,
-        adhyayan.amount,
-        req.user.username,
-        t
-      );
-
+      // TODO: is this correct?
       // After applying credits, if the status is still payment pending
       // then accept the UPI or cash payment and mark is complete.
       if (transaction.status == STATUS_PAYMENT_PENDING) {
@@ -317,22 +313,13 @@ export const adhyayanStatusUpdate = async (req, res) => {
         if (!transaction) {
           transaction = await createPendingTransaction(
             booking.cardno,
-            bookingid,
+            booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
             req.user.username,
             t
           );
         }
-
-        await useCredit(
-          transaction.cardno,
-          booking,
-          transaction,
-          adhyayan.amount,
-          req.user.username,
-          t
-        );
 
         // After applying credits, if the transaction is complete
         // then confirm the booking.
@@ -357,8 +344,6 @@ export const adhyayanStatusUpdate = async (req, res) => {
       break;
 
     case STATUS_WAITING:
-      throw new ApiError(400, 'Booking\'s status cannot be changed to Waiting');
-
     default:
       throw new ApiError(400, 'Invalid status provided');
   }
