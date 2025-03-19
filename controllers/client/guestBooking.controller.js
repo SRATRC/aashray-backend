@@ -1,6 +1,5 @@
 import {
   ShibirDb,
-  GuestDb,
   ShibirBookingDb,
   RoomBooking,
   FlatBooking,
@@ -800,16 +799,8 @@ export const guestBookingFlat = async (req, res) => {
   validateDate(startDay, endDay);
 
   for (var guest of guests) {
-    if (
-      await checkFlatAlreadyBookedForGuest(
-        startDay,
-        endDay,
-        // flatDb.dataValues.flatno,
-        guest['id']
-      )
-    ) {
-      throw new ApiError(400, 'Already Booked');
-    }
+    if (await checkFlatAlreadyBookedForGuest(startDay, endDay, guest['cardno']))
+      throw new ApiError(400, `flat already Booked for ${guest['name']}`);
   }
 
   const nights = await calculateNights(startDay, endDay);
@@ -819,14 +810,13 @@ export const guestBookingFlat = async (req, res) => {
   for (var guest of guests) {
     booking.push({
       bookingid: uuidv4(),
-      cardno: req.user.cardno,
+      cardno: guest.cardno,
       flatno: flatDb.dataValues.flatno,
       checkin: startDay,
       checkout: endDay,
       nights: nights,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      guest: guest['id'],
-      updatedBy: req.user.cardno
+      updatedBy: req.user.cardno,
+      status: ROOM_STATUS_PENDING_CHECKIN
     });
   }
 

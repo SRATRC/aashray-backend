@@ -116,7 +116,7 @@ export async function checkFlatAlreadyBookedForGuest(
           ]
         }
       ],
-      guest: guest_id
+      cardno: guest_id
     }
   });
 
