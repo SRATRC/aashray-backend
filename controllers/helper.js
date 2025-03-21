@@ -6,8 +6,7 @@ import {
   ShibirDb,
   TravelDb,
   CardDb,
-  FlatDb,
-  GuestDb
+  GuestRelationship
 } from '../models/associations.js';
 import {
   STATUS_WAITING,
@@ -18,7 +17,8 @@ import {
   TYPE_TRAVEL,
   TYPE_ADHYAYAN,
   ERR_INVALID_DATE,
-  TYPE_FLAT
+  TYPE_FLAT,
+  STATUS_GUEST
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -26,9 +26,6 @@ import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
-
-import { roomBooking } from './admin/roomManagement.controller.js';
-import sequelize from '../config/database.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   const startDate = new Date(checkin_date);
@@ -85,8 +82,7 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
           ]
         }
       ],
-      cardno: card_no,
-      guest: null
+      cardno: card_no
     }
   });
 
@@ -120,7 +116,7 @@ export async function checkFlatAlreadyBookedForGuest(
           ]
         }
       ],
-      guest: guest_id
+      cardno: guest_id
     }
   });
 
@@ -180,7 +176,6 @@ export async function checkSpecialAllowance(start_date, end_date, cardno) {
     ],
     where: {
       cardno: cardno,
-      guest: null,
       status: STATUS_CONFIRMED
     }
   });
@@ -289,12 +284,7 @@ export function findClosestSum(arr, target) {
   return { closestSum, closestIndices };
 }
 
-export async function checkGuestRoomAlreadyBooked(
-  checkin,
-  checkout,
-  cardno,
-  guests
-) {
+export async function checkGuestRoomAlreadyBooked(checkin, checkout, guests) {
   const result = await RoomBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -317,8 +307,7 @@ export async function checkGuestRoomAlreadyBooked(
           ]
         }
       ],
-      cardno: cardno,
-      guest: guests,
+      cardno: guests,
       status: {
         [Sequelize.Op.in]: [
           STATUS_WAITING,
@@ -386,124 +375,252 @@ export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
   return false;
 }
 
-export async function sendUnifiedEmail(user,bookingIds) {
-
+export async function sendUnifiedEmail(user, bookingIds) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked =  bookingIds[TYPE_FLAT] != null;
-  let adhyanBookingDetails = [], roomBookingDetails = [], travelBookingDetails = [],flatBookingDetails = [];
+  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+  let adhyanBookingDetails = [],
+    roomBookingDetails = [],
+    travelBookingDetails = [],
+    flatBookingDetails = [];
   //GetData for adhyan
-  let idx=0;
+  let idx = 0;
   if (wasAdhyanBooked) {
     const adhyanBookings = await ShibirBookingDb.findAll({
-    
       include: [
         {
           model: ShibirDb,
-          attributes: ['name','speaker','month','start_date','end_date'],
+          attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
           where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
         }
       ],
       where: {
-        bookingId : {[Sequelize.Op.in]:bookingIds[TYPE_ADHYAYAN]}
+        bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
       }
-      
     });
-    idx=0;
-    adhyanBookings.forEach( 
-      (adhyanBooking) => { 
-        adhyanBookingDetails[idx++]={"bookingid":adhyanBooking.bookingid,"name":adhyanBooking.dataValues.ShibirDb.name,
-          "speaker":adhyanBooking.dataValues.ShibirDb.speaker,"startdate":adhyanBooking.dataValues.ShibirDb.start_date
-        ,"enddate":adhyanBooking.dataValues.ShibirDb.end_date,"status":adhyanBooking.status};
-        
-      }
-    );
-   
+    idx = 0;
+    adhyanBookings.forEach((adhyanBooking) => {
+      adhyanBookingDetails[idx++] = {
+        bookingid: adhyanBooking.bookingid,
+        name: adhyanBooking.dataValues.ShibirDb.name,
+        speaker: adhyanBooking.dataValues.ShibirDb.speaker,
+        startdate: adhyanBooking.dataValues.ShibirDb.start_date,
+        enddate: adhyanBooking.dataValues.ShibirDb.end_date,
+        status: adhyanBooking.status
+      };
+    });
   }
   if (wasRajprvasBooked) {
-    const travelBookings = await TravelDb.findAll({ 
+    const travelBookings = await TravelDb.findAll({
       where: {
-        bookingId : {[Sequelize.Op.in]:bookingIds[TYPE_TRAVEL]}
-      }  
+        bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_TRAVEL] }
+      }
     });
 
-    idx=0;
-    travelBookings.forEach( 
-      (travelBooking) => { 
-        travelBookingDetails[idx++]={"bookingid":travelBooking.bookingid,"date":travelBooking.date
-          ,"pickuppoint":travelBooking.pickup_point,"dropoffpoint":travelBooking.drop_point};
-      }
-    );
-  } 
+    idx = 0;
+    travelBookings.forEach((travelBooking) => {
+      travelBookingDetails[idx++] = {
+        bookingid: travelBooking.bookingid,
+        date: travelBooking.date,
+        pickuppoint: travelBooking.pickup_point,
+        dropoffpoint: travelBooking.drop_point
+      };
+    });
+  }
 
   if (wasRoomBooked) {
     const roomBookings = await RoomBooking.findAll({
       where: {
-        bookingid: {[Sequelize.Op.in]: bookingIds[TYPE_ROOM]}
-      }   
-    });
-    idx=0;
-    roomBookings.forEach( 
-      (roomBooking) => { 
-        roomBookingDetails[idx++]={"bookingid":roomBooking.bookingid,"checkin":roomBooking.checkin,"checkout":roomBooking.checkout};
-        
+        bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_ROOM] }
       }
-    );
-    
+    });
+    idx = 0;
+    roomBookings.forEach((roomBooking) => {
+      roomBookingDetails[idx++] = {
+        bookingid: roomBooking.bookingid,
+        checkin: roomBooking.checkin,
+        checkout: roomBooking.checkout
+      };
+    });
   }
 
   if (wasFlatBooked) {
-
     const flatBookings = await FlatBooking.findAll({
       where: {
-        bookingid: {[Sequelize.Op.in]: bookingIds[TYPE_FLAT]}
+        bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_FLAT] }
       }
-      
     });
 
-    idx=0;
-    flatBookings.forEach( 
-      (flatBooking) => { 
-        flatBookingDetails[idx++]={"bookingid":flatBooking.bookingid,
-          "flatno":flatBooking.flatno,
-          "checkin":flatBooking.checkin,"checkout":flatBooking.checkout};
-        
+    idx = 0;
+    flatBookings.forEach((flatBooking) => {
+      flatBookingDetails[idx++] = {
+        bookingid: flatBooking.bookingid,
+        flatno: flatBooking.flatno,
+        checkin: flatBooking.checkin,
+        checkout: flatBooking.checkout
+      };
+    });
+  }
+
+  const userInfo = await CardDb.findOne({
+    where: {
+      cardno: user.cardno
+    }
+  });
+
+  //send email to me
+  sendMail({
+    email: userInfo.email,
+
+    subject: `Your Booking Confirmation for Stay at SRATRC`,
+
+    template: 'unifiedBookingEmail',
+
+    context: {
+      showAdhyanDetail: wasAdhyanBooked,
+      showRoomDetail: wasRoomBooked,
+      showTravelDetail: wasRajprvasBooked,
+      showFlatDetail: wasFlatBooked,
+      name: userInfo.issuedto,
+      roomBookingDetails,
+      adhyanBookingDetails,
+      travelBookingDetails,
+      flatBookingDetails
+    }
+  });
+
+  //send email
+}
+
+export async function createGuestsHelper(cardno, guests, t) {
+  const registeredGuests = guests.filter((guest) => guest.cardno);
+  const unregisteredGuests = guests.filter((guest) => !guest.cardno);
+
+  // Generate all needed IDs in one call
+  const newCardIds =
+    unregisteredGuests.length > 0
+      ? await createCardIds(unregisteredGuests.length)
+      : [];
+
+  const guestsToCreate = unregisteredGuests.map((guest, index) => ({
+    issuedto: guest.name,
+    gender: guest.gender,
+    mobno: guest.mobno,
+    guest_type: guest.type,
+    cardno: newCardIds[index],
+    res_status: STATUS_GUEST,
+    updatedBy: cardno,
+    packageid: guest.packageid
+  }));
+
+  let createdGuests = [];
+  if (guestsToCreate.length > 0) {
+    createdGuests = await CardDb.bulkCreate(guestsToCreate, {
+      transaction: t,
+      returning: true
+    });
+  }
+
+  if (guestsToCreate.length > 0) {
+    await GuestRelationship.bulkCreate(
+      guestsToCreate.map((guest) => ({
+        cardno: cardno,
+        guest: guest.cardno,
+        type: guest.guest_type,
+        updatedBy: cardno
+      })),
+      {
+        transaction: t
       }
     );
   }
 
+  const allGuests = [...registeredGuests, ...guestsToCreate];
+  return allGuests;
+}
 
-  const userInfo = await CardDb.findOne({
-    where: {
-      cardno : user.cardno
-    }   
-  });
- 
-//send email to me
-  sendMail({
+export async function createCardIds(count) {
+  // Convert array to Set for O(1) lookups if needed
+  const existingIds = await CardDb.findAll({
+    attributes: ['cardno'],
+    raw: true
+  }).then((cards) => cards.map((card) => card.cardno));
+  const usedIds =
+    existingIds instanceof Set ? existingIds : new Set(existingIds);
 
-    email: userInfo.email,
+  // Track the new IDs we're generating
+  const newIds = [];
 
-   subject: `Your Booking Confirmation for Stay at SRATRC`,
+  // Constants for the ID range
+  const MIN_ID = 1;
+  const MAX_ID = 9999999999;
 
-   template: 'unifiedBookingEmail',
+  // If we have too many existing IDs, a sequential approach might be more efficient
+  const RANDOM_THRESHOLD = MAX_ID * 0.1; // Arbitrary threshold - adjust based on your data
 
-    context: {
-    showAdhyanDetail:wasAdhyanBooked,
-    showRoomDetail:wasRoomBooked,
-    showTravelDetail:wasRajprvasBooked,
-    showFlatDetail:wasFlatBooked,
-    name: userInfo.issuedto,
-    roomBookingDetails,
-    adhyanBookingDetails,
-    travelBookingDetails,
-    flatBookingDetails
-   }
+  if (usedIds.size > RANDOM_THRESHOLD) {
+    // With many existing IDs, use sequential generation with validation
+    let currentId = MIN_ID;
 
-  });
+    while (newIds.length < count && currentId <= MAX_ID) {
+      const idString = currentId.toString().padStart(10, '0');
 
-  //send email
+      if (!usedIds.has(idString)) {
+        newIds.push(idString);
+        usedIds.add(idString); // Prevent duplicates in our generated set
+      }
 
-};
+      currentId++;
+    }
+  } else {
+    // With fewer existing IDs, random generation might be more efficient
+    let attempts = 0;
+    const MAX_ATTEMPTS = count * 10; // Prevent infinite loops
 
+    while (newIds.length < count && attempts < MAX_ATTEMPTS) {
+      // Generate a random number between MIN_ID and MAX_ID
+      const randomId =
+        Math.floor(Math.random() * (MAX_ID - MIN_ID + 1)) + MIN_ID;
+      const idString = randomId.toString().padStart(10, '0');
+
+      if (!usedIds.has(idString)) {
+        newIds.push(idString);
+        usedIds.add(idString); // Prevent duplicates in our generated set
+      }
+
+      attempts++;
+
+      // If we're struggling to find unique random IDs, switch to sequential
+      if (attempts >= MAX_ATTEMPTS && newIds.length < count) {
+        console.warn(
+          `Random generation inefficient, switching to sequential for remaining ${
+            count - newIds.length
+          } IDs`
+        );
+
+        // Find the next available ID
+        let currentId = MIN_ID;
+        while (newIds.length < count && currentId <= MAX_ID) {
+          const idString = currentId.toString().padStart(10, '0');
+
+          if (!usedIds.has(idString)) {
+            newIds.push(idString);
+            usedIds.add(idString);
+          }
+
+          currentId++;
+        }
+      }
+    }
+  }
+
+  // Check if we were able to generate the requested number of IDs
+  if (newIds.length < count) {
+    throw new Error(
+      `Could only generate ${newIds.length} unique IDs. The ID space may be exhausted.`
+    );
+  }
+
+  return newIds;
+}

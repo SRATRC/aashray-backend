@@ -13,7 +13,6 @@ import MaintenanceDb from './maintenance_db.model.js';
 import TravelDb from './travel_db.model.js';
 import WifiDb from './wifi.model.js';
 import UtsavBooking from './utsav_boking.model.js';
-import UtsavGuestBooking from './utsav_guest_booking.js';
 import UtsavDb from './utsav_db.model.js';
 import UtsavPackagesDb from './utsav_packages.model.js';
 import AdminUsers from './admin_users.model.js';
@@ -25,6 +24,7 @@ import Countries from './countries.model.js';
 import States from './states.model.js';
 import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
+import GuestRelationship from './guest_relationship.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -39,8 +39,20 @@ CardDb.hasMany(FoodDb, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+CardDb.hasMany(FoodDb, {
+  foreignKey: 'bookedBy',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 CardDb.hasMany(ShibirBookingDb, {
   foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(ShibirBookingDb, {
+  foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -63,6 +75,12 @@ CardDb.hasMany(RoomBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+CardDb.hasMany(RoomBooking, {
+  foreignKey: 'bookedBy',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 CardDb.hasMany(MaintenanceDb, {
   foreignKey: 'requested_by',
   sourceKey: 'cardno',
@@ -75,8 +93,20 @@ CardDb.hasOne(UtsavBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
-CardDb.hasMany(UtsavGuestBooking, {
+CardDb.hasOne(UtsavBooking, {
+  foreignKey: 'bookedBy',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(TravelDb, {
   foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(TravelDb, {
+  foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -93,6 +123,18 @@ CardDb.hasMany(GuestDb, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+CardDb.hasMany(GuestRelationship, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(GuestRelationship, {
+  foreignKey: 'guest',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 
 // Transactions
 Transactions.belongsTo(CardDb, {
@@ -105,9 +147,9 @@ FoodDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-FoodDb.belongsTo(GuestDb, {
-  foreignKey: 'guest',
-  targetKey: 'id'
+FoodDb.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
+  targetKey: 'cardno'
 });
 
 // Room
@@ -117,17 +159,17 @@ RoomDb.hasMany(RoomBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+RoomBooking.belongsTo(RoomDb, {
+  foreignKey: 'roomno',
+  targetKey: 'roomno'
+});
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-RoomBooking.belongsTo(GuestDb, {
-  foreignKey: 'guest',
-  targetKey: 'id'
-});
-RoomBooking.belongsTo(RoomDb, {
-  foreignKey: 'roomno',
-  targetKey: 'roomno'
+RoomBooking.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
+  targetKey: 'cardno'
 });
 
 // Flat
@@ -138,10 +180,6 @@ FlatDb.belongsTo(CardDb, {
 FlatBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
-});
-FlatBooking.belongsTo(GuestDb, {
-  foreignKey: 'guest',
-  targetKey: 'id'
 });
 
 FlatDb.hasMany(FlatBooking, {
@@ -168,6 +206,10 @@ ShibirBookingDb.belongsTo(ShibirDb, {
 });
 ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+ShibirBookingDb.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
   targetKey: 'cardno'
 });
 
@@ -198,6 +240,10 @@ TravelDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
+TravelDb.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
+  targetKey: 'cardno'
+});
 
 // Wifi
 WifiDb.belongsTo(CardDb, {
@@ -210,15 +256,11 @@ UtsavBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-UtsavBooking.belongsTo(UtsavDb, {
-  foreignKey: 'utsavid',
-  targetKey: 'id'
-});
-UtsavGuestBooking.belongsTo(CardDb, {
-  foreignKey: 'cardno',
+UtsavBooking.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
   targetKey: 'cardno'
 });
-UtsavGuestBooking.belongsTo(UtsavDb, {
+UtsavBooking.belongsTo(UtsavDb, {
   foreignKey: 'utsavid',
   targetKey: 'id'
 });
@@ -236,20 +278,6 @@ UtsavBooking.belongsTo(UtsavPackagesDb, {
   foreignKey: 'packageid',
   targetKey: 'id'
 });
-UtsavDb.hasMany(UtsavGuestBooking, {
-  foreignKey: 'utsavid',
-  sourceKey: 'id',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-UtsavGuestBooking.belongsTo(UtsavDb, {
-  foreignKey: 'utsavid',
-  targetKey: 'id'
-});
-UtsavGuestBooking.belongsTo(UtsavPackagesDb, {
-  foreignKey: 'packageid',
-  targetKey: 'id'
-});
 UtsavDb.hasMany(UtsavPackagesDb, {
   foreignKey: 'utsavid',
   sourceKey: 'id',
@@ -261,12 +289,6 @@ UtsavPackagesDb.belongsTo(UtsavDb, {
   targetKey: 'id'
 });
 UtsavPackagesDb.hasMany(UtsavBooking, {
-  foreignKey: 'packageid',
-  sourceKey: 'id',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
-UtsavPackagesDb.hasMany(UtsavGuestBooking, {
   foreignKey: 'packageid',
   sourceKey: 'id',
   onDelete: 'CASCADE',
@@ -334,21 +356,13 @@ GuestDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-GuestDb.hasMany(FoodDb, {
-  foreignKey: 'guest',
-  sourceKey: 'id',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
+GuestRelationship.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
 });
-GuestDb.hasMany(RoomBooking, {
+GuestRelationship.belongsTo(CardDb, {
   foreignKey: 'guest',
-  sourceKey: 'id'
-});
-GuestDb.hasMany(FlatBooking, {
-  foreignKey: 'guest',
-  sourceKey: 'id',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
+  targetKey: 'cardno'
 });
 
 export {
@@ -369,7 +383,6 @@ export {
   WifiDb,
   UtsavDb,
   UtsavBooking,
-  UtsavGuestBooking,
   UtsavPackagesDb,
   AdminRoles,
   AdminUsers,
@@ -378,5 +391,6 @@ export {
   Cities,
   States,
   Countries,
-  GuestDb
+  GuestDb,
+  GuestRelationship
 };

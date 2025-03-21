@@ -1,10 +1,4 @@
-import {
-  GateRecord,
-  CardDb,
-  FlatBooking,
-  GuestDb,
-  RoomBooking
-} from '../../models/associations.js';
+import { GateRecord, CardDb, FlatBooking } from '../../models/associations.js';
 import {
   STATUS_ONPREM,
   STATUS_OFFPREM,
@@ -106,45 +100,35 @@ export const guestList = async (req, res) => {
   const offset = (page - 1) * pageSize;
 
   const user_bookings = await database.query(
-    `
-    SELECT 
+    `SELECT 
         t1.bookingid, 
-        t1.guest,
-        t2.name AS name,
+        t1.cardno,
+        t2.issuedto AS name,
         t1.flatno, 
         t1.checkin, 
         t1.checkout, 
-        t1.nights, 
-        'FLat', 
-        t1.status, 
-        'Flat' ,
-        'completed' AS transaction_status
+        t1.nights
     FROM flat_booking t1
-    JOIN guest_db t2 
-        ON t2.id = t1.guest
-    WHERE t1.checkin = CURRENT_DATE()
+    JOIN card_db t2 
+        ON t2.cardno = t1.cardno
+    WHERE t1.checkin = CURRENT_DATE() AND t2.res_status = 'GUEST'
 
     UNION ALL
 
     SELECT 
         t1.bookingid, 
-        t1.guest,
-        t2.name AS name,
+        t1.cardno,
+        t2.issuedto AS name,
         t1.roomno, 
         t1.checkin, 
         t1.checkout, 
-        t1.nights, 
-        roomtype, 
-        t1.status, 
-        t1.gender,
-        'completed' AS transaction_status
-    FROM guest_room_booking t1
-    JOIN guest_db t2 
-        ON t2.id = t1.guest
-    WHERE t1.checkin = CURRENT_DATE()
+        t1.nights
+    FROM room_booking t1
+    JOIN card_db t2 
+        ON t2.cardno = t1.cardno
+    WHERE t1.checkin = CURRENT_DATE() AND t2.res_status = 'GUEST'
 
-LIMIT :limit OFFSET :offset;
-`,
+LIMIT :limit OFFSET :offset;`,
     {
       replacements: {
         limit: pageSize,

@@ -1,7 +1,5 @@
 import {
   ERR_ROOM_MUST_BE_BOOKED,
-  STATUS_ADMIN_CANCELLED,
-  STATUS_CANCELLED,
   STATUS_RESIDENT,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
@@ -14,12 +12,12 @@ import {
   validateDate
 } from '../controllers/helper.js';
 import { FoodDb, Transactions } from '../models/associations.js';
-import ApiError from '../utils/ApiError.js';
-import getDates from '../utils/getDates.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { cancelTransaction } from './transactions.helper.js';
+import ApiError from '../utils/ApiError.js';
+import getDates from '../utils/getDates.js';
 import moment from 'moment';
 
 const mealTypeMapping = {
@@ -32,8 +30,7 @@ export async function getFoodBookings(allDates, ...cardnos) {
   const bookings = await FoodDb.findAll({
     where: {
       date: allDates,
-      cardno: cardnos,
-      guest: null
+      cardno: cardnos
     }
   });
 
@@ -167,15 +164,14 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
   const today = moment().format('YYYY-MM-DD');
   const validFoodData = food_data.filter((item) => item.date > today + 1);
 
-  for (const item of food_data) {
+  for (const item of validFoodData) {
     const { date, mealType, bookedFor } = item;
 
     // Fetch the booking from the database to get the id
     const booking = await FoodDb.findOne({
       where: {
-        cardno,
-        date,
-        ...(bookedFor !== null && { guest: bookedFor })
+        cardno: bookedFor || cardno,
+        date
       }
     });
 
