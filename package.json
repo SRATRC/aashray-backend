@@ -6,7 +6,10 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "nodemon app.js"
+    "dev": "nodemon app.js",
+    "start:prod": "NODE_ENV=prod node app.js",
+    "start:cron": "node cron.js",
+    "logs:clean": "rm -rf logs/*"
   },
   "keywords": [],
   "author": "",
@@ -29,7 +32,9 @@
     "nodemailer-express-handlebars": "^6.1.2",
     "razorpay": "^2.9.5",
     "sequelize": "^6.34.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.25.8",

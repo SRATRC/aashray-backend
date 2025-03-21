@@ -1,5 +1,6 @@
 import nodeMailer from 'nodemailer';
 import hbs from 'nodemailer-express-handlebars';
+import logger from '../config/logger.js';
 
 const templateDir = process.cwd() + '/emails';
 
@@ -37,8 +38,10 @@ const sendMail = async (options) => {
     },
     (error, info) => {
       if (error) {
-        return console.log(error);
+        logger.error(`Email sending failed: ${error.message}`);
+        return;
       }
+      logger.info(`Email sent to ${options.email}: ${info.messageId}`);
     }
   );
 };
