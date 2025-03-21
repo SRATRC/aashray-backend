@@ -33,6 +33,7 @@ import {
   generateOrderId,
   userCancelTransaction
 } from '../../helpers/transactions.helper.js';
+import sendMail from '../../utils/sendMail.js';
 
 // TODO: sending mails
 
@@ -127,9 +128,10 @@ export const BookUtsav = async (req, res) => {
     throw new ApiError(400, 'Already booked');
   }
 
+  const bookingId=uuidv4();
   const booking = await UtsavBooking.create(
     {
-      bookingid: uuidv4(),
+      bookingid: bookingId,
       cardno: req.user.cardno,
       utsavid: utsavid,
       packageid: packageid,
@@ -159,6 +161,28 @@ export const BookUtsav = async (req, res) => {
 
   await t.commit();
 
+  const userInfo = await CardDb.findOne({
+    where: {
+      cardno : req.user.cardno
+    }   
+  });
+
+  sendMail({
+
+    email: userInfo.email,
+
+   subject: `Your Booking Confirmation for Stay at SRATRC`,
+
+   template: 'unifiedBookingEmail',
+
+    context: {
+    bookingid:bookingId,
+    packageType:TYPE_UTSAV,
+    name: userInfo.issuedto,
+    
+   }
+
+  });
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
