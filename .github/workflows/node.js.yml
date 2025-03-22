@@ -36,7 +36,6 @@ jobs:
 
     - name: Restart PM2 process    
       run: |
-        whoami
         pm2 reload BackendAPI --update-env
 
     - name: Health check
