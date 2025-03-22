@@ -24,9 +24,19 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+        
+    - name: Install dependencies
     - run: npm ci
+
+    - name: Set environment file
     - run: |
         touch .env.dev
         echo "${{ secrets.PROD_ENV_FILE }}" > .env.dev
-    - run: pm2 restart BackendAPI    
-        
+
+    - name: Restart PM2 process    
+    - run: |
+        pm2 reload BackendAPI --update-env
+
+    - name: Health check
+      run: curl -f http://localhost:3000 || exit 1
+    
