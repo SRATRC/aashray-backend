@@ -5,6 +5,10 @@ import session from 'express-session';
 import sequelize from './config/database.js';
 import ApiError from './utils/ApiError.js';
 import { ErrorHandler } from './middleware/Error.js';
+import logger from './config/logger.js';
+import { httpLogger } from './middleware/Logger.js';
+import fs from 'fs';
+import path from 'path';
 
 import gateRoutes from './routes/gate/gate.routes.js';
 import wifiRoutes from './routes/wifi/wifi.routes.js';
@@ -35,15 +39,21 @@ import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
 
+// Ensure logs directory exists
+const logsDir = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir);
+}
+
 (async () => {
   try {
     await sequelize.authenticate();
-    console.log('Connected to Database 🚀');
+    logger.info('Connected to Database 🚀');
 
     // Synchronize the models with the database (create tables if they don't exist)
     await sequelize.sync();
   } catch (error) {
-    console.error('Unable to connect to the database:', error);
+    logger.error('Unable to connect to the database:', error);
   }
 })();
 
@@ -57,6 +67,7 @@ const app = express();
 app.use(urlencoded({ extended: true }));
 app.use(json());
 app.use(cors(corsOptions));
+app.use(httpLogger);
 
 app.use(
   session({
@@ -106,7 +117,7 @@ app.use(ErrorHandler);
 
 const port = process.env.PORT || 3000;
 const server = app.listen(port, () => {
-  console.log(`server is listning on port ${port}...`);
+  logger.info(`Server is listening on port ${port}...`);
 });
 
 // Export the app and a function to close the database connection

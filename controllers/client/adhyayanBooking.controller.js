@@ -1,7 +1,4 @@
-import {
-  ShibirDb,
-  ShibirBookingDb
-} from '../../models/associations.js';
+import { ShibirDb, ShibirBookingDb } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
@@ -10,17 +7,16 @@ import {
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
-  ERR_BOOKING_NOT_FOUND
+  ERR_BOOKING_NOT_FOUND,
+  TYPE_GUEST_ADHYAYAN
 } from '../../config/constants.js';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
-import { 
-  openAdhyayanSeat, 
+import {
+  openAdhyayanSeat,
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
-import { 
-  userCancelBooking
-} from '../../helpers/transactions.helper.js';
+import { userCancelBooking } from '../../helpers/transactions.helper.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -67,29 +63,33 @@ export const FetchBookedShibir = async (req, res) => {
   const offset = (page - 1) * pageSize;
 
   const shibirs = await database.query(
-    `SELECT 
-      t1.bookingid, 
-      COALESCE(t1.guest, 'NA') AS bookedFor,
-      t4.name AS name,
-      t1.shibir_id, 
-      t1.status, 
-      t2.name AS shibir_name, 
-      t2.speaker, 
-      t2.start_date, 
-      t2.end_date, 
-      COALESCE(t3.amount, 0) AS amount,
-      t3.status AS transaction_status
+    `
+    SELECT t1.bookingid,
+       t1.cardno,
+       t1.bookedBy AS bookedBy,
+       t4.issuedto AS name,
+       t1.shibir_id,
+       t1.status,
+       t2.name AS shibir_name,
+       t2.speaker,
+       t2.start_date,
+       t2.end_date,
+       COALESCE(t3.amount, 0) AS amount,
+       t3.status AS transaction_status
     FROM shibir_booking_db t1
     JOIN shibir_db t2 ON t1.shibir_id = t2.id
-    LEFT JOIN transactions t3 ON t1.bookingid = t3.bookingid AND t3.category = :category
-    LEFT JOIN guest_db t4 ON t4.id = t1.guest
-    WHERE t1.cardno = :cardno
+    LEFT JOIN transactions t3 ON t1.bookingid = t3.bookingid
+    AND t3.category IN (:category)
+    LEFT JOIN card_db t4 ON t4.cardno = t1.cardno
+    WHERE t1.cardno = :cardno OR t1.bookedBy = :cardno
     ORDER BY start_date DESC
-    LIMIT :limit OFFSET :offset`,
+    LIMIT :limit
+    OFFSET :offset;
+    `,
     {
       replacements: {
         cardno: req.user.cardno,
-        category: TYPE_ADHYAYAN,
+        category: [TYPE_ADHYAYAN, TYPE_GUEST_ADHYAYAN],
         limit: pageSize,
         offset: offset
       },
@@ -101,7 +101,7 @@ export const FetchBookedShibir = async (req, res) => {
 };
 
 export const CancelShibir = async (req, res) => {
-  const { cardno, shibir_id, bookedFor } = req.body;
+  const { shibir_id, bookedBy } = req.body;
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
 
@@ -111,12 +111,9 @@ export const CancelShibir = async (req, res) => {
   const booking = await ShibirBookingDb.findOne({
     where: {
       shibir_id: shibir_id,
-      cardno: cardno,
-      guest: bookedFor == undefined ? null : bookedFor,
-      status: [
-        STATUS_WAITING,
-        STATUS_PAYMENT_PENDING
-      ]
+      cardno: req.user.cardno,
+      bookedBy: bookedBy ? bookedBy : null,
+      status: [STATUS_WAITING, STATUS_PAYMENT_PENDING]
     }
   });
 
@@ -178,4 +175,4 @@ export const FetchShibirInRange = async (req, res) => {
   });
 
   return res.status(200).send({ data: shibirs });
-}
+};

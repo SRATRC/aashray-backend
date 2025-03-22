@@ -3,7 +3,6 @@ import sequelize from '../config/database.js';
 import {
   STATUS_CONFIRMED,
   STATUS_CANCELLED,
-  STATUS_WAITING,
   STATUS_PAYMENT_PENDING
 } from '../config/constants.js';
 
@@ -14,6 +13,22 @@ const UtsavBooking = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       primaryKey: true
+    },
+    cardno: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      references: {
+        model: 'card_db',
+        key: 'cardno'
+      }
+    },
+    bookedBy: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      references: {
+        model: 'card_db',
+        key: 'cardno'
+      }
     },
     utsavid: {
       type: DataTypes.INTEGER,
@@ -29,14 +44,6 @@ const UtsavBooking = sequelize.define(
       references: {
         model: 'utsav_packages_db',
         key: 'id'
-      }
-    },
-    cardno: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      references: {
-        model: 'card_db',
-        key: 'cardno'
       }
     },
     status: {

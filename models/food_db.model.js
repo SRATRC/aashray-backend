@@ -17,17 +17,17 @@ const FoodDb = sequelize.define(
         key: 'cardno'
       }
     },
+    bookedBy: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      references: {
+        model: 'card_db',
+        key: 'cardno'
+      }
+    },
     date: {
       type: DataTypes.DATEONLY,
       allowNull: false
-    },
-    guest: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: 'guest_db',
-        key: 'id'
-      }
     },
     breakfast: {
       type: DataTypes.BOOLEAN,

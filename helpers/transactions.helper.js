@@ -11,13 +11,14 @@ import {
   STATUS_CREDITED,
   STATUS_CONFIRMED,
   TYPE_ADHYAYAN,
-  TYPE_GUEST_ADHYAYAN
+  TYPE_GUEST_ADHYAYAN,
+  ERR_CARD_NOT_FOUND
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
+import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
 import moment from 'moment';
-import { Sequelize } from 'sequelize';
 
 export async function createTransaction(
   cardno,
@@ -79,7 +80,7 @@ export async function createPendingTransaction(
     amount,
     updatedBy,
     t
-  )
+  );
 
   return { transaction, discountedAmount };
 }
@@ -126,9 +127,9 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
       if (
-        (amount > 0) &&
-        (transaction.category != TYPE_ADHYAYAN) &&
-        (transaction.category != TYPE_GUEST_ADHYAYAN)
+        amount > 0 &&
+        transaction.category != TYPE_ADHYAYAN &&
+        transaction.category != TYPE_GUEST_ADHYAYAN
       ) {
         await addCredit(user, transaction, amount, t);
         status = STATUS_CREDITED;
@@ -204,9 +205,8 @@ export async function useCredit(
     return amount;
   }
 
-  const status = amount > card.credits 
-    ? STATUS_PAYMENT_PENDING 
-    : STATUS_PAYMENT_COMPLETED;
+  const status =
+    amount > card.credits ? STATUS_PAYMENT_PENDING : STATUS_PAYMENT_COMPLETED;
 
   const creditsUsed = Math.min(amount, card.credits);
   const discountedAmount = amount - creditsUsed;
@@ -263,19 +263,17 @@ export const generateOrderId = async (amount) => {
 
 export async function cancelPendingBookings() {
   const yesterday = moment.utc().subtract(1, 'day');
-  
+
   const transactions = await Transactions.findAll({
-    where: { 
-      status: [
-        STATUS_PAYMENT_PENDING
-      ],
+    where: {
+      status: [STATUS_PAYMENT_PENDING],
       updatedAt: {
         [Sequelize.Op.lte]: yesterday
       }
     }
   });
 
-  console.log("TRANSACTIONS TO CANCEL: " + JSON.stringify(transactions));
+  console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
 
   // TODO: implement logic to cancel transactions
 }

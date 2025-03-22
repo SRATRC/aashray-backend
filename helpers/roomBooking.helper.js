@@ -11,11 +11,11 @@ import {
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED
 } from '../config/constants.js';
-import Sequelize from 'sequelize';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
 import { calculateNights, validateDate } from '../controllers/helper.js';
 import { validateCards } from './card.helper.js';
+import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
@@ -42,7 +42,6 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
         }
       ],
       cardno: cardnos,
-      guest: null,
       status: [
         STATUS_WAITING,
         ROOM_STATUS_CHECKEDIN,
@@ -123,7 +122,9 @@ export async function bookRoomForMumukshus(
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
-  let amount = 0,bookingIds=[],idx=0;;
+  let amount = 0,
+    bookingIds = [],
+    idx = 0;
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
@@ -152,12 +153,12 @@ export async function bookRoomForMumukshus(
         );
 
         amount += result.discountedAmount;
-        bookingIds[idx++]=result.bookingId;
+        bookingIds[idx++] = result.bookingId;
       }
     }
   }
 
-  return { t, amount,bookingIds };
+  return { t, amount, bookingIds };
 }
 
 export async function createRoomBooking(
@@ -176,7 +177,7 @@ export async function createRoomBooking(
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
- let bookingId = uuidv4();
+  let bookingId = uuidv4();
   const booking = await RoomBooking.create(
     {
       bookingid: bookingId,
@@ -212,7 +213,7 @@ export async function createRoomBooking(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  return { t, discountedAmount, bookingId};
+  return { t, discountedAmount, bookingId };
 }
 
 export function roomCharge(roomtype) {
