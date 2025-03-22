@@ -36,7 +36,7 @@ jobs:
 
     - name: Restart PM2 process    
       run: |
-        pm2 reload BackendAPI --update-env
+        sudo pm2 reload BackendAPI --update-env
 
     - name: Health check
       run: curl -f http://localhost:3000 || exit 1
