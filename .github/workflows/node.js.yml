@@ -37,7 +37,14 @@ jobs:
     - name: Restart PM2 process    
       run: |
         sudo pm2 reload BackendAPI --update-env
+        
+    - name: Wait for API to start
+      run: sudo sleep 3
+
+    - name: Status PM2 process    
+      run: |
+        sudo pm2 list      
 
     - name: Health check
-      run: curl -f http://localhost:3000 || exit 1
+      run: sudo curl -f http://localhost:3000 || exit 1
     
