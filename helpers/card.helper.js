@@ -18,7 +18,7 @@ export async function userIsPR(cardno) {
 export async function validateCards(cardnos) {
   const cardDb = await CardDb.findAll({
     where: { cardno: cardnos },
-    attributes: ['id', 'cardno', 'gender']
+    attributes: ['id', 'cardno', 'gender', 'res_status']
   });
 
   if (cardDb.length != cardnos.length) {

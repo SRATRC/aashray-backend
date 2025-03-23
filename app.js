@@ -78,7 +78,7 @@ app.use(
   })
 );
 
-app.get('/', (_req, res) => {
+app.get('/api', (_req, res) => {
   res.status(200).send({ data: 'API is up and running... 🚀', status: 200 });
 });
 

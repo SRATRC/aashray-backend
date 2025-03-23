@@ -117,6 +117,7 @@ export async function validateFood(
 ) {
   if (
     !(
+      card.res_status === STATUS_RESIDENT ||
       (await checkRoomBookingProgress(
         start_date,
         end_date,
@@ -125,7 +126,6 @@ export async function validateFood(
       )) ||
       (await checkRoomAlreadyBooked(start_date, end_date, card.cardno)) ||
       (await checkFlatAlreadyBooked(start_date, end_date, card.cardno)) ||
-      card.res_status === STATUS_RESIDENT ||
       (await checkSpecialAllowance(start_date, end_date, card.cardno))
     )
   ) {

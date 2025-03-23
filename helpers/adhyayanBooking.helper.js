@@ -3,23 +3,25 @@ import {
   ERR_ADHYAYAN_NO_SEATS_AVAILABLE,
   ERR_ADHYAYAN_NOT_FOUND,
   ERR_BOOKING_NOT_FOUND,
+  STATUS_CLOSED,
   STATUS_CONFIRMED,
+  STATUS_OPEN,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
   TYPE_ADHYAYAN
 } from '../config/constants.js';
 import { ShibirBookingDb, ShibirDb } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
-import ApiError from '../utils/ApiError.js';
-import { createPendingTransaction, useCredit } from './transactions.helper.js';
+import { createPendingTransaction } from './transactions.helper.js';
 import { validateCards } from './card.helper.js';
+import ApiError from '../utils/ApiError.js';
 
 export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   await validateCards(mumukshus);
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
   const shibirs = await validateAdhyayans(shibir_ids);
 
-  const result = await createAdhyayanBooking(shibirs, t, user,...mumukshus);
+  const result = await createAdhyayanBooking(shibirs, t, user, ...mumukshus);
 
   return result;
 }
@@ -29,7 +31,6 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
     where: {
       shibir_id: shibirIds,
       cardno: mumukshus,
-      guest: null,
       status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING]
     }
   });
@@ -67,10 +68,13 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
-  let amount = 0,bookingIds=[],idx=0,bookingId;
+  let amount = 0,
+    bookingIds = [],
+    idx = 0,
+    bookingId;
   for (const mumukshu of mumukshus) {
     for (const adhyayan of adhyayans) {
-      if (adhyayan.available_seats > 0) {
+      if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
         await reserveAdhyayanSeat(adhyayan, t);
         bookingId = uuidv4();
         const booking = await ShibirBookingDb.create(
@@ -84,7 +88,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
         );
         bookingIds[idx++] = bookingId;
 
-        const { transaction, discountedAmount } = await createPendingTransaction(
+        const { discountedAmount } = await createPendingTransaction(
           mumukshu,
           booking,
           TYPE_ADHYAYAN,
@@ -96,9 +100,9 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
         amount += discountedAmount;
       } else {
         bookingId = uuidv4();
-        const booking =  await ShibirBookingDb.create(
+        await ShibirBookingDb.create(
           {
-            bookingid:bookingId,
+            bookingid: bookingId,
             cardno: mumukshu,
             shibir_id: adhyayan.id,
             status: STATUS_WAITING
@@ -109,8 +113,8 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
       }
     }
   }
-  
-  return { t, amount,bookingIds };
+
+  return { t, amount, bookingIds };
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {
@@ -168,7 +172,6 @@ export async function checkAdhyayanAvailabilityForMumukshus(
   shibir_ids,
   mumukshus
 ) {
-  
   await validateCards(mumukshus);
   await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
   const shibirs = await validateAdhyayans(shibir_ids);
@@ -197,20 +200,17 @@ export async function checkAdhyayanAvailabilityForMumukshus(
 }
 
 export async function getAdhyayanBookings(bookingIds) {
-
   const adhyanBookings = await ShibirBookingDb.findOne({
-    
     include: [
       {
         model: ShibirDb,
-        attributes: ['name','speaker','month','start_date','end_date'],
+        attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
         where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
       }
     ],
     where: {
-      [Op.in]:bookingIds
+      [Op.in]: bookingIds
     }
-    
   });
 
   return adhyanBookings;

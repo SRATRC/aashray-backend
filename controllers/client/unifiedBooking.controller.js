@@ -1,6 +1,3 @@
-import database from '../../config/database.js';
-import Sequelize from 'sequelize';
-import ApiError from '../../utils/ApiError.js';
 import { TravelDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
@@ -13,7 +10,8 @@ import {
   RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   MSG_BOOKING_SUCCESSFUL,
-  ERR_TRAVEL_ALREADY_BOOKED
+  ERR_TRAVEL_ALREADY_BOOKED,
+  STATUS_OPEN
 } from '../../config/constants.js';
 import { calculateNights, validateDate, sendUnifiedEmail } from '../helper.js';
 import {
@@ -33,6 +31,9 @@ import {
   validateFood
 } from '../../helpers/foodBooking.helper.js';
 import { bookTravelForMumukshus } from '../../helpers/travelBooking.helper.js';
+import database from '../../config/database.js';
+import Sequelize from 'sequelize';
+import ApiError from '../../utils/ApiError.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -329,7 +330,10 @@ async function checkAdhyayanAvailability(user, data) {
   var charge = 0;
 
   for (var shibir of shibirs) {
-    if (shibir.dataValues.available_seats > 0) {
+    if (
+      shibir.dataValues.available_seats > 0 &&
+      shibir.dataValues.status == STATUS_OPEN
+    ) {
       status = STATUS_AVAILABLE;
       charge = shibir.dataValues.amount;
     } else {

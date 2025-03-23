@@ -337,7 +337,7 @@ export async function checkGuestFoodAlreadyBooked(
   const food_bookings = await FoodDb.findAll({
     where: {
       date: { [Sequelize.Op.in]: allDates },
-      guest: { [Sequelize.Op.in]: guests }
+      cardno: { [Sequelize.Op.in]: guests }
     }
   });
 
@@ -361,7 +361,7 @@ export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
       }
     ],
     where: {
-      guest: guests,
+      cardno: guests,
       status: STATUS_CONFIRMED
     }
   });

@@ -12,7 +12,8 @@ import {
 import {
   UtsavDb,
   UtsavPackagesDb,
-  UtsavBooking
+  UtsavBooking,
+  CardDb
 } from '../../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -20,14 +21,12 @@ import {
   generateOrderId,
   userCancelBooking
 } from '../../helpers/transactions.helper.js';
-import sendMail from '../../utils/sendMail.js';
 import { createGuestsHelper } from '../helper.js';
+import sendMail from '../../utils/sendMail.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-
-// TODO: sending mails
 
 export const FetchUpcoming = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -44,6 +43,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.start_date AS utsav_start,
        t1.end_date AS utsav_end,
        t1.month AS utsav_month,
+       t1.status AS utsav_status,
        JSON_ARRAYAGG(
            JSON_OBJECT(
                'package_id', t2.id,
@@ -55,8 +55,7 @@ export const FetchUpcoming = async (req, res) => {
        ) AS packages
     FROM utsav_db t1
     JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
-    WHERE t1.status = 'open'
-      AND t1.start_date > :today
+    WHERE t1.start_date > :today
     GROUP BY t1.id
     ORDER BY t1.start_date ASC
     LIMIT :limit
@@ -127,7 +126,7 @@ export const BookUtsav = async (req, res) => {
     throw new ApiError(400, 'Already booked');
   }
 
-  const bookingId=uuidv4();
+  const bookingId = uuidv4();
   const booking = await UtsavBooking.create(
     {
       bookingid: bookingId,
@@ -155,30 +154,24 @@ export const BookUtsav = async (req, res) => {
 
   const order = await generateOrderId(utsav_package.amount);
 
-  await t.commit();
-
   const userInfo = await CardDb.findOne({
     where: {
-      cardno : req.user.cardno
-    }   
+      cardno: req.user.cardno
+    }
   });
 
   sendMail({
-
     email: userInfo.email,
-
-   subject: `Your Booking Confirmation for Stay at SRATRC`,
-
-   template: 'unifiedBookingEmail',
-
+    subject: `Your Booking Confirmation for Stay at SRATRC`,
+    template: 'unifiedBookingEmail',
     context: {
-    bookingid:bookingId,
-    packageType:TYPE_UTSAV,
-    name: userInfo.issuedto,
-    
-   }
-
+      bookingid: bookingId,
+      packageType: TYPE_UTSAV,
+      name: userInfo.issuedto
+    }
   });
+
+  await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -374,16 +367,14 @@ export const ViewUtsavBookings = async (req, res) => {
 };
 
 export const CancelUtsavBooking = async (req, res) => {
-  const { bookingid, bookedBy } = req.body;
+  const { bookingid } = req.body;
 
   const t = await database.transaction();
   req.transaction = t;
 
   const booking = await UtsavBooking.findOne({
     where: {
-      bookingid: bookingid,
-      cardno: req.user.cardno,
-      bookedBy: bookedBy ? bookedBy : null
+      bookingid: bookingid
     }
   });
 
