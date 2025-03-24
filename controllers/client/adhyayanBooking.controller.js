@@ -1,22 +1,23 @@
 import { ShibirDb, ShibirBookingDb } from '../../models/associations.js';
-import database from '../../config/database.js';
-import Sequelize from 'sequelize';
-import moment from 'moment';
 import {
-  STATUS_WAITING,
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
   ERR_BOOKING_NOT_FOUND,
-  TYPE_GUEST_ADHYAYAN
+  TYPE_GUEST_ADHYAYAN,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../../config/constants.js';
-import sendMail from '../../utils/sendMail.js';
-import ApiError from '../../utils/ApiError.js';
 import {
   openAdhyayanSeat,
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import database from '../../config/database.js';
+import Sequelize from 'sequelize';
+import moment from 'moment';
+import sendMail from '../../utils/sendMail.js';
+import ApiError from '../../utils/ApiError.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -112,14 +113,19 @@ export const CancelShibir = async (req, res) => {
     where: {
       shibir_id: shibir_id,
       cardno: req.user.cardno,
-      bookedBy: bookedBy ? bookedBy : null,
-      status: [STATUS_WAITING, STATUS_PAYMENT_PENDING]
+      bookedBy: bookedBy ? bookedBy : null
     }
   });
 
   if (!booking) {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
+
+  if (
+    booking.status == STATUS_CANCELLED ||
+    booking.status == STATUS_ADMIN_CANCELLED
+  )
+    throw new ApiError(400, 'Booking already cancelled');
 
   if (
     booking.status == STATUS_CONFIRMED ||

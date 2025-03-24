@@ -36,7 +36,8 @@ import {
   TYPE_GUEST_LUNCH,
   TYPE_GUEST_DINNER,
   STATUS_GUEST,
-  TYPE_GUEST_ROOM
+  TYPE_GUEST_ROOM,
+  STATUS_OPEN
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -164,7 +165,6 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_ADHYAYAN:
       adhyayanDetails = await checkAdhyayanAvailability(
-        req.user,
         req.body.primary_booking
       );
       totalCharge += adhyayanDetails.reduce(
@@ -194,7 +194,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_ADHYAYAN:
-          adhyayanDetails = await checkAdhyayanAvailability(req.user, addon);
+          adhyayanDetails = await checkAdhyayanAvailability(addon);
           totalCharge += adhyayanDetails.reduce(
             (partialSum, adhyayan) => partialSum + adhyayan.charge,
             0
@@ -441,7 +441,7 @@ async function checkFoodAvailability(data) {
   const bookings = await FoodDb.findAll({
     where: {
       date: allDates,
-      guest: totalGuests
+      cardno: totalGuests
     }
   });
 
@@ -611,7 +611,7 @@ async function bookFood(data, t, user) {
   return { t, amount };
 }
 
-async function checkAdhyayanAvailability(user, data) {
+async function checkAdhyayanAvailability(data) {
   const { shibir_ids, guests } = data.details;
 
   const shibirs = await ShibirDb.findAll({
@@ -628,15 +628,16 @@ async function checkAdhyayanAvailability(user, data) {
 
   var adhyayanDetails = [];
   for (var shibir of shibirs) {
-    var available = guests.length;
+    var available = 0;
     var waiting = 0;
     var charge = 0;
 
-    if (shibir.dataValues.available_seats < guests.length) {
-      available = shibir.dataValues.available_seats;
-      waiting = guests.length - shibir.dataValues.available_seats;
+    if (shibir.dataValues.status == STATUS_OPEN) {
+      available = Math.min(shibir.dataValues.available_seats, guests.length);
+      waiting = guests.length - available;
+    } else {
+      waiting = guests.length;
     }
-    charge = available * shibir.dataValues.amount;
 
     adhyayanDetails.push({
       shibirId: shibir.dataValues.id,
