@@ -725,7 +725,6 @@ async function roomBookingReport(
   const data = await RoomBooking.findAll({
     include: [
       {
-        // TODO: include guest information
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'center'],
         required: true
@@ -736,6 +735,7 @@ async function roomBookingReport(
       'roomtype',
       'checkin',
       'checkout',
+      'bookedBy',
       'status',
       'nights'
     ],
