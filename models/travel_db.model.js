@@ -4,6 +4,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
   STATUS_CONFIRMED,
+  STATUS_PAYMENT_PENDING,
   STATUS_WAITING
 } from '../config/constants.js';
 
@@ -66,7 +67,8 @@ const TravelDb = sequelize.define(
         STATUS_WAITING,
         STATUS_CONFIRMED,
         STATUS_CANCELLED,
-        STATUS_ADMIN_CANCELLED
+        STATUS_ADMIN_CANCELLED,
+        STATUS_PAYMENT_PENDING
       ],
       defaultValue: STATUS_WAITING
     },

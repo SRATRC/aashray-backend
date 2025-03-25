@@ -1,7 +1,3 @@
-import database from '../../config/database.js';
-import getDates from '../../utils/getDates.js';
-import ApiError from '../../utils/ApiError.js';
-import moment from 'moment';
 import { CardDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
@@ -18,7 +14,9 @@ import {
   ERR_CARD_NOT_FOUND,
   TYPE_TRAVEL,
   ERR_INVALID_DATE,
-  MSG_BOOKING_SUCCESSFUL
+  MSG_BOOKING_SUCCESSFUL,
+  STATUS_RESIDENT,
+  STATUS_MUMUKSHU
 } from '../../config/constants.js';
 import { calculateNights, validateDate } from '../helper.js';
 import {
@@ -41,6 +39,10 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
+import database from '../../config/database.js';
+import getDates from '../../utils/getDates.js';
+import ApiError from '../../utils/ApiError.js';
+import moment from 'moment';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -92,8 +94,8 @@ export const validateBooking = async (req, res) => {
 export const checkMumukshu = async (req, res) => {
   const { mobno } = req.query;
   const cardDb = await CardDb.findOne({
-    where: { mobno: mobno },
-    attributes: ['cardno', 'issuedto', 'mobno']
+    where: { mobno: mobno, res_status: [STATUS_RESIDENT, STATUS_MUMUKSHU] },
+    attributes: ['cardno', 'issuedto', 'mobno', 'gender']
   });
 
   if (!cardDb) {
