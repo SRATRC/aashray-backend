@@ -389,52 +389,6 @@ export const updateFlatBooking = async (req, res) => {
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
-export const checkinReport = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  const today = moment().format('YYYY-MM-DD');
-
-  // TODO: include Guest information
-  const checkedin = await RoomBooking.findAll({
-    include: [CardDb],
-    where: {
-      checkin: today,
-      status: ROOM_STATUS_CHECKEDIN
-    },
-    offset,
-    limit: pageSize
-  });
-
-  return res
-    .status(200)
-    .send({ message: 'Fetched check in report', data: checkedin });
-};
-
-export const checkoutReport = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  const today = moment().format('YYYY-MM-DD');
-
-  // TODO: include Guest information
-  const checkedout = await RoomBooking.findAll({
-    include: [CardDb],
-    where: {
-      checkout: today,
-      status: ROOM_STATUS_CHECKEDOUT
-    },
-    offset,
-    limit: pageSize
-  });
-
-  return res
-    .status(200)
-    .send({ message: 'fetched checkout report', data: checkedout });
-};
-
 export const roomList = async (req, res) => {
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
@@ -595,6 +549,80 @@ export const occupancyReport = async (req, res) => {
   });
 
   return res.status(200).send({ message: 'Success', data: result });
+};
+
+export const checkinReport = async (req, res) => {
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
+
+  const today = moment().format('YYYY-MM-DD');
+
+  const checkedin = await RoomBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        required: true
+      }
+    ],
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'checkin',
+      'checkout',
+      'bookedBy',
+      'status',
+      'nights'
+    ],
+    where: {
+      checkin: today,
+      status: ROOM_STATUS_CHECKEDIN
+    },
+    offset,
+    limit: pageSize
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'Fetched check in report', data: checkedin });
+};
+
+export const checkoutReport = async (req, res) => {
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
+
+  const today = moment().format('YYYY-MM-DD');
+
+  const checkedout = await RoomBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        required: true
+      }
+    ],
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'checkin',
+      'checkout',
+      'bookedBy',
+      'status',
+      'nights'
+    ],
+    where: {
+      checkout: today,
+      status: ROOM_STATUS_CHECKEDOUT
+    },
+    offset,
+    limit: pageSize
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'fetched checkout report', data: checkedout });
 };
 
 export const ReservationReport = async (req, res) => {
