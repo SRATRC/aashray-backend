@@ -176,14 +176,11 @@ export const roomBooking = async (req, res) => {
     );
   }
   
-  
-  
-
   await t.commit();
   if( booking.bookingId != null ){
-  let bookingIds = {};
-  bookingIds[TYPE_ROOM]=[booking.bookingId];
-  sendUnifiedEmail(card,bookingIds);
+    let bookingIds = {};
+    bookingIds[TYPE_ROOM]=[booking.bookingId];
+    sendUnifiedEmail(card,bookingIds);
   }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -760,6 +757,7 @@ async function roomBookingReport(
     ],
     attributes: [
       'bookingid',
+      'roomno',
       'roomtype',
       'checkin',
       'checkout',
