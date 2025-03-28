@@ -216,7 +216,7 @@ export const adhyayanWaitlist = async (req, res) => {
       },
       {
         model: CardDb,
-        attributes: ['issuedto', 'mobno', 'center'],
+        attributes: ['issuedto', 'mobno', 'center','res_status'],
         required: true
       }
       // TODO: include Guest Details if booked for Guest
@@ -224,7 +224,7 @@ export const adhyayanWaitlist = async (req, res) => {
     where: {
       status: STATUS_WAITING
     },
-    attributes: ['id', 'shibir_id', 'cardno', 'status'],
+    attributes: ['bookingid', 'shibir_id', 'bookedby', 'status'],
     offset,
     limit: pageSize
   });
