@@ -1,11 +1,9 @@
-import { CardDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
   STATUS_WAITING,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
-  RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
   LUNCH_PRICE,
@@ -16,10 +14,11 @@ import {
   ERR_INVALID_DATE,
   MSG_BOOKING_SUCCESSFUL,
   STATUS_RESIDENT,
-  STATUS_MUMUKSHU
+  STATUS_MUMUKSHU,
+  TYPE_UTSAV
 } from '../../config/constants.js';
-import { calculateNights, validateDate } from '../helper.js';
 import {
+  bookRoomDuringUtsavForMumukshus,
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
   findRoom,
@@ -37,8 +36,14 @@ import {
   bookFoodForMumukshus,
   getFoodBookings
 } from '../../helpers/foodBooking.helper.js';
+import {
+  bookUtsavForMumukshus,
+  validateUtsavs
+} from '../../helpers/utsavBooking.helper.js';
+import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
+import { calculateNights, validateDate } from '../helper.js';
 import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
@@ -76,7 +81,7 @@ export const validateBooking = async (req, res) => {
     adhyayanDetails: [],
     foodDetails: {},
     travelDetails: {},
-    taxes: 0,
+    utsavDetails: [],
     totalCharge: 0
   };
 
@@ -110,7 +115,7 @@ async function book(body, data, t, user) {
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(data, t, user);
+      const roomResult = await bookRoom(body, data, t, user);
       amount += roomResult.amount;
       break;
 
@@ -127,13 +132,16 @@ async function book(body, data, t, user) {
       amount += adhyayanResult.amount;
       break;
 
+    case TYPE_UTSAV:
+      const utsavResult = await bookUtsav(data, t, user);
+      amount += utsavResult.amount;
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
 
-  const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
-
-  return amount + taxes;
+  return amount;
 }
 
 async function validate(data, response) {
@@ -168,28 +176,45 @@ async function validate(data, response) {
       totalCharge += response.travelDetails.charge;
       break;
 
+    case TYPE_UTSAV:
+      response.utsavDetails = await validateUtsavs(
+        data.details.utsavid,
+        data.details.mumukshus
+      );
+      totalCharge += response.utsavDetails.reduce(
+        (partialSum, utsav) => partialSum + utsav.charge,
+        0
+      );
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
-
-  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100) / 100;
-
-  response.taxes += taxes;
-  response.totalCharge += totalCharge + taxes;
+  response.totalCharge += totalCharge;
 
   return response;
 }
 
-async function bookRoom(data, t, user) {
+async function bookRoom(body, data, t, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
 
-  const result = await bookRoomForMumukshus(
-    checkin_date,
-    checkout_date,
-    mumukshuGroup,
-    t,
-    user
-  );
+  let result = {};
+  if (body.primary_booking.booking_type == TYPE_UTSAV) {
+    result = await bookRoomDuringUtsavForMumukshus(
+      body.primary_booking.details.utsavid,
+      mumukshuGroup,
+      t,
+      user
+    );
+  } else {
+    result = await bookRoomForMumukshus(
+      checkin_date,
+      checkout_date,
+      mumukshuGroup,
+      t,
+      user
+    );
+  }
 
   return result;
 }
@@ -223,6 +248,14 @@ async function bookTravel(data, t, user) {
   await bookTravelForMumukshus(date, mumukshuGroup, t, user);
 
   return t;
+}
+
+async function bookUtsav(data, t, user) {
+  const { utsavid, mumukshus } = data.details;
+
+  const result = await bookUtsavForMumukshus(utsavid, mumukshus, t, user);
+
+  return result;
 }
 
 async function checkRoomAvailability(data) {

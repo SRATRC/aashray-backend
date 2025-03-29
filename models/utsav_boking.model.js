@@ -3,7 +3,8 @@ import sequelize from '../config/database.js';
 import {
   STATUS_CONFIRMED,
   STATUS_CANCELLED,
-  STATUS_PAYMENT_PENDING
+  STATUS_PAYMENT_PENDING,
+  STATUS_WAITING
 } from '../config/constants.js';
 
 const UtsavBooking = sequelize.define(
@@ -46,10 +47,27 @@ const UtsavBooking = sequelize.define(
         key: 'id'
       }
     },
+    arrival: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    carno: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    other: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
-      values: [STATUS_CONFIRMED, STATUS_CANCELLED, STATUS_PAYMENT_PENDING]
+      values: [
+        STATUS_CONFIRMED,
+        STATUS_CANCELLED,
+        STATUS_PAYMENT_PENDING,
+        STATUS_WAITING
+      ]
     },
     updatedBy: {
       type: DataTypes.STRING,
