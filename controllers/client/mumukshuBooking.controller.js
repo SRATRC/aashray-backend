@@ -34,6 +34,7 @@ import {
 } from '../../helpers/travelBooking.helper.js';
 import {
   bookFoodForMumukshus,
+  bookFoodForMumukshusDuringUtsav,
   getFoodBookings
 } from '../../helpers/foodBooking.helper.js';
 import {
@@ -222,15 +223,27 @@ async function bookRoom(body, data, t, user) {
 async function bookFood(body, data, t, user) {
   const { start_date, end_date, mumukshuGroup } = data.details;
 
-  await bookFoodForMumukshus(
-    start_date,
-    end_date,
-    mumukshuGroup,
-    body.primary_booking,
-    body.addons,
-    user.cardno,
-    t
-  );
+  if (body.primary_booking.booking_type == TYPE_UTSAV) {
+    await bookFoodForMumukshusDuringUtsav(
+      start_date,
+      end_date,
+      mumukshuGroup,
+      body.primary_booking,
+      body.addons,
+      user.cardno,
+      t
+    );
+  } else {
+    await bookFoodForMumukshus(
+      start_date,
+      end_date,
+      mumukshuGroup,
+      body.primary_booking,
+      body.addons,
+      user.cardno,
+      t
+    );
+  }
   return t;
 }
 

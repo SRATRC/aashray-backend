@@ -25,6 +25,7 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
   bookFoodForMumukshus,
+  bookFoodForMumukshusDuringUtsav,
   createGroupFoodRequest,
   validateFood
 } from '../../helpers/foodBooking.helper.js';
@@ -215,24 +216,45 @@ async function bookFood(body, user, data, t) {
   const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
 
-  const mumukshuGroup = createGroupFoodRequest(
-    user.cardno,
-    breakfast,
-    lunch,
-    dinner,
-    spicy,
-    high_tea
-  );
+  if (body.primary_booking.booking_type == TYPE_UTSAV) {
+    const mumukshuGroup = createGroupFoodRequest(
+      user.cardno,
+      breakfast,
+      lunch,
+      dinner,
+      spicy,
+      high_tea
+    );
 
-  await bookFoodForMumukshus(
-    start_date,
-    end_date,
-    mumukshuGroup,
-    body.primary_booking,
-    body.addons,
-    user.cardno,
-    t
-  );
+    await bookFoodForMumukshusDuringUtsav(
+      start_date,
+      end_date,
+      mumukshuGroup,
+      body.primary_booking,
+      body.addons,
+      user.cardno,
+      t
+    );
+  } else {
+    const mumukshuGroup = createGroupFoodRequest(
+      user.cardno,
+      breakfast,
+      lunch,
+      dinner,
+      spicy,
+      high_tea
+    );
+
+    await bookFoodForMumukshus(
+      start_date,
+      end_date,
+      mumukshuGroup,
+      body.primary_booking,
+      body.addons,
+      user.cardno,
+      t
+    );
+  }
 
   return t;
 }
