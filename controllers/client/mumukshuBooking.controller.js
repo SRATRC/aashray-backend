@@ -15,7 +15,8 @@ import {
   MSG_BOOKING_SUCCESSFUL,
   STATUS_RESIDENT,
   STATUS_MUMUKSHU,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  STATUS_GUEST
 } from '../../config/constants.js';
 import {
   bookRoomDuringUtsavForMumukshus,
@@ -97,10 +98,13 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-export const checkMumukshu = async (req, res) => {
+export const checkMumukshuOrGuest = async (req, res) => {
   const { mobno } = req.query;
   const cardDb = await CardDb.findOne({
-    where: { mobno: mobno, res_status: [STATUS_RESIDENT, STATUS_MUMUKSHU] },
+    where: {
+      mobno: mobno,
+      res_status: [STATUS_RESIDENT, STATUS_MUMUKSHU, STATUS_GUEST]
+    },
     attributes: ['cardno', 'issuedto', 'mobno', 'gender']
   });
 
