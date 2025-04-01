@@ -201,7 +201,7 @@ export async function createRoomBooking(
 
   const amount = roomCharge(roomtype) * nights;
 
-  const transaction = await createPendingTransaction(
+  const {transaction,discountedAmount} = await createPendingTransaction(
     cardno,
     booking,
     TYPE_ROOM,
@@ -213,15 +213,6 @@ export async function createRoomBooking(
   if (!transaction) {
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
-
-  const discountedAmount = await useCredit(
-    cardno,
-    booking,
-    transaction,
-    amount,
-    updatedBy,
-    t
-  );
 
   return { t, discountedAmount, bookingId };
 }
