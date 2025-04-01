@@ -94,31 +94,6 @@ export const getStates = async (req, res) => {
 };
 
 export const getCities = async (req, res) => {
-  const { primary_booking, addons } = req.body;
-
-  if (!primary_booking) throw new ApiError(400, 'Invalid Request');
-
-  var t = await database.transaction();
-  req.transaction = t;
-  let bookingIds=[];
-
-  let amount = await book(req.user, req.body, primary_booking,bookingIds, t);
-
-  if (addons) {
-    for (const addon of addons) {
-      amount += await book(req.user, req.body, addon,bookingIds, t);
-    }
-  }
-
-  
-  let order = null;
-  if (amount > 0)
-    order =
-      process.env.NODE_ENV == 'prod'
-        ? await generateOrderId(amount)
-        : { amount };
-
-  await t.commit();
   const data = await Cities.findAll({
     include: [
       {
