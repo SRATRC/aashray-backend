@@ -1,4 +1,3 @@
-import { TravelDb } from '../../models/associations.js';
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
@@ -7,14 +6,14 @@ import {
   TYPE_TRAVEL,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
-  RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   MSG_BOOKING_SUCCESSFUL,
   ERR_TRAVEL_ALREADY_BOOKED,
-  STATUS_OPEN
+  STATUS_OPEN,
+  TYPE_UTSAV
 } from '../../config/constants.js';
-import { calculateNights, validateDate, sendUnifiedEmail } from '../helper.js';
 import {
+  bookRoomDuringUtsavForMumukshus,
   bookRoomForMumukshus,
   findRoom,
   roomCharge
@@ -24,16 +23,24 @@ import {
   checkAdhyayanAlreadyBooked,
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
-import { generateOrderId } from '../../helpers/transactions.helper.js';
 import {
   bookFoodForMumukshus,
+  bookFoodForMumukshusDuringUtsav,
   createGroupFoodRequest,
   validateFood
 } from '../../helpers/foodBooking.helper.js';
+import {
+  bookUtsavForMumukshus,
+  checkUtsavAlreadyBooked,
+  validateUtsavs
+} from '../../helpers/utsavBooking.helper.js';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
+import { TravelDb } from '../../models/associations.js';
 import { bookTravelForMumukshus } from '../../helpers/travelBooking.helper.js';
+import { calculateNights, validateDate, sendUnifiedEmail } from '../helper.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
+import Sequelize from 'sequelize';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -71,7 +78,7 @@ export const validateBooking = async (req, res) => {
     adhyayanDetails: [],
     foodDetails: {},
     travelDetails: {},
-    taxes: 0,
+    utsavDetails: [],
     totalCharge: 0
   };
 
@@ -91,7 +98,7 @@ async function book(user, body, data, bookingIds, t) {
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(user, data, t);
+      const roomResult = await bookRoom(user, body, data, t);
       amount += roomResult.amount;
       bookingIds[TYPE_ROOM] = roomResult.bookingIds;
       break;
@@ -111,13 +118,16 @@ async function book(user, body, data, bookingIds, t) {
       bookingIds[TYPE_ADHYAYAN] = adhyayanResult.bookingIds;
       break;
 
+    case TYPE_UTSAV:
+      const utsavResult = await bookUtsav(user, data, t);
+      amount += utsavResult.amount;
+      bookingIds[TYPE_UTSAV] = utsavResult.bookingIds;
+      break;
+
     default:
       throw new ApiError(400, 'Invalid Booking Type');
   }
-
-  const taxes = Math.round(amount * RAZORPAY_FEE * 100) / 100;
-
-  return amount + taxes;
+  return amount;
 }
 
 async function validate(body, user, data, response) {
@@ -147,34 +157,57 @@ async function validate(body, user, data, response) {
       );
       break;
 
+    case TYPE_UTSAV:
+      response.utsavDetails = await checkUtsavAvailability(user, data);
+      totalCharge += response.utsavDetails.reduce(
+        (partialSum, utsav) => partialSum + utsav.charge,
+        0
+      );
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
-
-  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100) / 100;
-
-  response.taxes += taxes;
-  response.totalCharge += totalCharge + taxes;
+  response.totalCharge += totalCharge;
 
   return response;
 }
 
-async function bookRoom(user, data, t) {
-  const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
+async function bookRoom(user, body, data, t) {
+  let { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
-  const result = await bookRoomForMumukshus(
-    checkin_date,
-    checkout_date,
-    [
-      {
-        mumukshus: [user.cardno],
-        roomType: room_type,
-        floorType: floor_pref
-      }
-    ],
-    t,
-    user
-  );
+  let result = {};
+  if (body.primary_booking.booking_type == TYPE_UTSAV) {
+    result = await bookRoomDuringUtsavForMumukshus(
+      body.primary_booking.details.utsavid,
+      [
+        {
+          mumukshus: [user.cardno],
+          roomType: room_type,
+          floorType: floor_pref,
+          packageid: body.primary_booking.details.packageid,
+          checkin_date,
+          checkout_date
+        }
+      ],
+      t,
+      user
+    );
+  } else {
+    result = await bookRoomForMumukshus(
+      checkin_date,
+      checkout_date,
+      [
+        {
+          mumukshus: [user.cardno],
+          roomType: room_type,
+          floorType: floor_pref
+        }
+      ],
+      t,
+      user
+    );
+  }
 
   return result;
 }
@@ -183,24 +216,45 @@ async function bookFood(body, user, data, t) {
   const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
 
-  const mumukshuGroup = createGroupFoodRequest(
-    user.cardno,
-    breakfast,
-    lunch,
-    dinner,
-    spicy,
-    high_tea
-  );
+  if (body.primary_booking.booking_type == TYPE_UTSAV) {
+    const mumukshuGroup = createGroupFoodRequest(
+      user.cardno,
+      breakfast,
+      lunch,
+      dinner,
+      spicy,
+      high_tea
+    );
 
-  await bookFoodForMumukshus(
-    start_date,
-    end_date,
-    mumukshuGroup,
-    body.primary_booking,
-    body.addons,
-    user.cardno,
-    t
-  );
+    await bookFoodForMumukshusDuringUtsav(
+      start_date,
+      end_date,
+      mumukshuGroup,
+      body.primary_booking,
+      body.addons,
+      user.cardno,
+      t
+    );
+  } else {
+    const mumukshuGroup = createGroupFoodRequest(
+      user.cardno,
+      breakfast,
+      lunch,
+      dinner,
+      spicy,
+      high_tea
+    );
+
+    await bookFoodForMumukshus(
+      start_date,
+      end_date,
+      mumukshuGroup,
+      body.primary_booking,
+      body.addons,
+      user.cardno,
+      t
+    );
+  }
 
   return t;
 }
@@ -235,6 +289,27 @@ async function bookAdhyayan(user, data, t) {
   const result = await bookAdhyayanForMumukshus(
     shibir_ids,
     [user.cardno],
+    t,
+    user
+  );
+
+  return result;
+}
+
+async function bookUtsav(user, data, t) {
+  const { utsavid, packageid, arrival, carno, other } = data.details;
+
+  const result = await bookUtsavForMumukshus(
+    utsavid,
+    [
+      {
+        cardno: user.cardno,
+        packageid,
+        arrival,
+        carno,
+        other
+      }
+    ],
     t,
     user
   );
@@ -348,4 +423,24 @@ async function checkAdhyayanAvailability(user, data) {
   }
 
   return adhyayanDetails;
+}
+
+async function checkUtsavAvailability(user, data) {
+  const { utsavid, packageid } = data.details;
+
+  await checkUtsavAlreadyBooked(utsavid, [
+    {
+      cardno: user.cardno,
+      packageid
+    }
+  ]);
+
+  const utsavDetails = await validateUtsavs(utsavid, [
+    {
+      cardno: user.cardno,
+      packageid
+    }
+  ]);
+
+  return utsavDetails;
 }

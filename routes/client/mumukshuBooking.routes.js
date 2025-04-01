@@ -1,7 +1,7 @@
 import express from 'express';
 const router = express.Router();
 import {
-  checkMumukshu,
+  checkMumukshuOrGuest,
   mumukshuBooking,
   validateBooking
 } from '../../controllers/client/mumukshuBooking.controller.js';
@@ -9,7 +9,7 @@ import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(validateCard);
-router.get('/', CatchAsync(checkMumukshu));
+router.get('/', CatchAsync(checkMumukshuOrGuest));
 router.post('/booking', CheckDatesBlocked, CatchAsync(mumukshuBooking));
 router.post('/validate', CheckDatesBlocked, CatchAsync(validateBooking));
 

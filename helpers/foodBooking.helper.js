@@ -11,7 +11,7 @@ import {
   checkSpecialAllowance,
   validateDate
 } from '../controllers/helper.js';
-import { FoodDb, Transactions } from '../models/associations.js';
+import { FoodDb, Transactions, UtsavDb } from '../models/associations.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -205,4 +205,91 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       await cancelTransaction(user, transaction, t, admin);
     }
   }
+}
+
+export async function bookFoodForMumukshusDuringUtsav(
+  start_date,
+  end_date,
+  mumukshuGroup,
+  primary_booking,
+  addons,
+  updatedBy,
+  t
+) {
+  const utsav = await UtsavDb.findOne({
+    where: { id: primary_booking.details.utsavid }
+  });
+  const event_start_date = new Date(utsav.start_date);
+  const event_end_date = new Date(utsav.end_date);
+
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  const cards = await validateCards(mumukshus);
+
+  for (const card of cards) {
+    await validateFood(start_date, end_date, primary_booking, addons, card);
+  }
+
+  let bookingsToCreate = [];
+  for (const group of mumukshuGroup) {
+    const { meals, spicy, high_tea, mumukshus } = group;
+
+    const breakfast = meals.includes('breakfast');
+    const lunch = meals.includes('lunch');
+    const dinner = meals.includes('dinner');
+
+    // Handle food booking before the event
+    if (new Date(start_date) < event_start_date) {
+      const beforeEventDates = getDates(start_date, event_start_date);
+      beforeEventDates.pop(); // Remove the event start date
+
+      for (const mumukshu of mumukshus) {
+        for (const date of beforeEventDates) {
+          if (new Date(date) < event_start_date) {
+            // Ensure date is before event
+            bookingsToCreate.push({
+              id: uuidv4(),
+              cardno: mumukshu,
+              date,
+              breakfast,
+              lunch,
+              dinner,
+              spicy,
+              hightea: high_tea,
+              plateissued: 0,
+              updatedBy
+            });
+          }
+        }
+      }
+    }
+
+    // Handle food booking after the event
+    if (new Date(end_date) > event_end_date) {
+      const afterEventDates = getDates(event_end_date, end_date);
+      afterEventDates.shift(); // Remove the event end date
+
+      for (const mumukshu of mumukshus) {
+        for (const date of afterEventDates) {
+          if (new Date(date) > event_end_date) {
+            // Ensure date is after event
+            bookingsToCreate.push({
+              id: uuidv4(),
+              cardno: mumukshu,
+              date,
+              breakfast,
+              lunch,
+              dinner,
+              spicy,
+              hightea: high_tea,
+              plateissued: 0,
+              updatedBy
+            });
+          }
+        }
+      }
+    }
+  }
+
+  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  return t;
 }
