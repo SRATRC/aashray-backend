@@ -379,7 +379,8 @@ export async function sendUnifiedEmail(user, bookingIds) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+  let wasFlatBooked = bookingIds["flat_type"] != null;
+  
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
@@ -448,7 +449,7 @@ export async function sendUnifiedEmail(user, bookingIds) {
   if (wasFlatBooked) {
     const flatBookings = await FlatBooking.findAll({
       where: {
-        bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_FLAT] }
+        bookingid: { [Sequelize.Op.in]: bookingIds["flat_type"] }
       }
     });
 
