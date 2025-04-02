@@ -120,24 +120,27 @@ export async function userCancelTransaction(user, transaction, t) {
 // STATUS_CREDITED
 export async function cancelTransaction(user, transaction, t, admin = false) {
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
+  var description = transaction.description;
 
-  var amount = transaction.amount + transaction.discount;
+  const totalAmount = transaction.amount + transaction.discount;
+  const credits = (transaction.status == STATUS_PAYMENT_COMPLETED || transaction.status == STATUS_CASH_COMPLETED) 
+    ? totalAmount
+    : transaction.discount;
 
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
+    case STATUS_PAYMENT_PENDING:
+    case STATUS_CASH_PENDING:
       if (
-        amount > 0 &&
+        credits > 0 &&
         transaction.category != TYPE_ADHYAYAN &&
         transaction.category != TYPE_GUEST_ADHYAYAN
       ) {
-        await addCredit(user, transaction, amount, t);
+        await addCredit(user, transaction.cardno, credits, t);
         status = STATUS_CREDITED;
+        description = `credits added: ${credits}`;
       }
-      break;
-
-    case STATUS_PAYMENT_PENDING:
-    case STATUS_CASH_PENDING:
       break;
 
     case STATUS_CANCELLED:
@@ -154,23 +157,10 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
 
   await transaction.update(
     {
+      discount: 0,
+      amount: totalAmount,
+      description,
       status,
-      updatedBy: user.username
-    },
-    { transaction: t }
-  );
-}
-
-async function addCredit(user, transaction, amount, t) {
-  const card = await CardDb.findOne({
-    where: { cardno: transaction.cardno }
-  });
-
-  if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
-
-  await card.update(
-    {
-      credits: card.credits + amount,
       updatedBy: user.username
     },
     { transaction: t }
@@ -179,8 +169,65 @@ async function addCredit(user, transaction, amount, t) {
   await transaction.update(
     {
       discount: 0,
-      amount,
       description: `credits added: ${amount}`,
+      updatedBy: user.username
+    },
+    { transaction: t }
+  );
+}
+
+export async function adjustAmount(user, transaction, amount, t) {
+  const originalAmount = transaction.amount + transaction.discount;
+  
+  if (originalAmount > amount) {
+    const credits = originalAmount - amount;
+
+    await addCreditsToCard(
+      user, 
+      transaction.cardno,
+      credits, 
+      t
+    );
+
+    const creditsUsed = Math.min(amount, transaction.discount);
+    const discountedAmount = amount - creditsUsed;
+      
+    await transaction.update(
+      {
+        status: STATUS_PAYMENT_COMPLETED,
+        discount: creditsUsed,
+        amount: discountedAmount,
+        description: `credits added: ${credits}`,
+        updatedBy: user.username
+      },
+      { transaction: t }
+    );
+  } else if (originalAmount < amount) {
+    const balance = amount - originalAmount;
+    await transaction.update(
+      {
+        status: STATUS_PAYMENT_PENDING,
+        discount: originalAmount,
+        amount: balance,
+        description: `Transaction updated. New Balance ${balance}.`,
+        updatedBy: user.username
+      },
+      { transaction: t }
+    );
+
+  }
+}
+
+async function addCredit(user, cardno, credits, t) {
+  const card = await CardDb.findOne({
+    where: { cardno }
+  });
+
+  if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
+
+  await card.update(
+    {
+      credits: card.credits + credits,
       updatedBy: user.username
     },
     { transaction: t }
