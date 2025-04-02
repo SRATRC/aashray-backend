@@ -94,49 +94,50 @@ export const gateExit = async (req, res) => {
   return res.status(200).send({ message: 'Success', data: gatein.dataValues });
 };
 
-export const guestList = async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+// GUEST LIST not needed anymore
+// export const guestList = async (req, res) => {
+//   const page = parseInt(req.query.page) || 1;
+//   const pageSize = parseInt(req.query.page_size) || 10;
+//   const offset = (page - 1) * pageSize;
 
-  const user_bookings = await database.query(
-    `SELECT 
-        t1.bookingid, 
-        t1.cardno,
-        t2.issuedto AS name,
-        t1.flatno, 
-        t1.checkin, 
-        t1.checkout, 
-        t1.nights
-    FROM flat_booking t1
-    JOIN card_db t2 
-        ON t2.cardno = t1.cardno
-    WHERE t1.checkin = CURRENT_DATE() AND t2.res_status = 'GUEST'
+//   const user_bookings = await database.query(
+//     `SELECT
+//         t1.bookingid,
+//         t1.cardno,
+//         t2.issuedto AS name,
+//         t1.flatno,
+//         t1.checkin,
+//         t1.checkout,
+//         t1.nights
+//     FROM flat_booking t1
+//     JOIN card_db t2
+//         ON t2.cardno = t1.cardno
+//     WHERE t1.checkin = CURRENT_DATE() AND t2.res_status = 'GUEST'
 
-    UNION ALL
+//     UNION ALL
 
-    SELECT 
-        t1.bookingid, 
-        t1.cardno,
-        t2.issuedto AS name,
-        t1.roomno, 
-        t1.checkin, 
-        t1.checkout, 
-        t1.nights
-    FROM room_booking t1
-    JOIN card_db t2 
-        ON t2.cardno = t1.cardno
-    WHERE t1.checkin = CURRENT_DATE() AND t2.res_status = 'GUEST'
+//     SELECT
+//         t1.bookingid,
+//         t1.cardno,
+//         t2.issuedto AS name,
+//         t1.roomno,
+//         t1.checkin,
+//         t1.checkout,
+//         t1.nights
+//     FROM room_booking t1
+//     JOIN card_db t2
+//         ON t2.cardno = t1.cardno
+//     WHERE t1.checkin = CURRENT_DATE() AND t2.res_status = 'GUEST'
 
-LIMIT :limit OFFSET :offset;`,
-    {
-      replacements: {
-        limit: pageSize,
-        offset: offset
-      },
-      type: Sequelize.QueryTypes.SELECT
-    }
-  );
+// LIMIT :limit OFFSET :offset;`,
+//     {
+//       replacements: {
+//         limit: pageSize,
+//         offset: offset
+//       },
+//       type: Sequelize.QueryTypes.SELECT
+//     }
+//   );
 
-  return res.status(200).send(user_bookings);
-};
+//   return res.status(200).send(user_bookings);
+// };

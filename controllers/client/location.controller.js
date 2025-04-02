@@ -117,3 +117,8 @@ export const getCities = async (req, res) => {
   });
   return res.status(200).send({ message: 'fetched cities', data: data });
 };
+
+
+
+
+

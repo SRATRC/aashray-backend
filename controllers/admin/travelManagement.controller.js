@@ -12,20 +12,14 @@ import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
   ERR_TRANSACTION_NOT_FOUND,
-  FULL_TRAVEL_PRICE,
   MSG_UPDATE_SUCCESSFUL,
   STATUS_ADMIN_CANCELLED,
-  STATUS_AWAITING_REFUND,
   STATUS_CANCELLED,
-  STATUS_CASH_COMPLETED,
   STATUS_CONFIRMED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
-  TRAVEL_PRICE,
-  TRAVEL_TYPE_FULL,
-  TYPE_EXPENSE,
-  TYPE_REFUND,
+  
   TYPE_TRAVEL
 } from '../../config/constants.js';
 import { adminCancelTransaction, createPendingTransaction } from '../../helpers/transactions.helper.js';
@@ -40,27 +34,25 @@ export const fetchUpcomingBookings = async (req, res) => {
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
 
-  // TODO: add guest info
-  const data = await TravelDb.findAll({
-    include: [{
-      model: CardDb
-    }],
-    where: {
-      date: {
-        [Sequelize.Op.gt]: today
-      },
-      status: {
-        [Sequelize.Op.notIn]: [
-          STATUS_CANCELLED, 
-          STATUS_ADMIN_CANCELLED
-        ]
-      }
-    },
-    offset,
-    limit: pageSize,
-    order: [['date', 'ASC']]
-  });
-
+  
+  const data = await database.query(`SELECT travel_db.bookingid, bookedBy,date,pickup_point, 
+  drop_point,travel_db.type,luggage,comments,admin_comments,travel_db.status,
+  issuedto,mobno,center,res_status,amount,upi_ref,t.status as paymentStatus
+  from travel_db
+  LEFT JOIN transactions t ON t.bookingid = travel_db.bookingId and t.type = :transaction_type
+  LEFT JOIN Card_Db ON bookedBy = Card_Db.cardno
+  WHERE date > :today AND travel_db.status NOT IN (:status_cancelled, :status_admin_cancelled) ORDER BY date ASC
+  LIMIT :limit OFFSET :offset ` , {
+  replacements: { 
+    today, 
+    status_cancelled: STATUS_CANCELLED, 
+    status_admin_cancelled: STATUS_ADMIN_CANCELLED, 
+    limit: pageSize, 
+    transaction_type:TYPE_TRAVEL,
+    offset 
+  },
+  type: Sequelize.QueryTypes.SELECT
+}); 
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
 

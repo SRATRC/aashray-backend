@@ -1,0 +1,130 @@
+import {
+  STATUS_PAYMENT_PENDING,
+  STATUS_CONFIRMED,
+  TYPE_UTSAV,
+  STATUS_CLOSED,
+  STATUS_WAITING,
+  STATUS_OPEN
+} from '../config/constants.js';
+import {
+  UtsavDb,
+  UtsavPackagesDb,
+  UtsavBooking
+} from '../models/associations.js';
+import { createPendingTransaction } from './transactions.helper.js';
+import { v4 as uuidv4 } from 'uuid';
+import Sequelize from 'sequelize';
+import ApiError from '../utils/ApiError.js';
+
+export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
+  const utsav = await UtsavDb.findOne({
+    where: {
+      id: utsavid
+    }
+  });
+  if (!utsav) throw new ApiError(400, 'Utsav not found');
+
+  const packages = await UtsavPackagesDb.findAll({
+    where: { utsavid }
+  });
+
+  await checkUtsavAlreadyBooked(utsavid, mumukshus);
+
+  let total_amount = 0;
+  const bookings = [];
+
+  for (const mumukshu of mumukshus) {
+    const bookingid = uuidv4();
+
+    const package_info = packages.find((p) => p.id === mumukshu.packageid);
+    if (!package_info) {
+      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+    }
+
+    const booking = await UtsavBooking.create(
+      {
+        bookingid,
+        utsavid,
+        cardno: mumukshu.cardno,
+        bookedBy: mumukshu.cardno !== user.cardno ? user.cardno : null,
+        packageid: mumukshu.packageid,
+        arrival: mumukshu.arrival,
+        carno: mumukshu.carno,
+        other: mumukshu.other,
+        status:
+          utsav.status === STATUS_CLOSED
+            ? STATUS_WAITING
+            : STATUS_PAYMENT_PENDING,
+        updatedBy: user.cardno
+      },
+      { transaction: t }
+    );
+
+    if (utsav.status === STATUS_OPEN) {
+      await createPendingTransaction(
+        user.cardno,
+        booking,
+        TYPE_UTSAV,
+        package_info.amount,
+        user.cardno,
+        t
+      );
+
+      total_amount += package_info.amount;
+    }
+    bookings.push(booking);
+  }
+
+  return { t, amount: total_amount, bookingIds: bookings };
+}
+
+export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
+  const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
+  const alreadyBooked = await UtsavBooking.findAll({
+    where: {
+      cardno: mumukshu_cardnos,
+      utsavid: utsavid,
+      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED] }
+    }
+  });
+
+  if (alreadyBooked.length > 0) throw new ApiError(400, 'Already booked');
+}
+
+export async function validateUtsavs(utsavid, mumukshus) {
+  var utsavDetails = [];
+
+  const utsav = await UtsavDb.findOne({
+    where: {
+      id: utsavid
+    }
+  });
+  if (!utsav) throw new ApiError(400, 'Utsav not found');
+
+  const packages = await UtsavPackagesDb.findAll({
+    where: { utsavid }
+  });
+
+  for (const mumukshu of mumukshus) {
+    const package_info = packages.find((p) => p.id === mumukshu.packageid);
+    if (!package_info) {
+      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+    }
+
+    if (utsav.status === STATUS_CLOSED) {
+      utsavDetails.push({
+        utsavId: utsavid,
+        status: STATUS_WAITING,
+        charge: 0
+      });
+    } else {
+      utsavDetails.push({
+        utsavId: utsavid,
+        status: STATUS_PAYMENT_PENDING,
+        charge: package_info.amount
+      });
+    }
+  }
+
+  return utsavDetails;
+}

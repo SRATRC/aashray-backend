@@ -1,7 +1,7 @@
 import {
   ShibirDb,
   ShibirBookingDb,
-  CardDb,
+  CardDb
 } from '../../models/associations.js';
 import {
   STATUS_WAITING,
@@ -12,21 +12,23 @@ import {
   STATUS_CANCELLED,
   STATUS_CASH_COMPLETED,
   TYPE_ADHYAYAN,
-  ERR_BOOKING_ALREADY_CANCELLED,
-  ERR_ADHYAYAN_NO_SEATS_AVAILABLE
+  ERR_BOOKING_ALREADY_CANCELLED
 } from '../../config/constants.js';
+import {
+  adminCancelTransaction,
+  createPendingTransaction
+} from '../../helpers/transactions.helper.js';
+import {
+  reserveAdhyayanSeat,
+  openAdhyayanSeat,
+  validateAdhyayanBooking,
+  validateAdhyayans
+} from '../../helpers/adhyayanBooking.helper.js';
 import database from '../../config/database.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
-import { adminCancelTransaction, createPendingTransaction, useCredit } from '../../helpers/transactions.helper.js';
-import { 
-  reserveAdhyayanSeat, 
-  openAdhyayanSeat, 
-  validateAdhyayanBooking, 
-  validateAdhyayans 
-} from '../../helpers/adhyayanBooking.helper.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -68,8 +70,6 @@ export const createAdhyayan = async (req, res) => {
 };
 
 export const fetchAllAdhyayan = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
-
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
@@ -106,7 +106,8 @@ GROUP BY
     shibir_db.comments,
     shibir_db.status,
     shibir_db.updatedBy
-    
+
+    ORDER BY shibir_db.start_date DESC
     LIMIT ${pageSize} OFFSET ${offset};`,
     {
       type: QueryTypes.SELECT
@@ -123,10 +124,8 @@ export const fetchAdhyayan = async (req, res) => {
     where: { id: id }
   });
 
-  return res
-    .status(200)
-    .send({ message: 'Fetched Adhyayan', data: adhyayan });
-}
+  return res.status(200).send({ message: 'Fetched Adhyayan', data: adhyayan });
+};
 
 export const fetchAdhyayanBookings = async (req, res) => {
   const { id } = req.params;
@@ -217,7 +216,7 @@ export const adhyayanWaitlist = async (req, res) => {
       },
       {
         model: CardDb,
-        attributes: ['issuedto', 'mobno', 'center'],
+        attributes: ['issuedto', 'mobno', 'center','res_status'],
         required: true
       }
       // TODO: include Guest Details if booked for Guest
@@ -225,7 +224,7 @@ export const adhyayanWaitlist = async (req, res) => {
     where: {
       status: STATUS_WAITING
     },
-    attributes: ['id', 'shibir_id', 'cardno', 'status'],
+    attributes: ['bookingid', 'shibir_id', 'bookedby', 'status'],
     offset,
     limit: pageSize
   });
@@ -265,10 +264,10 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
   // waiting to confirmed
   // waiting to payment pending -- not needed
-  // 
+  //
   switch (status) {
     // Only Waiting & Payment Pending booking can be changed to
-    // Confirmed 
+    // Confirmed
     case STATUS_CONFIRMED:
       if (booking.status == STATUS_WAITING) {
         await reserveAdhyayanSeat(adhyayan, t);
@@ -303,7 +302,10 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status == STATUS_CONFIRMED) {
-        throw new ApiError(400, 'Confirmed booking\'s status cannot be changed to Payment Pending');
+        throw new ApiError(
+          400,
+          "Confirmed booking's status cannot be changed to Payment Pending"
+        );
       }
 
       // Only Waiting booking can be changed to Payment Pending
@@ -329,7 +331,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
       }
 
       break;
-  
+
     case STATUS_ADMIN_CANCELLED:
       if (
         booking.status == STATUS_CONFIRMED ||
@@ -337,7 +339,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
       ) {
         await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
       }
-      
+
       if (transaction) {
         await adminCancelTransaction(req.user, transaction, t);
       }

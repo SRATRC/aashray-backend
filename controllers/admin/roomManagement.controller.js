@@ -176,14 +176,11 @@ export const roomBooking = async (req, res) => {
     );
   }
   
-  
-  
-
   await t.commit();
   if( booking.bookingId != null ){
-  let bookingIds = {};
-  bookingIds[TYPE_ROOM]=[booking.bookingId];
-  sendUnifiedEmail(card,bookingIds);
+    let bookingIds = {};
+    bookingIds[TYPE_ROOM]=[booking.bookingId];
+    sendUnifiedEmail(card,bookingIds);
   }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -232,7 +229,7 @@ export const flatBooking = async (req, res) => {
   }
 
   let bookingIdMap = {};
-  bookingIdMap[TYPE_FLAT]=[booking.bookingid];
+  bookingIdMap["type_flat"]=[booking.bookingid];
   sendUnifiedEmail(user_data.dataValues,bookingIdMap);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
@@ -387,52 +384,6 @@ export const updateFlatBooking = async (req, res) => {
   );
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
-};
-
-export const checkinReport = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  const today = moment().format('YYYY-MM-DD');
-
-  // TODO: include Guest information
-  const checkedin = await RoomBooking.findAll({
-    include: [CardDb],
-    where: {
-      checkin: today,
-      status: ROOM_STATUS_CHECKEDIN
-    },
-    offset,
-    limit: pageSize
-  });
-
-  return res
-    .status(200)
-    .send({ message: 'Fetched check in report', data: checkedin });
-};
-
-export const checkoutReport = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  const today = moment().format('YYYY-MM-DD');
-
-  // TODO: include Guest information
-  const checkedout = await RoomBooking.findAll({
-    include: [CardDb],
-    where: {
-      checkout: today,
-      status: ROOM_STATUS_CHECKEDOUT
-    },
-    offset,
-    limit: pageSize
-  });
-
-  return res
-    .status(200)
-    .send({ message: 'fetched checkout report', data: checkedout });
 };
 
 export const roomList = async (req, res) => {
@@ -597,6 +548,80 @@ export const occupancyReport = async (req, res) => {
   return res.status(200).send({ message: 'Success', data: result });
 };
 
+export const checkinReport = async (req, res) => {
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
+
+  const today = moment().format('YYYY-MM-DD');
+
+  const checkedin = await RoomBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        required: true
+      }
+    ],
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'checkin',
+      'checkout',
+      'bookedBy',
+      'status',
+      'nights'
+    ],
+    where: {
+      checkin: today,
+      status: ROOM_STATUS_CHECKEDIN
+    },
+    offset,
+    limit: pageSize
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'Fetched check in report', data: checkedin });
+};
+
+export const checkoutReport = async (req, res) => {
+  const page = parseInt(req.query.page) || req.body.page || 1;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const offset = (page - 1) * pageSize;
+
+  const today = moment().format('YYYY-MM-DD');
+
+  const checkedout = await RoomBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        required: true
+      }
+    ],
+    attributes: [
+      'bookingid',
+      'roomtype',
+      'checkin',
+      'checkout',
+      'bookedBy',
+      'status',
+      'nights'
+    ],
+    where: {
+      checkout: today,
+      status: ROOM_STATUS_CHECKEDOUT
+    },
+    offset,
+    limit: pageSize
+  });
+
+  return res
+    .status(200)
+    .send({ message: 'fetched checkout report', data: checkedout });
+};
+
 export const ReservationReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const page = parseInt(req.query.page) || req.body.page || 1;
@@ -725,7 +750,6 @@ async function roomBookingReport(
   const data = await RoomBooking.findAll({
     include: [
       {
-        // TODO: include guest information
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'center'],
         required: true
@@ -733,9 +757,11 @@ async function roomBookingReport(
     ],
     attributes: [
       'bookingid',
+      'roomno',
       'roomtype',
       'checkin',
       'checkout',
+      'bookedBy',
       'status',
       'nights'
     ],

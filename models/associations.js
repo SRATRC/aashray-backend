@@ -169,7 +169,8 @@ RoomBooking.belongsTo(CardDb, {
 });
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
-  targetKey: 'cardno'
+  targetKey: 'cardno',
+  as: 'bookedByCard'
 });
 
 // Flat
