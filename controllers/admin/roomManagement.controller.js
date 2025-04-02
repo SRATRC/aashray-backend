@@ -474,15 +474,14 @@ export const updateFlatBooking = async (req, res) => {
 
 export const roomList = async (req, res) => {
   const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
   const offset = (page - 1) * pageSize;
 
   const result = await RoomDb.findAll({
     attributes: ['roomno', 'roomtype', 'gender', 'roomstatus'],
     where: {
       roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%'
+        [Sequelize.Op.notIn]: ['NA', 'WL']
       }
     },
     offset,
