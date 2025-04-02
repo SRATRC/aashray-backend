@@ -1,14 +1,9 @@
-import { CardDb } from '../../models/associations.js';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { CardDb, Transactions } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
+import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
-import axios from 'axios';
-import FormData from 'form-data';
-import Transactions from '../../models/transactions.model.js';
-import ApiError from '../../utils/ApiError.js';
-
-const FASTAPI_URL = 'http://127.0.0.1:3001/verify';
 
 export const updateProfile = async (req, res) => {
   const {
@@ -63,29 +58,20 @@ export const updateProfile = async (req, res) => {
 };
 
 export const upload = async (req, res) => {
-  const uploadDir = 'uploads/';
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  }
-
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, 'uploads/');
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-      cb(
-        null,
-        file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname)
-      );
+  const s3 = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
     }
   });
 
+  const storage = multer.memoryStorage();
   const fileFilter = (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
-      cb(new ApiError(400, 'Only image files are allowed!'), false);
+      cb(new Error('Only image files are allowed!'), false);
     }
   };
 
@@ -106,30 +92,34 @@ export const upload = async (req, res) => {
       return res.status(400).json({ error: 'Please upload an image file' });
     }
 
-    const formData = new FormData();
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const fileName = `${uniqueSuffix}${path.extname(req.file.originalname)}`;
 
-    const fileStream = fs.createReadStream(req.file.path);
-    formData.append('file', fileStream);
+    const uploadParams = {
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: fileName,
+      Body: req.file.buffer,
+      ContentType: req.file.mimetype
+    };
 
-    const fastapiResponse = await axios.post(FASTAPI_URL, formData, {
-      headers: {
-        ...formData.getHeaders(),
-        'Content-Type': 'multipart/form-data'
+    await s3.send(new PutObjectCommand(uploadParams));
+    const fileUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+
+    await CardDb.update(
+      {
+        pfp: fileUrl
+      },
+      {
+        where: {
+          cardno: req.user.cardno
+        }
       }
-    });
+    );
 
-    if (fastapiResponse.data.isHumanFace) {
-      // Save the file to the database or perform additional processing
-      return res.status(200).json({
-        message: 'File uploaded and verified successfully',
-        file: req.file
-      });
-    } else {
-      // Delete the file if verification fails
-      fs.unlinkSync(req.file.path);
-      // throw new ApiError(400, 'Face not found in the image');
-      return res.status(400).json({ message: 'Face not found in the image' });
-    }
+    return res.status(200).json({
+      message: 'File uploaded successfully',
+      data: fileUrl
+    });
   });
 };
 
