@@ -558,8 +558,9 @@ export const rcBlockList = async (req, res) => {
   const blocked = await BlockDates.findAll({
     attributes: ['id', 'checkin', 'checkout', 'comments', 'status'],
     where: {
-      checkin: { [Sequelize.Op.gte]: today }
-    }
+      checkout: { [Sequelize.Op.gte]: today }
+    },
+    order: [['checkin', 'ASC']]
   });
 
   return res

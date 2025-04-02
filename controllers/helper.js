@@ -18,7 +18,8 @@ import {
   TYPE_ADHYAYAN,
   ERR_INVALID_DATE,
   TYPE_FLAT,
-  STATUS_GUEST
+  STATUS_GUEST,
+  STATUS_ACTIVE
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -33,6 +34,7 @@ export async function getBlockedDates(checkin_date, checkout_date) {
 
   const blockedDates = await BlockDates.findAll({
     where: {
+      status: STATUS_ACTIVE,
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
