@@ -377,7 +377,7 @@ export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
   return false;
 }
 
-export async function sendUnifiedEmail(user, bookingIds) {
+export async function sendUnifiedEmail(cardno, bookingIds) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
@@ -468,7 +468,7 @@ export async function sendUnifiedEmail(user, bookingIds) {
 
   const userInfo = await CardDb.findOne({
     where: {
-      cardno: user.cardno
+      cardno: cardno
     }
   });
 

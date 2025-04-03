@@ -67,11 +67,11 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
-  let amount = 0,
-    bookingIds = [],
-    idx = 0,
-    bookingId;
+  let amount = 0,bookingId;
+  let userBookingIds = []
   for (const mumukshu of mumukshus) {
+    let bookingIds = [],
+    idx = 0;
     for (const adhyayan of adhyayans) {
       if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
         await reserveAdhyayanSeat(adhyayan, t);
@@ -110,10 +110,13 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
         );
         bookingIds[idx++] = bookingId;
       }
+      
     }
+    userBookingIds[mumukshu] = bookingIds;
+    
   }
 
-  return { t, amount, bookingIds };
+  return { t, amount ,userBookingIds };
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {

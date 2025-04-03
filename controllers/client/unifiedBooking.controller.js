@@ -49,13 +49,13 @@ export const unifiedBooking = async (req, res) => {
 
   var t = await database.transaction();
   req.transaction = t;
-  let bookingIds = [];
+  let userBookingIdMap = new Map();
 
-  let amount = await book(req.user, req.body, primary_booking, bookingIds, t);
+  let amount = await book(req.user, req.body, primary_booking, userBookingIdMap, t);
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.user, req.body, addon, bookingIds, t);
+      amount += await book(req.user, req.body, addon, userBookingIdMap, t);
     }
   }
   let order = null;
@@ -66,7 +66,9 @@ export const unifiedBooking = async (req, res) => {
         : { amount };
 
   await t.commit();
-  sendUnifiedEmail(req.user, bookingIds);
+  userBookingIdMap.forEach((value, key) => {
+    sendUnifiedEmail(key, value);
+  });
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -93,14 +95,31 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-async function book(user, body, data, bookingIds, t) {
+function setBookingIdMap(userBookingIdMap,type,userIdArray){
+  for (const cardno in userIdArray) {
+    let bookingIds = userIdArray[cardno];
+    if( userBookingIdMap.get(cardno))
+      {
+        let bookingTypeIds=userBookingIdMap.get(cardno);
+        bookingTypeIds[type]=bookingIds;
+
+      }
+      else{
+        let bookingTypeIds = [];
+        bookingTypeIds[type]=bookingIds;
+        userBookingIdMap.set(cardno,bookingTypeIds);
+      }
+}
+ 
+}
+async function book(user, body, data, userBookingIdMap, t) {
   let amount = 0;
 
   switch (data.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(user, body, data, t);
       amount += roomResult.amount;
-      bookingIds[TYPE_ROOM] = roomResult.bookingIds;
+      setBookingIdMap(userBookingIdMap,TYPE_ROOM,roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
@@ -109,13 +128,13 @@ async function book(user, body, data, bookingIds, t) {
 
     case TYPE_TRAVEL:
       const travelResult = await bookTravel(user, data, t);
-      bookingIds[TYPE_TRAVEL] = travelResult.bookingIds;
+      setBookingIdMap(userBookingIdMap,TYPE_TRAVEL,travelResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(user, data, t);
       amount += adhyayanResult.amount;
-      bookingIds[TYPE_ADHYAYAN] = adhyayanResult.bookingIds;
+      setBookingIdMap(userBookingIdMap,TYPE_ADHYAYAN,adhyayanResult.userBookingIds);
       break;
 
     case TYPE_UTSAV:
@@ -278,9 +297,8 @@ async function bookTravel(user, data, t) {
     t,
     user
   );
-
-  const bookingIds = result.bookingIds;
-  return { t, bookingIds };
+  
+  return result;
 }
 
 async function bookAdhyayan(user, data, t) {
