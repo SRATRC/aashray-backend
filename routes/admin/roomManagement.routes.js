@@ -25,7 +25,8 @@ import {
   WaitlistReport,
   dayWiseGuestCountReport,
   cancelBooking,
-  availableRooms
+  availableRooms,
+  updateRoom
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN } from '../../config/constants.js';
@@ -50,6 +51,8 @@ router.put('/update_room_booking', CatchAsync(updateRoomBooking));
 // router.put('/update_flat_booking', CatchAsync(updateFlatBooking));
 router.put('/block_room/:roomno', CatchAsync(blockRoom));
 router.put('/unblock_room/:roomno', CatchAsync(unblockRoom));
+router.put('/update_room/:roomno', CatchAsync(updateRoom));
+
 router.post('/block_rc', CatchAsync(blockRC));
 router.put('/unblock_rc/:id', CatchAsync(unblockRC));
 
