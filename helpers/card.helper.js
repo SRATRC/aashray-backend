@@ -27,3 +27,16 @@ export async function validateCards(cardnos) {
 
   return cardDb;
 }
+
+export async function findCardByMobno(mobno) {
+  const cardDb = await CardDb.findOne({
+    attributes: ['id', 'cardno', 'mobno', 'gender', 'res_status'],
+    where: { mobno }
+  });
+
+  if (!cardDb) {
+    throw new ApiError(404, ERR_CARD_NOT_FOUND);
+  }
+  
+  return cardDb;
+}

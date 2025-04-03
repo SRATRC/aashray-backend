@@ -5,7 +5,6 @@ import {
   issuePlate,
   physicalPlatesIssued,
   fetchPhysicalPlateIssued,
-  bookFoodForMumukshu,
   cancelFoodByCard,
   cancelFoodByMob,
   bookFoodForGuest,
@@ -15,7 +14,8 @@ import {
   fetchMenu,
   updateMenu,
   deleteMenu,
-  addMenu
+  addMenu,
+  bookFood
 } from '../../controllers/admin/foodManagement.controller.js';
 import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -26,7 +26,7 @@ router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN));
 router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));
 router.get('/physicalPlates', CatchAsync(fetchPhysicalPlateIssued));
-router.post('/book', CatchAsync(bookFoodForMumukshu));
+router.post('/book', CatchAsync(bookFood));
 router.put('/cancelCard', CatchAsync(cancelFoodByCard));
 router.put('/cancelMob', CatchAsync(cancelFoodByMob));
 router.post('/guest', CatchAsync(bookFoodForGuest));

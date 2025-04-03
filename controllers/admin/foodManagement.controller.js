@@ -20,6 +20,7 @@ import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import { bookFoodForMumukshus, cancelFood, createGroupFoodRequest } from '../../helpers/foodBooking.helper.js';
+import { findCardByMobno } from '../../helpers/card.helper.js';
 
 export const issuePlate = async (req, res) => {
   const currentTime = moment.utc();
@@ -117,20 +118,25 @@ export const fetchPhysicalPlateIssued = async (req, res) => {
     .send({ message: MSG_FETCH_SUCCESSFUL, data: data });
 };
 
-export const bookFoodForMumukshu = async (req, res) => {
-  const { 
-    cardno, 
+export const bookFood = async (req, res) => {
+  var cardno = req.body.cardno;
+  const {
+    mobno,
     start_date, 
     end_date, 
     breakfast, 
     lunch,
     dinner,
     spicy,
-    high_tea
-   } = req.body;
+    hightea
+  } = req.body;
 
-   var t = await database.transaction();
-   req.transaction = t;
+  var t = await database.transaction();
+  req.transaction = t;
+
+  if (!cardno && mobno) {
+    cardno = (await findCardByMobno(mobno)).cardno;
+  }
 
   const mumukshuGroup = createGroupFoodRequest(
     cardno,
@@ -138,7 +144,7 @@ export const bookFoodForMumukshu = async (req, res) => {
     lunch,
     dinner, 
     spicy,
-    high_tea
+    hightea
   );
   
   await bookFoodForMumukshus(
