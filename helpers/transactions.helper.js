@@ -166,15 +166,6 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     },
     { transaction: t }
   );
-
-  await transaction.update(
-    {
-      discount: 0,
-      description: `credits added: ${amount}`,
-      updatedBy: user.username
-    },
-    { transaction: t }
-  );
 }
 
 export async function adjustAmount(user, transaction, amount, t) {
@@ -183,7 +174,7 @@ export async function adjustAmount(user, transaction, amount, t) {
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
 
-    await addCreditsToCard(
+    await addCredit(
       user, 
       transaction.cardno,
       credits, 
