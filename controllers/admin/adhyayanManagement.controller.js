@@ -197,37 +197,21 @@ export const adhyayanReport = async (req, res) => {
 export const adhyayanWaitlist = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  const data = await ShibirBookingDb.findAll({
-    include: [
-      {
-        model: ShibirDb,
-        attributes: ['name', 'speaker', 'start_date', 'end_date'],
-        where: {
-          start_date: {
-            [Sequelize.Op.gte]: today
-          }
-        },
-        required: true,
-        order: [['start_date', 'ASC']]
-      },
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno', 'center','res_status'],
-        required: true
-      }
-      // TODO: include Guest Details if booked for Guest
-    ],
-    where: {
-      status: STATUS_WAITING
-    },
-    attributes: ['bookingid', 'shibir_id', 'bookedby', 'status'],
-    offset,
-    limit: pageSize
-  });
+  const data = await database.query(
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, t2.start_date, t2.end_date, t3.cardno, t3.issuedto, t3.mobno, t3.center, t3.res_status
+FROM shibir_booking_db AS t1
+LEFT JOIN shibir_db AS t2 
+ON t1.shibir_id = t2.id 
+AND t2.start_date >= :date
+LEFT JOIN card_db AS t3 
+ON t1.bookedBy = t3.cardno 
+WHERE t1.status = :status`,
+    {
+      replacements: { date: today, status: STATUS_WAITING },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
   res.status(200).send({ message: 'Fetched Adhyayan', data: data });
 };
 
