@@ -204,7 +204,7 @@ LEFT JOIN shibir_db AS t2
 ON t1.shibir_id = t2.id 
 AND t2.start_date >= :date
 LEFT JOIN card_db AS t3 
-ON t1.bookedBy = t3.cardno 
+ON t1.cardno = t3.cardno 
 WHERE t1.status = :status`,
     {
       replacements: { date: today, status: STATUS_WAITING },
