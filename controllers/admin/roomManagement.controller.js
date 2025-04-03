@@ -384,23 +384,14 @@ export const fetchFlatBookingsByCard = async (req, res) => {
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
-// TODO: update room should be able to change dates too
 export const updateRoomBooking = async (req, res) => {
   const {
     bookingid,
-    cardno,
-    roomno,
-    checkout_date,
-    room_type,
-    gender,
-    status
+    roomno
   } = req.body;
 
   const booking = await RoomBooking.findOne({
-    where: { 
-      cardno: cardno,
-      bookingid: bookingid 
-    }
+    where: { bookingid }
   });
 
   if (!booking) {
@@ -410,40 +401,15 @@ export const updateRoomBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  // TODO: check if roomno is not taken
-  if (roomno) {
-    const room = await RoomDb.findOne({
-      where: {
-        roomno: roomno,
-        gender: gender,
-        roomtype: room_type
-      }
-    });
-
-    if (!room) {
-      throw new ApiError(404, 'Unable to find room with that room number, gender and type.');
-    }
-    
-    if (room.roomstatus == ROOM_BLOCKED)
-      throw new ApiError(403, 'Selected room is blocked.');
-  }
-
   await booking.update(
     {
       roomno,
-      // TODO: do we need to update the transaction
-      // to give refunds or take more payment
-      checkout: checkout_date,
-      roomtype: room_type,
-      // Same - if the booking gets cancelled, do we need to handle that
-      status,
       updatedBy: req.user.username
     },
     { transaction: t }
   );
 
   await t.commit();
-
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
