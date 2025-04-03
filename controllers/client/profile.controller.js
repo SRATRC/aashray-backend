@@ -1,4 +1,8 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand
+} from '@aws-sdk/client-s3';
 import { CardDb, Transactions } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
 import ApiError from '../../utils/ApiError.js';
@@ -58,6 +62,8 @@ export const updateProfile = async (req, res) => {
 };
 
 export const upload = async (req, res) => {
+  const doesPfpExist = req.user.pfp;
+
   const s3 = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {
@@ -115,6 +121,16 @@ export const upload = async (req, res) => {
         }
       }
     );
+
+    if (doesPfpExist) {
+      const oldKey = doesPfpExist.split('/').pop();
+      const deleteParams = {
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key: oldKey
+      };
+
+      await s3.send(new DeleteObjectCommand(deleteParams));
+    }
 
     return res.status(200).json({
       message: 'File uploaded successfully',
