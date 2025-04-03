@@ -40,6 +40,7 @@ import {
   bookDayVisit,
   checkRoomAlreadyBooked,
   createRoomBooking,
+  findAllRooms,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
@@ -266,7 +267,7 @@ export const roomBooking = async (req, res) => {
   if( booking.bookingId != null ){
     let bookingIds = {};
     bookingIds[TYPE_ROOM]=[booking.bookingId];
-    sendUnifiedEmail(card,bookingIds);
+    sendUnifiedEmail(card.cardno, bookingIds);
   }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -490,6 +491,30 @@ export const roomList = async (req, res) => {
 
   return res.status(200).send({ message: 'Success', data: result });
 };
+
+export const availableRooms = async (req, res) => {
+  const bookingid = req.params.bookingid;
+
+  const booking = await RoomBooking.findOne({
+    where: { bookingid }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  const today = moment().format('YYYY-MM-DD');
+
+  const rooms = await findAllRooms(
+    today,
+    booking.checkout,
+    booking.roomtype,
+    booking.gender
+  );
+
+  return res.status(200).send({ message: 'Fetched available rooms', data: rooms });
+};
+
 
 export const blockRoom = async (req, res) => {
   const t = await database.transaction();

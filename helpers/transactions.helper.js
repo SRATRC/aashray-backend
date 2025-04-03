@@ -1,4 +1,4 @@
-import { CardDb, Transactions } from '../models/associations.js';
+import { CardDb, RoomBooking, Transactions } from '../models/associations.js';
 import {
   TRANSACTION_TYPE_UPI,
   TRANSACTION_TYPE_CASH,
@@ -12,7 +12,8 @@ import {
   STATUS_CONFIRMED,
   TYPE_ADHYAYAN,
   TYPE_GUEST_ADHYAYAN,
-  ERR_CARD_NOT_FOUND
+  ERR_CARD_NOT_FOUND,
+  ROOM_STATUS_CHECKEDIN
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
@@ -272,9 +273,13 @@ export async function useCredit(
   // After applying credits, if the transaction is complete
   // then confirm the booking.
   if (status == STATUS_PAYMENT_COMPLETED) {
+    const bookingStatus = booking instanceof RoomBooking 
+      ? ROOM_STATUS_CHECKEDIN
+      : STATUS_CONFIRMED;
+
     booking.update(
       {
-        status: STATUS_CONFIRMED,
+        status: bookingStatus,
         updatedBy
       },
       { transaction: t }
