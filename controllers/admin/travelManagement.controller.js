@@ -23,18 +23,31 @@ import {
 } from '../../helpers/transactions.helper.js';
 import { travelCharge } from '../../helpers/travelBooking.helper.js';
 
-//TODO: send mail
+
+export const fectchSummaryByStatusForToday = async (req, res) => {
+  const today = moment().format('YYYY-MM-DD');
+  const data = await database.query(`SELECT travel_db.status,count(*) as count
+  from travel_db
+  WHERE date = :today group by travel_db.status ` , {
+  replacements: { 
+    today
+    },
+  type: Sequelize.QueryTypes.SELECT
+}); 
+  return res.status(200).send({ message: 'Fetched data', data: data });
+};
 
 export const fetchUpcomingBookings = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, t2.amount, t2.upi_ref, t2.status as paymentStatus
-FROM travel_db t1
-LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
-LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-WHERE date >= :today AND t1.status NOT IN (:status) 
-ORDER BY date ASC;`,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, 
+    t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, t2.amount, t2.upi_ref, t2.status as paymentStatus
+    FROM travel_db t1
+    LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
+    LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+    WHERE date >= :today AND t1.status NOT IN (:status) 
+    ORDER BY date ASC;`,
     {
       replacements: {
         today,
@@ -53,8 +66,7 @@ ORDER BY date ASC;`,
 // 3. confirmed to admin cancelled
 // TODO: Confirm with Harshit on valid statuses
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status } = req.body;
-
+  const { bookingid, status,adminComments } = req.body;
   var newBookingStatus = status;
 
   const t = await database.transaction();
@@ -63,7 +75,8 @@ export const updateBookingStatus = async (req, res) => {
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
-      status: [STATUS_WAITING, STATUS_CONFIRMED]
+      status: [STATUS_WAITING, STATUS_CONFIRMED,
+        STATUS_PAYMENT_PENDING]
     }
   });
 
@@ -120,6 +133,7 @@ export const updateBookingStatus = async (req, res) => {
   await booking.update(
     {
       status: newBookingStatus,
+      admin_comments:adminComments,
       updatedBy: req.user.username
     },
     { transaction: t }
@@ -127,7 +141,6 @@ export const updateBookingStatus = async (req, res) => {
 
   const card = CardDb.findOne({ where: { cardno: booking.cardno } });
 
-  // TODO: fix email template
   sendMail({
     email: card.email,
     subject: 'Status changed for your Raj Pravas Booking',
@@ -148,7 +161,22 @@ export const updateBookingStatus = async (req, res) => {
 
 // TODO: Deprecate? where is this used?
 export const updateTransactionStatus = async (req, res) => {
-  const { cardno, bookingid, type } = req.body;
+  const { cardno, bookingid, type ,payment_status,amount,upi_ref} = req.body;
+
+  const booking = await TravelDb.findOne({
+    where: {
+      bookingid: bookingid,
+      status: [
+        STATUS_WAITING,
+        STATUS_CONFIRMED
+      ]
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
 
   const t = await database.transaction();
   req.transaction = t;
@@ -164,6 +192,7 @@ export const updateTransactionStatus = async (req, res) => {
   if (!transaction) {
     throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
   }
+
 
   await adminCancelTransaction(req.user, transaction, t);
 
