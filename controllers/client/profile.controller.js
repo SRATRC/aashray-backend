@@ -255,3 +255,31 @@ export const sendNotification = async (req, res) => {
     });
   }
 };
+
+export const fetchProfile = async (req, res) => {
+  const { cardno } = req.body;
+
+  const profile = await CardDb.findOne({
+    where: {
+      cardno: cardno
+    },
+    attributes: {
+      exclude: [
+        'id',
+        'password',
+        'token',
+        'active',
+        'status',
+        'createdAt',
+        'updatedAt',
+        'updatedBy'
+      ]
+    }
+  });
+
+  if (!profile) {
+    throw new ApiError(404, 'user not found');
+  }
+
+  return res.status(200).json({ message: 'Profile fetched', data: profile });
+};

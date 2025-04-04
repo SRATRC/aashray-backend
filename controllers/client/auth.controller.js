@@ -94,7 +94,16 @@ export const verifyAndLogin = async (req, res) => {
       mobno: mobno
     },
     attributes: {
-      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
+      exclude: [
+        'id',
+        'password',
+        'token',
+        'active',
+        'status',
+        'createdAt',
+        'updatedAt',
+        'updatedBy'
+      ]
     }
   });
 
