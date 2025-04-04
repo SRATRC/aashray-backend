@@ -544,6 +544,34 @@ export const unblockRoom = async (req, res) => {
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
+export const updateRoom = async (req, res) => {
+  const { roomtype, gender } = req.body;
+  const roomno = req.params.roomno;
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const room = await RoomDb.findOne({
+    where: { roomno }
+  });
+
+  if (!room) {
+    throw new ApiError(400, ERR_ROOM_NOT_FOUND);
+  }
+
+  await room.update(
+    {
+      roomtype,
+      gender,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+};
+
 export const rcBlockList = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
   const blocked = await BlockDates.findAll({
