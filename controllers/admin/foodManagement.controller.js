@@ -276,45 +276,43 @@ export const cancelFoodForGuest = async (req, res) => {
 };
 
 export const foodReport = async (req, res) => {
-  const date = req.query.date;
+  const start_date = req.query.start_date;
+  const end_date = req.query.end_date;
 
   const report = await database.query(
     `SELECT
-  date,
-  SUM(CASE WHEN breakfast = 1 THEN 1 ELSE 0 END) AS breakfast,
-  SUM(CASE WHEN lunch = 1 THEN 1 ELSE 0 END) AS lunch,
-  SUM(CASE WHEN dinner = 1 THEN 1 ELSE 0 END) as dinner,
-  SUM(CASE WHEN breakfast_plate_issued = 1 THEN 1 ELSE 0 END) as breakfast_plate_issued,
-  SUM(CASE WHEN lunch_plate_issued = 1 THEN 1 ELSE 0 END) AS lunch_plate_issued,
-  SUM(CASE WHEN dinner_plate_issued = 1 THEN 1 ELSE 0 END) AS dinner_plate_issued,
-  SUM(CASE WHEN breakfast_plate_issued = 0 THEN 1 ELSE 0 END) AS breakfast_noshow,
-  SUM(CASE WHEN lunch_plate_issued = 0 THEN 1 ELSE 0 END) AS lunch_noshow,
-  SUM(CASE WHEN dinner_plate_issued = 0 THEN 1 ELSE 0 END) AS dinner_noshow,
-  SUM(CASE WHEN hightea = 'TEA' THEN 1 ELSE 0 END) AS tea,
-  SUM(CASE WHEN hightea = 'COFFEE' THEN 1 ELSE 0 END) AS coffee
-FROM
-  food_db
-WHERE
-  date = :date
-GROUP BY
-  date;`,
+      food_db.date,
+      SUM(CASE WHEN breakfast = 1 THEN 1 ELSE 0 END) AS breakfast,
+      SUM(CASE WHEN lunch = 1 THEN 1 ELSE 0 END) AS lunch,
+      SUM(CASE WHEN dinner = 1 THEN 1 ELSE 0 END) as dinner,
+      SUM(CASE WHEN breakfast_plate_issued = 1 THEN 1 ELSE 0 END) as breakfast_plate_issued,
+      SUM(CASE WHEN lunch_plate_issued = 1 THEN 1 ELSE 0 END) AS lunch_plate_issued,
+      SUM(CASE WHEN dinner_plate_issued = 1 THEN 1 ELSE 0 END) AS dinner_plate_issued,
+      SUM(CASE WHEN breakfast_plate_issued = 0 THEN 1 ELSE 0 END) AS breakfast_noshow,
+      SUM(CASE WHEN lunch_plate_issued = 0 THEN 1 ELSE 0 END) AS lunch_noshow,
+      SUM(CASE WHEN dinner_plate_issued = 0 THEN 1 ELSE 0 END) AS dinner_noshow,
+      SUM(CASE WHEN hightea = 'TEA' THEN 1 ELSE 0 END) AS tea,
+      SUM(CASE WHEN hightea = 'COFFEE' THEN 1 ELSE 0 END) AS coffee,
+      SUM(CASE WHEN type = 'breakfast' THEN count ELSE 0 END) AS breakfast_physical_plates,
+      SUM(CASE WHEN type = 'lunch' THEN count ELSE 0 END) AS lunch_physical_plates,
+      SUM(CASE WHEN type = 'dinner' THEN count ELSE 0 END) AS dinner_physical_plates 
+    FROM
+      food_db 
+    LEFT JOIN food_physical_plate ON food_db.date = food_physical_plate.date 
+    WHERE food_db.date >= :start_date
+      AND food_db.date <= :end_date 
+    GROUP BY food_db.date 
+    ORDER BY food_db.date ASC;`,
     {
-      replacements: { date: date },
+      replacements: { 
+        start_date,
+        end_date 
+      },
       type: Sequelize.QueryTypes.SELECT
     }
   );
 
-  const physical_plates = await FoodPhysicalPlate.findAll({
-    attributes: ['date', 'type', 'count'],
-    where: { date }
-  });
-  
-  const data = {
-    report: report[0],
-    physical_plates
-  };
-
-  return res.status(200).send({ data: data });
+  return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
 };
 
 export const foodReportDetails = async (req, res) => {
