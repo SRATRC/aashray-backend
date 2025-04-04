@@ -23,7 +23,6 @@ import {
 } from '../../helpers/transactions.helper.js';
 import { travelCharge } from '../../helpers/travelBooking.helper.js';
 
-//TODO: send mail
 
 export const fectchSummaryByStatusForToday = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -42,12 +41,13 @@ export const fetchUpcomingBookings = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, t2.amount, t2.upi_ref, t2.status as paymentStatus
-FROM travel_db t1
-LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
-LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-WHERE date >= :today AND t1.status NOT IN (:status) 
-ORDER BY date ASC;`,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, 
+    t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, t2.amount, t2.upi_ref, t2.status as paymentStatus
+    FROM travel_db t1
+    LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
+    LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+    WHERE date >= :today AND t1.status NOT IN (:status) 
+    ORDER BY date ASC;`,
     {
       replacements: {
         today,
