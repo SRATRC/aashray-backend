@@ -40,6 +40,7 @@ import {
   bookDayVisit,
   checkRoomAlreadyBooked,
   createRoomBooking,
+  findAllRooms,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
@@ -266,7 +267,7 @@ export const roomBooking = async (req, res) => {
   if( booking.bookingId != null ){
     let bookingIds = {};
     bookingIds[TYPE_ROOM]=[booking.bookingId];
-    sendUnifiedEmail(card,bookingIds);
+    sendUnifiedEmail(card.cardno, bookingIds);
   }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -383,23 +384,14 @@ export const fetchFlatBookingsByCard = async (req, res) => {
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
-// TODO: update room should be able to change dates too
 export const updateRoomBooking = async (req, res) => {
   const {
     bookingid,
-    cardno,
-    roomno,
-    checkout_date,
-    room_type,
-    gender,
-    status
+    roomno
   } = req.body;
 
   const booking = await RoomBooking.findOne({
-    where: { 
-      cardno: cardno,
-      bookingid: bookingid 
-    }
+    where: { bookingid }
   });
 
   if (!booking) {
@@ -409,40 +401,15 @@ export const updateRoomBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  // TODO: check if roomno is not taken
-  if (roomno) {
-    const room = await RoomDb.findOne({
-      where: {
-        roomno: roomno,
-        gender: gender,
-        roomtype: room_type
-      }
-    });
-
-    if (!room) {
-      throw new ApiError(404, 'Unable to find room with that room number, gender and type.');
-    }
-    
-    if (room.roomstatus == ROOM_BLOCKED)
-      throw new ApiError(403, 'Selected room is blocked.');
-  }
-
   await booking.update(
     {
       roomno,
-      // TODO: do we need to update the transaction
-      // to give refunds or take more payment
-      checkout: checkout_date,
-      roomtype: room_type,
-      // Same - if the booking gets cancelled, do we need to handle that
-      status,
       updatedBy: req.user.username
     },
     { transaction: t }
   );
 
   await t.commit();
-
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -490,6 +457,30 @@ export const roomList = async (req, res) => {
 
   return res.status(200).send({ message: 'Success', data: result });
 };
+
+export const availableRooms = async (req, res) => {
+  const bookingid = req.params.bookingid;
+
+  const booking = await RoomBooking.findOne({
+    where: { bookingid }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  const today = moment().format('YYYY-MM-DD');
+
+  const rooms = await findAllRooms(
+    today,
+    booking.checkout,
+    booking.roomtype,
+    booking.gender
+  );
+
+  return res.status(200).send({ message: 'Fetched available rooms', data: rooms });
+};
+
 
 export const blockRoom = async (req, res) => {
   const t = await database.transaction();
@@ -548,6 +539,34 @@ export const unblockRoom = async (req, res) => {
       { transaction: t }
     );
   }
+
+  await t.commit();
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+};
+
+export const updateRoom = async (req, res) => {
+  const { roomtype, gender } = req.body;
+  const roomno = req.params.roomno;
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const room = await RoomDb.findOne({
+    where: { roomno }
+  });
+
+  if (!room) {
+    throw new ApiError(400, ERR_ROOM_NOT_FOUND);
+  }
+
+  await room.update(
+    {
+      roomtype,
+      gender,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
 
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });

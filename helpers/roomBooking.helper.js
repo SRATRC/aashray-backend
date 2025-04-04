@@ -8,7 +8,9 @@ import {
   AC_ROOM_PRICE,
   TYPE_ROOM,
   ERR_ROOM_NO_BED_AVAILABLE,
-  ERR_ROOM_ALREADY_BOOKED
+  ERR_ROOM_ALREADY_BOOKED,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../config/constants.js';
 import { RoomBooking, RoomDb, UtsavDb } from '../models/associations.js';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
@@ -88,6 +90,7 @@ export async function findRoom(checkin, checkout, room_type, gender) {
                     SELECT roomno 
                     FROM room_booking 
                     WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
+                    AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
                 )`)
       },
       roomstatus: STATUS_AVAILABLE,
@@ -101,6 +104,33 @@ export async function findRoom(checkin, checkout, room_type, gender) {
       Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
     ],
     limit: 1
+  });
+}
+
+export async function findAllRooms(checkin, checkout, room_type, gender) {
+  return RoomDb.findAll({
+    attributes: ['roomno'],
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%',
+        [Sequelize.Op.notIn]: Sequelize.literal(`(
+                    SELECT roomno 
+                    FROM room_booking 
+                    WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
+                    AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
+                )`)
+      },
+      roomstatus: STATUS_AVAILABLE,
+      roomtype: room_type,
+      gender: gender
+    },
+    order: [
+      Sequelize.literal(
+        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
+      ),
+      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
+    ]
   });
 }
 

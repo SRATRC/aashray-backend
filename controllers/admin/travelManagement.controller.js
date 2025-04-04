@@ -1,8 +1,4 @@
-import {
-  TravelDb,
-  CardDb,
-  Transactions
-} from '../../models/associations.js';
+import { TravelDb, CardDb, Transactions } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize, { Transaction } from 'sequelize';
 import sendMail from '../../utils/sendMail.js';
@@ -19,10 +15,12 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
-  
   TYPE_TRAVEL
 } from '../../config/constants.js';
-import { adminCancelTransaction, createPendingTransaction } from '../../helpers/transactions.helper.js';
+import {
+  adminCancelTransaction,
+  createPendingTransaction
+} from '../../helpers/transactions.helper.js';
 import { travelCharge } from '../../helpers/travelBooking.helper.js';
 
 //TODO: send mail
@@ -43,29 +41,22 @@ export const fectchSummaryByStatusForToday = async (req, res) => {
 export const fetchUpcomingBookings = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
-  
-  const data = await database.query(`SELECT travel_db.bookingid, bookedBy,date,pickup_point, 
-  drop_point,travel_db.type,luggage,comments,admin_comments,travel_db.status,
-  issuedto,mobno,center,res_status,amount,upi_ref,t.status as paymentStatus
-  from travel_db
-  LEFT JOIN transactions t ON t.bookingid = travel_db.bookingId and t.type = :transaction_type
-  LEFT JOIN Card_Db ON travel_db.cardno = Card_Db.cardno
-  WHERE date > :today AND travel_db.status NOT IN (:status_cancelled, :status_admin_cancelled) ORDER BY date ASC
-  LIMIT :limit OFFSET :offset ` , {
-  replacements: { 
-    today, 
-    status_cancelled: STATUS_CANCELLED, 
-    status_admin_cancelled: STATUS_ADMIN_CANCELLED, 
-    limit: pageSize, 
-    transaction_type:TYPE_TRAVEL,
-    offset 
-  },
-  type: Sequelize.QueryTypes.SELECT
-}); 
+  const data = await database.query(
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, t2.amount, t2.upi_ref, t2.status as paymentStatus
+FROM travel_db t1
+LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
+LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+WHERE date >= :today AND t1.status NOT IN (:status) 
+ORDER BY date ASC;`,
+    {
+      replacements: {
+        today,
+        status: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED],
+        category: TYPE_TRAVEL
+      },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
 
@@ -84,11 +75,8 @@ export const updateBookingStatus = async (req, res) => {
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
-      status: [
-        STATUS_WAITING,
-        STATUS_CONFIRMED,
-        STATUS_PAYMENT_PENDING
-      ]
+      status: [STATUS_WAITING, STATUS_CONFIRMED,
+        STATUS_PAYMENT_PENDING]
     }
   });
 
@@ -111,7 +99,7 @@ export const updateBookingStatus = async (req, res) => {
     where: { bookingid: bookingid }
   });
 
-  switch(status) {
+  switch (status) {
     case STATUS_PAYMENT_PENDING:
       if (!transaction) {
         transaction = await createPendingTransaction(
@@ -123,7 +111,7 @@ export const updateBookingStatus = async (req, res) => {
           t
         );
       }
-      
+
       // After applying credits, if the transaction is complete
       // then confirm the booking.
       if (transaction.status == STATUS_PAYMENT_COMPLETED) {
@@ -151,9 +139,7 @@ export const updateBookingStatus = async (req, res) => {
     { transaction: t }
   );
 
-  const card = CardDb.findOne(
-    { where: { cardno: booking.cardno } }
-  );
+  const card = CardDb.findOne({ where: { cardno: booking.cardno } });
 
   sendMail({
     email: card.email,
@@ -170,9 +156,7 @@ export const updateBookingStatus = async (req, res) => {
   });
 
   await t.commit();
-  return res
-    .status(200)
-    .send({ message: MSG_UPDATE_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 // TODO: Deprecate? where is this used?
