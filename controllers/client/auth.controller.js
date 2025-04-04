@@ -96,7 +96,6 @@ export const verifyAndLogin = async (req, res) => {
     attributes: {
       exclude: [
         'id',
-        'password',
         'token',
         'active',
         'status',
