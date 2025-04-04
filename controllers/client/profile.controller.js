@@ -5,9 +5,15 @@ import {
 } from '@aws-sdk/client-s3';
 import { CardDb, Transactions } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
+import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
+import {
+  STATUS_PAYMENT_COMPLETED,
+  STATUS_PAYMENT_PENDING
+} from '../../config/constants.js';
 
 export const updateProfile = async (req, res) => {
   const {
@@ -266,7 +272,6 @@ export const fetchProfile = async (req, res) => {
     attributes: {
       exclude: [
         'id',
-        'password',
         'token',
         'active',
         'status',
@@ -282,4 +287,82 @@ export const fetchProfile = async (req, res) => {
   }
 
   return res.status(200).json({ message: 'Profile fetched', data: profile });
+};
+
+export const fetchPendingTransactions = async (req, res) => {
+  const transactions = await database.query(
+    `
+    SELECT combined.*,
+       card_db.issuedto AS booked_by_name,
+       transactions.amount,
+       transactions.category
+FROM
+  (SELECT t1.bookingid,
+          t1.cardno AS booked_for,
+          t1.bookedBy AS booked_by,
+          t1.checkin AS start_day,
+          t1.checkout AS end_day,
+          NULL AS name
+   FROM room_booking t1
+   UNION SELECT t2.bookingid,
+                t2.cardno AS booked_for,
+                t2.bookedBy AS booked_by,
+                t2.date AS start_day,
+                NULL AS end_day,
+                NULL AS name
+   FROM travel_db t2
+   UNION SELECT t3.bookingid,
+                t3.cardno AS booked_for,
+                t3.bookedBy AS booked_by,
+                t4.start_date AS start_day,
+                t4.end_date AS end_day,
+                t4.name
+   FROM shibir_booking_db t3
+   LEFT JOIN shibir_db t4 ON t3.shibir_id = t4.id
+   UNION SELECT t5.bookingid,
+                t5.cardno AS booked_for,
+                t5.bookedBy AS booked_by,
+                t6.start_date AS start_day,
+                t6.end_date AS end_day,
+                t7.name
+   FROM utsav_booking t5
+   LEFT JOIN utsav_packages_db t6 ON t5.packageid = t6.id
+   LEFT JOIN utsav_db t7 ON t5.utsavid = t7.id) AS combined
+LEFT JOIN transactions ON combined.bookingid = transactions.bookingid
+LEFT JOIN card_db ON combined.booked_by = card_db.cardno
+WHERE (combined.booked_for = :cardno
+       OR combined.booked_by = :cardno)
+  AND transactions.status='pending';
+`,
+    {
+      replacements: {
+        cardno: req.user.cardno
+      },
+      type: database.QueryTypes.SELECT
+    }
+  );
+
+  return res
+    .status(200)
+    .json({ message: 'transactions fetched', data: transactions });
+};
+
+//TODO: do we have to change status to paid?
+export const payNow = async (req, res) => {
+  const { bookingids } = req.body;
+
+  const totalAmount = await Transactions.sum('amount', {
+    where: {
+      bookingid: bookingids,
+      cardno: req.user.cardno,
+      status: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_COMPLETED]
+    }
+  });
+
+  if (totalAmount > 0) {
+    const order = await generateOrderId(totalAmount);
+    return res.status(200).send({ message: 'payment successful', data: order });
+  } else {
+    throw new ApiError(404, 'nothing to pay for');
+  }
 };
