@@ -161,63 +161,67 @@ export const bookFood = async (req, res) => {
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
-export const cancelFoodByCard = async (req, res) => {
-  const { food_data, cardno } = req.body;
+export const fetchFoodBookings = async (req, res) => {
+  var { cardno, mobno } = req.query;
 
-  const t = await database.transaction();
-
-  for (const item of food_data) {
-    const booking = await FoodDb.findOne({
-      where: {
-        cardno: cardno,
-        guest: null,
-        date: item.date
-      }
-    });
-
-    if (booking) {
-      booking.breakfast = item.breakfast;
-      booking.lunch = item.lunch;
-      booking.dinner = item.dinner;
-      await booking.save({ transaction: t });
-    }
+  if ((cardno == undefined || cardno == "") && mobno) {
+    cardno = (await findCardByMobno(mobno)).cardno;
   }
 
-  await t.commit();
-  return res
-    .status(200)
-    .send({ message: MSG_CANCEL_SUCCESSFUL });
-};
+  const today = moment().format('YYYY-MM-DD');
 
-export const cancelFoodByMob = async (req, res) => {
-  const { food_data, mobno } = req.body;
-
-  const card = await CardDb.findOne({
-    where: { mobno }
+  const bookings = await FoodDb.findAll({
+    attributes: ['id', 'date', 'breakfast', 'lunch', 'dinner', 'spicy', 'hightea'],
+    where: {
+      cardno,
+      date: { [Sequelize.Op.gt]: today },
+      [Sequelize.Op.or]: [
+        { breakfast: true },
+        { lunch: true },
+        { dinner: true }
+      ]
+    },
+    order: [['date', 'ASC']]
   });
 
-  if (!card) {
-    throw new ApiError(404, 'No user found with given mobile number');
+  return res
+    .status(200)
+    .send({ message: MSG_FETCH_SUCCESSFUL, data: bookings });
+}
+
+export const cancelBooking = async (req, res) => {
+  const bookingid = req.params.bookingid;
+
+  const booking = await FoodDb.findOne({
+    where: { id: req.params.bookingid }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const bookedBy = booking.bookedBy || booking.cardno;
+  const bookedFor = booking.bookedBy ? booking.cardno : null;
+  const food_data = [];
+
+  ['breakfast', 'lunch', 'dinner'].forEach((mealType) => {
+    if (booking[mealType]) {
+      food_data.push({
+        date: booking.date,
+        mealType,
+        bookedFor
+      });
+    }
+  });
+  
   const t = await database.transaction();
 
-  for (const item of food_data) {
-    const booking = await FoodDb.findOne({
-      where: {
-        cardno: card.cardno,
-        guest: null,
-        date: item.date
-      }
-    });
-
-    if (booking) {
-      booking.breakfast = item.breakfast;
-      booking.lunch = item.lunch;
-      booking.dinner = item.dinner;
-      await booking.save({ transaction: t });
-    }
-  }
+  await cancelFood(
+    req.user, 
+    bookedBy, 
+    food_data, 
+    t, 
+    true);
 
   await t.commit();
   return res
