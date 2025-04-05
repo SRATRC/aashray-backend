@@ -293,12 +293,22 @@ export const foodReport = async (req, res) => {
       SUM(CASE WHEN dinner_plate_issued = 0 THEN 1 ELSE 0 END) AS dinner_noshow,
       SUM(CASE WHEN hightea = 'TEA' THEN 1 ELSE 0 END) AS tea,
       SUM(CASE WHEN hightea = 'COFFEE' THEN 1 ELSE 0 END) AS coffee,
-      SUM(CASE WHEN type = 'breakfast' THEN count ELSE 0 END) AS breakfast_physical_plates,
-      SUM(CASE WHEN type = 'lunch' THEN count ELSE 0 END) AS lunch_physical_plates,
-      SUM(CASE WHEN type = 'dinner' THEN count ELSE 0 END) AS dinner_physical_plates 
+      COALESCE(breakfast_physical_plates, 0) AS breakfast_physical_plates,
+      COALESCE(lunch_physical_plates, 0) AS lunch_physical_plates,
+      COALESCE(dinner_physical_plates, 0) AS dinner_physical_plates
     FROM
       food_db 
-    LEFT JOIN food_physical_plate ON food_db.date = food_physical_plate.date 
+    LEFT JOIN 
+      (
+        SELECT date,
+          SUM(CASE WHEN type = 'breakfast' THEN count ELSE 0 END) AS breakfast_physical_plates,
+          SUM(CASE WHEN type = 'lunch' THEN count ELSE 0 END) AS lunch_physical_plates,
+          SUM(CASE WHEN type = 'dinner' THEN count ELSE 0 END) AS dinner_physical_plates 
+        FROM food_physical_plate
+        WHERE food_physical_plate.date >= :start_date
+          AND food_physical_plate.date <= :end_date
+        GROUP BY food_physical_plate.date 
+      ) AS x ON food_db.date = x.date
     WHERE food_db.date >= :start_date
       AND food_db.date <= :end_date 
     GROUP BY food_db.date 
