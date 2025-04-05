@@ -198,14 +198,15 @@ export const adhyayanWaitlist = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, t2.start_date, t2.end_date, t3.cardno, t3.issuedto, t3.mobno, t3.center, t3.res_status
-FROM shibir_booking_db AS t1
-LEFT JOIN shibir_db AS t2 
-ON t1.shibir_id = t2.id 
-AND t2.start_date >= :date
-LEFT JOIN card_db AS t3 
-ON t1.cardno = t3.cardno 
-WHERE t1.status = :status`,
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, 
+    t2.start_date, t2.end_date, t3.cardno, t3.issuedto, t3.mobno, t3.center, t3.res_status
+    FROM shibir_booking_db AS t1
+    LEFT JOIN shibir_db AS t2 
+    ON t1.shibir_id = t2.id 
+    AND t2.start_date >= :date
+    LEFT JOIN card_db AS t3 
+    ON t1.cardno = t3.cardno 
+    WHERE t1.status = :status`,
     {
       replacements: { date: today, status: STATUS_WAITING },
       raw: true,
