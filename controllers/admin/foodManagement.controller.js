@@ -1,4 +1,5 @@
 import {
+  BulkFoodBooking,
   CardDb,
   FoodDb,
   FoodPhysicalPlate,
@@ -11,10 +12,7 @@ import {
   MSG_BOOKING_SUCCESSFUL,
   MSG_FETCH_SUCCESSFUL
 } from '../../config/constants.js';
-import {
-  validateDate
-} from '../helper.js';
-import getDates from '../../utils/getDates.js';
+import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
@@ -230,34 +228,35 @@ export const cancelBooking = async (req, res) => {
 };
 
 // TODO: implement
-export const bookFoodForGuest = async (req, res) => {
-  const { 
-    start_date, 
-    end_date, 
-    breakfast, 
+export const bulkBooking = async (req, res) => {
+  const {
+    cardno,
+    date,
+    guestCount, 
+    breakfast,
     lunch, 
-    dinner, 
-    spicy, 
-    hightea, 
-    guests 
+    dinner,
+    department
   } = req.body;
 
-  const t = await database.transaction();
-  req.transaction = t;
+  const booking = await BulkFoodBooking.create(
+    {
+      bookingid: uuidv4(),
+      cardno,
+      date,
+      guestCount,
+      breakfast,
+      lunch,
+      dinner,
+      department,
+      updatedBy: req.user.username
+    }
+  );
 
-  validateDate(start_date, end_date);
-  const allDates = getDates(start_date, end_date);
-  
-  const days = allDates.length;
-
-  // TODO: get guest details
-
-  await t.commit();
-
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
-export const cancelFoodForGuest = async (req, res) => {
+export const cancelBulkBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 

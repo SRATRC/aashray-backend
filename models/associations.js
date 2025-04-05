@@ -25,6 +25,7 @@ import States from './states.model.js';
 import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
 import GuestRelationship from './guest_relationship.model.js';
+import BulkFoodBooking from './bulk_food_booking.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -41,6 +42,12 @@ CardDb.hasMany(FoodDb, {
 });
 CardDb.hasMany(FoodDb, {
   foreignKey: 'bookedBy',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(BulkFoodBooking, {
+  foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -151,6 +158,10 @@ FoodDb.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
   targetKey: 'cardno',
   as: 'bookedByCard'
+});
+BulkFoodBooking.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
 });
 
 // Room
@@ -376,6 +387,7 @@ export {
   MaintenanceDb,
   GateRecord,
   FoodDb,
+  BulkFoodBooking,
   FoodPhysicalPlate,
   RoomBooking,
   RoomDb,
