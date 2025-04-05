@@ -3,7 +3,8 @@ import {
   RoomDb,
   RoomBooking,
   FlatBooking,
-  Transactions
+  Transactions,
+  FlatDb
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
@@ -303,7 +304,7 @@ export const flatBooking = async (req, res) => {
 
   const booking = await FlatBooking.create({
     bookingid: uuidv4(),  
-    cardno: user_data.dataValues.cardno,
+    cardno: user_data.cardno,
     flatno: req.body.flat_no,
     checkin: req.body.checkin_date,
     checkout: req.body.checkout_date,
@@ -317,7 +318,7 @@ export const flatBooking = async (req, res) => {
 
   let bookingIdMap = {};
   bookingIdMap["type_flat"]=[booking.bookingid];
-  sendUnifiedEmail(user_data.dataValues,bookingIdMap);
+  sendUnifiedEmail(user_data.cardno, bookingIdMap);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -456,6 +457,11 @@ export const roomList = async (req, res) => {
   });
 
   return res.status(200).send({ message: 'Success', data: result });
+};
+
+export const flatList = async (req, res) => {
+  const flats = await FlatDb.findAll();
+  return res.status(200).send({ message: 'Success', data: flats });
 };
 
 export const availableRooms = async (req, res) => {

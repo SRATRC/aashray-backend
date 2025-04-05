@@ -26,7 +26,8 @@ import {
   dayWiseGuestCountReport,
   cancelBooking,
   availableRooms,
-  updateRoom
+  updateRoom,
+  flatList
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN } from '../../config/constants.js';
@@ -58,6 +59,7 @@ router.put('/unblock_rc/:id', CatchAsync(unblockRC));
 
 router.get('/rc_block_list', CatchAsync(rcBlockList));
 router.get('/room_list', CatchAsync(roomList));
+router.get('/flat_list', CatchAsync(flatList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));
 router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
 router.get('/fetch_flat_bookings/:cardno', CatchAsync(fetchFlatBookingsByCard));
