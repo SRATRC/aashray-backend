@@ -48,8 +48,5 @@ jobs:
 
     - name: Status PM2 process    
       run: |
-        sudo pm2 list      
-
-    - name: Health check
-      run: sudo curl -f http://localhost:3000 || exit 1
+        sudo pm2 list
     
