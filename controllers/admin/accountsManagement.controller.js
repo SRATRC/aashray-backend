@@ -1,9 +1,13 @@
-import { STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED } from '../../config/constants.js';
+import {
+  STATUS_PAYMENT_COMPLETED,
+  STATUS_CASH_COMPLETED
+} from '../../config/constants.js';
+import { QueryTypes } from 'sequelize';
 import database from '../../config/database.js';
-import ApiError from '../../utils/ApiError.js';
 
 export const fetchCompletedTransactions = async (req, res) => {
-    const transactions = await database.query(`
+  const transactions = await database.query(
+    `
         SELECT
     c.cardno,
     c.issuedto,
@@ -28,12 +32,19 @@ LEFT JOIN
 LEFT JOIN
     card_db cb ON cb.cardno = COALESCE(sb.bookedBy, rb.bookedBy, tb.bookedBy)
 WHERE
-    t.status IN ('completed', 'cash completed');
-        `, {queryType: database.QueryTypes.SELECT});
+    t.status IN (:status);
+        `,
+    {
+      type: QueryTypes.SELECT,
+      raw: true,
+      replacements: {
+        status: [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED]
+      }
+    }
+  );
 
-        return res.status(200).send({
-            message: 'Fetched completed transactions',
-            data: transactions
-        });
-
-}
+  return res.status(200).send({
+    message: 'Fetched completed transactions',
+    data: transactions
+  });
+};
