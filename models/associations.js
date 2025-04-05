@@ -149,7 +149,8 @@ FoodDb.belongsTo(CardDb, {
 });
 FoodDb.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
-  targetKey: 'cardno'
+  targetKey: 'cardno',
+  as: 'bookedByCard'
 });
 
 // Room
