@@ -256,21 +256,43 @@ export const bulkBooking = async (req, res) => {
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
+export const fetchBulkBookings = async (req, res) => {
+  const cardno = req.query.cardno;
+  const today = moment().format('YYYY-MM-DD');
+
+  const bookings = await BulkFoodBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno'],
+        required: true
+      }
+    ],
+    where: {
+      ...((cardno != "") && { cardno }),
+      date: { [Sequelize.Op.gt]: today }
+    },
+    order: [['date', 'ASC']]
+  });
+
+  return res
+    .status(200)
+    .send({ message: MSG_FETCH_SUCCESSFUL, data: bookings });
+};
+
 export const cancelBulkBooking = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
+  const bookingid = req.params.bookingid;
 
-  const { cardno, food_data } = req.body;
+  const booking = await BulkFoodBooking.findOne({
+    where: { bookingid }
+  });
 
-  await cancelFood(
-    req.user,
-    cardno,
-    food_data,
-    t,
-    true
-  );
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
-  await t.commit();
+  await booking.destroy();
+  
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 

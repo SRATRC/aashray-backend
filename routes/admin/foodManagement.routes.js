@@ -15,7 +15,8 @@ import {
   fetchFoodBookings,
   cancelBooking,
   bulkBooking,
-  cancelBulkBooking
+  cancelBulkBooking,
+  fetchBulkBookings
 } from '../../controllers/admin/foodManagement.controller.js';
 import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -32,6 +33,7 @@ router.post('/book', CatchAsync(bookFood));
 router.put('/cancel/:bookingid', CatchAsync(cancelBooking));
 
 router.post('/bulk_booking', CatchAsync(bulkBooking));
+router.get('/bulk_booking', CatchAsync(fetchBulkBookings));
 router.put('/cancel_bulk_booking/:bookingid', CatchAsync(cancelBulkBooking));
 
 router.get('/report', CatchAsync(foodReport));
