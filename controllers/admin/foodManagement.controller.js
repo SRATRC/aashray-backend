@@ -190,9 +190,13 @@ export const fetchFoodBookings = async (req, res) => {
 
 export const cancelBooking = async (req, res) => {
   const bookingid = req.params.bookingid;
+  const mealType = req.query.mealType;
 
   const booking = await FoodDb.findOne({
-    where: { id: req.params.bookingid }
+    where: { 
+      id: req.params.bookingid,
+      [mealType]: true
+    }
   });
 
   if (!booking) {
@@ -203,14 +207,10 @@ export const cancelBooking = async (req, res) => {
   const bookedFor = booking.bookedBy ? booking.cardno : null;
   const food_data = [];
 
-  ['breakfast', 'lunch', 'dinner'].forEach((mealType) => {
-    if (booking[mealType]) {
-      food_data.push({
-        date: booking.date,
-        mealType,
-        bookedFor
-      });
-    }
+  food_data.push({
+    date: booking.date,
+    mealType,
+    bookedFor
   });
   
   const t = await database.transaction();
@@ -228,7 +228,6 @@ export const cancelBooking = async (req, res) => {
     .send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
-// TODO: implement
 export const bulkBooking = async (req, res) => {
   const {
     cardno,
