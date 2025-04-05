@@ -124,9 +124,11 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
   var description = transaction.description;
 
   const totalAmount = transaction.amount + transaction.discount;
-  const credits = (transaction.status == STATUS_PAYMENT_COMPLETED || transaction.status == STATUS_CASH_COMPLETED) 
-    ? totalAmount
-    : transaction.discount;
+  const credits =
+    transaction.status == STATUS_PAYMENT_COMPLETED ||
+    transaction.status == STATUS_CASH_COMPLETED
+      ? totalAmount
+      : transaction.discount;
 
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
@@ -170,20 +172,15 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
 
 export async function adjustAmount(user, transaction, amount, t) {
   const originalAmount = transaction.amount + transaction.discount;
-  
+
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
 
-    await addCredit(
-      user, 
-      transaction.cardno,
-      credits, 
-      t
-    );
+    await addCredit(user, transaction.cardno, credits, t);
 
     const creditsUsed = Math.min(amount, transaction.discount);
     const discountedAmount = amount - creditsUsed;
-      
+
     await transaction.update(
       {
         status: STATUS_PAYMENT_COMPLETED,
@@ -206,7 +203,6 @@ export async function adjustAmount(user, transaction, amount, t) {
       },
       { transaction: t }
     );
-
   }
 }
 
@@ -264,9 +260,8 @@ export async function useCredit(
   // After applying credits, if the transaction is complete
   // then confirm the booking.
   if (status == STATUS_PAYMENT_COMPLETED) {
-    const bookingStatus = booking instanceof RoomBooking 
-      ? ROOM_STATUS_CHECKEDIN
-      : STATUS_CONFIRMED;
+    const bookingStatus =
+      booking instanceof RoomBooking ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED;
 
     booking.update(
       {

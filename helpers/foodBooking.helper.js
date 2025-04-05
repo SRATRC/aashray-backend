@@ -202,7 +202,9 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
         }
       });
 
-      await cancelTransaction(user, transaction, t, admin);
+      if (transaction) {
+        await cancelTransaction(user, transaction, t, admin);
+      }
     }
   }
 }
