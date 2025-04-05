@@ -10,7 +10,8 @@ import {
   ERR_BOOKING_NOT_FOUND,
   ERR_INVALID_MEAL_TIME,
   MSG_BOOKING_SUCCESSFUL,
-  MSG_FETCH_SUCCESSFUL
+  MSG_FETCH_SUCCESSFUL,
+  MSG_UPDATE_SUCCESSFUL
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
@@ -370,11 +371,11 @@ export const foodReportDetails = async (req, res) => {
 };
 
 export const fetchMenu = async (req, res) => {
+  const { startDate, endDate } = req.query;
+
   const menu = await Menu.findAll({
     where: {
-      date: {
-        [Sequelize.Op.gte]: moment().format('YYYY-MM-DD')
-      }
+      date: { [Sequelize.Op.between]: [startDate, endDate] }
     }
   });
 
@@ -404,19 +405,18 @@ export const addMenu = async (req, res) => {
 };
 
 export const updateMenu = async (req, res) => {
-  const { old_date, date, breakfast, lunch, dinner } = req.body;
+  const { date, breakfast, lunch, dinner } = req.body;
 
   const menu = await Menu.findOne({
-    where: { date: old_date }
+    where: { date }
   });
 
   if (!menu) {
-    throw new ApiError(404, 'Menu not found');
+    throw new ApiError(404, 'Menu not found for the given date.');
   }
 
   await menu.update(
     {
-      date,
       breakfast,
       lunch,
       dinner,
@@ -424,7 +424,7 @@ export const updateMenu = async (req, res) => {
     }
   );
 
-  return res.status(200).send({ message: 'Menu updated' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const deleteMenu = async (req, res) => {
