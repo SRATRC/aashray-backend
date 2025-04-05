@@ -75,12 +75,12 @@ CardDb.hasMany(RoomBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
-// CardDb.hasMany(RoomBooking, {
-//   foreignKey: 'bookedBy',
-//   sourceKey: 'cardno',
-//   onDelete: 'SET NULL',
-//   onUpdate: 'CASCADE'
-// });
+CardDb.hasMany(RoomBooking, {
+  foreignKey: 'bookedBy',
+  sourceKey: 'cardno',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE'
+});
 CardDb.hasMany(MaintenanceDb, {
   foreignKey: 'requested_by',
   sourceKey: 'cardno',
@@ -168,11 +168,11 @@ RoomBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
-// RoomBooking.belongsTo(CardDb, {
-//   foreignKey: 'bookedBy',
-//   targetKey: 'cardno',
-//   as: 'bookedByCard'
-// });
+RoomBooking.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
+  targetKey: 'cardno',
+  as: 'bookedByCard'
+});
 
 // Flat
 FlatDb.belongsTo(CardDb, {

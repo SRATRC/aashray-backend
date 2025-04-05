@@ -28,10 +28,10 @@ const RoomBooking = sequelize.define(
     bookedBy: {
       type: DataTypes.STRING,
       allowNull: true,
-      // references: {
-      //   model: 'card_db',
-      //   key: 'cardno'
-      // }
+      references: {
+        model: 'card_db',
+        key: 'cardno'
+      }
     },
     roomno: {
       type: DataTypes.STRING,

@@ -246,7 +246,7 @@ export const roomBooking = async (req, res) => {
       card.cardno, 
       checkin_date, 
       checkout_date,
-      req.user.username,
+      card.cardno,
       t
     );
   } else {
@@ -258,7 +258,7 @@ export const roomBooking = async (req, res) => {
       room_type,
       card.gender,
       floor_pref,
-      req.user.username,
+      card.cardno,
       t
     );
   }
