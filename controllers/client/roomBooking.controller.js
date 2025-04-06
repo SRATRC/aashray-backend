@@ -21,7 +21,6 @@ import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 
-// TODO: show flat booking
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
@@ -29,28 +28,41 @@ export const ViewAllBookings = async (req, res) => {
 
   const user_bookings = await database.query(
     `
-    SELECT t1.bookingid,
-       t1.cardno AS bookedFor,
-       t1.bookedBy AS bookedBy,
+    SELECT combined.*,
        t3.issuedto AS name,
-       t1.roomno,
-       t1.checkin,
-       t1.checkout,
-       t1.nights,
-       t1.roomtype,
-       t1.status,
-       t1.gender,
        COALESCE(t2.amount, 0) AS amount,
        t2.status AS transaction_status
-    FROM room_booking t1
-    LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid
-    AND t2.category IN (:category)
-    LEFT JOIN card_db t3 ON t3.cardno = t1.cardno
-    WHERE t1.cardno = :cardno
-      OR t1.bookedBy = :cardno
-    ORDER BY checkin DESC
-    LIMIT :limit
-    OFFSET :offset;
+FROM
+  (SELECT t1.bookingid,
+          t1.cardno AS bookedFor,
+          t1.bookedBy AS bookedBy,
+          t1.roomno,
+          t1.checkin,
+          t1.checkout,
+          t1.nights,
+          t1.roomtype,
+          t1.status,
+          t1.gender
+   FROM room_booking t1
+   UNION SELECT t4.bookingid,
+          t4.cardno AS bookedFor,
+          NULL AS bookedBy,
+          t4.flatno AS roomno,
+          t4.checkin,
+          t4.checkout,
+          t4.nights,
+          NULL AS roomtype,
+          t4.status,
+          NULL AS gender
+   FROM flat_booking t4) AS combined
+   LEFT JOIN transactions t2 ON combined.bookingid = t2.bookingid
+   AND t2.category IN (:category)
+   LEFT JOIN card_db t3 ON t3.cardno = combined.bookedFor
+   WHERE combined.bookedFor = :cardno
+     OR combined.bookedBy = :cardno
+   ORDER BY combined.checkin DESC
+   LIMIT :limit
+   OFFSET :offset;
     `,
     {
       replacements: {
