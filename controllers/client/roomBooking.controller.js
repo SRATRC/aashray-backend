@@ -51,7 +51,7 @@ FROM
           t4.checkin,
           t4.checkout,
           t4.nights,
-          NULL AS roomtype,
+          'flat' AS roomtype,
           t4.status,
           NULL AS gender
    FROM flat_booking t4) AS combined
