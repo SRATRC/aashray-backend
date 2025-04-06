@@ -213,6 +213,113 @@ export const manualCheckout = async (req, res) => {
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
+export const cancelFlatBooking = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const booking = await FlatBooking.findOne({
+    where: {
+      bookingid: req.params.bookingid,
+      status: {
+        [Sequelize.Op.notIn]: [
+          ROOM_STATUS_CHECKEDIN,
+          ROOM_STATUS_CHECKEDOUT,
+          STATUS_ADMIN_CANCELLED,
+          STATUS_CANCELLED
+        ]
+      }
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  await booking.update(
+    {
+      status: STATUS_ADMIN_CANCELLED,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL, data: booking });
+};
+
+export const flatCheckin = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+  
+  const today = moment().format('YYYY-MM-DD');
+
+  const booking = await FlatBooking.findOne({
+    where: {
+      cardno: req.params.cardno,
+      status: ROOM_STATUS_PENDING_CHECKIN,
+      checkout: { [Sequelize.Op.gte]: today }
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  if (booking.checkin > today) {
+    throw new ApiError(404, `Cannot check-in until ${booking.checkin}.`);
+  }
+
+  await booking.update(
+    {
+      status: ROOM_STATUS_CHECKEDIN,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+  return res.status(200).send({ message: 'Successfully checked in', data: booking });
+};
+
+export const flatCheckout = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const booking = await FlatBooking.findOne({
+    where: {
+      cardno: req.params.cardno,
+      status: ROOM_STATUS_CHECKEDIN
+    },
+    order: [['checkin', 'ASC']]
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  const today = moment().format('YYYY-MM-DD');
+
+  if (today > booking.checkout) {
+    throw new ApiError(404, `Original check-out date was ${booking.checkout}. Please create ` +
+                `a new booking for the guest for the remaining days and collect the difference.`);
+  }
+
+  const nights = await calculateNights(booking.checkin, today);
+
+  await booking.update(
+    {
+      nights,
+      checkout: today,
+      status: ROOM_STATUS_CHECKEDOUT,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+  return res.status(200).send({ message: 'Successfully checked out' });
+};
+
 export const roomBooking = async (req, res) => {
   const { mobno, cardno, checkin_date, checkout_date, room_type, floor_pref } =
     req.body;
@@ -777,6 +884,39 @@ export const CancellationReport = async (req, res) => {
     .status(200)
     .send({ message: 'Fetched room cancellation report', data: cancellations });
 };
+
+export const flatReservationReport = async (req, res) => {
+  const { start_date, end_date } = req.query;
+
+  const bookings = await FlatBooking.findAll({
+      include: [
+        {
+          model: CardDb,
+          attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+          required: true
+        }
+      ],
+      attributes: [
+        'bookingid',
+        'flatno',
+        'checkin',
+        'checkout',
+        'status',
+        'nights'
+      ],
+      where: {
+        [ Sequelize.Op.or ]: [
+          { checkin: { [Sequelize.Op.between]: [start_date, end_date] } },
+          { checkout: { [Sequelize.Op.between]: [start_date, end_date] } },
+        ]
+      },
+      order: [['checkin', 'ASC']]
+    });
+
+  return res
+    .status(200)
+    .send({ message: 'Fetched flat reservation report', data: bookings });
+}
 
 export const WaitlistReport = async (req, res) => {
   const { start_date, end_date } = req.query;
