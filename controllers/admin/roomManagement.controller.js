@@ -594,6 +594,18 @@ export const availableRooms = async (req, res) => {
   return res.status(200).send({ message: 'Fetched available rooms', data: rooms });
 };
 
+export const availableRoomsForDay = async (req, res) => {
+  const { date, roomtype } = req.query;
+
+  const rooms = await findAllRooms(
+    date,
+    date,
+    roomtype
+  );
+
+  return res.status(200).send({ message: 'Fetched available rooms', data: rooms });
+};
+
 
 export const blockRoom = async (req, res) => {
   const t = await database.transaction();
@@ -939,14 +951,24 @@ export const WaitlistReport = async (req, res) => {
 export const dayWiseGuestCountReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const allDates = getDates(start_date, end_date);
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
+
+  const allRooms = await database.query(
+    `SELECT
+      SUM(CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END) as nac,
+      SUM(CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END) as ac
+    FROM
+      roomdb
+    WHERE roomstatus <> 'blocked'
+      AND roomtype <> 'NA'
+    `,
+    {
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
 
   var data = [];
-
   for (let date of allDates) {
-    const daywise_report = await RoomBooking.findAll({
+    const report = (await RoomBooking.findAll({
       attributes: [
         [
           Sequelize.fn(
@@ -972,16 +994,16 @@ export const dayWiseGuestCountReport = async (req, res) => {
           ROOM_STATUS_CHECKEDOUT
         ]
       },
-      group: 'checkin',
-      offset,
-      limit: pageSize
-    });
+      group: 'checkin'
+    }))[0];
 
-    if (daywise_report[0]) {
+    if (report) {
       data.push({
         date: date,
-        nac: daywise_report[0].dataValues.nac,
-        ac: daywise_report[0].dataValues.ac
+        ac: report.dataValues.ac,
+        nac: report.dataValues.nac,
+        ac_available: allRooms[0].ac - report.dataValues.ac, 
+        nac_available: allRooms[0].nac - report.dataValues.nac
       });
     }
   }

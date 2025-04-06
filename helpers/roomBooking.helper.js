@@ -108,22 +108,43 @@ export async function findRoom(checkin, checkout, room_type, gender) {
 }
 
 export async function findAllRooms(checkin, checkout, room_type, gender) {
+  const bookings = await RoomBooking.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: checkin } },
+            { checkin: { [Sequelize.Op.lt]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkout: { [Sequelize.Op.gt]: checkin } },
+            { checkout: { [Sequelize.Op.lte]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: checkin } },
+            { checkout: { [Sequelize.Op.gte]: checkout } }
+          ]
+        }
+      ],
+      status: { [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] } 
+    }
+  });
+  const bookedRooms = bookings.map(x => x.roomno);
+
   return RoomDb.findAll({
-    attributes: ['roomno'],
     where: {
       roomno: {
         [Sequelize.Op.notLike]: 'NA%',
         [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
-                    AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
-                )`)
+        [Sequelize.Op.notIn]: bookedRooms
       },
       roomstatus: STATUS_AVAILABLE,
       roomtype: room_type,
-      gender: gender
+      ...(gender && { gender })
     },
     order: [
       Sequelize.literal(
