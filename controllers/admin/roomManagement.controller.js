@@ -641,6 +641,7 @@ export const occupancyReport = async (req, res) => {
     attributes: [
       'bookingid',
       'roomtype',
+      'roomno',
       'checkin',
       'checkout',
       'bookedBy',
