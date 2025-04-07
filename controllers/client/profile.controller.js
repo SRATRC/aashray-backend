@@ -27,7 +27,7 @@ export const updateProfile = async (req, res) => {
     state,
     city,
     pin,
-    centre
+    center
   } = req.body;
   const updatedProfile = await CardDb.update(
     {
@@ -41,7 +41,7 @@ export const updateProfile = async (req, res) => {
       state,
       city,
       pin,
-      center: centre
+      center: center
     },
     {
       where: {
