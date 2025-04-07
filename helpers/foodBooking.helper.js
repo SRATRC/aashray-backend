@@ -162,7 +162,8 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
   }
 
   const today = moment().format('YYYY-MM-DD');
-  const validFoodData = food_data.filter((item) => item.date > today + 1);
+  const validDate = admin ? today : today + 1;
+  const validFoodData = food_data.filter((item) => item.date >= validDate);
 
   for (const item of validFoodData) {
     const { date, mealType, bookedFor } = item;
