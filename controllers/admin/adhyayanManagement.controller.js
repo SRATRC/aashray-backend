@@ -129,33 +129,37 @@ export const fetchAdhyayan = async (req, res) => {
 
 export const fetchAdhyayanBookings = async (req, res) => {
   const shibir_id = req.query.shibir_id;
-  const page = parseInt(req.query.page) || req.body.page || 0;
+  const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-
+  const offset = (page - 1) * pageSize;
   await validateAdhyayans(shibir_id);
 
-  const adhyayanData = await ShibirBookingDb.findAll({
-    attributes: ['bookingid', 'status', 'updatedBy','bookedby',"shibir_id"],
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'center','res_status']
-      }
-      
-    ],
-    where: {
-      shibir_id: shibir_id,
-      status : {
-        [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED,STATUS_CANCELLED]
-      }
-    },
-    offset: page, // Skip the first 10 records
-    limit: pageSize 
-  });
+  const adhyayanData = await database.query(
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.cardno, t2.issuedto, t2.mobno, t2.center, t2.res_status
+    FROM shibir_booking_db AS t1
+    LEFT JOIN card_db AS t2 
+    ON t1.cardno = t2.cardno 
+    WHERE 
+    t1.shibir_id = :shibirId And
+    t1.status not in  (:status)
+    LIMIT :pageSize OFFSET :page;`,
+    {
+      replacements: {
+        shibirId: shibir_id, 
+        status: [STATUS_ADMIN_CANCELLED,STATUS_CANCELLED],
+        pageSize : pageSize,
+        page : offset
+      },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
+
+  
 
   return res
     .status(200)
-    .send({ message: 'Found Adhyayan', data: adhyayanData });
+    .send({ message: 'Found Adhyayan Bookings', data: adhyayanData });
 };
 
 export const updateAdhyayan = async (req, res) => {
