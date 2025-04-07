@@ -107,9 +107,8 @@ export const manualCheckin = async (req, res) => {
 
   const booking = await RoomBooking.findOne({
     where: {
-      cardno: req.params.cardno,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      checkout: { [Sequelize.Op.gte]: today }
+      bookingid: req.params.bookingid,
+      status: ROOM_STATUS_PENDING_CHECKIN
     }
   });
 
@@ -162,10 +161,9 @@ export const manualCheckout = async (req, res) => {
 
   const booking = await RoomBooking.findOne({
     where: {
-      cardno: req.params.cardno,
+      bookingid: req.params.bookingid,
       status: ROOM_STATUS_CHECKEDIN
-    },
-    order: [['checkin', 'ASC']]
+    }
   });
 
   if (!booking) {
@@ -267,9 +265,8 @@ export const flatCheckin = async (req, res) => {
 
   const booking = await FlatBooking.findOne({
     where: {
-      cardno: req.params.cardno,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      checkout: { [Sequelize.Op.gte]: today }
+      bookingid: req.params.bookingid,
+      status: ROOM_STATUS_PENDING_CHECKIN
     }
   });
 
@@ -301,10 +298,9 @@ export const flatCheckout = async (req, res) => {
 
   const booking = await FlatBooking.findOne({
     where: {
-      cardno: req.params.cardno,
+      bookingid: req.params.bookingid,
       status: ROOM_STATUS_CHECKEDIN
-    },
-    order: [['checkin', 'ASC']]
+    }
   });
 
   if (!booking) {

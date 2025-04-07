@@ -36,8 +36,8 @@ router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN));
 
 // room routes
 router.post('/bookForMumukshu', CatchAsync(roomBooking));
-router.put('/checkin/:cardno', CatchAsync(manualCheckin));
-router.put('/checkout/:cardno', CatchAsync(manualCheckout));
+router.put('/checkin/:bookingid', CatchAsync(manualCheckin));
+router.put('/checkout/:bookingid', CatchAsync(manualCheckout));
 router.put('/cancel/:bookingid', CatchAsync(cancelBooking));
 router.put('/update_room_booking', CatchAsync(updateRoomBooking));
 router.get('/room_list', CatchAsync(roomList));
@@ -47,8 +47,8 @@ router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
 
 // flat routes
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));
-router.put('/flat_checkin/:cardno', CatchAsync(flatCheckin));
-router.put('/flat_checkout/:cardno', CatchAsync(flatCheckout));
+router.put('/flat_checkin/:bookingid', CatchAsync(flatCheckin));
+router.put('/flat_checkout/:bookingid', CatchAsync(flatCheckout));
 router.put('/flat_cancel/:bookingid', CatchAsync(cancelFlatBooking));
 router.get('/flat_list', CatchAsync(flatList));
 router.get('/fetch_flat_bookings/:cardno', CatchAsync(fetchFlatBookingsByCard));
