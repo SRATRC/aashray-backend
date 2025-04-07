@@ -128,24 +128,29 @@ export const fetchAdhyayan = async (req, res) => {
 };
 
 export const fetchAdhyayanBookings = async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.query;
+  const shibir_id = req.query.shibir_id;
+  const page = parseInt(req.query.page) || req.body.page || 0;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
 
-  await validateAdhyayans(id);
+  await validateAdhyayans(shibir_id);
 
   const adhyayanData = await ShibirBookingDb.findAll({
-    attributes: ['bookingid', 'status', 'updatedBy'],
+    attributes: ['bookingid', 'status', 'updatedBy','bookedby',"shibir_id"],
     include: [
       {
         model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'center']
+        attributes: ['cardno', 'issuedto', 'mobno', 'center','res_status']
       }
-      // TODO: include Guest Details if booked for Guest
+      
     ],
     where: {
-      shibir_id: id,
-      status: status
-    }
+      shibir_id: shibir_id,
+      status : {
+        [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED,STATUS_CANCELLED]
+      }
+    },
+    offset: page, // Skip the first 10 records
+    limit: pageSize 
   });
 
   return res
@@ -195,6 +200,7 @@ export const adhyayanReport = async (req, res) => {
 };
 
 export const adhyayanWaitlist = async (req, res) => {
+  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
