@@ -45,7 +45,7 @@ import {
 import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
-import { calculateNights, validateDate } from '../helper.js';
+import { calculateNights, validateDate,sendUnifiedEmail } from '../helper.js';
 import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
@@ -56,11 +56,14 @@ export const mumukshuBooking = async (req, res) => {
   var t = await database.transaction();
   req.transaction = t;
 
-  let amount = await book(req.body, primary_booking, t, req.user);
+  let userBookingIdMap = new Map();
+  
+
+  let amount = await book(req.body, primary_booking, t, req.user,userBookingIdMap);
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.body, addon, t, req.user);
+      amount += await book(req.body, addon, t, req.user,userBookingIdMap);
     }
   }
 
@@ -72,6 +75,13 @@ export const mumukshuBooking = async (req, res) => {
         ? await generateOrderId(amount)
         : { amount };
   await t.commit();
+  
+  userBookingIdMap.forEach((value, key) => {
+    sendUnifiedEmail(key, value);
+});
+
+  
+  
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, order });
 };
 
@@ -115,13 +125,32 @@ export const checkMumukshuOrGuest = async (req, res) => {
   return res.status(200).send({ data: cardDb });
 };
 
-async function book(body, data, t, user) {
-  let amount = 0;
+function setBookingIdMap(userBookingIdMap,type,userIdArray){
+  
+  for (const cardno in userIdArray) {
+    let bookingIds = userIdArray[cardno];
+    if( userBookingIdMap.get(cardno))
+      {
+        let bookingTypeIds=userBookingIdMap.get(cardno);
+        bookingTypeIds[type]=bookingIds;
+      }
+      else{
+        let bookingTypeIds = [];
+        bookingTypeIds[type]=bookingIds;
+        userBookingIdMap.set(cardno,bookingTypeIds);
+      }
+}
+ 
+}
 
+async function book(body, data, t, user,userBookingIdMap) {
+  let amount = 0;
+  
   switch (data.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(body, data, t, user);
       amount += roomResult.amount;
+      setBookingIdMap(userBookingIdMap,TYPE_ROOM,roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
@@ -129,12 +158,14 @@ async function book(body, data, t, user) {
       break;
 
     case TYPE_TRAVEL:
-      await bookTravel(data, t, user);
+      const travelResult = await bookTravel(data, t, user);
+      setBookingIdMap(userBookingIdMap,TYPE_TRAVEL,travelResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(data, t, user);
       amount += adhyayanResult.amount;
+      setBookingIdMap(userBookingIdMap,TYPE_ADHYAYAN,adhyayanResult.userBookingIds);
       break;
 
     case TYPE_UTSAV:
@@ -262,9 +293,9 @@ async function bookAdhyayan(data, t, user) {
 async function bookTravel(data, t, user) {
   const { date, mumukshuGroup } = data.details;
 
-  await bookTravelForMumukshus(date, mumukshuGroup, t, user);
+  const result = await bookTravelForMumukshus(date, mumukshuGroup, t, user);
 
-  return t;
+  return result;
 }
 
 async function bookUtsav(data, t, user) {

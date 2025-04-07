@@ -8,7 +8,9 @@ import {
   AC_ROOM_PRICE,
   TYPE_ROOM,
   ERR_ROOM_NO_BED_AVAILABLE,
-  ERR_ROOM_ALREADY_BOOKED
+  ERR_ROOM_ALREADY_BOOKED,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../config/constants.js';
 import { RoomBooking, RoomDb, UtsavDb } from '../models/associations.js';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
@@ -88,6 +90,7 @@ export async function findRoom(checkin, checkout, room_type, gender) {
                     SELECT roomno 
                     FROM room_booking 
                     WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
+                    AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
                 )`)
       },
       roomstatus: STATUS_AVAILABLE,
@@ -101,6 +104,54 @@ export async function findRoom(checkin, checkout, room_type, gender) {
       Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
     ],
     limit: 1
+  });
+}
+
+export async function findAllRooms(checkin, checkout, room_type, gender) {
+  const bookings = await RoomBooking.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: checkin } },
+            { checkin: { [Sequelize.Op.lt]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkout: { [Sequelize.Op.gt]: checkin } },
+            { checkout: { [Sequelize.Op.lte]: checkout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: checkin } },
+            { checkout: { [Sequelize.Op.gte]: checkout } }
+          ]
+        }
+      ],
+      status: { [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] } 
+    }
+  });
+  const bookedRooms = bookings.map(x => x.roomno);
+
+  return RoomDb.findAll({
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%',
+        [Sequelize.Op.notIn]: bookedRooms
+      },
+      roomstatus: STATUS_AVAILABLE,
+      roomtype: room_type,
+      ...(gender && { gender })
+    },
+    order: [
+      Sequelize.literal(
+        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
+      ),
+      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
+    ]
   });
 }
 
@@ -122,9 +173,8 @@ export async function bookRoomForMumukshus(
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
-  let amount = 0,
-    bookingIds = [],
-    idx = 0;
+  let amount = 0;
+  let userBookingIds = [];
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
@@ -153,12 +203,11 @@ export async function bookRoomForMumukshus(
         );
 
         amount += result.discountedAmount;
-        bookingIds[idx++] = result.bookingId;
+        userBookingIds[card.cardno]=[result.bookingId];
       }
     }
   }
-
-  return { t, amount, bookingIds };
+  return { t, amount, userBookingIds };
 }
 
 export async function createRoomBooking(
@@ -238,6 +287,7 @@ export async function bookRoomDuringUtsavForMumukshus(
     bookingIds = [],
     idx = 0;
 
+  
   for (const group of mumukshuGroup) {
     const { roomType, floorType, checkin_date, checkout_date, mumukshus } =
       group;

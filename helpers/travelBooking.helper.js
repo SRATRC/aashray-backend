@@ -4,7 +4,8 @@ import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
   TRAVEL_PRICE,
-  TRAVEL_TYPE_FULL
+  TRAVEL_TYPE_FULL,
+  TYPE_TRAVEL
 } from '../config/constants.js';
 import { TravelDb } from '../models/associations.js';
 import ApiError from '../utils/ApiError.js';
@@ -31,19 +32,19 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   if (date <= today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
-
+  let userBookingIds = []
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
 
-  var bookingsToCreate = [],bookingIds = [],bookingId,idx=0;
+  var bookingsToCreate = [],bookingId;
   for (const group of mumukshuGroup) {
     const { pickup_point, drop_point, luggage, comments, type, mumukshus } =
       group;
 
     for (const mumukshu of mumukshus) {
       bookingId=uuidv4();
-      bookingIds[idx++]=bookingId;
+      
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
@@ -56,11 +57,12 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         comments,
         updatedBy: user.cardno
       });
+      userBookingIds[mumukshu]=[bookingId];
+      
     }
   }
-
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return {t,bookingIds};
+  return {t,userBookingIds};
 }
 
 export function travelCharge(type) {

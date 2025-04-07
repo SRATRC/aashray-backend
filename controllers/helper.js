@@ -18,7 +18,8 @@ import {
   TYPE_ADHYAYAN,
   ERR_INVALID_DATE,
   TYPE_FLAT,
-  STATUS_GUEST
+  STATUS_GUEST,
+  STATUS_ACTIVE
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -33,6 +34,7 @@ export async function getBlockedDates(checkin_date, checkout_date) {
 
   const blockedDates = await BlockDates.findAll({
     where: {
+      status: STATUS_ACTIVE,
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
@@ -379,8 +381,8 @@ export async function sendUnifiedEmail(user, bookingIds) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds["flat_type"] != null;
-  
+  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
@@ -406,8 +408,12 @@ export async function sendUnifiedEmail(user, bookingIds) {
         bookingid: adhyanBooking.bookingid,
         name: adhyanBooking.dataValues.ShibirDb.name,
         speaker: adhyanBooking.dataValues.ShibirDb.speaker,
-        startdate: adhyanBooking.dataValues.ShibirDb.start_date,
-        enddate: adhyanBooking.dataValues.ShibirDb.end_date,
+        startdate: moment(adhyanBooking.dataValues.ShibirDb.start_date).format(
+          'Do MMMM, YYYY'
+        ),
+        enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
+          'Do MMMM, YYYY'
+        ),
         status: adhyanBooking.status
       };
     });
@@ -423,7 +429,7 @@ export async function sendUnifiedEmail(user, bookingIds) {
     travelBookings.forEach((travelBooking) => {
       travelBookingDetails[idx++] = {
         bookingid: travelBooking.bookingid,
-        date: travelBooking.date,
+        date: moment(travelBooking.date).format('Do MMMM, YYYY'),
         pickuppoint: travelBooking.pickup_point,
         dropoffpoint: travelBooking.drop_point
       };
@@ -440,8 +446,8 @@ export async function sendUnifiedEmail(user, bookingIds) {
     roomBookings.forEach((roomBooking) => {
       roomBookingDetails[idx++] = {
         bookingid: roomBooking.bookingid,
-        checkin: roomBooking.checkin,
-        checkout: roomBooking.checkout
+        checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
+        checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
       };
     });
   }
@@ -449,7 +455,7 @@ export async function sendUnifiedEmail(user, bookingIds) {
   if (wasFlatBooked) {
     const flatBookings = await FlatBooking.findAll({
       where: {
-        bookingid: { [Sequelize.Op.in]: bookingIds["flat_type"] }
+        bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_FLAT] }
       }
     });
 
@@ -458,40 +464,34 @@ export async function sendUnifiedEmail(user, bookingIds) {
       flatBookingDetails[idx++] = {
         bookingid: flatBooking.bookingid,
         flatno: flatBooking.flatno,
-        checkin: flatBooking.checkin,
-        checkout: flatBooking.checkout
+        checkin: moment(flatBooking.checkin).format('Do MMMM, YYYY'),
+        checkout: moment(flatBooking.checkout).format('Do MMMM, YYYY')
       };
     });
   }
 
-  const userInfo = await CardDb.findOne({
-    where: {
-      cardno: user.cardno
-    }
-  });
+  // const userInfo = await CardDb.findOne({
+  //   where: {
+  //     cardno: cardno
+  //   }
+  // });
 
-  //send email to me
   sendMail({
-    email: userInfo.email,
-
+    email: user.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,
-
     template: 'unifiedBookingEmail',
-
     context: {
       showAdhyanDetail: wasAdhyanBooked,
       showRoomDetail: wasRoomBooked,
       showTravelDetail: wasRajprvasBooked,
       showFlatDetail: wasFlatBooked,
-      name: userInfo.issuedto,
+      name: user.issuedto,
       roomBookingDetails,
       adhyanBookingDetails,
       travelBookingDetails,
       flatBookingDetails
     }
   });
-
-  //send email
 }
 
 export async function createGuestsHelper(cardno, guests, t) {
