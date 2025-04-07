@@ -20,7 +20,6 @@ import {
   TYPE_FOOD,
   TYPE_ADHYAYAN,
   TYPE_GUEST_ADHYAYAN,
-  RAZORPAY_FEE,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
@@ -207,14 +206,12 @@ export const validateBooking = async (req, res) => {
     }
   }
 
-  const taxes = Math.round(totalCharge * RAZORPAY_FEE * 100) / 100;
   return res.status(200).send({
     data: {
       roomDetails: roomDetails,
       adhyayanDetails: adhyayanDetails,
       foodDetails: foodDetails,
-      taxes: taxes,
-      totalCharge: totalCharge + taxes
+      totalCharge: totalCharge
     }
   });
 };

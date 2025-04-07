@@ -27,7 +27,7 @@ export const updateProfile = async (req, res) => {
     state,
     city,
     pin,
-    centre
+    center
   } = req.body;
   const updatedProfile = await CardDb.update(
     {
@@ -41,7 +41,7 @@ export const updateProfile = async (req, res) => {
       state,
       city,
       pin,
-      center: centre
+      center: center
     },
     {
       where: {
@@ -166,14 +166,7 @@ export const transactions = async (req, res) => {
   const transactions = await Transactions.findAll({
     where: whereClause,
     attributes: {
-      exclude: [
-        'id',
-        'cardno',
-        'description',
-        'upi_ref',
-        'updatedAt',
-        'updatedBy'
-      ]
+      exclude: ['id', 'cardno', 'upi_ref', 'updatedAt', 'updatedBy']
     },
     order: [['createdAt', 'DESC']],
     offset,
