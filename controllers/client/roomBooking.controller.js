@@ -83,7 +83,7 @@ export const CancelBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const booking = await RoomBooking.findOne({
+  let booking = await RoomBooking.findOne({
     where: {
       bookingid: bookingid,
       [Sequelize.Op.or]: [
@@ -95,7 +95,15 @@ export const CancelBooking = async (req, res) => {
   });
 
   if (!booking) {
-    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+    booking = await FlatBooking.findOne({
+      where: {
+        bookingid: bookingid,
+        [Sequelize.Op.or]: [{ cardno: req.user.cardno }],
+        status: [STATUS_WAITING, ROOM_STATUS_PENDING_CHECKIN]
+      }
+    });
+
+    if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   await userCancelBooking(req.user, booking, t);
@@ -167,9 +175,8 @@ export const FlatBookingMumukshu = async (req, res) => {
     bookingIds[idx++] = flatBooking.bookingid;
   });
 
-  bookingIdMap['type_flat'] = bookingIds;
+  bookingIdMap[TYPE_FLAT] = bookingIds;
 
-  //FIXME: unified emails crashes the application
-  // sendUnifiedEmail(req.user, bookingIdMap);
+  sendUnifiedEmail(req.user, bookingIdMap);
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

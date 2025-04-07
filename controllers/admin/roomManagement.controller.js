@@ -50,8 +50,10 @@ import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import { adjustAmount, adminCancelTransaction } from '../../helpers/transactions.helper.js';
-
+import {
+  adjustAmount,
+  adminCancelTransaction
+} from '../../helpers/transactions.helper.js';
 
 export const cancelBooking = async (req, res) => {
   const t = await database.transaction();
@@ -92,13 +94,15 @@ export const cancelBooking = async (req, res) => {
   );
 
   await t.commit();
-  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL, data: booking });
+  return res
+    .status(200)
+    .send({ message: MSG_CANCEL_SUCCESSFUL, data: booking });
 };
 
 export const manualCheckin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
-  
+
   const today = moment().format('YYYY-MM-DD');
 
   const booking = await RoomBooking.findOne({
@@ -114,9 +118,12 @@ export const manualCheckin = async (req, res) => {
   }
 
   if (booking.checkin > today) {
-    throw new ApiError(404, `Cannot check-in until ${booking.checkin}. Please ask the guest to create ` + 
+    throw new ApiError(
+      404,
+      `Cannot check-in until ${booking.checkin}. Please ask the guest to create ` +
         `a new booking on the mobile app or you can create a new booking on admin with the ` +
-        `desired check-in date.`);
+        `desired check-in date.`
+    );
   }
 
   var transaction = await Transactions.findOne({
@@ -144,7 +151,9 @@ export const manualCheckin = async (req, res) => {
   );
 
   await t.commit();
-  return res.status(200).send({ message: 'Successfully checked in', data: booking });
+  return res
+    .status(200)
+    .send({ message: 'Successfully checked in', data: booking });
 };
 
 export const manualCheckout = async (req, res) => {
@@ -174,8 +183,11 @@ export const manualCheckout = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   if (today > booking.checkout) {
-    throw new ApiError(404, `Original check-out date was ${booking.checkout}. Please create ` +
-                `a new booking for the guest for the remaining days and collect the difference.`);
+    throw new ApiError(
+      404,
+      `Original check-out date was ${booking.checkout}. Please create ` +
+        `a new booking for the guest for the remaining days and collect the difference.`
+    );
   }
 
   const nights = await calculateNights(booking.checkin, today);
@@ -186,16 +198,14 @@ export const manualCheckout = async (req, res) => {
     const originalAmount = transaction.amount + transaction.discount;
 
     if (newAmount > originalAmount) {
-      throw new ApiError(404, `New amount is more than previously paid. This does not seem right.`);
+      throw new ApiError(
+        404,
+        `New amount is more than previously paid. This does not seem right.`
+      );
     }
 
     if (newAmount < originalAmount) {
-      await adjustAmount(
-        req.user,
-        transaction,
-        newAmount, 
-        t
-      );
+      await adjustAmount(req.user, transaction, newAmount, t);
     }
   }
 
@@ -244,13 +254,15 @@ export const cancelFlatBooking = async (req, res) => {
   );
 
   await t.commit();
-  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL, data: booking });
+  return res
+    .status(200)
+    .send({ message: MSG_CANCEL_SUCCESSFUL, data: booking });
 };
 
 export const flatCheckin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
-  
+
   const today = moment().format('YYYY-MM-DD');
 
   const booking = await FlatBooking.findOne({
@@ -278,7 +290,9 @@ export const flatCheckin = async (req, res) => {
   );
 
   await t.commit();
-  return res.status(200).send({ message: 'Successfully checked in', data: booking });
+  return res
+    .status(200)
+    .send({ message: 'Successfully checked in', data: booking });
 };
 
 export const flatCheckout = async (req, res) => {
@@ -300,8 +314,11 @@ export const flatCheckout = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   if (today > booking.checkout) {
-    throw new ApiError(404, `Original check-out date was ${booking.checkout}. Please create ` +
-                `a new booking for the guest for the remaining days and collect the difference.`);
+    throw new ApiError(
+      404,
+      `Original check-out date was ${booking.checkout}. Please create ` +
+        `a new booking for the guest for the remaining days and collect the difference.`
+    );
   }
 
   const nights = await calculateNights(booking.checkin, today);
@@ -325,21 +342,15 @@ export const roomBooking = async (req, res) => {
     req.body;
   validateDate(checkin_date, checkout_date);
 
-  const card = mobno ? 
-    await CardDb.findOne({ where: { mobno } }) :
-    await CardDb.findOne({ where: { cardno } });
+  const card = mobno
+    ? await CardDb.findOne({ where: { mobno } })
+    : await CardDb.findOne({ where: { cardno } });
 
   if (!card) {
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
-  if (
-    await checkRoomAlreadyBooked(
-      checkin_date,
-      checkout_date,
-      card.cardno
-    )
-  ) {
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, card.cardno)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
@@ -351,8 +362,8 @@ export const roomBooking = async (req, res) => {
   var booking = undefined;
   if (nights == 0) {
     booking = await bookDayVisit(
-      card.cardno, 
-      checkin_date, 
+      card.cardno,
+      checkin_date,
       checkout_date,
       card.cardno,
       t
@@ -370,12 +381,12 @@ export const roomBooking = async (req, res) => {
       t
     );
   }
-  
+
   await t.commit();
-  if( booking.bookingId != null ){
+  if (booking.bookingId != null) {
     let bookingIds = {};
-    bookingIds[TYPE_ROOM]=[booking.bookingId];
-    sendUnifiedEmail(card.cardno, bookingIds);
+    bookingIds[TYPE_ROOM] = [booking.bookingId];
+    sendUnifiedEmail(card, bookingIds);
   }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -410,7 +421,7 @@ export const flatBooking = async (req, res) => {
   );
 
   const booking = await FlatBooking.create({
-    bookingid: uuidv4(),  
+    bookingid: uuidv4(),
     cardno: user_data.cardno,
     flatno: req.body.flat_no,
     checkin: req.body.checkin_date,
@@ -424,8 +435,8 @@ export const flatBooking = async (req, res) => {
   }
 
   let bookingIdMap = {};
-  bookingIdMap["type_flat"]=[booking.bookingid];
-  sendUnifiedEmail(user_data.cardno, bookingIdMap);
+  bookingIdMap['type_flat'] = [booking.bookingid];
+  sendUnifiedEmail(user_data, bookingIdMap);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -493,10 +504,7 @@ export const fetchFlatBookingsByCard = async (req, res) => {
 };
 
 export const updateRoomBooking = async (req, res) => {
-  const {
-    bookingid,
-    roomno
-  } = req.body;
+  const { bookingid, roomno } = req.body;
 
   const booking = await RoomBooking.findOne({
     where: { bookingid }
@@ -533,16 +541,14 @@ export const updateFlatBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  await booking.update(
-    {
-      flatno,
-      checkin: checkin_date,
-      checkout: checkout_date,
-      nights,
-      status,
-      updatedBy: req.user.username
-    }
-  );
+  await booking.update({
+    flatno,
+    checkin: checkin_date,
+    checkout: checkout_date,
+    nights,
+    status,
+    updatedBy: req.user.username
+  });
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
@@ -591,21 +597,20 @@ export const availableRooms = async (req, res) => {
     booking.gender
   );
 
-  return res.status(200).send({ message: 'Fetched available rooms', data: rooms });
+  return res
+    .status(200)
+    .send({ message: 'Fetched available rooms', data: rooms });
 };
 
 export const availableRoomsForDay = async (req, res) => {
   const { date, roomtype } = req.query;
 
-  const rooms = await findAllRooms(
-    date,
-    date,
-    roomtype
-  );
+  const rooms = await findAllRooms(date, date, roomtype);
 
-  return res.status(200).send({ message: 'Fetched available rooms', data: rooms });
+  return res
+    .status(200)
+    .send({ message: 'Fetched available rooms', data: rooms });
 };
-
 
 export const blockRoom = async (req, res) => {
   const t = await database.transaction();
@@ -646,7 +651,7 @@ export const unblockRoom = async (req, res) => {
     where: {
       roomno: {
         [Sequelize.Op.like]: `${req.params.roomno}%`
-      }, 
+      },
       roomstatus: ROOM_BLOCKED
     }
   });
@@ -718,8 +723,9 @@ export const blockRC = async (req, res) => {
   const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
   if (blockedDates.length > 0) {
-    throw new ApiError(400, 
-      'Already blocked on one or more of the given dates', 
+    throw new ApiError(
+      400,
+      'Already blocked on one or more of the given dates',
       blockedDates
     );
   }
@@ -741,12 +747,10 @@ export const blockRC = async (req, res) => {
 export const unblockRC = async (req, res) => {
   const blocked = await BlockDates.findByPk(req.params.id);
 
-  await blocked.update(
-    {
-      status: STATUS_INACTIVE,
-      updatedBy: req.user.username
-    },
-  );
+  await blocked.update({
+    status: STATUS_INACTIVE,
+    updatedBy: req.user.username
+  });
 
   return res.status(200).send({ message: 'Unblocked RC successfully' });
 };
@@ -871,7 +875,7 @@ export const ReservationReport = async (req, res) => {
     ROOM_STATUS_PENDING_CHECKIN,
     ROOM_STATUS_CHECKEDIN,
     ROOM_STATUS_CHECKEDOUT
-  )
+  );
 
   return res
     .status(200)
@@ -882,15 +886,15 @@ export const CancellationReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
-  
+
   const cancellations = await roomBookingReport(
     start_date,
     end_date,
     page,
     pageSize,
-    STATUS_CANCELLED, 
+    STATUS_CANCELLED,
     STATUS_ADMIN_CANCELLED
-  )
+  );
 
   return res
     .status(200)
@@ -901,34 +905,34 @@ export const flatReservationReport = async (req, res) => {
   const { start_date, end_date } = req.query;
 
   const bookings = await FlatBooking.findAll({
-      include: [
-        {
-          model: CardDb,
-          attributes: ['cardno', 'issuedto', 'mobno', 'center'],
-          required: true
-        }
-      ],
-      attributes: [
-        'bookingid',
-        'flatno',
-        'checkin',
-        'checkout',
-        'status',
-        'nights'
-      ],
-      where: {
-        [ Sequelize.Op.or ]: [
-          { checkin: { [Sequelize.Op.between]: [start_date, end_date] } },
-          { checkout: { [Sequelize.Op.between]: [start_date, end_date] } },
-        ]
-      },
-      order: [['checkin', 'ASC']]
-    });
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        required: true
+      }
+    ],
+    attributes: [
+      'bookingid',
+      'flatno',
+      'checkin',
+      'checkout',
+      'status',
+      'nights'
+    ],
+    where: {
+      [Sequelize.Op.or]: [
+        { checkin: { [Sequelize.Op.between]: [start_date, end_date] } },
+        { checkout: { [Sequelize.Op.between]: [start_date, end_date] } }
+      ]
+    },
+    order: [['checkin', 'ASC']]
+  });
 
   return res
     .status(200)
     .send({ message: 'Fetched flat reservation report', data: bookings });
-}
+};
 
 export const WaitlistReport = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -941,7 +945,7 @@ export const WaitlistReport = async (req, res) => {
     page,
     pageSize,
     STATUS_WAITING
-  )
+  );
 
   return res
     .status(200)
@@ -968,41 +972,43 @@ export const dayWiseGuestCountReport = async (req, res) => {
 
   var data = [];
   for (let date of allDates) {
-    const report = (await RoomBooking.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            'SUM',
-            Sequelize.literal(`CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END`)
-          ),
-          'nac'
+    const report = (
+      await RoomBooking.findAll({
+        attributes: [
+          [
+            Sequelize.fn(
+              'SUM',
+              Sequelize.literal(`CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END`)
+            ),
+            'nac'
+          ],
+          [
+            Sequelize.fn(
+              'SUM',
+              Sequelize.literal(`CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END`)
+            ),
+            'ac'
+          ]
         ],
-        [
-          Sequelize.fn(
-            'SUM',
-            Sequelize.literal(`CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END`)
-          ),
-          'ac'
-        ]
-      ],
-      where: {
-        checkin: { [Sequelize.Op.lte]: date },
-        checkout: { [Sequelize.Op.gt]: date },
-        status: [
-          ROOM_STATUS_PENDING_CHECKIN,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_CHECKEDOUT
-        ]
-      },
-      group: 'checkin'
-    }))[0];
+        where: {
+          checkin: { [Sequelize.Op.lte]: date },
+          checkout: { [Sequelize.Op.gt]: date },
+          status: [
+            ROOM_STATUS_PENDING_CHECKIN,
+            ROOM_STATUS_CHECKEDIN,
+            ROOM_STATUS_CHECKEDOUT
+          ]
+        },
+        group: 'checkin'
+      })
+    )[0];
 
     if (report) {
       data.push({
         date: date,
         ac: report.dataValues.ac,
         nac: report.dataValues.nac,
-        ac_available: allRooms[0].ac - report.dataValues.ac, 
+        ac_available: allRooms[0].ac - report.dataValues.ac,
         nac_available: allRooms[0].nac - report.dataValues.nac
       });
     }
@@ -1014,14 +1020,14 @@ export const dayWiseGuestCountReport = async (req, res) => {
 };
 
 async function roomBookingReport(
-  startDate, 
+  startDate,
   endDate,
-  page, 
+  page,
   pageSize,
   ...statuses
 ) {
   const offset = (page - 1) * pageSize;
-  
+
   const data = await RoomBooking.findAll({
     include: [
       {
@@ -1042,9 +1048,9 @@ async function roomBookingReport(
     ],
     where: {
       status: statuses,
-      [ Sequelize.Op.or ]: [
+      [Sequelize.Op.or]: [
         { checkin: { [Sequelize.Op.between]: [startDate, endDate] } },
-        { checkout: { [Sequelize.Op.between]: [startDate, endDate] } },
+        { checkout: { [Sequelize.Op.between]: [startDate, endDate] } }
       ]
     },
     order: [['checkin', 'ASC']],
