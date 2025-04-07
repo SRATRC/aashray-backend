@@ -6,14 +6,9 @@ import {
   manualCheckout,
   roomBooking,
   flatBooking,
-  fetchAllRoomBookings,
-  fetchAllFlatBookings,
   fetchRoomBookingsByCard,
   fetchFlatBookingsByCard,
   updateRoomBooking,
-  updateFlatBooking,
-  checkinReport,
-  checkoutReport,
   roomList,
   blockRoom,
   unblockRoom,
@@ -21,8 +16,6 @@ import {
   blockRC,
   unblockRC,
   ReservationReport,
-  CancellationReport,
-  WaitlistReport,
   dayWiseGuestCountReport,
   cancelBooking,
   availableRooms,
@@ -73,7 +66,6 @@ router.get('/rc_block_list', CatchAsync(rcBlockList));
 // reports
 router.get('/reservation_report', CatchAsync(ReservationReport));
 router.get('/flat_reservation_report', CatchAsync(flatReservationReport));
-router.get('/cancellation_report', CatchAsync(CancellationReport));
 router.get('/daywise_report', CatchAsync(dayWiseGuestCountReport));
 router.get('/occupancyReport', CatchAsync(occupancyReport));
 // router.get('/waitlist_report', CatchAsync(WaitlistReport));

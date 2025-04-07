@@ -432,7 +432,7 @@ export const flatBooking = async (req, res) => {
 
 export const fetchAllRoomBookings = async (req, res) => {
   const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
   const offset = (page - 1) * pageSize;
 
   const bookings = await RoomBooking.findAll({
@@ -446,7 +446,7 @@ export const fetchAllRoomBookings = async (req, res) => {
 
 export const fetchAllFlatBookings = async (req, res) => {
   const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
   const offset = (page - 1) * pageSize;
 
   const bookings = await FlatBooking.findAll({
@@ -460,7 +460,7 @@ export const fetchAllFlatBookings = async (req, res) => {
 
 export const fetchRoomBookingsByCard = async (req, res) => {
   const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
   const offset = (page - 1) * pageSize;
 
   const bookings = await RoomBooking.findAll({
@@ -477,7 +477,7 @@ export const fetchRoomBookingsByCard = async (req, res) => {
 
 export const fetchFlatBookingsByCard = async (req, res) => {
   const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
+  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
   const offset = (page - 1) * pageSize;
 
   const bookings = await FlatBooking.findAll({
@@ -783,82 +783,9 @@ export const occupancyReport = async (req, res) => {
   return res.status(200).send({ message: 'Success', data: result });
 };
 
-export const checkinReport = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
-  const offset = (page - 1) * pageSize;
-
-  const today = moment().format('YYYY-MM-DD');
-
-  const checkedin = await RoomBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
-        required: true
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'roomtype',
-      'checkin',
-      'checkout',
-      'bookedBy',
-      'status',
-      'nights'
-    ],
-    where: {
-      checkin: today,
-      status: ROOM_STATUS_CHECKEDIN
-    },
-    offset,
-    limit: pageSize
-  });
-
-  return res
-    .status(200)
-    .send({ message: 'Fetched check in report', data: checkedin });
-};
-
-export const checkoutReport = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
-  const offset = (page - 1) * pageSize;
-
-  const today = moment().format('YYYY-MM-DD');
-
-  const checkedout = await RoomBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
-        required: true
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'roomtype',
-      'checkin',
-      'checkout',
-      'bookedBy',
-      'status',
-      'nights'
-    ],
-    where: {
-      checkout: today,
-      status: ROOM_STATUS_CHECKEDOUT
-    },
-    offset,
-    limit: pageSize
-  });
-
-  return res
-    .status(200)
-    .send({ message: 'fetched checkout report', data: checkedout });
-};
-
 export const ReservationReport = async (req, res) => {
-  const { start_date, end_date } = req.query;
+  const { start_date, end_date, statuses } = req.query;
+
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
 
@@ -867,34 +794,12 @@ export const ReservationReport = async (req, res) => {
     end_date,
     page,
     pageSize,
-    STATUS_WAITING,
-    ROOM_STATUS_PENDING_CHECKIN,
-    ROOM_STATUS_CHECKEDIN,
-    ROOM_STATUS_CHECKEDOUT
+    statuses
   )
 
   return res
     .status(200)
     .send({ message: 'Fetched room reservation report', data: reservations });
-};
-
-export const CancellationReport = async (req, res) => {
-  const { start_date, end_date } = req.query;
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
-  
-  const cancellations = await roomBookingReport(
-    start_date,
-    end_date,
-    page,
-    pageSize,
-    STATUS_CANCELLED, 
-    STATUS_ADMIN_CANCELLED
-  )
-
-  return res
-    .status(200)
-    .send({ message: 'Fetched room cancellation report', data: cancellations });
 };
 
 export const flatReservationReport = async (req, res) => {
@@ -929,24 +834,6 @@ export const flatReservationReport = async (req, res) => {
     .status(200)
     .send({ message: 'Fetched flat reservation report', data: bookings });
 }
-
-export const WaitlistReport = async (req, res) => {
-  const { start_date, end_date } = req.query;
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-
-  const waiting = await roomBookingReport(
-    start_date,
-    end_date,
-    page,
-    pageSize,
-    STATUS_WAITING
-  )
-
-  return res
-    .status(200)
-    .send({ message: 'Fetched room waiting report', data: waiting });
-};
 
 export const dayWiseGuestCountReport = async (req, res) => {
   const { start_date, end_date } = req.query;
@@ -1018,7 +905,7 @@ async function roomBookingReport(
   endDate,
   page, 
   pageSize,
-  ...statuses
+  statuses
 ) {
   const offset = (page - 1) * pageSize;
   
