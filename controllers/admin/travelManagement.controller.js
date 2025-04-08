@@ -25,12 +25,15 @@ import { travelCharge } from '../../helpers/travelBooking.helper.js';
 
 
 export const fectchSummaryByStatusForToday = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
+  const start_date =req.query.start_date
+  const end_date = req.query.end_date;
+
   const data = await database.query(`SELECT travel_db.status,count(*) as count
   from travel_db
-  WHERE date = :today group by travel_db.status ` , {
+  WHERE date >= :startDate AND date <= :endDate group by travel_db.status ` , {
   replacements: { 
-    today
+    startDate : start_date,
+    endDate : end_date
     },
   type: Sequelize.QueryTypes.SELECT
 }); 
@@ -38,7 +41,9 @@ export const fectchSummaryByStatusForToday = async (req, res) => {
 };
 
 export const fetchUpcomingBookings = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
+  
+  const start_date =req.query.start_date
+  const end_date = req.query.end_date;
 
   const data = await database.query(
     `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, 
@@ -46,11 +51,12 @@ export const fetchUpcomingBookings = async (req, res) => {
     FROM travel_db t1
     LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-    WHERE date >= :today AND t1.status NOT IN (:status) 
+    WHERE  t1.date >= :startDate AND t1.date <= :endDate AND t1.status NOT IN (:status) 
     ORDER BY date ASC;`,
     {
       replacements: {
-        today,
+        startDate : start_date,
+        endDate : end_date,
         status: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED],
         category: TYPE_TRAVEL
       },

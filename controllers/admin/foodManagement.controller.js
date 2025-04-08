@@ -173,7 +173,7 @@ export const fetchFoodBookings = async (req, res) => {
     attributes: ['id', 'date', 'breakfast', 'lunch', 'dinner', 'spicy', 'hightea'],
     where: {
       cardno,
-      date: { [Sequelize.Op.gt]: today },
+      date: { [Sequelize.Op.gte]: today },
       [Sequelize.Op.or]: [
         { breakfast: true },
         { lunch: true },
@@ -194,7 +194,7 @@ export const cancelBooking = async (req, res) => {
 
   const booking = await FoodDb.findOne({
     where: { 
-      id: req.params.bookingid,
+      id: bookingid,
       [mealType]: true
     }
   });
