@@ -1,5 +1,6 @@
 import './config/environment.js';
-import { cancelPendingBookings } from './helpers/transactions.helper.js';
+import moment from 'moment';
+import { getPendingTransactions } from './helpers/transactions.helper.js';
 import sequelize from './config/database.js';
 import cron from 'node-cron';
 import logger from './config/logger.js';
@@ -12,12 +13,34 @@ const job = cron.schedule('* * * * *', async () => {
   try {
     await sequelize.authenticate();
 
-    await cancelPendingBookings();
+
+
+    // Cancel bookings created before 10 mins, but not paid
+    const cancelTimeFilter = moment.utc().subtract(10, 'minutes');
+
+    console.log("10 mins ago: " + cancelTimeFilter);
+    const transactions = await getPendingTransactions(cancelTimeFilter);
+
+    transactions.forEach((transaction) => {
+      cancelTransaction(transaction);
+    })
+    
+
+
+
   } catch (error) {
     logger.error('Cron job error:', error);
   }
 
   logger.info('Cron job finishing...');
 });
+
+async function cancelTransaction(transaction) {
+  try {
+        
+  } catch (error) {
+    logger.error(`Error cancelling transaction: ${transaction.id}`, error); 
+  }
+}
 
 job.start();

@@ -299,14 +299,14 @@ export const generateOrderId = async (amount) => {
   return order;
 };
 
-export async function cancelPendingBookings() {
-  const yesterday = moment.utc().subtract(1, 'day');
+export async function getPendingTransactions(timeFilter) {
+  const dateFilter = moment.utc().subtract(1, 'day');
 
   const transactions = await Transactions.findAll({
     where: {
       status: [STATUS_PAYMENT_PENDING],
       updatedAt: {
-        [Sequelize.Op.lte]: yesterday
+        [Sequelize.Op.lte]: timeFilter
       }
     }
   });
