@@ -76,7 +76,7 @@ export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
-export const ERR_CARD_NOT_FOUND = 'Card does not exist';
+export const ERR_CARD_NOT_FOUND = 'User not found';
 
 export const ERR_INVALID_BOOKING_TYPE = 'Invalid booking type';
 export const ERR_INVALID_DATE = 'Invalid date';

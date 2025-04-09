@@ -631,6 +631,7 @@ async function checkAdhyayanAvailability(data) {
 
     if (shibir.dataValues.status == STATUS_OPEN) {
       available = Math.min(shibir.dataValues.available_seats, guests.length);
+      charge = available * shibir.dataValues.amount;
       waiting = guests.length - available;
     } else {
       waiting = guests.length;
