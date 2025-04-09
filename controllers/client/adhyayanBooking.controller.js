@@ -70,6 +70,7 @@ export const FetchBookedShibir = async (req, res) => {
        t1.bookedBy AS bookedBy,
        t4.issuedto AS name,
        t1.shibir_id,
+       t2.location,
        t1.status,
        t2.name AS shibir_name,
        t2.speaker,

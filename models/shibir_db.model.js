@@ -30,6 +30,11 @@ const ShibirDb = sequelize.define(
       type: DataTypes.DATEONLY,
       allowNull: false
     },
+    location: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'Research Centre'
+    },
     total_seats: {
       type: DataTypes.INTEGER,
       allowNull: false
