@@ -302,7 +302,18 @@ export const generateOrderId = async (amount) => {
 export async function getPendingTransactions(timeFilter) {
   const dateFilter = moment.utc().subtract(1, 'day');
 
+  // only get pending transactions for India based users
   const transactions = await Transactions.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'email', 'mobno'],
+        required: true,
+        where: {
+          country: 'INDIA'
+        }
+      }
+    ],
     where: {
       status: [STATUS_PAYMENT_PENDING],
       updatedAt: {
@@ -314,4 +325,5 @@ export async function getPendingTransactions(timeFilter) {
   console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
 
   // TODO: implement logic to cancel transactions
+  return transactions;
 }
