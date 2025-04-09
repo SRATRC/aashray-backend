@@ -37,6 +37,7 @@ export const createAdhyayan = async (req, res) => {
     end_date,
     speaker,
     amount,
+    location,
     total_seats,
     food_allowed,
     comments
@@ -58,6 +59,7 @@ export const createAdhyayan = async (req, res) => {
     month: month,
     start_date: start_date,
     end_date: end_date,
+    location: location,
     total_seats: total_seats,
     amount: amount,
     available_seats: total_seats,
@@ -82,6 +84,7 @@ export const fetchAllAdhyayan = async (req, res) => {
     shibir_db.month,
     shibir_db.start_date,
     shibir_db.end_date,
+    shibir_db.location,
     shibir_db.total_seats,
     shibir_db.available_seats,
     COUNT(shibir_booking_db.status) AS waitlist_count,
@@ -100,6 +103,7 @@ GROUP BY
     shibir_db.month,
     shibir_db.start_date,
     shibir_db.end_date,
+    shibir_db.location,
     shibir_db.total_seats,
     shibir_db.available_seats,
     shibir_db.food_allowed,
@@ -145,17 +149,15 @@ export const fetchAdhyayanBookings = async (req, res) => {
     LIMIT :pageSize OFFSET :page;`,
     {
       replacements: {
-        shibirId: shibir_id, 
-        status: [STATUS_ADMIN_CANCELLED,STATUS_CANCELLED],
-        pageSize : pageSize,
-        page : offset
+        shibirId: shibir_id,
+        status: [STATUS_ADMIN_CANCELLED, STATUS_CANCELLED],
+        pageSize: pageSize,
+        page: offset
       },
       raw: true,
       type: QueryTypes.SELECT
     }
   );
-
-  
 
   return res
     .status(200)
@@ -169,6 +171,7 @@ export const updateAdhyayan = async (req, res) => {
     end_date,
     speaker,
     amount,
+    location,
     total_seats,
     food_allowed,
     comments
@@ -187,6 +190,7 @@ export const updateAdhyayan = async (req, res) => {
     month,
     start_date,
     end_date,
+    location,
     total_seats,
     amount,
     available_seats,
@@ -208,7 +212,7 @@ export const adhyayanWaitlist = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, 
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, t2.location,
     t2.start_date, t2.end_date, t3.cardno, t3.issuedto, t3.mobno, t3.center, t3.res_status
     FROM shibir_booking_db AS t1
     LEFT JOIN shibir_db AS t2 
