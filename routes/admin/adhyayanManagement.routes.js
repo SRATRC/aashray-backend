@@ -7,7 +7,6 @@ import {
   createAdhyayan,
   updateAdhyayan,
   adhyayanReport,
-  adhyayanWaitlist,
   adhyayanStatusUpdate,
   activateAdhyayan,
   fetchAdhyayan,
@@ -26,7 +25,6 @@ router.get('/fetch', CatchAsync(fetchAllAdhyayan));
 router.get('/fetch/:id', CatchAsync(fetchAdhyayan));
 router.put('/update/:id', CatchAsync(updateAdhyayan));
 router.post('/report/:id', CatchAsync(adhyayanReport));
-router.get('/waitlist', CatchAsync(adhyayanWaitlist));
 router.get('/bookings', CatchAsync(fetchAdhyayanBookings));
 router.put('/status', CatchAsync(adhyayanStatusUpdate));
 router.put('/:id/:activate', CatchAsync(activateAdhyayan));

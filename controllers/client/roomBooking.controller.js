@@ -175,7 +175,7 @@ export const FlatBookingMumukshu = async (req, res) => {
     bookingIds[idx++] = flatBooking.bookingid;
   });
 
-  bookingIdMap[TYPE_FLAT] = bookingIds;
+  bookingIdMap["type_flat"] = bookingIds;
 
   sendUnifiedEmail(req.user, bookingIdMap);
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
