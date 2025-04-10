@@ -24,9 +24,8 @@ import TravelDb from './models/travel_db.model.js';
 import AdminUsers from './models/admin_users.model.js';
 import { cancelFood } from './helpers/foodBooking.helper.js';
 
-// Schedule the cron job to run every minute
-// TODO: update to run every N minutes
-const job = cron.schedule('* * * * *', async () => {
+// Schedule the cron job to run every 10 minutes
+const job = cron.schedule('*/10 * * * *', async () => {
   logger.info('Cron job starting...');
 
   try {
