@@ -68,53 +68,52 @@ export const createAdhyayan = async (req, res) => {
 };
 
 export const fetchAllAdhyayan = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
   const shibirs = await database.query(
     `SELECT 
-		shibir_db.id,
-    shibir_db.name,
-    shibir_db.speaker,
-    shibir_db.month,
-    shibir_db.start_date,
-    shibir_db.end_date,
-    shibir_db.location,
-    shibir_db.total_seats,
-    shibir_db.available_seats,
-    COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
-    shibir_db.food_allowed,
-    shibir_db.comments,
-    shibir_db.status,
-    shibir_db.updatedBy
-FROM 
-    shibir_db
-LEFT JOIN 
-    shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
-GROUP BY 
-    shibir_db.id,
-    shibir_db.name,
-    shibir_db.speaker,
-    shibir_db.month,
-    shibir_db.start_date,
-    shibir_db.end_date,
-    shibir_db.location,
-    shibir_db.total_seats,
-    shibir_db.available_seats,
-    shibir_db.food_allowed,
-    shibir_db.comments,
-    shibir_db.status,
-    shibir_db.updatedBy
-
-    ORDER BY shibir_db.start_date DESC
-    LIMIT ${pageSize} OFFSET ${offset};`,
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    FROM 
+      shibir_db
+    LEFT JOIN 
+      shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+    WHERE 
+      shibir_db.start_date > CURRENT_DATE
+    GROUP BY 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    ORDER BY 
+      shibir_db.start_date ASC;`,
     {
       type: QueryTypes.SELECT
     }
   );
+
   return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
+
 
 export const fetchAdhyayan = async (req, res) => {
   const { id } = req.params;
