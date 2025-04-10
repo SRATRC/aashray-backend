@@ -8,6 +8,7 @@ import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
+import sendMail from '../../utils/sendMail.js';
 
 export const FetchUpcoming = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -69,16 +70,18 @@ export const CancelTravel = async (req, res) => {
   await userCancelBooking(req.user, booking, t);
   await t.commit();
 
-  // TODO: Send email
-  // sendMail({
-  //   email: req.user.email,
-  //   subject: 'Your Raj Pravas (Travel) booking has been canceled',
-  //   template: 'rajPravasCancellation',
-  //   context: {
-  //     name: req.user.issuedto,
-  //     adhyayanName: adhyayan.dataValues.name
-  //   }
-  // });
+  sendMail({
+    email: req.user.email,
+     subject: 'Your Raj Pravas (Travel) booking has been cancelled',
+     template: 'rajPravasCancellation',
+     context: {
+       name: req.user.issuedto,
+       bookingid:bookingid,
+       date: booking.date,
+       pickup:booking.pickup_point,
+       drop:booking.drop_point
+     }
+   });
 
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };

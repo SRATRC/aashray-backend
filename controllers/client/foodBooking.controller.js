@@ -204,7 +204,7 @@ export const fetchMenu = async (req, res) => {
   });
 
   if (menuItems.length === 0) {
-    return res.status(404).json({ data: null, message: 'No menu available' });
+    return res.status(200).json({ data: null });
   }
 
   const formattedMenu = menuItems.reduce(

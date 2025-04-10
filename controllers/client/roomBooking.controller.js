@@ -111,7 +111,7 @@ export const CancelBooking = async (req, res) => {
 
   sendMail({
     email: req.user.email,
-    subject: `Your Raj Sharan Booking at SRATRC has been canceled.`,
+    subject: `Your Raj Sharan Booking at SRATRC has been cancelled.`,
     template: 'rajSharanCancellation',
     context: {
       name: req.user.issuedto,
@@ -121,7 +121,7 @@ export const CancelBooking = async (req, res) => {
     }
   });
 
-  res.status(200).send({ message: 'Room booking canceled' });
+  res.status(200).send({ message: 'Room booking cancelled' });
 };
 
 export const FlatBookingMumukshu = async (req, res) => {
@@ -175,7 +175,7 @@ export const FlatBookingMumukshu = async (req, res) => {
     bookingIds[idx++] = flatBooking.bookingid;
   });
 
-  bookingIdMap[TYPE_FLAT] = bookingIds;
+  bookingIdMap["type_flat"] = bookingIds;
 
   sendUnifiedEmail(req.user, bookingIdMap);
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });

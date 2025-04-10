@@ -23,15 +23,25 @@ export const validateCard = catchAsync(async (req, res, next) => {
 });
 
 export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
-  const { checkin_date, checkout_date } =
-    req.body.primary_booking ? req.body.primary_booking.details : req.body;
+  const { checkin_date, checkout_date } = req.body.primary_booking
+    ? req.body.primary_booking.details
+    : req.body;
 
   if (!checkin_date || !checkout_date) return next();
 
   const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
   if (blockedDates.length > 0) {
-    throw new ApiError(400, ERR_BLOCKED_DATES, blockedDates);
+    const blockingInfo = blockedDates
+      .map(
+        (block) => `${block.checkin} to ${block.checkout} for ${block.comments}`
+      )
+      .join(', ');
+
+    throw new ApiError(
+      400,
+      `Dates are blocked during following periods: ${blockingInfo}`
+    );
   }
 
   next();
