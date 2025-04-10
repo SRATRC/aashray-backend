@@ -270,13 +270,11 @@ import { travelCharge } from '../../helpers/travelBooking.helper.js';
 function getAdditionalConditions(statuses, pickup, replacementMap) {
   let additionalWhereClause = "";
 
-  // If statuses provided, include only those
-  if (statuses && Array.isArray(statuses) && statuses.length > 0) {
+  if (statuses && statuses.length > 0) {
     additionalWhereClause += " AND t1.status IN (:status)";
     replacementMap.status = statuses;
   }
 
-  // If pickup filter provided
   if (pickup && pickup.trim() !== '') {
     additionalWhereClause += " AND pickup_point = :pickup";
     replacementMap.pickup = pickup;
@@ -285,16 +283,21 @@ function getAdditionalConditions(statuses, pickup, replacementMap) {
   return additionalWhereClause;
 }
 
-// Fetch travel booking summary
 export const fectchSummary = async (req, res) => {
   const { start_date, end_date, statuses, pickup } = req.query;
+
+  const normalizedStatuses = statuses
+    ? Array.isArray(statuses)
+      ? statuses
+      : [statuses]
+    : [];
 
   const replacementMap = {
     startDate: start_date,
     endDate: end_date
   };
 
-  const additionalWhereClause = getAdditionalConditions(statuses, pickup, replacementMap);
+  const additionalWhereClause = getAdditionalConditions(normalizedStatuses, pickup, replacementMap);
 
   const data = await database.query(
     `SELECT t1.status, COUNT(*) as count
@@ -310,9 +313,14 @@ export const fectchSummary = async (req, res) => {
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
 
-// Fetch upcoming bookings
 export const fetchUpcomingBookings = async (req, res) => {
   const { start_date, end_date, statuses, pickup } = req.query;
+
+  const normalizedStatuses = statuses
+    ? Array.isArray(statuses)
+      ? statuses
+      : [statuses]
+    : [];
 
   const replacementMap = {
     startDate: start_date,
@@ -320,7 +328,7 @@ export const fetchUpcomingBookings = async (req, res) => {
     category: TYPE_TRAVEL
   };
 
-  const additionalWhereClause = getAdditionalConditions(statuses, pickup, replacementMap);
+  const additionalWhereClause = getAdditionalConditions(normalizedStatuses, pickup, replacementMap);
 
   const data = await database.query(
     `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage,
@@ -340,7 +348,6 @@ export const fetchUpcomingBookings = async (req, res) => {
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
 
-// Update booking status
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status, adminComments, upiRef, description } = req.body;
   let newBookingStatus = status;
@@ -356,18 +363,12 @@ export const updateBookingStatus = async (req, res) => {
   });
 
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
-  if (status === booking.status) throw new ApiError(400, 'Status is same as before');
-
-  if (
-    booking.status === STATUS_ADMIN_CANCELLED ||
-    booking.status === STATUS_CANCELLED
-  ) {
+  if (status == booking.status) throw new ApiError(400, 'Status is same as before');
+  if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
-  let transaction = await Transactions.findOne({
-    where: { bookingid: bookingid }
-  });
+  let transaction = await Transactions.findOne({ where: { bookingid } });
 
   switch (status) {
     case STATUS_PAYMENT_PENDING:
@@ -394,12 +395,12 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
-      if (transaction.status === STATUS_PAYMENT_PENDING) {
+      if (transaction && transaction.status === STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
             upi_ref: upiRef || 'NA',
             status: upiRef ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
-            description: description,
+            description,
             updatedBy: req.user.username
           },
           { transaction: t }
@@ -441,7 +442,7 @@ export const updateBookingStatus = async (req, res) => {
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
-// Update transaction status (possibly deprecated)
+// Might be deprecated
 export const updateTransactionStatus = async (req, res) => {
   const { cardno, bookingid, type, payment_status, amount, upi_ref } = req.body;
 
