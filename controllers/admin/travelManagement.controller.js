@@ -15,7 +15,8 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
-  TYPE_TRAVEL
+  TYPE_TRAVEL,
+  STATUS_CASH_COMPLETED
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
@@ -24,17 +25,34 @@ import {
 import { travelCharge } from '../../helpers/travelBooking.helper.js';
 
 
-export const fectchSummaryByStatusForToday = async (req, res) => {
-  const start_date =req.query.start_date
-  const end_date = req.query.end_date;
+function getAdditionalConditions(statuses, pickup,replacementMap) {
+  let additionalWhereClause="";
+  if (statuses && Array.isArray(statuses) && statuses.length != 0) {
+    additionalWhereClause = "AND t1.status in (:status)";
+    console.log(replacementMap);
+    replacementMap.status=statuses;
+  }
+  if (pickup && pickup.trim() != '') {
+    additionalWhereClause += " AND pickup_point = :pickup";
+    replacementMap.pickup=pickup;
+  }
+  return additionalWhereClause;
+}
 
-  const data = await database.query(`SELECT travel_db.status,count(*) as count
-  from travel_db
-  WHERE date >= :startDate AND date <= :endDate group by travel_db.status ` , {
-  replacements: { 
+export const fectchSummary = async (req, res) => {
+  const { start_date, end_date, statuses,pickup } = req.query;
+  const replacementMap = {
     startDate : start_date,
-    endDate : end_date
-    },
+    endDate : end_date, 
+  };
+
+  let additionalWhereClause=getAdditionalConditions(statuses, pickup,replacementMap);
+  
+  const data = await database.query(`SELECT t1.status,count(*) as count
+  from travel_db t1
+  WHERE date >= :startDate AND date <= :endDate ${additionalWhereClause} 
+  group by t1.status ` , {
+  replacements: replacementMap,
   type: Sequelize.QueryTypes.SELECT
 }); 
   return res.status(200).send({ message: 'Fetched data', data: data });
@@ -42,24 +60,25 @@ export const fectchSummaryByStatusForToday = async (req, res) => {
 
 export const fetchUpcomingBookings = async (req, res) => {
   
-  const start_date =req.query.start_date
-  const end_date = req.query.end_date;
+  const { start_date, end_date, statuses,pickup } = req.query;
+  
+  const replacementMap = {
+    startDate : start_date,
+    endDate : end_date, 
+    category: TYPE_TRAVEL
+  };
 
+  let additionalWhereClause=getAdditionalConditions(statuses, pickup,replacementMap);
   const data = await database.query(
     `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage, 
     t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, t2.amount, t2.upi_ref, t2.status as paymentStatus,t3.res_status
     FROM travel_db t1
     LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-    WHERE  t1.date >= :startDate AND t1.date <= :endDate AND t1.status NOT IN (:status) 
+    WHERE  t1.date >= :startDate AND t1.date <= :endDate  ${additionalWhereClause}
     ORDER BY date ASC;`,
     {
-      replacements: {
-        startDate : start_date,
-        endDate : end_date,
-        status: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED],
-        category: TYPE_TRAVEL
-      },
+      replacements: replacementMap,
       type: Sequelize.QueryTypes.SELECT
     }
   );
@@ -72,7 +91,7 @@ export const fetchUpcomingBookings = async (req, res) => {
 // 3. confirmed to admin cancelled
 // TODO: Confirm with Harshit on valid statuses
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status,adminComments } = req.body;
+  const { bookingid, status,adminComments,upiRef,description } = req.body;
   var newBookingStatus = status;
 
   const t = await database.transaction();
@@ -132,6 +151,20 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
+
+    if (transaction.status == STATUS_PAYMENT_PENDING) {
+      await transaction.update(
+        {
+          upi_ref: upiRef || 'NA',
+          status: upiRef ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+          description:description,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+    }
+
+    case STATUS_WAITING:
     default:
       throw new ApiError(400, 'Invalid status provided');
   }
@@ -205,3 +238,6 @@ export const updateTransactionStatus = async (req, res) => {
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
+
+
+
