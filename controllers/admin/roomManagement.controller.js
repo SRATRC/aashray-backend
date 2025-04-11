@@ -382,7 +382,7 @@ export const roomBooking = async (req, res) => {
   if (booking.bookingId != null) {
     let bookingIds = {};
     bookingIds[TYPE_ROOM] = [booking.bookingId];
-    sendUnifiedEmail(card, bookingIds);
+    sendUnifiedEmail(card.cardno, bookingIds, card);
   }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -431,8 +431,8 @@ export const flatBooking = async (req, res) => {
   }
 
   let bookingIdMap = {};
-  bookingIdMap['type_flat'] = [booking.bookingid];
-  sendUnifiedEmail(user_data, bookingIdMap);
+  bookingIdMap[TYPE_FLAT] = [booking.bookingid];
+  sendUnifiedEmail(user_data.cardno, bookingIdMap, user_data);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

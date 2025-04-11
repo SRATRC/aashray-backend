@@ -44,7 +44,8 @@ import {
   checkGuestRoomAlreadyBooked,
   checkFlatAlreadyBookedForGuest,
   sendUnifiedEmail,
-  createGuestsHelper
+  createGuestsHelper,
+  setBookingIdMap
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
@@ -63,35 +64,24 @@ export const guestBooking = async (req, res) => {
   req.transaction = t;
 
   let amount = 0;
-  var bookingIdMap = {};
+  const userBookingIdMap = {};
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(
-        primary_booking,
-        t,
-        req.user,
-        bookingIdMap
-      );
-      t = roomResult.t;
+      const roomResult = await bookRoom(primary_booking, t, req.user);
       amount += roomResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
       const foodResult = await bookFood(primary_booking, t, req.user);
-      t = foodResult.t;
       amount += foodResult.amount;
       break;
 
     case TYPE_ADHYAYAN:
-      const adhyayanResult = await bookAdhyayan(
-        primary_booking,
-        t,
-        req.user,
-        bookingIdMap
-      );
-      t = adhyayanResult.t;
+      const adhyayanResult = await bookAdhyayan(primary_booking, t, req.user);
       amount += adhyayanResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
       break;
 
     default:
@@ -102,26 +92,20 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          const roomResult = await bookRoom(addon, t, req.user, bookingIdMap);
-          t = roomResult.t;
+          const roomResult = await bookRoom(addon, t, req.user);
           amount += roomResult.amount;
+          setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
           break;
 
         case TYPE_FOOD:
           const foodResult = await bookFood(addon, t, req.user);
-          t = foodResult.t;
           amount += foodResult.amount;
           break;
 
         case TYPE_ADHYAYAN:
-          const adhyayanResult = await bookAdhyayan(
-            addon,
-            t,
-            req.user,
-            bookingIdMap
-          );
-          t = adhyayanResult.t;
+          const adhyayanResult = await bookAdhyayan(addon, t, req.user);
           amount += adhyayanResult.amount;
+          setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
           break;
 
         default:
@@ -130,10 +114,18 @@ export const guestBooking = async (req, res) => {
     }
   }
 
-  const order = await generateOrderId(amount);
+  const order = process.env.NODE_ENV == 'prod' && amount > 0 
+    ? await generateOrderId(amount)
+    : { amount }
 
   await t.commit();
-  sendUnifiedEmail(req.user, bookingIdMap);
+
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  }
+
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -281,14 +273,14 @@ async function checkRoomAvailability(user, data) {
   return roomDetails;
 }
 
-async function bookRoom(data, t, user, bookingIdMap) {
+async function bookRoom(data, t, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
 
   let amount = 0;
-  let bookingIds = [],
-    idx = 0;
+  let userBookingIds = {};
+
   const nights = await calculateNights(checkin_date, checkout_date);
   const totalGuests = guestGroup.flatMap((group) => group.guests);
 
@@ -296,6 +288,11 @@ async function bookRoom(data, t, user, bookingIdMap) {
     attributes: ['cardno', 'issuedto', 'gender'],
     where: { cardno: totalGuests, res_status: STATUS_GUEST }
   });
+
+  if (guest_db.length != totalGuests.length) {
+    throw new ApiError(404, 'Guest not found');
+  }
+
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
   if (
@@ -324,12 +321,12 @@ async function bookRoom(data, t, user, bookingIdMap) {
         );
         t = result.t;
         amount += result.discountedAmount;
-        bookingIds[idx++] = result.bookingId;
+        userBookingIds[guest] = [result.bookingId];
       }
     }
   }
-  bookingIdMap[TYPE_ROOM] = bookingIds;
-  return { t, amount };
+
+  return { amount, userBookingIds };
 }
 
 async function bookDayVisitForGuest(
@@ -648,8 +645,10 @@ async function checkAdhyayanAvailability(data) {
   return adhyayanDetails;
 }
 
-async function bookAdhyayan(data, t, user, bookingIdMap) {
+async function bookAdhyayan(data, t, user) {
   const { shibir_ids, guests } = data.details;
+  const userBookingIds = {};
+
   let amount = 0,
     idx = 0;
 
@@ -679,12 +678,13 @@ async function bookAdhyayan(data, t, user, bookingIdMap) {
 
   var booking_data = [];
   var transaction_data = [];
-  var bookingIds = [];
+
   for (const guest of guests) {
+    const bookingIds = [];
     for (var shibir of shibirs) {
       const bookingid = uuidv4();
-      bookingIds[idx++] = bookingid;
-      if (shibir.dataValues.available_seats > 0) {
+
+      if (shibir.available_seats > 0 && shibir.status == STATUS_OPEN) {
         booking_data.push({
           bookingid: bookingid,
           shibir_id: shibir.dataValues.id,
@@ -719,14 +719,18 @@ async function bookAdhyayan(data, t, user, bookingIdMap) {
           updatedBy: user.cardno
         });
       }
+
+      bookingIds.push(bookingid);
     }
+
+    userBookingIds[guest] = bookingIds;
   }
-  bookingIdMap[TYPE_ADHYAYAN] = bookingIds;
+  
 
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
-  return { t, amount };
+  return { amount, userBookingIds };
 }
 
 export const fetchGuests = async (req, res) => {

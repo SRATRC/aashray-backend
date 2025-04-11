@@ -167,16 +167,14 @@ export const FlatBookingMumukshu = async (req, res) => {
   await FlatBooking.bulkCreate(flat_bookings, { transaction: t });
 
   await t.commit();
-  let bookingIdMap = {},
-    bookingIds = [];
-  let idx = 0;
+  
+  const bookingIds = flat_bookings.map((booking) => booking.bookingid);
+  const bookingIdMap = {
+    [TYPE_FLAT]: bookingIds
+  }
 
-  flat_bookings.forEach((flatBooking) => {
-    bookingIds[idx++] = flatBooking.bookingid;
-  });
+  console.log("BOOKINGS: " + JSON.stringify(bookingIdMap));
 
-  bookingIdMap["type_flat"] = bookingIds;
-
-  sendUnifiedEmail(req.user, bookingIdMap);
+  sendUnifiedEmail(req.user.cardno, bookingIdMap, req.user);
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

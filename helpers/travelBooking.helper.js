@@ -32,7 +32,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   if (date <= today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
-  let userBookingIds = []
+  let userBookingIds = {};
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
@@ -57,12 +57,11 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         comments,
         updatedBy: user.cardno
       });
-      userBookingIds[mumukshu]=[bookingId];
-      
+      userBookingIds[mumukshu] = [bookingId];
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return {t,userBookingIds};
+  return { userBookingIds };
 }
 
 export function travelCharge(type) {
