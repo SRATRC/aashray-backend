@@ -182,13 +182,14 @@ export async function bookRoomForMumukshus(
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
 
       if (nights == 0) {
-        await bookDayVisit(
+        const result = await bookDayVisit(
           card.cardno,
           checkin_date,
           checkout_date,
           user.cardno,
           t
         );
+        userBookingIds[card.cardno]=[result.bookingId];
       } else {
         const result = await createRoomBooking(
           card.cardno,

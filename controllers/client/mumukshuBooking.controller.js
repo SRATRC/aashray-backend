@@ -75,12 +75,17 @@ export const mumukshuBooking = async (req, res) => {
         ? await generateOrderId(amount)
         : { amount };
   await t.commit();
-  
-  userBookingIdMap.forEach((value, key) => {
-    sendUnifiedEmail(key, value);
-});
+  //userBookingIdMap ONLY CONTAIN CARDNO
 
+  for (const [key, value] of userBookingIdMap) {
+    const userInfo = await CardDb.findOne({
+      where: {
+        cardno: key
+      }
+    });
   
+    sendUnifiedEmail(userInfo, value);
+  }  
   
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, order });
 };

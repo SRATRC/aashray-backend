@@ -431,7 +431,7 @@ export const flatBooking = async (req, res) => {
   }
 
   let bookingIdMap = {};
-  bookingIdMap['type_flat'] = [booking.bookingid];
+  bookingIdMap[TYPE_FLAT] = [booking.bookingid];
   sendUnifiedEmail(user_data, bookingIdMap);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
