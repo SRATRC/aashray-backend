@@ -10,13 +10,15 @@ export const login = async (req, res) => {
   const admin = await AdminUsers.findOne({
     where: { username: username }
   });
-  if (admin.dataValues.status === STATUS_INACTIVE)
-    throw new ApiError(401, 'Account Deactivated');
-
+  
   if (!admin) {
     throw new ApiError(404, 'Invalid Username');
   }
-
+  
+  if (admin.dataValues.status === STATUS_INACTIVE) {
+    throw new ApiError(401, 'Account Deactivated');
+  }
+  
   const roles = await AdminRoles.findAll({
     attributes: ['role_name'],
     where: { user_id: admin.dataValues.id, status: STATUS_ACTIVE }
