@@ -264,8 +264,16 @@ async function bookFood(body, user, data, t) {
 }
 
 async function bookTravel(user, data, t) {
-  const { date, pickup_point, drop_point, luggage, comments, type } =
-    data.details;
+  const {
+    date,
+    pickup_point,
+    drop_point,
+    luggage,
+    comments,
+    type,
+    arrival_time = null,
+    leaving_post_adhyayan
+  } = data.details;
 
   const result = await bookTravelForMumukshus(
     date,
@@ -276,13 +284,15 @@ async function bookTravel(user, data, t) {
         drop_point,
         luggage,
         comments,
-        type
+        type,
+        arrival_time,
+        leaving_post_adhyayan
       }
     ],
     t,
     user
   );
-  
+
   return result;
 }
 

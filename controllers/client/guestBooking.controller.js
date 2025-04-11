@@ -36,7 +36,8 @@ import {
   TYPE_GUEST_DINNER,
   STATUS_GUEST,
   TYPE_GUEST_ROOM,
-  STATUS_OPEN
+  STATUS_OPEN,
+  TYPE_FLAT
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -690,24 +691,29 @@ async function bookAdhyayan(data, t, user) {
           shibir_id: shibir.dataValues.id,
           cardno: guest,
           bookedBy: user.cardno,
-          status: STATUS_PAYMENT_PENDING,
+          status:
+            shibir.dataValues.amount > 0
+              ? STATUS_PAYMENT_PENDING
+              : STATUS_CONFIRMED,
           updatedBy: user.cardno
         });
 
         shibir.available_seats -= 1;
         await shibir.save({ transaction: t });
 
-        transaction_data.push({
-          cardno: user.cardno,
-          bookingid: bookingid,
-          category: TYPE_GUEST_ADHYAYAN,
-          type: TYPE_EXPENSE,
-          amount: shibir.dataValues.amount,
-          status: STATUS_PAYMENT_PENDING,
-          updatedBy: user.cardno
-        });
+        if (shibir.dataValues.amount > 0) {
+          transaction_data.push({
+            cardno: user.cardno,
+            bookingid: bookingid,
+            category: TYPE_GUEST_ADHYAYAN,
+            type: TYPE_EXPENSE,
+            amount: shibir.dataValues.amount,
+            status: STATUS_PAYMENT_PENDING,
+            updatedBy: user.cardno
+          });
 
-        amount += shibir.dataValues.amount;
+          amount += shibir.dataValues.amount;
+        }
       } else {
         bookingIds[idx++] = bookingid;
         booking_data.push({
@@ -809,10 +815,14 @@ export const guestBookingFlat = async (req, res) => {
   const nights = await calculateNights(startDay, endDay);
   var t = await database.transaction();
 
-  let booking = [];
+  let bookings = [];
+  const userBookingIds = {};
+
   for (var guest of guests) {
-    booking.push({
-      bookingid: uuidv4(),
+    const bookingId = uuidv4();
+
+    bookings.push({
+      bookingid: bookingId,
       cardno: guest.cardno,
       flatno: flatDb.dataValues.flatno,
       checkin: startDay,
@@ -821,9 +831,20 @@ export const guestBookingFlat = async (req, res) => {
       updatedBy: req.user.cardno,
       status: ROOM_STATUS_PENDING_CHECKIN
     });
+
+    userBookingIds[guest.cardno] = [bookingId];
   }
 
-  await FlatBooking.bulkCreate(booking, { transaction: t });
+  await FlatBooking.bulkCreate(bookings, { transaction: t });
   await t.commit();
+
+  const userBookingIdMap = {};
+  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
+
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  }
+
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

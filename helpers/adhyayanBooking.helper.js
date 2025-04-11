@@ -82,21 +82,24 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
             bookingid: bookingId,
             cardno: mumukshu,
             shibir_id: adhyayan.id,
-            status: STATUS_PAYMENT_PENDING
+            status:
+              adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED
           },
           { transaction: t }
         );
 
-        const { discountedAmount } = await createPendingTransaction(
-          mumukshu,
-          booking,
-          TYPE_ADHYAYAN,
-          adhyayan.amount,
-          user.cardno,
-          t
-        );
+        if (adhyayan.amount > 0) {
+          const { discountedAmount } = await createPendingTransaction(
+            mumukshu,
+            booking,
+            TYPE_ADHYAYAN,
+            adhyayan.amount,
+            user.cardno,
+            t
+          );
 
-        amount += discountedAmount;
+          amount += discountedAmount;
+        }
       } else {
         await ShibirBookingDb.create(
           {

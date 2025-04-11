@@ -398,7 +398,8 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+  let wasFlatBooked = bookingIds.hasOwnProperty(TYPE_FLAT);
+
 
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
