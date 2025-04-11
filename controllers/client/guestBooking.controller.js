@@ -130,7 +130,12 @@ export const guestBooking = async (req, res) => {
     }
   }
 
-  const order = await generateOrderId(amount);
+  let order = null;
+  if (amount > 0)
+    order =
+      process.env.NODE_ENV == 'prod'
+        ? await generateOrderId(amount)
+        : { amount };
 
   await t.commit();
   sendUnifiedEmail(req.user, bookingIdMap);
@@ -690,24 +695,29 @@ async function bookAdhyayan(data, t, user, bookingIdMap) {
           shibir_id: shibir.dataValues.id,
           cardno: guest,
           bookedBy: user.cardno,
-          status: STATUS_PAYMENT_PENDING,
+          status:
+            shibir.dataValues.amount > 0
+              ? STATUS_PAYMENT_PENDING
+              : STATUS_CONFIRMED,
           updatedBy: user.cardno
         });
 
         shibir.available_seats -= 1;
         await shibir.save({ transaction: t });
 
-        transaction_data.push({
-          cardno: user.cardno,
-          bookingid: bookingid,
-          category: TYPE_GUEST_ADHYAYAN,
-          type: TYPE_EXPENSE,
-          amount: shibir.dataValues.amount,
-          status: STATUS_PAYMENT_PENDING,
-          updatedBy: user.cardno
-        });
+        if (shibir.dataValues.amount > 0) {
+          transaction_data.push({
+            cardno: user.cardno,
+            bookingid: bookingid,
+            category: TYPE_GUEST_ADHYAYAN,
+            type: TYPE_EXPENSE,
+            amount: shibir.dataValues.amount,
+            status: STATUS_PAYMENT_PENDING,
+            updatedBy: user.cardno
+          });
 
-        amount += shibir.dataValues.amount;
+          amount += shibir.dataValues.amount;
+        }
       } else {
         bookingIds[idx++] = bookingid;
         booking_data.push({

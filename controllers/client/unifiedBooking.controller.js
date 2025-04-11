@@ -66,9 +66,7 @@ export const unifiedBooking = async (req, res) => {
         : { amount };
 
   await t.commit();
-  
   sendUnifiedEmail(req.user, bookingIds);
-
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -94,7 +92,6 @@ export const validateBooking = async (req, res) => {
 
   return res.status(200).send({ data: response });
 };
- 
 
 async function book(user, body, data, bookingIds, t) {
   let amount = 0;
@@ -103,7 +100,7 @@ async function book(user, body, data, bookingIds, t) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(user, body, data, t);
       amount += roomResult.amount;
-      bookingIds[TYPE_ROOM]= roomResult.userBookingIds[user.cardno];
+      bookingIds[TYPE_ROOM] = roomResult.userBookingIds[user.cardno];
       break;
 
     case TYPE_FOOD:
@@ -112,14 +109,14 @@ async function book(user, body, data, bookingIds, t) {
 
     case TYPE_TRAVEL:
       const travelResult = await bookTravel(user, data, t);
-      bookingIds[TYPE_TRAVEL]= travelResult.userBookingIds[user.cardno];
+      bookingIds[TYPE_TRAVEL] = travelResult.userBookingIds[user.cardno];
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(user, data, t);
       amount += adhyayanResult.amount;
-      bookingIds[TYPE_ADHYAYAN]= adhyayanResult.userBookingIds[user.cardno];
-      
+      bookingIds[TYPE_ADHYAYAN] = adhyayanResult.userBookingIds[user.cardno];
+
       break;
 
     case TYPE_UTSAV:
@@ -264,8 +261,16 @@ async function bookFood(body, user, data, t) {
 }
 
 async function bookTravel(user, data, t) {
-  const { date, pickup_point, drop_point, luggage, comments, type } =
-    data.details;
+  const {
+    date,
+    pickup_point,
+    drop_point,
+    luggage,
+    comments,
+    type,
+    arrival_time = null,
+    leaving_post_adhyayan
+  } = data.details;
 
   const result = await bookTravelForMumukshus(
     date,
@@ -276,13 +281,15 @@ async function bookTravel(user, data, t) {
         drop_point,
         luggage,
         comments,
-        type
+        type,
+        arrival_time,
+        leaving_post_adhyayan
       }
     ],
     t,
     user
   );
-  
+
   return result;
 }
 
