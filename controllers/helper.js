@@ -381,7 +381,8 @@ export async function sendUnifiedEmail(user, bookingIds) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+  let wasFlatBooked = bookingIds.hasOwnProperty(TYPE_FLAT);
+
 
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
@@ -469,13 +470,7 @@ export async function sendUnifiedEmail(user, bookingIds) {
       };
     });
   }
-
-  // const userInfo = await CardDb.findOne({
-  //   where: {
-  //     cardno: cardno
-  //   }
-  // });
-
+   
   sendMail({
     email: user.email,
     subject: `Your Booking Confirmation for Stay at SRATRC`,

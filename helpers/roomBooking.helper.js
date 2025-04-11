@@ -75,7 +75,6 @@ export async function bookDayVisit(cardno, checkin, checkout, updatedBy, t) {
   if (!booking) {
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
-
   return booking;
 }
 
@@ -182,13 +181,14 @@ export async function bookRoomForMumukshus(
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
 
       if (nights == 0) {
-        await bookDayVisit(
+        const result = await bookDayVisit(
           card.cardno,
           checkin_date,
           checkout_date,
           user.cardno,
           t
         );
+        userBookingIds[card.cardno]=[result.bookingid];
       } else {
         const result = await createRoomBooking(
           card.cardno,

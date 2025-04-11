@@ -67,11 +67,12 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
-  let amount = 0,bookingId;
-  let userBookingIds = []
+  let amount = 0,
+    bookingId;
+  let userBookingIds = [];
   for (const mumukshu of mumukshus) {
     let bookingIds = [],
-    idx = 0;
+      idx = 0;
     for (const adhyayan of adhyayans) {
       if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
         await reserveAdhyayanSeat(adhyayan, t);
@@ -81,22 +82,25 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
             bookingid: bookingId,
             cardno: mumukshu,
             shibir_id: adhyayan.id,
-            status: STATUS_PAYMENT_PENDING
+            status:
+              adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED
           },
           { transaction: t }
         );
         bookingIds[idx++] = bookingId;
 
-        const { discountedAmount } = await createPendingTransaction(
-          mumukshu,
-          booking,
-          TYPE_ADHYAYAN,
-          adhyayan.amount,
-          user.cardno,
-          t
-        );
+        if (adhyayan.amount > 0) {
+          const { discountedAmount } = await createPendingTransaction(
+            mumukshu,
+            booking,
+            TYPE_ADHYAYAN,
+            adhyayan.amount,
+            user.cardno,
+            t
+          );
 
-        amount += discountedAmount;
+          amount += discountedAmount;
+        }
       } else {
         bookingId = uuidv4();
         await ShibirBookingDb.create(
@@ -110,13 +114,11 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
         );
         bookingIds[idx++] = bookingId;
       }
-      
     }
     userBookingIds[mumukshu] = bookingIds;
-    
   }
 
-  return { t, amount ,userBookingIds };
+  return { t, amount, userBookingIds };
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {

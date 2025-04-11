@@ -1,4 +1,5 @@
 import {
+  ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
   FULL_TRAVEL_PRICE,
   STATUS_CONFIRMED,
@@ -32,19 +33,28 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   if (date <= today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
-  let userBookingIds = []
+  let userBookingIds = [];
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
 
-  var bookingsToCreate = [],bookingId;
+  var bookingsToCreate = [],
+    bookingId;
   for (const group of mumukshuGroup) {
-    const { pickup_point, drop_point, luggage, comments, type, mumukshus } =
-      group;
+    const {
+      pickup_point,
+      drop_point,
+      luggage,
+      comments,
+      type,
+      mumukshus,
+      arrival_time,
+      leaving_post_adhyayan
+    } = group;
 
     for (const mumukshu of mumukshus) {
-      bookingId=uuidv4();
-      
+      bookingId = uuidv4();
+
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
@@ -54,19 +64,18 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         pickup_point,
         drop_point,
         luggage,
+        arrival_time,
+        leaving_post_adhyayan,
         comments,
         updatedBy: user.cardno
       });
-      userBookingIds[mumukshu]=[bookingId];
-      
+      userBookingIds[mumukshu] = [bookingId];
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return {t,userBookingIds};
+  return { t, userBookingIds };
 }
 
 export function travelCharge(type) {
-  return type == TRAVEL_TYPE_FULL 
-    ? FULL_TRAVEL_PRICE
-    : TRAVEL_PRICE;
+  return type == TRAVEL_TYPE_FULL ? FULL_TRAVEL_PRICE : TRAVEL_PRICE;
 }

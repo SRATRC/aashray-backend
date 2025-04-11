@@ -1,8 +1,4 @@
-import {
-  ShibirDb,
-  ShibirBookingDb,
-  CardDb
-} from '../../models/associations.js';
+import { ShibirDb } from '../../models/associations.js';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -72,53 +68,52 @@ export const createAdhyayan = async (req, res) => {
 };
 
 export const fetchAllAdhyayan = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
   const shibirs = await database.query(
     `SELECT 
-		shibir_db.id,
-    shibir_db.name,
-    shibir_db.speaker,
-    shibir_db.month,
-    shibir_db.start_date,
-    shibir_db.end_date,
-    shibir_db.location,
-    shibir_db.total_seats,
-    shibir_db.available_seats,
-    COUNT(shibir_booking_db.status) AS waitlist_count,
-    shibir_db.food_allowed,
-    shibir_db.comments,
-    shibir_db.status,
-    shibir_db.updatedBy
-FROM 
-    shibir_db
-LEFT JOIN 
-    shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
-GROUP BY 
-    shibir_db.id,
-    shibir_db.name,
-    shibir_db.speaker,
-    shibir_db.month,
-    shibir_db.start_date,
-    shibir_db.end_date,
-    shibir_db.location,
-    shibir_db.total_seats,
-    shibir_db.available_seats,
-    shibir_db.food_allowed,
-    shibir_db.comments,
-    shibir_db.status,
-    shibir_db.updatedBy
-
-    ORDER BY shibir_db.start_date DESC
-    LIMIT ${pageSize} OFFSET ${offset};`,
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    FROM 
+      shibir_db
+    LEFT JOIN 
+      shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+    WHERE 
+      shibir_db.start_date > CURRENT_DATE
+    GROUP BY 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    ORDER BY 
+      shibir_db.start_date ASC;`,
     {
       type: QueryTypes.SELECT
     }
   );
+
   return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
+
 
 export const fetchAdhyayan = async (req, res) => {
   const { id } = req.params;
@@ -133,24 +128,37 @@ export const fetchAdhyayan = async (req, res) => {
 
 export const fetchAdhyayanBookings = async (req, res) => {
   const shibir_id = req.query.shibir_id;
+  let status = req.query.status;
+  if (status != null || status != undefined) {
+    status = status.replace(/^"|"$/g, '');
+    status = status.trim();
+  }
+  let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_PAYMENT_PENDING];
+
+  if (status != null && status == 'waiting') {
+    statusToBeIncluded = [STATUS_WAITING];
+  }
+
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
   await validateAdhyayans(shibir_id);
 
   const adhyayanData = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.cardno, t2.issuedto, t2.mobno, t2.center, t2.res_status
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.cardno, t2.issuedto, t2.mobno, t2.center, t2.res_status,t3.name
     FROM shibir_booking_db AS t1
     LEFT JOIN card_db AS t2 
     ON t1.cardno = t2.cardno 
+    LEFT JOIN shibir_db AS t3 
+    ON t1.shibir_id = t3.id 
     WHERE 
     t1.shibir_id = :shibirId And
-    t1.status not in  (:status)
+    t1.status in  (:status)
     LIMIT :pageSize OFFSET :page;`,
     {
       replacements: {
         shibirId: shibir_id,
-        status: [STATUS_ADMIN_CANCELLED, STATUS_CANCELLED],
+        status: statusToBeIncluded,
         pageSize: pageSize,
         page: offset
       },
@@ -212,7 +220,7 @@ export const adhyayanWaitlist = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, t2.location,
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, 
     t2.start_date, t2.end_date, t3.cardno, t3.issuedto, t3.mobno, t3.center, t3.res_status
     FROM shibir_booking_db AS t1
     LEFT JOIN shibir_db AS t2 
@@ -291,6 +299,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
           {
             upi_ref: upi_ref || 'NA',
             status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+            description: description,
             updatedBy: req.user.username
           },
           { transaction: t }
