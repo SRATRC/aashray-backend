@@ -73,6 +73,7 @@ export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
+export const ROLE_GATE_ADMIN = 'gateAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

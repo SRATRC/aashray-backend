@@ -61,29 +61,19 @@ export const createCard = async (req, res) => {
 };
 
 export const fetchAllCards = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
+  
   const data = await CardDb.findAll({
-    offset,
-    limit: pageSize
   });
 
   return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
 
 export const searchCardsByName = async (req, res) => {
-  const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
-
+  
   const data = await CardDb.findAll({
     where: {
       issuedto: { [Sequelize.Op.like]: `%${req.params.name}%` }
     },
-    offset,
-    limit: pageSize
   });
 
   return res.status(200).send({ message: 'Fetched all cards', data: data });

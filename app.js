@@ -10,7 +10,6 @@ import { httpLogger } from './middleware/Logger.js';
 import fs from 'fs';
 import path from 'path';
 
-import gateRoutes from './routes/gate/gate.routes.js';
 import wifiRoutes from './routes/wifi/wifi.routes.js';
 
 // Client Route Imports
@@ -84,7 +83,6 @@ app.get('/api', (_req, res) => {
 });
 
 app.use('/api/v1/client', clientAuthRoutes);
-app.use('/api/v1/gate', gateRoutes);
 app.use('/api/v1/wifi', wifiRoutes);
 app.use('/api/v1/stay', roomRoutes);
 app.use('/api/v1/food', foodRoutes);
