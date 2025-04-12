@@ -292,9 +292,7 @@ export async function bookRoomDuringUtsavForMumukshus(
     const { roomType, floorType, checkin_date, checkout_date, mumukshus } =
       group;
 
-    if (
-      await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)
-    ) {
+    if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
       throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
     }
 

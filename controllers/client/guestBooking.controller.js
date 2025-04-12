@@ -38,14 +38,13 @@ import {
 import {
   calculateNights,
   validateDate,
-  checkGuestRoomAlreadyBooked,
-  checkFlatAlreadyBookedForGuest,
   sendUnifiedEmail,
   createGuestsHelper,
-  setBookingIdMap
+  setBookingIdMap,
+  checkFlatAlreadyBooked
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import { checkRoomAlreadyBooked, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
   generateOrderId
@@ -220,11 +219,10 @@ async function checkRoomAvailability(user, data) {
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
   if (
-    await checkGuestRoomAlreadyBooked(
+    await checkRoomAlreadyBooked(
       checkin_date,
       checkout_date,
-      user.cardno,
-      totalGuests
+      ...totalGuests
     )
   ) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
@@ -294,7 +292,7 @@ async function bookRoom(data, t, user) {
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
   if (
-    await checkGuestRoomAlreadyBooked(checkin_date, checkout_date, totalGuests)
+    await checkRoomAlreadyBooked(checkin_date, checkout_date, ...totalGuests)
   ) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
@@ -679,7 +677,7 @@ export const guestBookingFlat = async (req, res) => {
   validateDate(startDay, endDay);
 
   for (var guest of guests) {
-    if (await checkFlatAlreadyBookedForGuest(startDay, endDay, guest['cardno']))
+    if (await checkFlatAlreadyBooked(startDay, endDay, guest['cardno']))
       throw new ApiError(400, `flat already Booked for ${guest['name']}`);
   }
 

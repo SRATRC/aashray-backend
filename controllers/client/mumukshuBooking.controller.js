@@ -290,7 +290,7 @@ async function checkRoomAvailability(data) {
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cardDb = await validateCards(mumukshus);
 
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 

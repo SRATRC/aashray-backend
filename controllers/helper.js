@@ -91,40 +91,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
   return result.length > 0;
 }
 
-export async function checkFlatAlreadyBookedForGuest(
-  checkin,
-  checkout,
-  guest_id
-) {
-  const result = await FlatBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
-          ]
-        }
-      ],
-      cardno: guest_id
-    }
-  });
-
-  return result.length > 0;
-}
-
 export async function calculateNights(checkin, checkout) {
   const date1 = new Date(checkin);
   const date2 = new Date(checkout);
@@ -211,47 +177,6 @@ export async function checkRoomBookingProgress(
   }
 
   return false;
-}
-
-export async function checkGuestRoomAlreadyBooked(checkin, checkout, guests) {
-  const result = await RoomBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
-          ]
-        }
-      ],
-      cardno: guests,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
-    }
-  });
-
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
-  }
 }
 
 export async function checkGuestFoodAlreadyBooked(
