@@ -155,6 +155,11 @@ MaintenanceDb.belongsTo(CardDb, {
   targetKey: 'cardno',
   as: 'card'
 });
+CardDb.hasMany(MaintenanceDb, {
+  foreignKey: 'requested_by',
+  sourceKey: 'cardno',
+  as: 'maintenanceRequests'
+});
 
 
 // Food
