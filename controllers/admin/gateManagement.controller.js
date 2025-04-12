@@ -192,3 +192,8 @@ export const gateExit = async (req, res) => {
   await t.commit();
   return res.status(200).send({ message: 'Success' });
 };
+
+export const gateRecord = async (req, res) => {
+  const result = await GateRecord.findAll();
+  return res.status(200).send({ message: 'Success', data: result });
+};

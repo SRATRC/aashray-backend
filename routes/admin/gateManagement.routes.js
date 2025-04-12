@@ -6,6 +6,7 @@ import {
   fetchPR,
   fetchSevaKutir,
   gateEntry,
+  gateRecord,
   gateExit
 } from '../../controllers/admin/gateManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
@@ -21,5 +22,6 @@ router.get('/totalMumukshu', CatchAsync(fetchMumukshu));
 router.get('/totalSeva', CatchAsync(fetchSevaKutir));
 router.post('/entry/:cardno', CatchAsync(gateEntry));
 router.post('/exit/:cardno', CatchAsync(gateExit));
+router.get('/gaterecords', CatchAsync(gateRecord));
 
 export default router;
