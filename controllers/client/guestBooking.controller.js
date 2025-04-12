@@ -56,6 +56,7 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
+import { getFoodBookings } from '../../helpers/foodBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -435,32 +436,17 @@ async function checkFoodAvailability(data) {
 
   validateDate(start_date, end_date);
 
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
-
+  const guests = guestGroup.flatMap((group) => group.guests);
   const allDates = getDates(start_date, end_date);
+  const bookings = await getFoodBookings(allDates, guests);
+
   var charge = 0;
-
-  const bookings = await FoodDb.findAll({
-    where: {
-      date: allDates,
-      cardno: totalGuests
-    }
-  });
-
-  let bookingsByGuest = {};
-  for (const booking of bookings) {
-    bookingsByGuest[booking.guest] ||= {};
-    bookingsByGuest[booking.guest][booking.date] = booking;
-  }
-
   for (const group of guestGroup) {
     const { meals, guests } = group;
 
     for (const date of allDates) {
       for (const guest of guests) {
-        const booking = bookingsByGuest[guest]
-          ? bookingsByGuest[guest][date]
-          : null;
+        const booking = bookings[guest] && bookings[guest][date];
 
         if (booking) {
           // Only charge for meals that weren't previously booked
@@ -514,19 +500,8 @@ async function bookFood(data, t, user) {
   }
 
   const allDates = getDates(start_date, end_date);
-  const bookings = await FoodDb.findAll({
-    where: {
-      date: allDates,
-      cardno: guests
-    }
-  });
-
-  let bookingsByCard = {};
-  for (const booking of bookings) {
-    bookingsByCard[booking.cardno] ||= {};
-    bookingsByCard[booking.cardno][booking.date] = booking;
-  }
-
+  const bookings = await getFoodBookings(allDates, guests);
+  
   var bookingsToCreate = [];
   var transactionsToCreate = [];
   for (const group of guestGroup) {
@@ -540,9 +515,7 @@ async function bookFood(data, t, user) {
 
     for (const guest of guests) {
       for (const date of allDates) {
-        const booking = bookingsByCard[guest]
-          ? bookingsByCard[guest][date]
-          : null;
+        const booking = bookings[guest] && bookings[guest][date];
 
         if (booking) {
           // Only charge for meals that weren't previously booked
