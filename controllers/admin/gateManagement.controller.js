@@ -63,58 +63,94 @@ export const fetchSevaKutir = async (req, res) => {
   return res.status(200).send({ message: 'Success', data: total_seva });
 };
 
+// export const gateEntry = async (req, res) => {
+//   const t = await database.transaction();
+//   req.transaction = t;
+
+//   try {
+//     const user = await CardDb.findOne({
+//       where: { cardno: req.params.cardno }
+//     });
+
+//     if (!user) {
+//       await t.rollback();
+//       return res.status(404).json({ success: false, message: 'Card not found in the system.' });
+//     }
+
+//     await user.update(
+//       { status: STATUS_ONPREM, updatedBy: req.user.username },
+//       { transaction: t }
+//     );
+
+//     await GateRecord.create(
+//       {
+//         cardno: req.params.cardno,
+//         status: STATUS_ONPREM,
+//         updatedBy: req.user.username
+//       },
+//       { transaction: t }
+//     );
+
+//     const today = moment().format('YYYY-MM-DD');
+
+//     const booking = await FlatBooking.findOne({
+//       where: {
+//         cardno: req.params.cardno,
+//         status: ROOM_STATUS_PENDING_CHECKIN,
+//         checkin: { [Sequelize.Op.lte]: today },
+//         checkout: { [Sequelize.Op.gte]: today }
+//       }
+//     });
+
+//     if (booking) {
+//       booking.status = ROOM_STATUS_CHECKEDIN;
+//       await booking.save({ transaction: t });
+//     }
+
+//     await t.commit();
+//     return res.status(200).json({ success: true, message: 'Success' });
+//   } catch (err) {
+//     console.error('Gate entry error:', err);
+//     await t.rollback();
+//     return res.status(500).json({ success: false, message: 'Internal server error.' });
+//   }
+// };
+
 export const gateEntry = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  try {
-    const user = await CardDb.findOne({
-      where: { cardno: req.params.cardno }
-    });
+  // Check if user exists based on the cardno
+  const user = await CardDb.findOne({
+    where: { cardno: req.params.cardno }
+  });
 
-    if (!user) {
-      await t.rollback();
-      return res.status(404).json({ success: false, message: 'Card not found in the system.' });
-    }
-
-    await user.update(
-      { status: STATUS_ONPREM, updatedBy: req.user.username },
-      { transaction: t }
-    );
-
-    await GateRecord.create(
-      {
-        cardno: req.params.cardno,
-        status: STATUS_ONPREM,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
-
-    const today = moment().format('YYYY-MM-DD');
-
-    const booking = await FlatBooking.findOne({
-      where: {
-        cardno: req.params.cardno,
-        status: ROOM_STATUS_PENDING_CHECKIN,
-        checkin: { [Sequelize.Op.lte]: today },
-        checkout: { [Sequelize.Op.gte]: today }
-      }
-    });
-
-    if (booking) {
-      booking.status = ROOM_STATUS_CHECKEDIN;
-      await booking.save({ transaction: t });
-    }
-
-    await t.commit();
-    return res.status(200).json({ success: true, message: 'Success' });
-  } catch (err) {
-    console.error('Gate entry error:', err);
-    await t.rollback();
-    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  // If user not found, return a 404 error
+  if (!user) {
+    return res.status(404).send({ message: 'User not found.' });
   }
+
+  // Update the user status (assuming the card exists)
+  await user.update(
+    { status: STATUS_ONPREM, updatedBy: req.user.username },
+    { transaction: t }
+  );
+
+  // Create a GateRecord entry for the check-in
+  await GateRecord.create(
+    {
+      cardno: req.params.cardno,
+      status: STATUS_ONPREM,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  // Commit the transaction
+  await t.commit();
+  return res.status(200).send({ message: 'Success' });
 };
+
 
 export const gateExit = async (req, res) => {
   const t = await database.transaction();
