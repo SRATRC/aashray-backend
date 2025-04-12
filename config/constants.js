@@ -50,6 +50,8 @@ export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
+export const STATUS_INPROGRESS = 'inprogress';
+
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
@@ -74,6 +76,7 @@ export const ROLE_FOOD_ADMIN = 'foodAdmin';
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
 export const ROLE_GATE_ADMIN = 'gateAdmin';
+export const ROLE_MAINTENANCE_ADMIN = 'maintenanceAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
