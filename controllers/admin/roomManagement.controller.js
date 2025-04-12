@@ -382,7 +382,7 @@ export const roomBooking = async (req, res) => {
   if (booking.bookingId != null) {
     let bookingIds = {};
     bookingIds[TYPE_ROOM] = [booking.bookingId];
-    sendUnifiedEmail(card, bookingIds);
+    sendUnifiedEmail(card.cardno, bookingIds, card);
   }
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -390,14 +390,14 @@ export const roomBooking = async (req, res) => {
 export const flatBooking = async (req, res) => {
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
-  const user_data = await CardDb.findOne({
+  const user = await CardDb.findOne({
     attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email'],
     where: {
       mobno: req.params.mobno
     }
   });
 
-  if (!user_data) {
+  if (!user) {
     throw new ApiError(404, 'User not found');
   }
 
@@ -405,7 +405,7 @@ export const flatBooking = async (req, res) => {
     await checkFlatAlreadyBooked(
       req.body.checkin_date,
       req.body.checkout_date,
-      user_data.dataValues.cardno
+      user.dataValues.cardno
     )
   ) {
     throw new ApiError(400, 'Already Booked');
@@ -418,7 +418,7 @@ export const flatBooking = async (req, res) => {
 
   const booking = await FlatBooking.create({
     bookingid: uuidv4(),
-    cardno: user_data.cardno,
+    cardno: user.cardno,
     flatno: req.body.flat_no,
     checkin: req.body.checkin_date,
     checkout: req.body.checkout_date,
@@ -432,7 +432,7 @@ export const flatBooking = async (req, res) => {
 
   let bookingIdMap = {};
   bookingIdMap[TYPE_FLAT] = [booking.bookingid];
-  sendUnifiedEmail(user_data, bookingIdMap);
+  sendUnifiedEmail(user.cardno, bookingIdMap, user);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

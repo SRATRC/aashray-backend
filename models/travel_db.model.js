@@ -58,7 +58,8 @@ const TravelDb = sequelize.define(
     },
     leaving_post_adhyayan: {
       type: DataTypes.BOOLEAN,
-      allowNull: false
+      allowNull: false,
+      defaultValue: true 
     },
     comments: {
       type: DataTypes.STRING,
