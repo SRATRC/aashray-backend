@@ -173,7 +173,7 @@ export async function bookRoomForMumukshus(
   const nights = await calculateNights(checkin_date, checkout_date);
 
   let amount = 0;
-  let userBookingIds = [];
+  let userBookingIds = {};
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
@@ -203,11 +203,11 @@ export async function bookRoomForMumukshus(
         );
 
         amount += result.discountedAmount;
-        userBookingIds[card.cardno]=[result.bookingId];
+        userBookingIds[card.cardno] = [result.bookingId];
       }
     }
   }
-  return { t, amount, userBookingIds };
+  return { amount, userBookingIds };
 }
 
 export async function createRoomBooking(
