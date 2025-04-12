@@ -56,7 +56,7 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
-import { getFoodBookings } from '../../helpers/foodBooking.helper.js';
+import { boodFoodForGuests, getFoodBookings } from '../../helpers/foodBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -74,13 +74,11 @@ export const guestBooking = async (req, res) => {
         req.user,
         bookingIdMap
       );
-      t = roomResult.t;
       amount += roomResult.amount;
       break;
 
     case TYPE_FOOD:
       const foodResult = await bookFood(primary_booking, t, req.user);
-      t = foodResult.t;
       amount += foodResult.amount;
       break;
 
@@ -91,7 +89,6 @@ export const guestBooking = async (req, res) => {
         req.user,
         bookingIdMap
       );
-      t = adhyayanResult.t;
       amount += adhyayanResult.amount;
       break;
 
@@ -104,13 +101,11 @@ export const guestBooking = async (req, res) => {
       switch (addon.booking_type) {
         case TYPE_ROOM:
           const roomResult = await bookRoom(addon, t, req.user, bookingIdMap);
-          t = roomResult.t;
           amount += roomResult.amount;
           break;
 
         case TYPE_FOOD:
           const foodResult = await bookFood(addon, t, req.user);
-          t = foodResult.t;
           amount += foodResult.amount;
           break;
 
@@ -121,7 +116,6 @@ export const guestBooking = async (req, res) => {
             req.user,
             bookingIdMap
           );
-          t = adhyayanResult.t;
           amount += adhyayanResult.amount;
           break;
 
@@ -474,116 +468,18 @@ async function checkFoodAvailability(data) {
 }
 
 async function bookFood(data, t, user) {
-  const meals_object = [
-    {
-      name: 'breakfast',
-      price: BREAKFAST_PRICE,
-      type: TYPE_GUEST_BREAKFAST
-    },
-    { name: 'lunch', price: LUNCH_PRICE, type: TYPE_GUEST_LUNCH },
-    { name: 'dinner', price: DINNER_PRICE, type: TYPE_GUEST_DINNER }
-  ];
-
   const { start_date, end_date, guestGroup } = data.details;
-  let amount = 0;
-
-  validateDate(start_date, end_date);
-
-  const guests = guestGroup.flatMap((group) => group.guests);
-  const guestDb = await CardDb.findAll({
-    where: { cardno: guests, res_status: STATUS_GUEST },
-    attributes: ['cardno']
-  });
-
-  if (guestDb.length != guests.length) {
-    throw new ApiError(404, 'Guest not found');
-  }
-
-  const allDates = getDates(start_date, end_date);
-  const bookings = await getFoodBookings(allDates, guests);
   
-  var bookingsToCreate = [];
-  var transactionsToCreate = [];
-  for (const group of guestGroup) {
-    const { meals, spicy, high_tea, guests } = group;
+  const result = await boodFoodForGuests(
+    start_date,
+    end_date,
+    guestGroup,
+    user.cardno,
+    user.cardno,
+    t
+  );
 
-    const breakfast = meals.includes('breakfast');
-    const lunch = meals.includes('lunch');
-    const dinner = meals.includes('dinner');
-
-    const mealSelections = { breakfast, lunch, dinner };
-
-    for (const guest of guests) {
-      for (const date of allDates) {
-        const booking = bookings[guest] && bookings[guest][date];
-
-        if (booking) {
-          // Only charge for meals that weren't previously booked
-          meals_object.forEach((meal) => {
-            if (mealSelections[meal.name] && !booking[meal.name]) {
-              amount += meal.price;
-
-              transactionsToCreate.push({
-                cardno: user.cardno,
-                bookingid: booking.dataValues.id,
-                category: meal.type,
-                amount: meal.price,
-                status: STATUS_PAYMENT_PENDING,
-                updatedBy: user.cardno
-              });
-            }
-          });
-
-          await booking.update(
-            {
-              breakfast: booking.breakfast || breakfast,
-              lunch: booking.lunch || lunch,
-              dinner: booking.dinner || dinner,
-              hightea: high_tea,
-              spicy,
-              updatedBy: user.cardno
-            },
-            { transaction: t }
-          );
-        } else {
-          const bookingId = uuidv4();
-
-          bookingsToCreate.push({
-            id: bookingId,
-            cardno: guest,
-            bookedBy: user.cardno,
-            date,
-            breakfast,
-            lunch,
-            dinner,
-            spicy,
-            hightea: high_tea,
-            plateissued: 0,
-            updatedBy: user.cardno
-          });
-
-          meals_object.forEach((meal) => {
-            if (mealSelections[meal.name]) {
-              amount += meal.price;
-
-              transactionsToCreate.push({
-                cardno: user.cardno,
-                bookingid: bookingId,
-                category: meal.type,
-                amount: meal.price,
-                status: STATUS_PAYMENT_PENDING,
-                updatedBy: user.cardno
-              });
-            }
-          });
-        }
-      }
-    }
-  }
-
-  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
-  await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
-  return { t, amount };
+  return result;
 }
 
 async function checkAdhyayanAvailability(data) {

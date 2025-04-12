@@ -1,5 +1,10 @@
 import {
+  BREAKFAST_PRICE,
+  DINNER_PRICE,
   ERR_ROOM_MUST_BE_BOOKED,
+  LUNCH_PRICE,
+  STATUS_GUEST,
+  STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
@@ -11,7 +16,7 @@ import {
   checkSpecialAllowance,
   validateDate
 } from '../controllers/helper.js';
-import { FoodDb, Transactions, UtsavDb } from '../models/associations.js';
+import { CardDb, FoodDb, Transactions, UtsavDb } from '../models/associations.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -106,6 +111,135 @@ export async function bookFoodForMumukshus(
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
+}
+
+export async function boodFoodForGuests(
+  start_date,
+  end_date,
+  guestGroup,
+  bookedBy,
+  updatedBy,
+  t
+) {
+
+  const meals_object = [
+    {
+      name: 'breakfast',
+      price: BREAKFAST_PRICE,
+      type: TYPE_GUEST_BREAKFAST
+    },
+    { 
+      name: 'lunch', 
+      price: LUNCH_PRICE, 
+      type: TYPE_GUEST_LUNCH
+    },
+    { 
+      name: 'dinner', 
+      price: DINNER_PRICE, 
+      type: TYPE_GUEST_DINNER
+    }
+  ];
+  
+  validateDate(start_date, end_date);
+
+  const guests = guestGroup.flatMap((group) => group.guests);
+  const guestDb = await CardDb.findAll({
+    where: { cardno: guests, res_status: STATUS_GUEST },
+    attributes: ['cardno']
+  });
+
+  if (guestDb.length != guests.length) {
+    throw new ApiError(404, 'Guest not found');
+  }
+
+  const allDates = getDates(start_date, end_date);
+  const bookings = await getFoodBookings(allDates, guests);
+  
+  var bookingsToCreate = [];
+  var transactionsToCreate = [];
+  var amount = 0;
+
+  for (const group of guestGroup) {
+    const { meals, spicy, high_tea, guests } = group;
+
+    const breakfast = meals.includes('breakfast');
+    const lunch = meals.includes('lunch');
+    const dinner = meals.includes('dinner');
+
+    const mealSelections = { breakfast, lunch, dinner };
+
+    for (const guest of guests) {
+      for (const date of allDates) {
+        const booking = bookings[guest] && bookings[guest][date];
+
+        if (booking) {
+          // Only charge for meals that weren't previously booked
+          meals_object.forEach((meal) => {
+            if (mealSelections[meal.name] && !booking[meal.name]) {
+              amount += meal.price;
+
+              transactionsToCreate.push({
+                cardno: bookedBy || guest,
+                bookingid: booking.dataValues.id,
+                category: meal.type,
+                amount: meal.price,
+                status: STATUS_PAYMENT_PENDING,
+                updatedBy
+              });
+            }
+          });
+
+          await booking.update(
+            {
+              breakfast: booking.breakfast || breakfast,
+              lunch: booking.lunch || lunch,
+              dinner: booking.dinner || dinner,
+              hightea: high_tea,
+              spicy,
+              updatedBy
+            },
+            { transaction: t }
+          );
+        } else {
+          const bookingId = uuidv4();
+
+          bookingsToCreate.push({
+            id: bookingId,
+            cardno: guest,
+            bookedBy: bookedBy,
+            date,
+            breakfast,
+            lunch,
+            dinner,
+            spicy,
+            hightea: high_tea,
+            plateissued: 0,
+            updatedBy
+          });
+
+          meals_object.forEach((meal) => {
+            if (mealSelections[meal.name]) {
+              amount += meal.price;
+
+              transactionsToCreate.push({
+                cardno: bookedBy || guest,
+                bookingid: bookingId,
+                category: meal.type,
+                amount: meal.price,
+                status: STATUS_PAYMENT_PENDING,
+                updatedBy
+              });
+            }
+          });
+        }
+      }
+    }
+  }
+
+  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+
+  return { amount };
 }
 
 export async function validateFood(
