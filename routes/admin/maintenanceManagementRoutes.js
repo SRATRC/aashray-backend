@@ -8,6 +8,6 @@ import { fetchMaintenanceReport } from '../../controllers/admin/maintenanceManag
 router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_MAINTENANCE_ADMIN));
 
-router.get('/fetch', CatchAsync(fetchMaintenanceReport));
+router.get('/fetch/:department', CatchAsync(fetchMaintenanceReport));
 
 export default router;
