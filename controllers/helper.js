@@ -179,56 +179,6 @@ export async function checkRoomBookingProgress(
   return false;
 }
 
-export async function checkGuestFoodAlreadyBooked(
-  start_date,
-  end_date,
-  guests
-) {
-  const startDate = new Date(start_date);
-  const endDate = new Date(end_date);
-
-  const allDates = getDates(startDate, endDate);
-  const food_bookings = await FoodDb.findAll({
-    where: {
-      date: { [Sequelize.Op.in]: allDates },
-      cardno: { [Sequelize.Op.in]: guests }
-    }
-  });
-
-  if (food_bookings.length > 0) return true;
-  else return false;
-}
-
-export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
-  const adhyayans = await ShibirBookingDb.findAll({
-    include: [
-      {
-        model: ShibirDb,
-        where: {
-          start_date: {
-            [Sequelize.Op.lte]: start_date
-          },
-          end_date: {
-            [Sequelize.Op.gte]: end_date
-          }
-        }
-      }
-    ],
-    where: {
-      cardno: guests,
-      status: STATUS_CONFIRMED
-    }
-  });
-
-  if (adhyayans) {
-    for (var data of adhyayans) {
-      if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
-    }
-  }
-
-  return false;
-}
-
 /*
  * Input: 
  *    userBookingIds: { cardno: [bookingIds] }
