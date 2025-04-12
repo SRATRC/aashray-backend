@@ -55,7 +55,14 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   return result.length > 0;
 }
 
-export async function bookDayVisit(cardno, checkin, checkout, updatedBy, t) {
+export async function bookDayVisit(
+  cardno, 
+  checkin, 
+  checkout,
+  bookedBy,
+  updatedBy,
+  t
+  ) {
   const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
@@ -67,6 +74,7 @@ export async function bookDayVisit(cardno, checkin, checkout, updatedBy, t) {
       gender: 'NA',
       nights: 0,
       status: ROOM_STATUS_PENDING_CHECKIN,
+      bookedBy,
       updatedBy
     },
     { transaction: t }
@@ -185,6 +193,7 @@ export async function bookRoomForMumukshus(
           card.cardno,
           checkin_date,
           checkout_date,
+          null,
           user.cardno,
           t
         );

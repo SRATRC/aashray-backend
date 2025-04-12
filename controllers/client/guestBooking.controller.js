@@ -44,7 +44,7 @@ import {
   checkFlatAlreadyBooked
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { checkRoomAlreadyBooked, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import { bookDayVisit, checkRoomAlreadyBooked, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
   generateOrderId
@@ -302,7 +302,14 @@ async function bookRoom(data, t, user) {
 
     for (const guest of guests) {
       if (nights == 0) {
-        await bookDayVisitForGuest(user, guest, checkin_date, checkout_date, t);
+        const result = await bookDayVisit(
+          guest,
+          checkin_date,
+          checkout_date,
+          user.cardno,
+          user.cardno,
+          t
+        );
       } else {
         const result = await bookRoomForSingleGuest(
           user,
@@ -315,7 +322,6 @@ async function bookRoom(data, t, user) {
           nights,
           t
         );
-        t = result.t;
         amount += result.discountedAmount;
         userBookingIds[guest] = [result.bookingId];
       }
@@ -323,37 +329,6 @@ async function bookRoom(data, t, user) {
   }
 
   return { amount, userBookingIds };
-}
-
-async function bookDayVisitForGuest(
-  user,
-  guest,
-  checkin,
-  checkout,
-  transaction
-) {
-  const booking = await RoomBooking.create(
-    {
-      bookingid: uuidv4(),
-      cardno: guest,
-      bookedBy: user.cardno,
-      roomno: 'NA',
-      roomtype: 'NA',
-      gender: 'NA',
-      nights: 0,
-      checkin,
-      checkout,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      updatedBy: user.cardno
-    },
-    { transaction }
-  );
-
-  if (!booking) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-  }
-
-  return booking;
 }
 
 async function bookRoomForSingleGuest(

@@ -361,6 +361,7 @@ export const roomBooking = async (req, res) => {
       card.cardno,
       checkin_date,
       checkout_date,
+      null,
       card.cardno,
       t
     );
