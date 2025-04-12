@@ -67,42 +67,53 @@ export const gateEntry = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const user = await CardDb.findOne({
-    where: { cardno: req.params.cardno }
-  });
+  try {
+    const user = await CardDb.findOne({
+      where: { cardno: req.params.cardno }
+    });
 
-  user.update(
-    { status: STATUS_ONPREM, updatedBy: req.user.username },
-    { transaction: t }
-  );
-
-  await GateRecord.create(
-    {
-      cardno: req.params.cardno,
-      status: STATUS_ONPREM,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-
-  const today = moment().format('YYYY-MM-DD');
-
-  const booking = await FlatBooking.findOne({
-    where: {
-      cardno: req.params.cardno,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      checkin: { [Sequelize.Op.lte]: today },
-      checkout: { [Sequelize.Op.gte]: today }
+    if (!user) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Card not found in the system.' });
     }
-  });
 
-  if (booking) {
-    booking.status = ROOM_STATUS_CHECKEDIN;
-    await booking.save({ transaction: t });
+    await user.update(
+      { status: STATUS_ONPREM, updatedBy: req.user.username },
+      { transaction: t }
+    );
+
+    await GateRecord.create(
+      {
+        cardno: req.params.cardno,
+        status: STATUS_ONPREM,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+
+    const today = moment().format('YYYY-MM-DD');
+
+    const booking = await FlatBooking.findOne({
+      where: {
+        cardno: req.params.cardno,
+        status: ROOM_STATUS_PENDING_CHECKIN,
+        checkin: { [Sequelize.Op.lte]: today },
+        checkout: { [Sequelize.Op.gte]: today }
+      }
+    });
+
+    if (booking) {
+      booking.status = ROOM_STATUS_CHECKEDIN;
+      await booking.save({ transaction: t });
+    }
+
+    await t.commit();
+    return res.status(200).json({ success: true, message: 'Success' });
+  } catch (err) {
+    console.error('Gate entry error:', err);
+    await t.rollback();
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
   }
-
-  await t.commit();
-  return res.status(200).send({ message: 'Success' });
 };
 
 export const gateExit = async (req, res) => {
