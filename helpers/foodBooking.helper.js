@@ -113,7 +113,7 @@ export async function bookFoodForMumukshus(
   return t;
 }
 
-export async function boodFoodForGuests(
+export async function bookFoodForGuests(
   start_date,
   end_date,
   guestGroup,
@@ -283,6 +283,29 @@ export function createGroupFoodRequest(
   return [
     {
       mumukshus: [cardno],
+      meals,
+      spicy,
+      high_tea
+    }
+  ];
+}
+
+export function createGroupFoodRequestForGuest(
+  cardno,
+  breakfast,
+  lunch,
+  dinner,
+  spicy,
+  high_tea
+) {
+  const meals = [];
+  if (breakfast) meals.push('breakfast');
+  if (lunch) meals.push('lunch');
+  if (dinner) meals.push('dinner');
+
+  return [
+    {
+      guests: [cardno],
       meals,
       spicy,
       high_tea

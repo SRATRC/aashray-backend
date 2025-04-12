@@ -4,7 +4,6 @@ import {
   RoomBooking,
   FlatBooking,
   FlatDb,
-  FoodDb,
   Transactions,
   CardDb,
   GuestRelationship
@@ -31,9 +30,6 @@ import {
   DINNER_PRICE,
   MSG_BOOKING_SUCCESSFUL,
   MSG_UPDATE_SUCCESSFUL,
-  TYPE_GUEST_BREAKFAST,
-  TYPE_GUEST_LUNCH,
-  TYPE_GUEST_DINNER,
   STATUS_GUEST,
   TYPE_GUEST_ROOM,
   STATUS_OPEN
@@ -56,7 +52,7 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
-import { boodFoodForGuests, getFoodBookings } from '../../helpers/foodBooking.helper.js';
+import { bookFoodForGuests, getFoodBookings } from '../../helpers/foodBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -470,7 +466,7 @@ async function checkFoodAvailability(data) {
 async function bookFood(data, t, user) {
   const { start_date, end_date, guestGroup } = data.details;
   
-  const result = await boodFoodForGuests(
+  const result = await bookFoodForGuests(
     start_date,
     end_date,
     guestGroup,
