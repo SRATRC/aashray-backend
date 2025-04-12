@@ -121,20 +121,20 @@ export const gateEntry = async (req, res) => {
   req.transaction = t;
 
   // Check if user exists based on the cardno
-  // const user = await CardDb.findOne({
-  //   where: { cardno: req.params.cardno }
-  // });
+  const user = await CardDb.findOne({
+    where: { cardno: req.params.cardno }
+  });
 
-  // // If user not found, return a 404 error
-  // if (!user) {
-  //   return res.status(404).send({ message: 'User not found.' });
-  // }
+  // If user not found, return a 404 error
+  if (!user) {
+    return res.status(404).send({ message: 'User not found.' });
+  }
 
-  // // Update the user status (assuming the card exists)
-  // await user.update(
-  //   { status: STATUS_ONPREM, updatedBy: req.user.username },
-  //   { transaction: t }
-  // );
+  // Update the user status (assuming the card exists)
+  await user.update(
+    { status: STATUS_ONPREM, updatedBy: req.user.username },
+    { transaction: t }
+  );
 
   // Create a GateRecord entry for the check-in
   await GateRecord.create(
