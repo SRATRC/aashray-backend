@@ -69,6 +69,8 @@ export const TRAVEL_TYPE_FULL = 'full';
 
 // ADMIN ROLES
 export const ROLE_SUPER_ADMIN = 'superAdmin';
+export const ROLE_ROOM_ADMIN = 'roomAdmin';
+export const ROLE_CARD_ADMIN = 'cardAdmin';
 export const ROLE_OFFICE_ADMIN = 'officeAdmin';
 export const ROLE_ADHYAYAN_ADMIN = 'adhyayanAdmin';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
@@ -77,6 +79,8 @@ export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
 export const ROLE_GATE_ADMIN = 'gateAdmin';
 export const ROLE_MAINTENANCE_ADMIN = 'maintenanceAdmin';
+export const ROLE_HOUSEKEEPING_ADMIN = 'housekeepingAdmin';
+export const ROLE_ELECTRICAL_ADMIN = 'electricalAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
