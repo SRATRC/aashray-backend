@@ -5,23 +5,23 @@ import {
 } from '../../config/constants.js';
 import { QueryTypes } from 'sequelize';
 import database from '../../config/database.js';
-import Sequelize, { QueryTypes } from 'sequelize';
+// import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
-import Transactions from '../../models/transactions.model.js';
 
-
-import { Maintenance } from '../../models/maintenance_db.modeljs';
-import { Card } from '../../models/card.model.jsa';
+import {
+  CardDb,
+  MaintenanceDb
+} from '../../models/associations.js';
 
 export const fetchMaintenanceReport = async (req, res) => {
   const { department } = req.params;
 
-  const requests = await Maintenance.findAll({
+  const requests = await MaintenanceDb.findAll({
     where: { department },
     include: [
       {
-        model: Card,
+        model: CardDb,
         as: 'card', // must match association alias
         attributes: ['issuedto', 'mobno']
       }
@@ -105,7 +105,7 @@ export const updateMaintenanceRequest = async (req, res) => {
       return res.status(400).json({ message: 'Booking ID is required.' });
     }
 
-    const maintenance = await Maintenance.findOne({ where: { bookingid } });
+    const maintenance = await MaintenanceDb.findOne({ where: { bookingid } });
 
     if (!maintenance) {
       return res.status(404).json({ message: 'Maintenance request not found.' });
