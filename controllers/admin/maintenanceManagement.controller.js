@@ -22,7 +22,6 @@ export const fetchMaintenanceReport = async (req, res) => {
     include: [
       {
         model: CardDb,
-        as: 'card', // must match association alias
         attributes: ['issuedto', 'mobno']
       }
     ],
