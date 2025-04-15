@@ -459,3 +459,32 @@ export const deleteMenu = async (req, res) => {
 
   return res.status(200).send({ message: 'Menu deleted' });
 };
+
+export const addBulkMenu = async (req, res) => {
+  const { menus } = req.body;
+
+  if (!Array.isArray(menus)) {
+    return res.status(400).json({ message: "Invalid format" });
+  }
+
+  try {
+    // You can validate each item here
+    const bulkData = menus.map(item => ({
+      date: item.date,
+      breakfast: item.breakfast || '',
+      lunch: item.lunch || '',
+      dinner: item.dinner || '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }));
+
+    await Menu.bulkCreate(bulkData, {
+      updateOnDuplicate: ['breakfast', 'lunch', 'dinner', 'updatedAt']
+    });
+
+    res.status(200).json({ message: "Menus uploaded successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
