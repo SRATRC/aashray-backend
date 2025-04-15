@@ -45,7 +45,7 @@ import {
 import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
-import { calculateNights, validateDate,sendUnifiedEmail } from '../helper.js';
+import { calculateNights, validateDate,sendUnifiedEmail, setBookingIdMap } from '../helper.js';
 import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
@@ -56,31 +56,26 @@ export const mumukshuBooking = async (req, res) => {
   var t = await database.transaction();
   req.transaction = t;
 
-  let userBookingIdMap = new Map();
-  
+  const userBookingIdMap = {};
 
-  let amount = await book(req.body, primary_booking, t, req.user,userBookingIdMap);
+  let amount = await book(req.body, primary_booking, t, req.user, userBookingIdMap);
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.body, addon, t, req.user,userBookingIdMap);
+      amount += await book(req.body, addon, t, req.user, userBookingIdMap);
     }
   }
 
-  let order = null;
+  const order = process.env.NODE_ENV == 'prod' && amount > 0 
+    ? await generateOrderId(amount)
+    : { amount }
 
-  if (amount > 0)
-    order =
-      process.env.NODE_ENV == 'prod'
-        ? await generateOrderId(amount)
-        : { amount };
   await t.commit();
   
-  userBookingIdMap.forEach((value, key) => {
-    sendUnifiedEmail(key, value);
-});
-
-  
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  } 
   
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, order });
 };
@@ -125,32 +120,14 @@ export const checkMumukshuOrGuest = async (req, res) => {
   return res.status(200).send({ data: cardDb });
 };
 
-function setBookingIdMap(userBookingIdMap,type,userIdArray){
-  
-  for (const cardno in userIdArray) {
-    let bookingIds = userIdArray[cardno];
-    if( userBookingIdMap.get(cardno))
-      {
-        let bookingTypeIds=userBookingIdMap.get(cardno);
-        bookingTypeIds[type]=bookingIds;
-      }
-      else{
-        let bookingTypeIds = [];
-        bookingTypeIds[type]=bookingIds;
-        userBookingIdMap.set(cardno,bookingTypeIds);
-      }
-}
- 
-}
-
-async function book(body, data, t, user,userBookingIdMap) {
+async function book(body, data, t, user, userBookingIdMap) {
   let amount = 0;
   
   switch (data.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(body, data, t, user);
       amount += roomResult.amount;
-      setBookingIdMap(userBookingIdMap,TYPE_ROOM,roomResult.userBookingIds);
+      setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
@@ -159,13 +136,13 @@ async function book(body, data, t, user,userBookingIdMap) {
 
     case TYPE_TRAVEL:
       const travelResult = await bookTravel(data, t, user);
-      setBookingIdMap(userBookingIdMap,TYPE_TRAVEL,travelResult.userBookingIds);
+      setBookingIdMap(userBookingIdMap, TYPE_TRAVEL, travelResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(data, t, user);
       amount += adhyayanResult.amount;
-      setBookingIdMap(userBookingIdMap,TYPE_ADHYAYAN,adhyayanResult.userBookingIds);
+      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
       break;
 
     case TYPE_UTSAV:
@@ -313,7 +290,7 @@ async function checkRoomAvailability(data) {
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cardDb = await validateCards(mumukshus);
 
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 

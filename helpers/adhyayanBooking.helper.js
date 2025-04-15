@@ -67,38 +67,40 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
-  let amount = 0,bookingId;
-  let userBookingIds = []
+  let amount = 0;
+  const userBookingIds = {};
+
   for (const mumukshu of mumukshus) {
-    let bookingIds = [],
-    idx = 0;
+    const bookingIds = [];
     for (const adhyayan of adhyayans) {
+      const bookingId = uuidv4();
       if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
         await reserveAdhyayanSeat(adhyayan, t);
-        bookingId = uuidv4();
+        
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
             cardno: mumukshu,
             shibir_id: adhyayan.id,
-            status: STATUS_PAYMENT_PENDING
+            status:
+              adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED
           },
           { transaction: t }
         );
-        bookingIds[idx++] = bookingId;
 
-        const { discountedAmount } = await createPendingTransaction(
-          mumukshu,
-          booking,
-          TYPE_ADHYAYAN,
-          adhyayan.amount,
-          user.cardno,
-          t
-        );
+        if (adhyayan.amount > 0) {
+          const { discountedAmount } = await createPendingTransaction(
+            mumukshu,
+            booking,
+            TYPE_ADHYAYAN,
+            adhyayan.amount,
+            user.cardno,
+            t
+          );
 
-        amount += discountedAmount;
+          amount += discountedAmount;
+        }
       } else {
-        bookingId = uuidv4();
         await ShibirBookingDb.create(
           {
             bookingid: bookingId,
@@ -108,15 +110,15 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
           },
           { transaction: t }
         );
-        bookingIds[idx++] = bookingId;
+        
       }
+      bookingIds.push(bookingId);
       
     }
     userBookingIds[mumukshu] = bookingIds;
-    
   }
 
-  return { t, amount ,userBookingIds };
+  return { amount, userBookingIds };
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {

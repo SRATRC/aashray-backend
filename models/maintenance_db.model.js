@@ -1,6 +1,6 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
-import { STATUS_CLOSED, STATUS_OPEN } from '../config/constants.js';
+import { STATUS_CLOSED, STATUS_INPROGRESS, STATUS_OPEN } from '../config/constants.js';
 
 const MaintenanceDb = sequelize.define(
   'MaintenanceDb',
@@ -41,7 +41,7 @@ const MaintenanceDb = sequelize.define(
     status: {
       type: DataTypes.ENUM,
       allowNull: false,
-      values: [STATUS_OPEN, STATUS_CLOSED],
+      values: [STATUS_OPEN, STATUS_CLOSED, STATUS_INPROGRESS],
       defaultValue: STATUS_OPEN
     },
     finished_at: {

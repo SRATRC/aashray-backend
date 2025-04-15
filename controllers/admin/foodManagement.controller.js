@@ -11,15 +11,16 @@ import {
   ERR_INVALID_MEAL_TIME,
   MSG_BOOKING_SUCCESSFUL,
   MSG_FETCH_SUCCESSFUL,
-  MSG_UPDATE_SUCCESSFUL
+  MSG_UPDATE_SUCCESSFUL,
+  STATUS_GUEST
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
-import { bookFoodForMumukshus, cancelFood, createGroupFoodRequest } from '../../helpers/foodBooking.helper.js';
-import { findCardByMobno } from '../../helpers/card.helper.js';
+import { bookFoodForGuests, bookFoodForMumukshus, cancelFood, createGroupFoodRequest, createGroupFoodRequestForGuest } from '../../helpers/foodBooking.helper.js';
+import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 
 export const issuePlate = async (req, res) => {
   const currentTime = moment.utc();
@@ -128,28 +129,52 @@ export const bookFood = async (req, res) => {
   var t = await database.transaction();
   req.transaction = t;
 
-  if (!cardno && mobno) {
-    cardno = (await findCardByMobno(mobno)).cardno;
+  var card;
+  if (cardno) {
+    card = await validateCard(cardno);
+  } else {
+    card = await findCardByMobno(mobno);
   }
 
-  const mumukshuGroup = createGroupFoodRequest(
-    cardno,
-    breakfast,
-    lunch,
-    dinner, 
-    spicy,
-    hightea
-  );
-  
-  await bookFoodForMumukshus(
-    start_date,
-    end_date,
-    mumukshuGroup,
-    null,
-    null,
-    req.user.username,
-    t
-  );
+  if (card.res_status == STATUS_GUEST) {
+    const guestGroup = createGroupFoodRequestForGuest(
+      cardno,
+      breakfast,
+      lunch,
+      dinner, 
+      spicy,
+      hightea
+    );
+    
+    await bookFoodForGuests(
+      start_date,
+      end_date,
+      guestGroup,
+      null,
+      req.user.username,
+      t
+    );
+
+  } else {
+    const mumukshuGroup = createGroupFoodRequest(
+      cardno,
+      breakfast,
+      lunch,
+      dinner, 
+      spicy,
+      hightea
+    );
+    
+    await bookFoodForMumukshus(
+      start_date,
+      end_date,
+      mumukshuGroup,
+      null,
+      null,
+      req.user.username,
+      t
+    );
+  }
 
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
@@ -433,4 +458,33 @@ export const deleteMenu = async (req, res) => {
   if (item == 0) throw new ApiError(404, 'Menu not found');
 
   return res.status(200).send({ message: 'Menu deleted' });
+};
+
+export const addBulkMenu = async (req, res) => {
+  const { menus } = req.body;
+
+  if (!Array.isArray(menus)) {
+    return res.status(400).json({ message: "Invalid format" });
+  }
+
+  try {
+    // You can validate each item here
+    const bulkData = menus.map(item => ({
+      date: item.date,
+      breakfast: item.breakfast || '',
+      lunch: item.lunch || '',
+      dinner: item.dinner || '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }));
+
+    await Menu.bulkCreate(bulkData, {
+      updateOnDuplicate: ['breakfast', 'lunch', 'dinner', 'updatedAt']
+    });
+
+    res.status(200).json({ message: "Menus uploaded successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
 };

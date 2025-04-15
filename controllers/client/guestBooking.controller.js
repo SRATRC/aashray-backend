@@ -4,7 +4,6 @@ import {
   RoomBooking,
   FlatBooking,
   FlatDb,
-  FoodDb,
   Transactions,
   CardDb,
   GuestRelationship
@@ -31,23 +30,21 @@ import {
   DINNER_PRICE,
   MSG_BOOKING_SUCCESSFUL,
   MSG_UPDATE_SUCCESSFUL,
-  TYPE_GUEST_BREAKFAST,
-  TYPE_GUEST_LUNCH,
-  TYPE_GUEST_DINNER,
   STATUS_GUEST,
   TYPE_GUEST_ROOM,
-  STATUS_OPEN
+  STATUS_OPEN,
+  TYPE_FLAT
 } from '../../config/constants.js';
 import {
   calculateNights,
   validateDate,
-  checkGuestRoomAlreadyBooked,
-  checkFlatAlreadyBookedForGuest,
   sendUnifiedEmail,
-  createGuestsHelper
+  createGuestsHelper,
+  setBookingIdMap,
+  checkFlatAlreadyBooked
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import { bookDayVisit, checkRoomAlreadyBooked, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
   generateOrderId
@@ -56,6 +53,7 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
+import { bookFoodForGuests, getFoodBookings } from '../../helpers/foodBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -63,35 +61,24 @@ export const guestBooking = async (req, res) => {
   req.transaction = t;
 
   let amount = 0;
-  var bookingIdMap = {};
+  const userBookingIdMap = {};
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(
-        primary_booking,
-        t,
-        req.user,
-        bookingIdMap
-      );
-      t = roomResult.t;
+      const roomResult = await bookRoom(primary_booking, t, req.user);
       amount += roomResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
       const foodResult = await bookFood(primary_booking, t, req.user);
-      t = foodResult.t;
       amount += foodResult.amount;
       break;
 
     case TYPE_ADHYAYAN:
-      const adhyayanResult = await bookAdhyayan(
-        primary_booking,
-        t,
-        req.user,
-        bookingIdMap
-      );
-      t = adhyayanResult.t;
+      const adhyayanResult = await bookAdhyayan(primary_booking, t, req.user);
       amount += adhyayanResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
       break;
 
     default:
@@ -102,26 +89,20 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          const roomResult = await bookRoom(addon, t, req.user, bookingIdMap);
-          t = roomResult.t;
+          const roomResult = await bookRoom(addon, t, req.user);
           amount += roomResult.amount;
+          setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
           break;
 
         case TYPE_FOOD:
           const foodResult = await bookFood(addon, t, req.user);
-          t = foodResult.t;
           amount += foodResult.amount;
           break;
 
         case TYPE_ADHYAYAN:
-          const adhyayanResult = await bookAdhyayan(
-            addon,
-            t,
-            req.user,
-            bookingIdMap
-          );
-          t = adhyayanResult.t;
+          const adhyayanResult = await bookAdhyayan(addon, t, req.user);
           amount += adhyayanResult.amount;
+          setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
           break;
 
         default:
@@ -130,10 +111,18 @@ export const guestBooking = async (req, res) => {
     }
   }
 
-  const order = await generateOrderId(amount);
+  const order = process.env.NODE_ENV == 'prod' && amount > 0 
+    ? await generateOrderId(amount)
+    : { amount }
 
   await t.commit();
-  sendUnifiedEmail(req.user, bookingIdMap);
+
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  }
+
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -230,11 +219,10 @@ async function checkRoomAvailability(user, data) {
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
   if (
-    await checkGuestRoomAlreadyBooked(
+    await checkRoomAlreadyBooked(
       checkin_date,
       checkout_date,
-      user.cardno,
-      totalGuests
+      ...totalGuests
     )
   ) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
@@ -281,14 +269,14 @@ async function checkRoomAvailability(user, data) {
   return roomDetails;
 }
 
-async function bookRoom(data, t, user, bookingIdMap) {
+async function bookRoom(data, t, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
 
   let amount = 0;
-  let bookingIds = [],
-    idx = 0;
+  let userBookingIds = {};
+
   const nights = await calculateNights(checkin_date, checkout_date);
   const totalGuests = guestGroup.flatMap((group) => group.guests);
 
@@ -296,10 +284,15 @@ async function bookRoom(data, t, user, bookingIdMap) {
     attributes: ['cardno', 'issuedto', 'gender'],
     where: { cardno: totalGuests, res_status: STATUS_GUEST }
   });
+
+  if (guest_db.length != totalGuests.length) {
+    throw new ApiError(404, 'Guest not found');
+  }
+
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
   if (
-    await checkGuestRoomAlreadyBooked(checkin_date, checkout_date, totalGuests)
+    await checkRoomAlreadyBooked(checkin_date, checkout_date, ...totalGuests)
   ) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
@@ -309,7 +302,14 @@ async function bookRoom(data, t, user, bookingIdMap) {
 
     for (const guest of guests) {
       if (nights == 0) {
-        await bookDayVisitForGuest(user, guest, checkin_date, checkout_date, t);
+        const result = await bookDayVisit(
+          guest,
+          checkin_date,
+          checkout_date,
+          user.cardno,
+          user.cardno,
+          t
+        );
       } else {
         const result = await bookRoomForSingleGuest(
           user,
@@ -322,45 +322,13 @@ async function bookRoom(data, t, user, bookingIdMap) {
           nights,
           t
         );
-        t = result.t;
         amount += result.discountedAmount;
-        bookingIds[idx++] = result.bookingId;
+        userBookingIds[guest] = [result.bookingId];
       }
     }
   }
-  bookingIdMap[TYPE_ROOM] = bookingIds;
-  return { t, amount };
-}
 
-async function bookDayVisitForGuest(
-  user,
-  guest,
-  checkin,
-  checkout,
-  transaction
-) {
-  const booking = await RoomBooking.create(
-    {
-      bookingid: uuidv4(),
-      cardno: guest,
-      bookedBy: user.cardno,
-      roomno: 'NA',
-      roomtype: 'NA',
-      gender: 'NA',
-      nights: 0,
-      checkin,
-      checkout,
-      status: ROOM_STATUS_PENDING_CHECKIN,
-      updatedBy: user.cardno
-    },
-    { transaction }
-  );
-
-  if (!booking) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
-  }
-
-  return booking;
+  return { amount, userBookingIds };
 }
 
 async function bookRoomForSingleGuest(
@@ -430,32 +398,17 @@ async function checkFoodAvailability(data) {
 
   validateDate(start_date, end_date);
 
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
-
+  const guests = guestGroup.flatMap((group) => group.guests);
   const allDates = getDates(start_date, end_date);
+  const bookings = await getFoodBookings(allDates, guests);
+
   var charge = 0;
-
-  const bookings = await FoodDb.findAll({
-    where: {
-      date: allDates,
-      cardno: totalGuests
-    }
-  });
-
-  let bookingsByGuest = {};
-  for (const booking of bookings) {
-    bookingsByGuest[booking.guest] ||= {};
-    bookingsByGuest[booking.guest][booking.date] = booking;
-  }
-
   for (const group of guestGroup) {
     const { meals, guests } = group;
 
     for (const date of allDates) {
       for (const guest of guests) {
-        const booking = bookingsByGuest[guest]
-          ? bookingsByGuest[guest][date]
-          : null;
+        const booking = bookings[guest] && bookings[guest][date];
 
         if (booking) {
           // Only charge for meals that weren't previously booked
@@ -483,129 +436,18 @@ async function checkFoodAvailability(data) {
 }
 
 async function bookFood(data, t, user) {
-  const meals_object = [
-    {
-      name: 'breakfast',
-      price: BREAKFAST_PRICE,
-      type: TYPE_GUEST_BREAKFAST
-    },
-    { name: 'lunch', price: LUNCH_PRICE, type: TYPE_GUEST_LUNCH },
-    { name: 'dinner', price: DINNER_PRICE, type: TYPE_GUEST_DINNER }
-  ];
-
   const { start_date, end_date, guestGroup } = data.details;
-  let amount = 0;
+  
+  const result = await bookFoodForGuests(
+    start_date,
+    end_date,
+    guestGroup,
+    user.cardno,
+    user.cardno,
+    t
+  );
 
-  validateDate(start_date, end_date);
-
-  const guests = guestGroup.flatMap((group) => group.guests);
-  const guestDb = await CardDb.findAll({
-    where: { cardno: guests, res_status: STATUS_GUEST },
-    attributes: ['cardno']
-  });
-
-  if (guestDb.length != guests.length) {
-    throw new ApiError(404, 'Guest not found');
-  }
-
-  const allDates = getDates(start_date, end_date);
-  const bookings = await FoodDb.findAll({
-    where: {
-      date: allDates,
-      cardno: guests
-    }
-  });
-
-  let bookingsByCard = {};
-  for (const booking of bookings) {
-    bookingsByCard[booking.cardno] ||= {};
-    bookingsByCard[booking.cardno][booking.date] = booking;
-  }
-
-  var bookingsToCreate = [];
-  var transactionsToCreate = [];
-  for (const group of guestGroup) {
-    const { meals, spicy, high_tea, guests } = group;
-
-    const breakfast = meals.includes('breakfast');
-    const lunch = meals.includes('lunch');
-    const dinner = meals.includes('dinner');
-
-    const mealSelections = { breakfast, lunch, dinner };
-
-    for (const guest of guests) {
-      for (const date of allDates) {
-        const booking = bookingsByCard[guest]
-          ? bookingsByCard[guest][date]
-          : null;
-
-        if (booking) {
-          // Only charge for meals that weren't previously booked
-          meals_object.forEach((meal) => {
-            if (mealSelections[meal.name] && !booking[meal.name]) {
-              amount += meal.price;
-
-              transactionsToCreate.push({
-                cardno: user.cardno,
-                bookingid: booking.dataValues.id,
-                category: meal.type,
-                amount: meal.price,
-                status: STATUS_PAYMENT_PENDING,
-                updatedBy: user.cardno
-              });
-            }
-          });
-
-          await booking.update(
-            {
-              breakfast: booking.breakfast || breakfast,
-              lunch: booking.lunch || lunch,
-              dinner: booking.dinner || dinner,
-              hightea: high_tea,
-              spicy,
-              updatedBy: user.cardno
-            },
-            { transaction: t }
-          );
-        } else {
-          const bookingId = uuidv4();
-
-          bookingsToCreate.push({
-            id: bookingId,
-            cardno: guest,
-            bookedBy: user.cardno,
-            date,
-            breakfast,
-            lunch,
-            dinner,
-            spicy,
-            hightea: high_tea,
-            plateissued: 0,
-            updatedBy: user.cardno
-          });
-
-          meals_object.forEach((meal) => {
-            if (mealSelections[meal.name]) {
-              amount += meal.price;
-
-              transactionsToCreate.push({
-                cardno: user.cardno,
-                bookingid: bookingId,
-                category: meal.type,
-                amount: meal.price,
-                status: STATUS_PAYMENT_PENDING,
-                updatedBy: user.cardno
-              });
-            }
-          });
-        }
-      }
-    }
-  }
-
-  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
-  await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
-  return { t, amount };
+  return result;
 }
 
 async function checkAdhyayanAvailability(data) {
@@ -648,8 +490,10 @@ async function checkAdhyayanAvailability(data) {
   return adhyayanDetails;
 }
 
-async function bookAdhyayan(data, t, user, bookingIdMap) {
+async function bookAdhyayan(data, t, user) {
   const { shibir_ids, guests } = data.details;
+  const userBookingIds = {};
+
   let amount = 0,
     idx = 0;
 
@@ -679,35 +523,41 @@ async function bookAdhyayan(data, t, user, bookingIdMap) {
 
   var booking_data = [];
   var transaction_data = [];
-  var bookingIds = [];
+
   for (const guest of guests) {
+    const bookingIds = [];
     for (var shibir of shibirs) {
       const bookingid = uuidv4();
-      bookingIds[idx++] = bookingid;
-      if (shibir.dataValues.available_seats > 0) {
+
+      if (shibir.available_seats > 0 && shibir.status == STATUS_OPEN) {
         booking_data.push({
           bookingid: bookingid,
           shibir_id: shibir.dataValues.id,
           cardno: guest,
           bookedBy: user.cardno,
-          status: STATUS_PAYMENT_PENDING,
+          status:
+            shibir.dataValues.amount > 0
+              ? STATUS_PAYMENT_PENDING
+              : STATUS_CONFIRMED,
           updatedBy: user.cardno
         });
 
         shibir.available_seats -= 1;
         await shibir.save({ transaction: t });
 
-        transaction_data.push({
-          cardno: user.cardno,
-          bookingid: bookingid,
-          category: TYPE_GUEST_ADHYAYAN,
-          type: TYPE_EXPENSE,
-          amount: shibir.dataValues.amount,
-          status: STATUS_PAYMENT_PENDING,
-          updatedBy: user.cardno
-        });
+        if (shibir.dataValues.amount > 0) {
+          transaction_data.push({
+            cardno: user.cardno,
+            bookingid: bookingid,
+            category: TYPE_GUEST_ADHYAYAN,
+            type: TYPE_EXPENSE,
+            amount: shibir.dataValues.amount,
+            status: STATUS_PAYMENT_PENDING,
+            updatedBy: user.cardno
+          });
 
-        amount += shibir.dataValues.amount;
+          amount += shibir.dataValues.amount;
+        }
       } else {
         bookingIds[idx++] = bookingid;
         booking_data.push({
@@ -719,14 +569,18 @@ async function bookAdhyayan(data, t, user, bookingIdMap) {
           updatedBy: user.cardno
         });
       }
+
+      bookingIds.push(bookingid);
     }
+
+    userBookingIds[guest] = bookingIds;
   }
-  bookingIdMap[TYPE_ADHYAYAN] = bookingIds;
+  
 
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
-  return { t, amount };
+  return { amount, userBookingIds };
 }
 
 export const fetchGuests = async (req, res) => {
@@ -798,17 +652,21 @@ export const guestBookingFlat = async (req, res) => {
   validateDate(startDay, endDay);
 
   for (var guest of guests) {
-    if (await checkFlatAlreadyBookedForGuest(startDay, endDay, guest['cardno']))
+    if (await checkFlatAlreadyBooked(startDay, endDay, guest['cardno']))
       throw new ApiError(400, `flat already Booked for ${guest['name']}`);
   }
 
   const nights = await calculateNights(startDay, endDay);
   var t = await database.transaction();
 
-  let booking = [];
+  let bookings = [];
+  const userBookingIds = {};
+
   for (var guest of guests) {
-    booking.push({
-      bookingid: uuidv4(),
+    const bookingId = uuidv4();
+
+    bookings.push({
+      bookingid: bookingId,
       cardno: guest.cardno,
       flatno: flatDb.dataValues.flatno,
       checkin: startDay,
@@ -817,9 +675,20 @@ export const guestBookingFlat = async (req, res) => {
       updatedBy: req.user.cardno,
       status: ROOM_STATUS_PENDING_CHECKIN
     });
+
+    userBookingIds[guest.cardno] = [bookingId];
   }
 
-  await FlatBooking.bulkCreate(booking, { transaction: t });
+  await FlatBooking.bulkCreate(bookings, { transaction: t });
   await t.commit();
+
+  const userBookingIdMap = {};
+  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
+
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  }
+
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

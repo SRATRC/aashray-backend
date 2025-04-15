@@ -11,7 +11,8 @@ import {
   validateDate,
   calculateNights,
   checkFlatAlreadyBooked,
-  sendUnifiedEmail
+  sendUnifiedEmail,
+  setBookingIdMap
 } from '../helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
@@ -150,10 +151,13 @@ export const FlatBookingMumukshu = async (req, res) => {
   req.transaction = t;
 
   let flat_bookings = [];
+  const userBookingIds = {};
 
   for (var mumukshu of mumukshus) {
+    const bookingId = uuidv4();
+
     flat_bookings.push({
-      bookingid: uuidv4(),
+      bookingid: bookingId,
       cardno: mumukshu['cardno'],
       flatno: flatDb.dataValues.flatno,
       checkin: startDay,
@@ -162,21 +166,21 @@ export const FlatBookingMumukshu = async (req, res) => {
       updatedBy: req.user.cardno,
       status: ROOM_STATUS_PENDING_CHECKIN
     });
+
+    userBookingIds[mumukshu['cardno']] = [bookingId];
   }
 
   await FlatBooking.bulkCreate(flat_bookings, { transaction: t });
 
   await t.commit();
-  let bookingIdMap = {},
-    bookingIds = [];
-  let idx = 0;
+  
+  const userBookingIdMap = {};
+  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
 
-  flat_bookings.forEach((flatBooking) => {
-    bookingIds[idx++] = flatBooking.bookingid;
-  });
-
-  bookingIdMap["type_flat"] = bookingIds;
-
-  sendUnifiedEmail(req.user, bookingIdMap);
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  }
+  
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
