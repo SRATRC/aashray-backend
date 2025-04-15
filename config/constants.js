@@ -37,6 +37,7 @@ export const STATUS_AVAILABLE = 'available';
 export const STATUS_TAKEN = 'taken';
 export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
+export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
 export const STATUS_PAYMENT_COMPLETED = 'completed';
@@ -50,7 +51,7 @@ export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
-export const STATUS_INPROGRESS = 'inprogress';
+
 
 
 // ROOM
