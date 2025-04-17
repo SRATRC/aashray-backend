@@ -12,6 +12,7 @@ const FlatDb = sequelize.define(
     owner: {
       type: DataTypes.STRING,
       allowNull: false,
+      primaryKey: true,
       references: {
         model: 'card_db',
         key: 'cardno'
