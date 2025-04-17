@@ -51,53 +51,8 @@ import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import {
-  adjustAmount,
-  adminCancelTransaction
+  adjustAmount
 } from '../../helpers/transactions.helper.js';
-
-export const cancelBooking = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
-
-  const booking = await RoomBooking.findOne({
-    where: {
-      bookingid: req.params.bookingid,
-      status: {
-        [Sequelize.Op.notIn]: [
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_CHECKEDOUT,
-          STATUS_ADMIN_CANCELLED,
-          STATUS_CANCELLED
-        ]
-      }
-    }
-  });
-
-  if (!booking) {
-    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
-  }
-
-  var transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
-  });
-
-  if (transaction) {
-    await adminCancelTransaction(req.user, transaction, t);
-  }
-
-  await booking.update(
-    {
-      status: STATUS_ADMIN_CANCELLED,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-
-  await t.commit();
-  return res
-    .status(200)
-    .send({ message: MSG_CANCEL_SUCCESSFUL, data: booking });
-};
 
 export const manualCheckin = async (req, res) => {
   const t = await database.transaction();
