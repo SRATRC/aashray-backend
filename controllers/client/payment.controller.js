@@ -92,4 +92,10 @@ export const completePayment = async (req, res) => {
 
   await t.commit();
   res.status(200).json({ message: 'Payment successful.' });
+
+
+  // for (const cardno in userBookingIdMap) {
+  //   const bookings = userBookingIdMap[cardno];
+  //   sendUnifiedEmail(cardno, bookings, req.user);
+  // }
 }
