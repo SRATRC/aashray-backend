@@ -16,6 +16,7 @@ export const TYPE_UTSAV = 'utsav';
 export const TYPE_GUEST_UTSAV = 'guest_utsav';
 export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
+export const RAZORPAY_CALLBACK = 'razorpay_callback';
 
 // PRICES
 export const BREAKFAST_PRICE = 50;

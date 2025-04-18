@@ -19,76 +19,85 @@ import {
   TYPE_TRAVEL,
   TYPE_UTSAV,
   TYPE_GUEST_UTSAV,
+  TYPE_FOOD,
 } from '../config/constants.js';
 import ApiError from '../utils/ApiError.js';
 
-export async function getBooking(transaction) {
+const bookingTypeMap = {
+  [TYPE_ROOM]: TYPE_ROOM,
+  [TYPE_GUEST_ROOM]: TYPE_ROOM,
+  [TYPE_FLAT]: TYPE_FLAT,
+  [TYPE_GUEST_FLAT]: TYPE_FLAT,
+  [TYPE_ADHYAYAN]: TYPE_ADHYAYAN,
+  [TYPE_GUEST_ADHYAYAN]: TYPE_ADHYAYAN,
+  [TYPE_GUEST_BREAKFAST]: TYPE_FOOD,
+  [TYPE_GUEST_LUNCH]: TYPE_FOOD,
+  [TYPE_GUEST_DINNER]: TYPE_FOOD,
+  [TYPE_TRAVEL]: TYPE_TRAVEL,
+  [TYPE_UTSAV]: TYPE_UTSAV,
+  [TYPE_GUEST_UTSAV]: TYPE_GUEST_UTSAV
+}
+
+export async function getBooking(bookingType, bookingid) {
   var booking = null;
 
-    switch(transaction.category) {
+    switch(bookingType) {
       case TYPE_ROOM:
-      case TYPE_GUEST_ROOM:
         booking = await RoomBooking.findOne({
-          where: {
-            bookingid: transaction.bookingid
-          }
+          where: { bookingid }
         });
         break;
 
       case TYPE_FLAT:
-      case TYPE_GUEST_FLAT:
         booking = await FlatBooking.findOne({
-          where: {
-            bookingid: transaction.bookingid
-          }
+          where: { bookingid }
         });
         break;
 
       case TYPE_ADHYAYAN:
-      case TYPE_GUEST_ADHYAYAN:
         booking = await ShibirBookingDb.findOne({
-          where: {
-            bookingid: transaction.bookingid
-          }
+          where: { bookingid }
         });
         break;
 
-      case TYPE_GUEST_BREAKFAST:
-      case TYPE_GUEST_LUNCH:
-      case TYPE_GUEST_DINNER:
+      case TYPE_FOOD:
         booking = await FoodDb.findOne({
-          where: {
-            id: transaction.bookingid
-          }
+          where: { id: bookingid }
         });
         break;
 
       case TYPE_TRAVEL:
         booking = await TravelDb.findOne({
-          where: {
-            id: transaction.bookingid
-          }
+          where: { bookingid }
         });
         break;
 
       case TYPE_UTSAV:
-      case TYPE_GUEST_UTSAV:
         booking = await UtsavBooking.findOne({
-          where: {
-            id: transaction.bookingid
-          }
+          where: { bookingid }
         });
         break;
 
       default:
-        throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${transaction.category}`);
+        throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${bookingType}`);
     }
 
   return booking;
 }
 
-export async function confirmBooking(booking, updatedBy, t) {
-  const bookingStatus = booking instanceof RoomBooking 
+export function getBookingType(transaction) {
+  const bookingType = bookingTypeMap[transaction.category];
+
+  if (!bookingType) {
+    throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${transaction.category}`);
+  }
+  
+  return bookingType;
+}
+
+export async function confirmBooking(bookingType, booking, updatedBy, t) {
+  // TODO: Fix the status for Room bookings
+  const bookingStatus = bookingType == TYPE_ROOM
     ? ROOM_STATUS_CHECKEDIN 
     : STATUS_CONFIRMED;
 
