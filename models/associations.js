@@ -149,6 +149,19 @@ Transactions.belongsTo(CardDb, {
   targetKey: 'cardno'
 });
 
+// In models/index.js or where you define associations
+MaintenanceDb.belongsTo(CardDb, {
+  foreignKey: 'requested_by',
+  targetKey: 'cardno',
+  as: 'card'
+});
+CardDb.hasMany(MaintenanceDb, {
+  foreignKey: 'requested_by',
+  sourceKey: 'cardno',
+  as: 'maintenanceRequests'
+});
+
+
 // Food
 FoodDb.belongsTo(CardDb, {
   foreignKey: 'cardno',

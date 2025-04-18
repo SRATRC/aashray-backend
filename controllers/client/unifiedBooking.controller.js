@@ -37,7 +37,7 @@ import {
 import { generateOrderId } from '../../helpers/transactions.helper.js';
 import { TravelDb } from '../../models/associations.js';
 import { bookTravelForMumukshus } from '../../helpers/travelBooking.helper.js';
-import { calculateNights, validateDate, sendUnifiedEmail } from '../helper.js';
+import { calculateNights, validateDate, sendUnifiedEmail, setBookingIdMap } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -49,24 +49,26 @@ export const unifiedBooking = async (req, res) => {
 
   var t = await database.transaction();
   req.transaction = t;
-  let bookingIds = [];
+  const userBookingIdMap = {};
 
-  let amount = await book(req.user, req.body, primary_booking, bookingIds, t);
+  let amount = await book(req.user, req.body, primary_booking, userBookingIdMap, t);
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.user, req.body, addon, bookingIds, t);
+      amount += await book(req.user, req.body, addon, userBookingIdMap, t);
     }
   }
-  let order = null;
-  if (amount > 0)
-    order =
-      process.env.NODE_ENV == 'prod'
-        ? await generateOrderId(amount)
-        : { amount };
+  
+  const order = process.env.NODE_ENV == 'prod' && amount > 0 
+    ? await generateOrderId(amount)
+    : { amount }
 
   await t.commit();
-  sendUnifiedEmail(req.user, bookingIds);
+
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  }
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -93,14 +95,16 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-async function book(user, body, data, bookingIds, t) {
+
+ 
+async function book(user, body, data, userBookingIdMap, t) {
   let amount = 0;
 
   switch (data.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(user, body, data, t);
       amount += roomResult.amount;
-      bookingIds[TYPE_ROOM] = roomResult.userBookingIds[user.cardno];
+      setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
@@ -109,14 +113,13 @@ async function book(user, body, data, bookingIds, t) {
 
     case TYPE_TRAVEL:
       const travelResult = await bookTravel(user, data, t);
-      bookingIds[TYPE_TRAVEL] = travelResult.userBookingIds[user.cardno];
+      setBookingIdMap(userBookingIdMap, TYPE_TRAVEL, travelResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(user, data, t);
       amount += adhyayanResult.amount;
-      bookingIds[TYPE_ADHYAYAN] = adhyayanResult.userBookingIds[user.cardno];
-
+      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
       break;
 
     case TYPE_UTSAV:

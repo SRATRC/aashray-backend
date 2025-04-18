@@ -91,40 +91,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
   return result.length > 0;
 }
 
-export async function checkFlatAlreadyBookedForGuest(
-  checkin,
-  checkout,
-  guest_id
-) {
-  const result = await FlatBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
-          ]
-        }
-      ],
-      cardno: guest_id
-    }
-  });
-
-  return result.length > 0;
-}
-
 export async function calculateNights(checkin, checkout) {
   const date1 = new Date(checkin);
   const date2 = new Date(checkout);
@@ -213,171 +179,24 @@ export async function checkRoomBookingProgress(
   return false;
 }
 
-export function findClosestSum(arr, target) {
-  let closestSum = null;
-  let closestIndices = null;
+/*
+ * Input: 
+ *    userBookingIds: { cardno: [bookingIds] }
+ *    userBookingIdMap: { cardno: { type: [bookingIds] } } 
+ * Output: 
+ *    userBookingIdMap: { cardno: { type: [bookingIds] } } 
+ */
+export function setBookingIdMap(userBookingIdMap, type, userBookingIds) {
+  for (const cardno in userBookingIds) {
+    const bookingIds = userBookingIds[cardno];
+    const userBookingIdsByType = userBookingIdMap[cardno] || {};
 
-  function findExactSum(
-    arr,
-    n,
-    target,
-    currentSum = 0,
-    currentIndices = [],
-    index = 0
-  ) {
-    if (currentSum === target) {
-      closestSum = currentSum;
-      closestIndices = [...currentIndices];
-      return true;
-    }
-    if (index === n || currentSum > target) {
-      return false;
-    }
-
-    return (
-      findExactSum(
-        arr,
-        n,
-        target,
-        currentSum + arr[index],
-        [...currentIndices, index],
-        index + 1
-      ) || findExactSum(arr, n, target, currentSum, currentIndices, index + 1)
-    );
-  }
-
-  function findClosestSubsetSum(
-    arr,
-    target,
-    index,
-    currentSum,
-    currentIndices
-  ) {
-    if (index === arr.length) {
-      if (
-        closestSum === null ||
-        Math.abs(target - currentSum) < Math.abs(target - closestSum)
-      ) {
-        closestSum = currentSum;
-        closestIndices = [...currentIndices];
-      }
-      return;
-    }
-
-    findClosestSubsetSum(arr, target, index + 1, currentSum, currentIndices);
-    findClosestSubsetSum(arr, target, index + 1, currentSum + arr[index], [
-      ...currentIndices,
-      index
-    ]);
-  }
-
-  if (arr.includes(target)) {
-    closestSum = target;
-    closestIndices = [arr.indexOf(target)];
-    return { closestSum, closestIndices };
-  }
-
-  if (findExactSum(arr, arr.length, target)) {
-    return { closestSum, closestIndices };
-  }
-
-  findClosestSubsetSum(arr, target, 0, 0, []);
-
-  return { closestSum, closestIndices };
-}
-
-export async function checkGuestRoomAlreadyBooked(checkin, checkout, guests) {
-  const result = await RoomBooking.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
-          ]
-        }
-      ],
-      cardno: guests,
-      status: {
-        [Sequelize.Op.in]: [
-          STATUS_WAITING,
-          ROOM_STATUS_CHECKEDIN,
-          ROOM_STATUS_PENDING_CHECKIN
-        ]
-      }
-    }
-  });
-
-  if (result.length > 0) {
-    return true;
-  } else {
-    return false;
+    userBookingIdsByType[type] = bookingIds;
+    userBookingIdMap[cardno] = userBookingIdsByType;
   }
 }
 
-export async function checkGuestFoodAlreadyBooked(
-  start_date,
-  end_date,
-  guests
-) {
-  const startDate = new Date(start_date);
-  const endDate = new Date(end_date);
-
-  const allDates = getDates(startDate, endDate);
-  const food_bookings = await FoodDb.findAll({
-    where: {
-      date: { [Sequelize.Op.in]: allDates },
-      cardno: { [Sequelize.Op.in]: guests }
-    }
-  });
-
-  if (food_bookings.length > 0) return true;
-  else return false;
-}
-
-export async function checkGuestSpecialAllowance(start_date, end_date, guests) {
-  const adhyayans = await ShibirBookingDb.findAll({
-    include: [
-      {
-        model: ShibirDb,
-        where: {
-          start_date: {
-            [Sequelize.Op.lte]: start_date
-          },
-          end_date: {
-            [Sequelize.Op.gte]: end_date
-          }
-        }
-      }
-    ],
-    where: {
-      cardno: guests,
-      status: STATUS_CONFIRMED
-    }
-  });
-
-  if (adhyayans) {
-    for (var data of adhyayans) {
-      if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
-    }
-  }
-
-  return false;
-}
-
-export async function sendUnifiedEmail(user, bookingIds) {
+export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
@@ -389,7 +208,6 @@ export async function sendUnifiedEmail(user, bookingIds) {
     travelBookingDetails = [],
     flatBookingDetails = [];
   //GetData for adhyan
-  let idx = 0;
   if (wasAdhyanBooked) {
     const adhyanBookings = await ShibirBookingDb.findAll({
       include: [
@@ -403,9 +221,9 @@ export async function sendUnifiedEmail(user, bookingIds) {
         bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
       }
     });
-    idx = 0;
+
     adhyanBookings.forEach((adhyanBooking) => {
-      adhyanBookingDetails[idx++] = {
+      adhyanBookingDetails.push({
         bookingid: adhyanBooking.bookingid,
         name: adhyanBooking.dataValues.ShibirDb.name,
         speaker: adhyanBooking.dataValues.ShibirDb.speaker,
@@ -416,7 +234,7 @@ export async function sendUnifiedEmail(user, bookingIds) {
           'Do MMMM, YYYY'
         ),
         status: adhyanBooking.status
-      };
+      });
     });
   }
   if (wasRajprvasBooked) {
@@ -426,14 +244,13 @@ export async function sendUnifiedEmail(user, bookingIds) {
       }
     });
 
-    idx = 0;
     travelBookings.forEach((travelBooking) => {
-      travelBookingDetails[idx++] = {
+      travelBookingDetails.push({
         bookingid: travelBooking.bookingid,
         date: moment(travelBooking.date).format('Do MMMM, YYYY'),
         pickuppoint: travelBooking.pickup_point,
         dropoffpoint: travelBooking.drop_point
-      };
+      });
     });
   }
 
@@ -443,13 +260,12 @@ export async function sendUnifiedEmail(user, bookingIds) {
         bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_ROOM] }
       }
     });
-    idx = 0;
     roomBookings.forEach((roomBooking) => {
-      roomBookingDetails[idx++] = {
+      roomBookingDetails.push({
         bookingid: roomBooking.bookingid,
         checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
         checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
-      };
+      });
     });
   }
 
@@ -460,33 +276,40 @@ export async function sendUnifiedEmail(user, bookingIds) {
       }
     });
 
-    idx = 0;
     flatBookings.forEach((flatBooking) => {
-      flatBookingDetails[idx++] = {
+      flatBookingDetails.push({
         bookingid: flatBooking.bookingid,
         flatno: flatBooking.flatno,
         checkin: moment(flatBooking.checkin).format('Do MMMM, YYYY'),
         checkout: moment(flatBooking.checkout).format('Do MMMM, YYYY')
-      };
+      });
     });
   }
-   
-  sendMail({
-    email: user.email,
-    subject: `Your Booking Confirmation for Stay at SRATRC`,
-    template: 'unifiedBookingEmail',
-    context: {
-      showAdhyanDetail: wasAdhyanBooked,
-      showRoomDetail: wasRoomBooked,
-      showTravelDetail: wasRajprvasBooked,
-      showFlatDetail: wasFlatBooked,
-      name: user.issuedto,
-      roomBookingDetails,
-      adhyanBookingDetails,
-      travelBookingDetails,
-      flatBookingDetails
-    }
+
+  const user = await CardDb.findOne({
+    where: { cardno }
   });
+
+  const email = user.email || bookedBy.email;
+
+  if (email) {
+    sendMail({
+      email: email,
+      subject: `Your Booking Confirmation for Stay at SRATRC`,
+      template: 'unifiedBookingEmail',
+      context: {
+        showAdhyanDetail: wasAdhyanBooked,
+        showRoomDetail: wasRoomBooked,
+        showTravelDetail: wasRajprvasBooked,
+        showFlatDetail: wasFlatBooked,
+        name: user.issuedto,
+        roomBookingDetails,
+        adhyanBookingDetails,
+        travelBookingDetails,
+        flatBookingDetails
+      }
+    });
+  }
 }
 
 export async function createGuestsHelper(cardno, guests, t) {

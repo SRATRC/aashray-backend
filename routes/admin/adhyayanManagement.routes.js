@@ -13,12 +13,13 @@ import {
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
-  ROLE_ADHYAYAN_ADMIN
+  ROLE_ADHYAYAN_ADMIN,
+  ROLE_OFFICE_ADMIN
 } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
-router.use(authorizeRoles(ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN));
+router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN));
 
 router.post('/create', CatchAsync(createAdhyayan));
 router.get('/fetch', CatchAsync(fetchAllAdhyayan));

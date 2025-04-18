@@ -37,6 +37,7 @@ export const STATUS_AVAILABLE = 'available';
 export const STATUS_TAKEN = 'taken';
 export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
+export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
 export const STATUS_PAYMENT_COMPLETED = 'completed';
@@ -50,6 +51,8 @@ export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
+
+
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
@@ -67,6 +70,8 @@ export const TRAVEL_TYPE_FULL = 'full';
 
 // ADMIN ROLES
 export const ROLE_SUPER_ADMIN = 'superAdmin';
+export const ROLE_ROOM_ADMIN = 'roomAdmin';
+export const ROLE_CARD_ADMIN = 'cardAdmin';
 export const ROLE_OFFICE_ADMIN = 'officeAdmin';
 export const ROLE_ADHYAYAN_ADMIN = 'adhyayanAdmin';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
@@ -74,6 +79,9 @@ export const ROLE_FOOD_ADMIN = 'foodAdmin';
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
 export const ROLE_GATE_ADMIN = 'gateAdmin';
+export const ROLE_MAINTENANCE_ADMIN = 'maintenanceAdmin';
+export const ROLE_HOUSEKEEPING_ADMIN = 'housekeepingAdmin';
+export const ROLE_ELECTRICAL_ADMIN = 'electricalAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

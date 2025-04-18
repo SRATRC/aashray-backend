@@ -55,7 +55,14 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   return result.length > 0;
 }
 
-export async function bookDayVisit(cardno, checkin, checkout, updatedBy, t) {
+export async function bookDayVisit(
+  cardno, 
+  checkin, 
+  checkout,
+  bookedBy,
+  updatedBy,
+  t
+  ) {
   const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
@@ -67,6 +74,7 @@ export async function bookDayVisit(cardno, checkin, checkout, updatedBy, t) {
       gender: 'NA',
       nights: 0,
       status: ROOM_STATUS_PENDING_CHECKIN,
+      bookedBy,
       updatedBy
     },
     { transaction: t }
@@ -173,18 +181,20 @@ export async function bookRoomForMumukshus(
   const nights = await calculateNights(checkin_date, checkout_date);
 
   let amount = 0;
-  let userBookingIds = [];
+  let userBookingIds = {};
   for (const group of mumukshuGroup) {
     const { roomType, floorType, mumukshus } = group;
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
+      const bookedBy = card.cardno == user.cardno ? null : user.cardno;
 
       if (nights == 0) {
         const result = await bookDayVisit(
           card.cardno,
           checkin_date,
           checkout_date,
+          bookedBy,
           user.cardno,
           t
         );
@@ -203,11 +213,11 @@ export async function bookRoomForMumukshus(
         );
 
         amount += result.discountedAmount;
-        userBookingIds[card.cardno]=[result.bookingId];
+        userBookingIds[card.cardno] = [result.bookingId];
       }
     }
   }
-  return { t, amount, userBookingIds };
+  return { amount, userBookingIds };
 }
 
 export async function createRoomBooking(
@@ -292,9 +302,7 @@ export async function bookRoomDuringUtsavForMumukshus(
     const { roomType, floorType, checkin_date, checkout_date, mumukshus } =
       group;
 
-    if (
-      await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)
-    ) {
+    if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
       throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
     }
 

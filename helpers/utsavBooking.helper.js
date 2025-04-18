@@ -75,7 +75,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     bookings.push(booking);
   }
 
-  return { t, amount: total_amount, bookingIds: bookings };
+  return { amount: total_amount, bookingIds: bookings };
 }
 
 export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {

@@ -16,7 +16,7 @@ export const login = async (req, res) => {
   if (!admin) {
     throw new ApiError(404, 'Invalid Username');
   }
-
+  
   const roles = await AdminRoles.findAll({
     attributes: ['role_name'],
     where: { user_id: admin.dataValues.id, status: STATUS_ACTIVE }
