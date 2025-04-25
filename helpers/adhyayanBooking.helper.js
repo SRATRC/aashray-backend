@@ -76,14 +76,16 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
       const bookingId = uuidv4();
       if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
         await reserveAdhyayanSeat(adhyayan, t);
-        
+
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
             cardno: mumukshu,
+            bookedBy: user.cardno !== mumukshu ? user.cardno : null,
             shibir_id: adhyayan.id,
             status:
-              adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED
+              adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED,
+            updatedBy: user.cardno
           },
           { transaction: t }
         );
@@ -110,10 +112,8 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
           },
           { transaction: t }
         );
-        
       }
       bookingIds.push(bookingId);
-      
     }
     userBookingIds[mumukshu] = bookingIds;
   }

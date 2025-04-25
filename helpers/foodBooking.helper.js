@@ -16,7 +16,12 @@ import {
   checkSpecialAllowance,
   validateDate
 } from '../controllers/helper.js';
-import { CardDb, FoodDb, Transactions, UtsavDb } from '../models/associations.js';
+import {
+  CardDb,
+  FoodDb,
+  Transactions,
+  UtsavDb
+} from '../models/associations.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -96,6 +101,7 @@ export async function bookFoodForMumukshus(
             id: uuidv4(),
             cardno: mumukshu,
             date,
+            bookedBy: updatedBy !== mumukshu ? updatedBy : null,
             breakfast,
             lunch,
             dinner,
@@ -121,25 +127,24 @@ export async function bookFoodForGuests(
   updatedBy,
   t
 ) {
-
   const meals_object = [
     {
       name: 'breakfast',
       price: BREAKFAST_PRICE,
       type: TYPE_GUEST_BREAKFAST
     },
-    { 
-      name: 'lunch', 
-      price: LUNCH_PRICE, 
+    {
+      name: 'lunch',
+      price: LUNCH_PRICE,
       type: TYPE_GUEST_LUNCH
     },
-    { 
-      name: 'dinner', 
-      price: DINNER_PRICE, 
+    {
+      name: 'dinner',
+      price: DINNER_PRICE,
       type: TYPE_GUEST_DINNER
     }
   ];
-  
+
   validateDate(start_date, end_date);
 
   const guests = guestGroup.flatMap((group) => group.guests);
@@ -154,7 +159,7 @@ export async function bookFoodForGuests(
 
   const allDates = getDates(start_date, end_date);
   const bookings = await getFoodBookings(allDates, guests);
-  
+
   var bookingsToCreate = [];
   var transactionsToCreate = [];
   var amount = 0;
