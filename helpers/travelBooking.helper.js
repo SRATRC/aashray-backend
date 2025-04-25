@@ -58,6 +58,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
+        bookedBy: user.cardno !== mumukshu ? user.cardno : null,
         status: STATUS_WAITING,
         date,
         type,
