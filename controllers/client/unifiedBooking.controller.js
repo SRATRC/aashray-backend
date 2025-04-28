@@ -1,16 +1,15 @@
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
-  STATUS_CONFIRMED,
   STATUS_WAITING,
   TYPE_TRAVEL,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
   MSG_BOOKING_SUCCESSFUL,
-  ERR_TRAVEL_ALREADY_BOOKED,
   STATUS_OPEN,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  ERR_INVALID_DATE
 } from '../../config/constants.js';
 import {
   bookRoomDuringUtsavForMumukshus,
@@ -35,12 +34,19 @@ import {
   validateUtsavs
 } from '../../helpers/utsavBooking.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
-import { TravelDb } from '../../models/associations.js';
-import { bookTravelForMumukshus } from '../../helpers/travelBooking.helper.js';
-import { calculateNights, validateDate, sendUnifiedEmail, setBookingIdMap } from '../helper.js';
+import {
+  bookTravelForMumukshus,
+  checkTravelAlreadyBooked
+} from '../../helpers/travelBooking.helper.js';
+import {
+  calculateNights,
+  validateDate,
+  sendUnifiedEmail,
+  setBookingIdMap
+} from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import Sequelize from 'sequelize';
+import moment from 'moment';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -51,17 +57,24 @@ export const unifiedBooking = async (req, res) => {
   req.transaction = t;
   const userBookingIdMap = {};
 
-  let amount = await book(req.user, req.body, primary_booking, userBookingIdMap, t);
+  let amount = await book(
+    req.user,
+    req.body,
+    primary_booking,
+    userBookingIdMap,
+    t
+  );
 
   if (addons) {
     for (const addon of addons) {
       amount += await book(req.user, req.body, addon, userBookingIdMap, t);
     }
   }
-  
-  const order = process.env.NODE_ENV == 'prod' && amount > 0 
-    ? await generateOrderId(amount)
-    : { amount }
+
+  const order =
+    process.env.NODE_ENV == 'prod' && amount > 0
+      ? await generateOrderId(amount)
+      : { amount };
 
   await t.commit();
 
@@ -95,8 +108,6 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-
- 
 async function book(user, body, data, userBookingIdMap, t) {
   let amount = 0;
 
@@ -113,13 +124,21 @@ async function book(user, body, data, userBookingIdMap, t) {
 
     case TYPE_TRAVEL:
       const travelResult = await bookTravel(user, data, t);
-      setBookingIdMap(userBookingIdMap, TYPE_TRAVEL, travelResult.userBookingIds);
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_TRAVEL,
+        travelResult.userBookingIds
+      );
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(user, data, t);
       amount += adhyayanResult.amount;
-      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.userBookingIds
+      );
       break;
 
     case TYPE_UTSAV:
@@ -149,7 +168,7 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_TRAVEL:
-      response.travelDetails = await checkTravelAvailability(data);
+      response.travelDetails = await checkTravelAvailability(user, data);
       totalCharge += response.travelDetails.charge;
       break;
 
@@ -382,24 +401,15 @@ async function checkFoodAvailability(user, body, data) {
   };
 }
 
-async function checkTravelAvailability(data) {
-  const { date, pickup_point, drop_point, type } = data.details;
+async function checkTravelAvailability(user, data) {
+  const { date } = data.details;
 
-  const whereCondition = {
-    status: { [Sequelize.Op.in]: [STATUS_CONFIRMED, STATUS_WAITING] },
-    date: { [Sequelize.Op.eq]: date }
-  };
-
-  if (pickup_point == 'RC') whereCondition.pickup_point = pickup_point;
-  else if (drop_point == 'RC') whereCondition.drop_point = drop_point;
-
-  const travelBookings = await TravelDb.findAll({
-    where: whereCondition
-  });
-
-  if (travelBookings.length > 0) {
-    throw new ApiError(400, ERR_TRAVEL_ALREADY_BOOKED);
+  const today = moment().format('YYYY-MM-DD');
+  if (date <= today) {
+    throw new ApiError(400, ERR_INVALID_DATE);
   }
+
+  await checkTravelAlreadyBooked(date, [user.cardno]);
 
   return {
     status: STATUS_WAITING,

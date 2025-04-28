@@ -3,22 +3,22 @@ import {
   ERR_TRAVEL_ALREADY_BOOKED,
   FULL_TRAVEL_PRICE,
   STATUS_CONFIRMED,
+  STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
   TRAVEL_PRICE,
-  TRAVEL_TYPE_FULL,
-  TYPE_TRAVEL
+  TRAVEL_TYPE_FULL
 } from '../config/constants.js';
 import { TravelDb } from '../models/associations.js';
-import ApiError from '../utils/ApiError.js';
 import { validateCards } from './card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
+import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
 
 export async function checkTravelAlreadyBooked(date, ...mumukshus) {
   const booking = await TravelDb.findOne({
     where: {
       cardno: mumukshus,
-      status: [STATUS_CONFIRMED, STATUS_WAITING],
+      status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING],
       date: date
     }
   });
