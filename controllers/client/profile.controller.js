@@ -284,49 +284,57 @@ export const fetchProfile = async (req, res) => {
 
 export const fetchPendingTransactions = async (req, res) => {
   const transactions = await database.query(
-    `
-    SELECT combined.*,
+    `SELECT combined.bookingid,
+       combined.booked_for,
+       combined.booked_by,
+       combined.start_day,
+       combined.end_day,
+       combined.name,
        card_db.issuedto AS booked_by_name,
        transactions.amount,
        transactions.category
 FROM
-  (SELECT t1.bookingid,
-          t1.cardno AS booked_for,
-          t1.bookedBy AS booked_by,
-          t1.checkin AS start_day,
-          t1.checkout AS end_day,
-          NULL AS name
+  (-- Room Bookings
+ SELECT t1.bookingid,
+        t1.cardno AS booked_for,
+        t1.bookedBy AS booked_by,
+        t1.checkin AS start_day,
+        t1.checkout AS end_day,
+        NULL AS name
    FROM room_booking t1
-   UNION SELECT t2.bookingid,
-                t2.cardno AS booked_for,
-                t2.bookedBy AS booked_by,
-                t2.date AS start_day,
-                NULL AS end_day,
-                NULL AS name
+   UNION ALL -- Travel Bookings
+ SELECT t2.bookingid,
+        t2.cardno AS booked_for,
+        t2.bookedBy AS booked_by,
+        t2.date AS start_day,
+        NULL AS end_day,
+        NULL AS name
    FROM travel_db t2
-   UNION SELECT t3.bookingid,
-                t3.cardno AS booked_for,
-                t3.bookedBy AS booked_by,
-                t4.start_date AS start_day,
-                t4.end_date AS end_day,
-                t4.name
+   UNION ALL -- Shibir Bookings
+ SELECT t3.bookingid,
+        t3.cardno AS booked_for,
+        t3.bookedBy AS booked_by,
+        t4.start_date AS start_day,
+        t4.end_date AS end_day,
+        t4.name
    FROM shibir_booking_db t3
    LEFT JOIN shibir_db t4 ON t3.shibir_id = t4.id
-   UNION SELECT t5.bookingid,
-                t5.cardno AS booked_for,
-                t5.bookedBy AS booked_by,
-                t6.start_date AS start_day,
-                t6.end_date AS end_day,
-                t7.name
+   UNION ALL -- Utsav Bookings
+ SELECT t5.bookingid,
+        t5.cardno AS booked_for,
+        t5.bookedBy AS booked_by,
+        t6.start_date AS start_day,
+        t6.end_date AS end_day,
+        t7.name
    FROM utsav_booking t5
    LEFT JOIN utsav_packages_db t6 ON t5.packageid = t6.id
-   LEFT JOIN utsav_db t7 ON t5.utsavid = t7.id) AS combined
-LEFT JOIN transactions ON combined.bookingid = transactions.bookingid
-LEFT JOIN card_db ON combined.booked_by = card_db.cardno
-WHERE (combined.booked_for = :cardno
-       OR combined.booked_by = :cardno)
-  AND transactions.status='pending';
-`,
+   LEFT JOIN utsav_db t7 ON t5.utsavid = t7.id) AS combined -- Only include transactions that are pending
+INNER JOIN transactions ON combined.bookingid = transactions.bookingid
+AND transactions.status = 'pending' -- Get name of person who booked
+LEFT JOIN card_db ON combined.booked_by = card_db.cardno -- Filter by card number
+
+WHERE combined.booked_for = :cardno
+  OR combined.booked_by = :cardno;`,
     {
       replacements: {
         cardno: req.user.cardno
