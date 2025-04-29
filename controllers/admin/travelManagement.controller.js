@@ -600,13 +600,15 @@ export const updateBookingStatus = async (req, res) => {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
+  const bookedBy = booking.bookedBy || booking.cardno;
+
   let transaction = await Transactions.findOne({ where: { bookingid } });
 
   switch (status) {
     case STATUS_PAYMENT_PENDING:
       if (!transaction) {
         transaction = await createPendingTransaction(
-          booking.cardno,
+          bookedBy,
           booking,
           TYPE_TRAVEL,
           travelCharge(booking.type),
