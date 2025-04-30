@@ -1,7 +1,11 @@
 import {
   STATUS_PAYMENT_PENDING,
   STATUS_CASH_PENDING,
-  RAZORPAY_CALLBACK
+  RAZORPAY_CALLBACK,
+  STATUS_PAYMENT_COMPLETED,
+  ROOM_STATUS_PENDING_CHECKIN,
+  STATUS_CONFIRMED,
+  TYPE_ROOM
 } from '../../config/constants.js';
 import { completeRazorpayTransaction } from '../../helpers/transactions.helper.js';
 import { Transactions } from '../../models/associations.js';
@@ -25,7 +29,7 @@ export const verifyPayment = async (req, res) => {
     throw new ApiError(400, 'Payment verification failed. Please try again.');    
   }
 
-  const transactions = Transactions.findAll({
+  const transactions = await Transactions.findAll({
     where: {
       razorpay_order_id,
       status: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING]
@@ -49,13 +53,25 @@ export const verifyPayment = async (req, res) => {
 
     const booking = await getBooking(bookingType, transaction.bookingid);
     
-    await confirmBooking(bookingType, booking, updatedBy, t);
+    const bookingStatus = bookingType == TYPE_ROOM
+      ? ROOM_STATUS_PENDING_CHECKIN
+      : STATUS_CONFIRMED;
+
+    await booking.update(
+      {
+        status: bookingStatus,
+        updatedBy
+      },
+      { transaction: t }
+    );
   
-    await completeRazorpayTransaction(
-      transaction, 
-      razorpay_payment_id, 
-      updatedBy, 
-      t
+    await transaction.update(
+      {
+        status: STATUS_PAYMENT_COMPLETED,
+        razorpay_payment_id,
+        updatedBy
+      },
+      { transaction: t }
     );
 
     setBookingIdMap(

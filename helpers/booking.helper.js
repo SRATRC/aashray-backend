@@ -20,6 +20,7 @@ import {
   TYPE_UTSAV,
   TYPE_GUEST_UTSAV,
   TYPE_FOOD,
+  ROOM_STATUS_PENDING_CHECKIN,
 } from '../config/constants.js';
 import ApiError from '../utils/ApiError.js';
 
@@ -93,21 +94,4 @@ export function getBookingType(transaction) {
   }
   
   return bookingType;
-}
-
-export async function confirmBooking(bookingType, booking, updatedBy, t) {
-  // TODO: Fix the status for Room bookings
-  const bookingStatus = bookingType == TYPE_ROOM
-    ? ROOM_STATUS_CHECKEDIN 
-    : STATUS_CONFIRMED;
-
-  booking.update(
-    {
-      status: bookingStatus,
-      updatedBy
-    },
-    { transaction: t }
-  );
-
-  return booking;
 }

@@ -315,21 +315,3 @@ export async function cancelPendingBookings() {
 
   // TODO: implement logic to cancel transactions
 }
-
-export async function completeRazorpayTransaction(
-  transaction, 
-  razorpay_payment_id, 
-  updatedBy, 
-  t
-) {
-  transaction.update(
-    {
-      status: STATUS_PAYMENT_COMPLETED,
-      razorpay_payment_id,
-      updatedBy
-    },
-    { transaction: t }
-  );
-
-  return transaction;
-}
