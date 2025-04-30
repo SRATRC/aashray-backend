@@ -73,7 +73,7 @@ app.use(httpLogger);
 
 app.use(
   session({
-    secret: 'temp_dev_secret_123!@#secure',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false, maxAge: 86400000 }
@@ -114,7 +114,7 @@ app.use('/api/v1/mumukshu', mumukshuRoutes);
 
 // Test route for sending notification
 app.post('/test-notification', async (req, res) => {
-  const token = 'ExponentPushToken[vnpGo5Pyo4JteD6cp1zYax]'; // The token you want to test with
+  const token = req.body.token;
 
   try {
     const notificationResponse = await sendNotification([
