@@ -36,7 +36,7 @@ const bookingTypeMap = {
   [TYPE_GUEST_DINNER]: TYPE_FOOD,
   [TYPE_TRAVEL]: TYPE_TRAVEL,
   [TYPE_UTSAV]: TYPE_UTSAV,
-  [TYPE_GUEST_UTSAV]: TYPE_GUEST_UTSAV
+  [TYPE_GUEST_UTSAV]: TYPE_UTSAV
 }
 
 export async function getBooking(bookingType, bookingid) {
