@@ -7,13 +7,12 @@ import {
   STATUS_CONFIRMED,
   TYPE_ROOM
 } from '../../config/constants.js';
-import { completeRazorpayTransaction } from '../../helpers/transactions.helper.js';
 import { Transactions } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { validateWebhookSignature } from 'razorpay/dist/utils/razorpay-utils.js';
-import { confirmBooking, getBooking, getBookingType } from '../../helpers/booking.helper.js';
+import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 
 export const verifyPayment = async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
