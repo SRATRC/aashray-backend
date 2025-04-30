@@ -13,6 +13,7 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { validateWebhookSignature } from 'razorpay/dist/utils/razorpay-utils.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
+import { validateCard } from '../../helpers/card.helper.js';
 
 export const verifyPayment = async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
@@ -84,12 +85,13 @@ export const verifyPayment = async (req, res) => {
   }
 
   await t.commit();
-  res.status(200).json({ message: 'Payment successful.' });
 
   for (const cardno in userBookingIdMap) {
     const bookings = userBookingIdMap[cardno];
-    sendUnifiedEmail(cardno, bookings, bookedBy);
+    await sendUnifiedEmail(cardno, bookings, bookedBy);
   }
+
+  res.status(200).json({ message: 'Payment successful.' });
 }
 
 /*
