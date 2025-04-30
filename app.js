@@ -73,7 +73,7 @@ app.use(httpLogger);
 
 app.use(
   session({
-    secret: process.env['SESSION_SECRET'],
+    secret: 'temp_dev_secret_123!@#secure',
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false, maxAge: 86400000 }
@@ -114,11 +114,6 @@ app.use('/api/v1/unified', unifiedBookingRoutes);
 app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/mumukshu', mumukshuRoutes);
 
-// if any unknown endpoint is hit then the error is handelled
-app.use((_req, _res) => {
-  throw new ApiError(404, 'Page Not Found');
-});
-app.use(ErrorHandler);
 
 const port = process.env.PORT || 3000;
 const server = app.listen(port, () => {
@@ -127,3 +122,57 @@ const server = app.listen(port, () => {
 
 // Export the app and a function to close the database connection
 export { app, sequelize, server };
+
+
+
+// server.js or app.js
+
+import { sendNotification } from './utils/sendNotification.js'; // Adjust path as needed
+
+app.use(express.json());  // Middleware to parse JSON bodies
+
+// Test route for sending notification
+app.post('/test-notification', async (req, res) => {
+  const token = 'ExponentPushToken[vnpGo5Pyo4JteD6cp1zYax]'; // The token you want to test with
+
+  try {
+    const notificationResponse = await sendNotification([
+      {
+        token,
+        title: 'Test Notification',
+        body: 'This is a test notification!',
+        screen: 'TestScreen',
+        data: { someKey: 'someValue' }
+      }
+    ]);
+
+    return res.status(200).send({
+      message: 'Notification sent successfully',
+      tickets: notificationResponse,
+    });
+  } catch (error) {
+    console.error('Error sending notification:', error);
+    return res.status(500).send({
+      message: 'Error sending notification',
+      error,
+    });
+  }
+});
+
+// Other routes for your app (your existing routes)
+// Example:
+app.post('/some-other-route', (req, res) => {
+  // your logic here
+});
+
+// Start the server
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+// if any unknown endpoint is hit then the error is handelled
+app.use((_req, _res) => {
+  throw new ApiError(404, 'Page Not Found');
+});
+app.use(ErrorHandler);
