@@ -1,12 +1,13 @@
 import './config/environment.js';
 import express, { urlencoded, json } from 'express';
+import { ErrorHandler } from './middleware/Error.js';
+import { httpLogger } from './middleware/Logger.js';
+import { sendNotification } from './utils/sendNotification.js';
 import cors from 'cors';
 import session from 'express-session';
 import sequelize from './config/database.js';
 import ApiError from './utils/ApiError.js';
-import { ErrorHandler } from './middleware/Error.js';
 import logger from './config/logger.js';
-import { httpLogger } from './middleware/Logger.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -73,7 +74,7 @@ app.use(httpLogger);
 
 app.use(
   session({
-    secret: 'temp_dev_secret_123!@#secure',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false, maxAge: 86400000 }
@@ -108,32 +109,14 @@ app.use('/api/v1/admin/travel', travelManagementRoutes);
 app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
 
-
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
 app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/mumukshu', mumukshuRoutes);
 
-
-const port = process.env.PORT || 3000;
-const server = app.listen(port, () => {
-  logger.info(`Server is listening on port ${port}...`);
-});
-
-// Export the app and a function to close the database connection
-export { app, sequelize, server };
-
-
-
-// server.js or app.js
-
-import { sendNotification } from './utils/sendNotification.js'; // Adjust path as needed
-
-app.use(express.json());  // Middleware to parse JSON bodies
-
 // Test route for sending notification
 app.post('/test-notification', async (req, res) => {
-  const token = 'ExponentPushToken[vnpGo5Pyo4JteD6cp1zYax]'; // The token you want to test with
+  const token = req.body.token;
 
   try {
     const notificationResponse = await sendNotification([
@@ -148,31 +131,28 @@ app.post('/test-notification', async (req, res) => {
 
     return res.status(200).send({
       message: 'Notification sent successfully',
-      tickets: notificationResponse,
+      tickets: notificationResponse
     });
   } catch (error) {
     console.error('Error sending notification:', error);
     return res.status(500).send({
       message: 'Error sending notification',
-      error,
+      error
     });
   }
-});
-
-// Other routes for your app (your existing routes)
-// Example:
-app.post('/some-other-route', (req, res) => {
-  // your logic here
-});
-
-// Start the server
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
 
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {
   throw new ApiError(404, 'Page Not Found');
 });
+
 app.use(ErrorHandler);
+
+const port = process.env.PORT || 3000;
+const server = app.listen(port, () => {
+  logger.info(`Server is listening on port ${port}...`);
+});
+
+// Export the app and a function to close the database connection
+export { app, sequelize, server };
