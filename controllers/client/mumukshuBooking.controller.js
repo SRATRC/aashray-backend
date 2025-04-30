@@ -36,7 +36,8 @@ import {
 import {
   bookFoodForMumukshus,
   bookFoodForMumukshusDuringUtsav,
-  getFoodBookings
+  getFoodBookings,
+  validateFood
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
@@ -92,11 +93,11 @@ export const validateBooking = async (req, res) => {
     totalCharge: 0
   };
 
-  await validate(primary_booking, response);
+  await validate(req.body, primary_booking, response);
 
   if (addons) {
     for (const addon of addons) {
-      await validate(addon, response);
+      await validate(req.body, addon, response);
     }
   }
 
@@ -157,7 +158,7 @@ async function book(body, data, t, user, userBookingIdMap) {
   return amount;
 }
 
-async function validate(data, response) {
+async function validate(body, data, response) {
   let totalCharge = 0;
   switch (data.booking_type) {
     case TYPE_ROOM:
@@ -169,7 +170,7 @@ async function validate(data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(data);
+      response.foodDetails = await checkFoodAvailability(body, data);
       // totalCharge += foodDetails.charge;
       break;
 
@@ -339,15 +340,25 @@ async function checkRoomAvailability(data) {
   return roomDetails;
 }
 
-async function checkFoodAvailability(data) {
+async function checkFoodAvailability(body, data) {
   const { start_date, end_date, mumukshuGroup } = data.details;
   validateDate(start_date, end_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  await validateCards(mumukshus);
+
+  const cards = await validateCards(mumukshus);
+  for (const card of cards) {
+    await validateFood(
+      start_date, 
+      end_date, 
+      body.primary_booking, 
+      body.addons, 
+      card
+    );
+  }
 
   const allDates = getDates(start_date, end_date);
-  const bookings = await getFoodBookings(allDates, ...mumukshus);
+  const bookings = await getFoodBookings(allDates, mumukshus);
 
   var charge = 0;
 
