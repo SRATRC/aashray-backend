@@ -73,10 +73,10 @@ export const mumukshuBooking = async (req, res) => {
 
   await t.commit();
   
-  for (const cardno in userBookingIdMap) {
-    const bookings = userBookingIdMap[cardno];
-    sendUnifiedEmail(cardno, bookings, req.user);
-  } 
+  // for (const cardno in userBookingIdMap) {
+  //   const bookings = userBookingIdMap[cardno];
+  //   sendUnifiedEmail(cardno, bookings, req.user);
+  // } 
   
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, order });
 };
