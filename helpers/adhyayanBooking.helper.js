@@ -92,7 +92,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
 
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
-            mumukshu,
+            user.cardno,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
@@ -152,8 +152,9 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
     );
 
     // for a booking in waiting status, there should be no existing transaction
+    const bookedBy = booking.bookedBy || booking.cardno;
     const transaction = await createPendingTransaction(
-      cardno,
+      bookedBy,
       booking,
       TYPE_ADHYAYAN,
       adhyayan.amount,

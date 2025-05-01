@@ -20,7 +20,7 @@ router.get('/total', CatchAsync(fetchTotal));
 router.get('/totalPR', CatchAsync(fetchPR));
 router.get('/totalMumukshu', CatchAsync(fetchMumukshu));
 router.get('/totalSeva', CatchAsync(fetchSevaKutir));
-router.post('/entry/:cardno', CatchAsync(gateEntry));
+router.post('/entry', CatchAsync(gateEntry));
 router.post('/exit/:cardno', CatchAsync(gateExit));
 router.get('/gaterecords', CatchAsync(gateRecord));
 

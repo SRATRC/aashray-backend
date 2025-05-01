@@ -120,9 +120,11 @@ export const gateEntry = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  const { cardno } = req.body;
+
   // Check if user exists based on the cardno
   const user = await CardDb.findOne({
-    where: { cardno: req.params.cardno }
+    where: { cardno }
   });
 
   // If user not found, return a 404 error
@@ -139,7 +141,7 @@ export const gateEntry = async (req, res) => {
   // Create a GateRecord entry for the check-in
   await GateRecord.create(
     {
-      cardno: req.params.cardno,
+      cardno,
       status: STATUS_ONPREM,
       updatedBy: req.user.username
     },
