@@ -45,8 +45,8 @@ import {
 } from '../../helpers/utsavBooking.helper.js';
 import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
-import { generateOrderId } from '../../helpers/transactions.helper.js';
-import { calculateNights, validateDate,sendUnifiedEmail, setBookingIdMap } from '../helper.js';
+import { generateOrderId, updateRazorpayTransactions } from '../../helpers/transactions.helper.js';
+import { calculateNights, validateDate,sendUnifiedEmail, setBookingIdMap, retrieveBookingIds } from '../helper.js';
 import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
@@ -67,10 +67,10 @@ export const mumukshuBooking = async (req, res) => {
     }
   }
 
-  const order = process.env.NODE_ENV == 'prod' && amount > 0 
-    ? await generateOrderId(amount)
-    : { amount }
-
+  const order = await generateOrderId(amount);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);  
+  await updateRazorpayTransactions(bookingIds, order.id, t);
+  
   await t.commit();
   
   // for (const cardno in userBookingIdMap) {

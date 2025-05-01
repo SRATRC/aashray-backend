@@ -196,6 +196,13 @@ export function setBookingIdMap(userBookingIdMap, type, userBookingIds) {
   }
 }
 
+export function retrieveBookingIds(userBookingIdMap) {
+  return Object.values(userBookingIdMap).map(
+    (bookingIdsByType) => Object.values(bookingIdsByType).flat()
+  ).flat();
+}
+
+
 export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;

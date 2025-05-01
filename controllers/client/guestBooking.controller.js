@@ -41,13 +41,15 @@ import {
   sendUnifiedEmail,
   createGuestsHelper,
   setBookingIdMap,
-  checkFlatAlreadyBooked
+  checkFlatAlreadyBooked,
+  retrieveBookingIds
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { bookDayVisit, checkRoomAlreadyBooked, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
-  generateOrderId
+  generateOrderId,
+  updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -111,10 +113,10 @@ export const guestBooking = async (req, res) => {
     }
   }
 
-  const order = process.env.NODE_ENV == 'prod' && amount > 0 
-    ? await generateOrderId(amount)
-    : { amount }
-
+  const order = await generateOrderId(amount);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);  
+  await updateRazorpayTransactions(bookingIds, order.id, t);
+  
   await t.commit();
 
   // for (const cardno in userBookingIdMap) {

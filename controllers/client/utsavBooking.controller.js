@@ -19,6 +19,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   createPendingTransaction,
   generateOrderId,
+  updateRazorpayTransactions,
   userCancelBooking
 } from '../../helpers/transactions.helper.js';
 import { createGuestsHelper } from '../helper.js';
@@ -153,24 +154,8 @@ export const BookUtsav = async (req, res) => {
   }
 
   const order = await generateOrderId(utsav_package.amount);
-
-  const userInfo = await CardDb.findOne({
-    where: {
-      cardno: req.user.cardno
-    }
-  });
-
-  sendMail({
-    email: userInfo.email,
-    subject: `Your Booking Confirmation for Stay at SRATRC`,
-    template: 'unifiedBookingEmail',
-    context: {
-      bookingid: bookingId,
-      packageType: TYPE_UTSAV,
-      name: userInfo.issuedto
-    }
-  });
-
+  await updateRazorpayTransactions([booking.id], order.id, t);
+  
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
@@ -235,6 +220,8 @@ export const BookGuestUtsav = async (req, res) => {
   }
 
   const order = await generateOrderId(total_amount);
+  const bookingIds = bookings.map((booking) => booking.bookingid);
+  await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
   res.status(200).send({
@@ -312,6 +299,8 @@ export const BookMumukshuUtsav = async (req, res) => {
   }
 
   const order = await generateOrderId(total_amount);
+  const bookingIds = bookings.map((booking) => booking.bookingid);
+  await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
   res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
