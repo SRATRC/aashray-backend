@@ -53,6 +53,7 @@ const job = cron.schedule('*/10 * * * *', async () => {
     logger.error('Cron job error:', error);
   }
 
+  // TODO: send notifications
   logger.info('Cron job finishing...');
 });
 
