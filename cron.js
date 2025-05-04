@@ -14,8 +14,10 @@ import {
   TYPE_GUEST_BREAKFAST, 
   TYPE_GUEST_DINNER, 
   TYPE_GUEST_ROOM, 
+  TYPE_GUEST_UTSAV, 
   TYPE_ROOM, 
-  TYPE_TRAVEL 
+  TYPE_TRAVEL, 
+  TYPE_UTSAV
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import ShibirBookingDb from './models/shibir_booking_db.model.js';
@@ -23,26 +25,26 @@ import FoodDb from './models/food_db.model.js';
 import TravelDb from './models/travel_db.model.js';
 import AdminUsers from './models/admin_users.model.js';
 import { cancelFood } from './helpers/foodBooking.helper.js';
+import UtsavBooking from './models/utsav_boking.model.js';
 
 // Schedule the cron job to run every 10 minutes
 const job = cron.schedule('*/10 * * * *', async () => {
   logger.info('Cron job starting...');
 
   try {
-    const userBookingIds = new Map();
     await database.authenticate();
-
-    // Cancel bookings created before 1 hr, but not paid
-    const cancelTimeFilter = moment.utc().subtract(60, 'minutes');
 
     const systemUser = AdminUsers.findOne({
       where: { username: "admin" } 
     })
 
+    // Find bookings created before 1 hr, but not paid
+    const cancelTimeFilter = moment.utc().subtract(60, 'minutes');
     const transactions = await getPendingTransactions(cancelTimeFilter);
 
     console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
 
+    const userBookingIds = {};
     for (const transaction of transactions) {
       await cancelTransaction(userBookingIds, systemUser, transaction);
     }
@@ -66,8 +68,7 @@ async function cancelTransaction(userBookingIds, user, transaction) {
       case TYPE_GUEST_ROOM:
         booking = await RoomBooking.findOne({
           where: { 
-            bookingid: transaction.bookingid,
-            status: [ROOM_STATUS_PENDING_CHECKIN]
+            bookingid: transaction.bookingid
           }
         });
         await cancelBooking(user, booking, transaction);
@@ -78,8 +79,7 @@ async function cancelTransaction(userBookingIds, user, transaction) {
       case TYPE_GUEST_ADHYAYAN:
         booking = await ShibirBookingDb.findOne({
           where: { 
-            bookingid: transaction.bookingid,
-            status: [STATUS_PAYMENT_PENDING]
+            bookingid: transaction.bookingid
           }
         });
         await cancelBooking(user, booking, transaction);
@@ -89,12 +89,22 @@ async function cancelTransaction(userBookingIds, user, transaction) {
       case TYPE_TRAVEL:
         booking = await TravelDb.findOne({
           where: { 
-            bookingid: transaction.bookingid,
-            status: [STATUS_PAYMENT_PENDING]
+            bookingid: transaction.bookingid
           }
         });
         await cancelBooking(user, booking, transaction);
         addToUserBookingIdMap(userBookingIds, transaction.cardno, transaction.bookingid, TYPE_TRAVEL);
+        break;
+
+      case TYPE_UTSAV:
+      case TYPE_GUEST_UTSAV:
+        booking = await UtsavBooking.findOne({
+          where: { 
+            bookingid: transaction.bookingid
+          }
+        });
+        await cancelBooking(user, booking, transaction);
+        addToUserBookingIdMap(userBookingIds, transaction.cardno, transaction.bookingid, TYPE_UTSAV);
         break;
       
       case TYPE_GUEST_BREAKFAST:
