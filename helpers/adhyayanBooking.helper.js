@@ -39,6 +39,24 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
   }
 }
 
+export async function checkAdhyayanParamGyanSabha(date) {
+  const adhyayan = await ShibirDb.findOne({
+    attributes: ['name', 'speaker'],       
+    where: {
+      name: 'Param Gyaan Sabha',
+      start_date: date,
+      status: STATUS_OPEN
+    }
+  });
+
+  if (adhyayan) {
+     return true;
+  }
+
+  return false;
+  }
+
+
 export async function validateAdhyayans(...shibirIds) {
   const shibirs = await ShibirDb.findAll({
     where: { id: shibirIds }

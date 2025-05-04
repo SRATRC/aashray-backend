@@ -9,6 +9,8 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
+import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
+import { STATUS_AWAITING_CONFIRMATION } from '../../config/constants.js';
 
 export const FetchUpcoming = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -59,7 +61,7 @@ export const CancelTravel = async (req, res) => {
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
-      status: [STATUS_WAITING, STATUS_CONFIRMED]
+      status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED]
     }
   });
 
@@ -82,6 +84,8 @@ export const CancelTravel = async (req, res) => {
        drop:booking.drop_point
      }
    });
-
+   //bring people from the waiting to awaiting confrimation.
+   updateWaitingTravelBooking(booking.date);
+   
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
