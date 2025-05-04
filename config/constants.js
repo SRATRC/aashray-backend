@@ -29,6 +29,7 @@ export const FULL_TRAVEL_PRICE = 1800;
 // STATUS
 export const STATUS_WAITING = 'waiting';
 export const STATUS_CONFIRMED = 'confirmed';
+export const STATUS_AWAITING_CONFIRMATION = 'awaiting confirmation';
 export const STATUS_CANCELLED = 'cancelled';
 export const STATUS_REJECTED = 'rejected';
 export const STATUS_ACTIVE = 'active';
@@ -40,6 +41,8 @@ export const STATUS_CLOSED = 'closed';
 export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
+export const STATUS_PROCEED_FOR_PAYMENT = 'proceed for payment';
+
 export const STATUS_PAYMENT_COMPLETED = 'completed';
 export const STATUS_AWAITING_REFUND = 'awaiting refund';
 export const STATUS_CASH_PENDING = 'cash pending';

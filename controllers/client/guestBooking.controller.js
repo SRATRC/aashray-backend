@@ -378,7 +378,7 @@ async function bookRoomForSingleGuest(
   const amount = roomCharge(roomtype) * nights;
 
   const { transaction, discountedAmount } = await createPendingTransaction(
-    booking.cardno,
+    user.cardno,
     booking,
     TYPE_GUEST_ROOM,
     amount,

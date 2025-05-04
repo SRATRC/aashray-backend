@@ -228,7 +228,7 @@ export async function createRoomBooking(
   roomtype,
   user_gender,
   floor_pref,
-  updatedBy,
+  bookedBy,
   t
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
@@ -243,13 +243,13 @@ export async function createRoomBooking(
       roomno: roomno.dataValues.roomno,
       status: ROOM_STATUS_PENDING_CHECKIN,
       cardno,
-      bookedBy: updatedBy !== cardno ? updatedBy : null,
+      bookedBy: bookedBy !== cardno ? bookedBy : null,
       checkin,
       checkout,
       nights,
       roomtype,
       gender,
-      updatedBy
+      updatedBy: bookedBy
     },
     { transaction: t }
   );
@@ -261,11 +261,11 @@ export async function createRoomBooking(
   const amount = roomCharge(roomtype) * nights;
 
   const {transaction,discountedAmount} = await createPendingTransaction(
-    cardno,
+    bookedBy,
     booking,
     TYPE_ROOM,
     amount,
-    updatedBy,
+    bookedBy,
     t
   );
 

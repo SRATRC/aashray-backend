@@ -1,12 +1,13 @@
 import './config/environment.js';
 import express, { urlencoded, json } from 'express';
+import { ErrorHandler } from './middleware/Error.js';
+import { httpLogger } from './middleware/Logger.js';
+import { sendNotification } from './utils/sendNotification.js';
 import cors from 'cors';
 import session from 'express-session';
 import sequelize from './config/database.js';
 import ApiError from './utils/ApiError.js';
-import { ErrorHandler } from './middleware/Error.js';
 import logger from './config/logger.js';
-import { httpLogger } from './middleware/Logger.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -73,7 +74,7 @@ app.use(httpLogger);
 
 app.use(
   session({
-    secret: process.env['SESSION_SECRET'],
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false, maxAge: 86400000 }
@@ -108,16 +109,44 @@ app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
 app.use('/api/v1/admin/bookings', bookingManagementRoutes);
 
-
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
 app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/mumukshu', mumukshuRoutes);
 
+// Test route for sending notification
+app.post('/test-notification', async (req, res) => {
+  const token = req.body.token;
+
+  try {
+    const notificationResponse = await sendNotification([
+      {
+        token,
+        title: 'Test Notification',
+        body: 'This is a test notification!',
+        screen: 'TestScreen',
+        data: { someKey: 'someValue' }
+      }
+    ]);
+
+    return res.status(200).send({
+      message: 'Notification sent successfully',
+      tickets: notificationResponse
+    });
+  } catch (error) {
+    console.error('Error sending notification:', error);
+    return res.status(500).send({
+      message: 'Error sending notification',
+      error
+    });
+  }
+});
+
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {
   throw new ApiError(404, 'Page Not Found');
 });
+
 app.use(ErrorHandler);
 
 const port = process.env.PORT || 3000;

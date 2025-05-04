@@ -4,8 +4,9 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
   STATUS_CONFIRMED,
-  STATUS_PAYMENT_PENDING,
-  STATUS_WAITING
+  STATUS_WAITING,
+  STATUS_AWAITING_CONFIRMATION,
+  STATUS_PROCEED_FOR_PAYMENT
 } from '../config/constants.js';
 
 const TravelDb = sequelize.define(
@@ -59,7 +60,7 @@ const TravelDb = sequelize.define(
     leaving_post_adhyayan: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
-      defaultValue: true 
+      defaultValue: 0
     },
     comments: {
       type: DataTypes.STRING,
@@ -74,10 +75,11 @@ const TravelDb = sequelize.define(
       allowNull: true,
       values: [
         STATUS_WAITING,
+        STATUS_AWAITING_CONFIRMATION,
         STATUS_CONFIRMED,
         STATUS_CANCELLED,
         STATUS_ADMIN_CANCELLED,
-        STATUS_PAYMENT_PENDING
+        STATUS_PROCEED_FOR_PAYMENT
       ],
       defaultValue: STATUS_WAITING
     },

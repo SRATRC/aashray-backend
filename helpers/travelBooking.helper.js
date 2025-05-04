@@ -2,23 +2,31 @@ import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
   FULL_TRAVEL_PRICE,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_AWAITING_CONFIRMATION,
+  STATUS_CANCELLED,
   STATUS_CONFIRMED,
+  STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
   TRAVEL_PRICE,
   TRAVEL_TYPE_FULL,
-  TYPE_TRAVEL
+  TRAVEL_TYPE_SINGLE
 } from '../config/constants.js';
 import { TravelDb } from '../models/associations.js';
-import ApiError from '../utils/ApiError.js';
 import { validateCards } from './card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
+import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
+import Sequelize from 'sequelize';
+import { checkAdhyayanParamGyanSabha } from './adhyayanBooking.helper.js';
+import { CardDb } from '../models/associations.js';
+import sendMail from '../utils/sendMail.js';
 
 export async function checkTravelAlreadyBooked(date, ...mumukshus) {
   const booking = await TravelDb.findOne({
     where: {
       cardno: mumukshus,
-      status: [STATUS_CONFIRMED, STATUS_WAITING],
+      status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING],
       date: date
     }
   });
@@ -27,6 +35,59 @@ export async function checkTravelAlreadyBooked(date, ...mumukshus) {
     throw new ApiError(400, ERR_TRAVEL_ALREADY_BOOKED);
   }
 }
+ 
+ async function getTravelBookingStatus(type,date,travelBookingsFordate){
+
+  if ( type == TRAVEL_TYPE_SINGLE && travelBookingsFordate > 4 ){
+    if(await checkAdhyayanParamGyanSabha(date) ){
+      return STATUS_AWAITING_CONFIRMATION;
+    }
+    return STATUS_WAITING;
+  }else{
+    return STATUS_AWAITING_CONFIRMATION;
+  }
+
+}
+
+export async function updateWaitingTravelBooking(date){
+  const travelBookingsFordate = await TravelDb.findOne({
+    where: {
+      date: date,
+      status: STATUS_WAITING
+    },
+    order: [['createdAt', 'ASC']]
+  });
+
+  if( travelBookingsFordate ){
+    await TravelDb.update({
+      status: STATUS_AWAITING_CONFIRMATION
+    }, {
+      where: {
+        bookingid: travelBookingsFordate.bookingid
+      }
+    });
+    const user = await CardDb.findOne({
+      where: {
+        cardno: travelBookingsFordate.cardno
+      }
+    });
+
+    sendMail({
+      email: user.email,
+      subject: 'Your Raj Pravas (Travel) booking has been cancelled',
+      template: 'rajPravasStatusUpdate',
+      context: {
+        name: user.issuedto,
+        bookingid:travelBookingsFordate.bookingid,
+        date: travelBookingsFordate.date,
+        pickup:travelBookingsFordate.pickup_point,
+        drop:travelBookingsFordate.drop_point,
+        status: STATUS_AWAITING_CONFIRMATION
+      }
+    });
+  }
+}
+
 
 export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   const today = moment().format('YYYY-MM-DD');
@@ -38,6 +99,16 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
 
+  const bookings = await TravelDb.findAll({
+    where: {
+      type:TRAVEL_TYPE_SINGLE,
+      status: {
+        [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED,STATUS_CANCELLED]
+      },
+      date: date
+    }
+  });
+  let travelBookingsFordate=bookings.length;
   var bookingsToCreate = [],
     bookingId;
   for (const group of mumukshuGroup) {
@@ -54,11 +125,12 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
 
     for (const mumukshu of mumukshus) {
       bookingId = uuidv4();
-
+      let travelbookingStatus =  await getTravelBookingStatus(type,date,travelBookingsFordate); 
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
-        status: STATUS_WAITING,
+        bookedBy: user.cardno !== mumukshu ? user.cardno : null,
+        status: travelbookingStatus,
         date,
         type,
         pickup_point,
@@ -69,6 +141,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         comments,
         updatedBy: user.cardno
       });
+      travelBookingsFordate++;
       userBookingIds[mumukshu] = [bookingId];
     }
   }

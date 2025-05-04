@@ -18,6 +18,8 @@ import Sequelize from 'sequelize';
 import moment from 'moment';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
+import { sendNotification } from '../../helpers/sendNotification.helper.js';
+// import { sendNotification } from '../../utils/sendNotification.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -102,36 +104,78 @@ export const FetchBookedShibir = async (req, res) => {
   return res.status(200).send({ data: shibirs });
 };
 
+// export const CancelShibir = async (req, res) => {
+//   const { shibir_id, bookedBy } = req.body;
+
+//   const adhyayan = (await validateAdhyayans(shibir_id))[0];
+
+//   const t = await database.transaction();
+//   req.transaction = t;
+
+//   const booking = await ShibirBookingDb.findOne({
+//     where: {
+//       shibir_id: shibir_id,
+//       cardno: req.user.cardno,
+//       bookedBy: bookedBy ? bookedBy : null
+//     }
+//   });
+
+//   if (!booking) {
+//     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+//   }
+
+//   if (
+//     booking.status == STATUS_CANCELLED ||
+//     booking.status == STATUS_ADMIN_CANCELLED
+//   )
+//     throw new ApiError(400, 'Booking already cancelled');
+
+//   if (
+//     booking.status == STATUS_CONFIRMED ||
+//     booking.status == STATUS_PAYMENT_PENDING
+//   ) {
+//     await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
+//   }
+
+//   await userCancelBooking(req.user, booking, t);
+//   await t.commit();
+
+//   sendMail({
+//     email: req.user.email,
+//     subject: 'Your Raj Adhyayan Booking has been cancelled',
+//     template: 'rajAdhyayanCancellation',
+//     context: {
+//       name: req.user.issuedto,
+//       adhyayanName: adhyayan.dataValues.name
+//     }
+//   });
+
+//   return res.status(200).send({ message: 'Shibir booking cancelled' });
+// };
+
+
 export const CancelShibir = async (req, res) => {
   const { shibir_id, bookedBy } = req.body;
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
-
   const t = await database.transaction();
   req.transaction = t;
 
   const booking = await ShibirBookingDb.findOne({
     where: {
-      shibir_id: shibir_id,
+      shibir_id,
       cardno: req.user.cardno,
-      bookedBy: bookedBy ? bookedBy : null
+      bookedBy: bookedBy || null
     }
   });
 
-  if (!booking) {
-    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+
+  if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(booking.status)) {
+    throw new ApiError(400, 'Booking already cancelled');
   }
 
-  if (
-    booking.status == STATUS_CANCELLED ||
-    booking.status == STATUS_ADMIN_CANCELLED
-  )
-    throw new ApiError(400, 'Booking already cancelled');
-
-  if (
-    booking.status == STATUS_CONFIRMED ||
-    booking.status == STATUS_PAYMENT_PENDING
-  ) {
+  if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
     await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
   }
 
@@ -147,6 +191,19 @@ export const CancelShibir = async (req, res) => {
       adhyayanName: adhyayan.dataValues.name
     }
   });
+
+  // Call the refactored utility function
+  if (req.user.pushToken) {
+    await sendNotification([
+      {
+        token: req.user.pushToken,
+        title: 'Booking Cancelled',
+        body: `Your booking for "${adhyayan.dataValues.name}" has been cancelled.`,
+        screen: 'CancelledBookings',
+        data: { shibir_id, status: 'cancelled' }
+      }
+    ]);
+  }
 
   return res.status(200).send({ message: 'Shibir booking cancelled' });
 };

@@ -39,6 +39,24 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
   }
 }
 
+export async function checkAdhyayanParamGyanSabha(date) {
+  const adhyayan = await ShibirDb.findOne({
+    attributes: ['name', 'speaker'],       
+    where: {
+      name: 'Param Gyaan Sabha',
+      start_date: date,
+      status: STATUS_OPEN
+    }
+  });
+
+  if (adhyayan) {
+     return true;
+  }
+
+  return false;
+  }
+
+
 export async function validateAdhyayans(...shibirIds) {
   const shibirs = await ShibirDb.findAll({
     where: { id: shibirIds }
@@ -76,21 +94,23 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
       const bookingId = uuidv4();
       if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
         await reserveAdhyayanSeat(adhyayan, t);
-        
+
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
             cardno: mumukshu,
+            bookedBy: user.cardno !== mumukshu ? user.cardno : null,
             shibir_id: adhyayan.id,
             status:
-              adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED
+              adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED,
+            updatedBy: user.cardno
           },
           { transaction: t }
         );
 
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
-            mumukshu,
+            user.cardno,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
@@ -110,10 +130,8 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
           },
           { transaction: t }
         );
-        
       }
       bookingIds.push(bookingId);
-      
     }
     userBookingIds[mumukshu] = bookingIds;
   }
@@ -152,8 +170,9 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
     );
 
     // for a booking in waiting status, there should be no existing transaction
+    const bookedBy = booking.bookedBy || booking.cardno;
     const transaction = await createPendingTransaction(
-      cardno,
+      bookedBy,
       booking,
       TYPE_ADHYAYAN,
       adhyayan.amount,
