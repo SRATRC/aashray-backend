@@ -32,15 +32,16 @@ const job = cron.schedule('*/10 * * * *', async () => {
     const userBookingIds = new Map();
     await database.authenticate();
 
-    // Cancel bookings created before 10 mins, but not paid
-    const cancelTimeFilter = moment.utc().subtract(10, 'minutes');
+    // Cancel bookings created before 1 hr, but not paid
+    const cancelTimeFilter = moment.utc().subtract(60, 'minutes');
 
     const systemUser = AdminUsers.findOne({
       where: { username: "admin" } 
     })
 
-    console.log("10 mins ago: " + cancelTimeFilter.format('MMMM Do YYYY, h:mm:ss a'));
     const transactions = await getPendingTransactions(cancelTimeFilter);
+
+    console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
 
     for (const transaction of transactions) {
       await cancelTransaction(userBookingIds, systemUser, transaction);

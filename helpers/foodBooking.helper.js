@@ -3,6 +3,7 @@ import {
   DINNER_PRICE,
   ERR_ROOM_MUST_BE_BOOKED,
   LUNCH_PRICE,
+  STATUS_CASH_PENDING,
   STATUS_GUEST,
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
@@ -125,7 +126,8 @@ export async function bookFoodForGuests(
   guestGroup,
   bookedBy,
   updatedBy,
-  t
+  t,
+  cashAllowed = false
 ) {
   const meals_object = [
     {
@@ -188,7 +190,7 @@ export async function bookFoodForGuests(
                 bookingid: booking.dataValues.id,
                 category: meal.type,
                 amount: meal.price,
-                status: STATUS_PAYMENT_PENDING,
+                status: cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING,
                 updatedBy
               });
             }
@@ -231,7 +233,7 @@ export async function bookFoodForGuests(
                 bookingid: bookingId,
                 category: meal.type,
                 amount: meal.price,
-                status: STATUS_PAYMENT_PENDING,
+                status: cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING,
                 updatedBy
               });
             }

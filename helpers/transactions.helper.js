@@ -60,7 +60,8 @@ export async function createPendingTransaction(
   category,
   amount,
   updatedBy,
-  t
+  t,
+  cashAllowed = false
 ) {
   const transaction = await Transactions.create(
     {
@@ -68,7 +69,7 @@ export async function createPendingTransaction(
       bookingid: booking.bookingid,
       category,
       amount,
-      status: STATUS_PAYMENT_PENDING,
+      status: cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING,
       updatedBy
     },
     { transaction: t }
@@ -300,8 +301,6 @@ export const generateOrderId = async (amount) => {
 };
 
 export async function getPendingTransactions(timeFilter) {
-  const dateFilter = moment.utc().subtract(1, 'day');
-
   // only get pending transactions for India based users
   const transactions = await Transactions.findAll({
     include: [
@@ -315,6 +314,9 @@ export async function getPendingTransactions(timeFilter) {
       }
     ],
     where: {
+      // only get transactions with status STATUS_PAYMENT_PENDING
+      // STATUS_CASH_PENDING is reserved for transactions created from
+      // admin
       status: [STATUS_PAYMENT_PENDING],
       updatedAt: {
         [Sequelize.Op.lte]: timeFilter
@@ -322,8 +324,5 @@ export async function getPendingTransactions(timeFilter) {
     }
   });
 
-  console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
-
-  // TODO: implement logic to cancel transactions
   return transactions;
 }

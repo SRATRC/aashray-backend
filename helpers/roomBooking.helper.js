@@ -229,7 +229,8 @@ export async function createRoomBooking(
   user_gender,
   floor_pref,
   bookedBy,
-  t
+  t,
+  cashAllowed = false
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
   const roomno = await findRoom(checkin, checkout, roomtype, gender);
@@ -266,7 +267,8 @@ export async function createRoomBooking(
     TYPE_ROOM,
     amount,
     bookedBy,
-    t
+    t,
+    cashAllowed
   );
 
   if (!transaction) {
