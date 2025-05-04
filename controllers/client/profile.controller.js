@@ -349,25 +349,3 @@ WHERE combined.booked_for = :cardno
     .status(200)
     .json({ message: 'transactions fetched', data: transactions });
 };
-
-export const payNow = async (req, res) => {
-  const { bookingids } = req.body;
-
-  const totalAmount = await Transactions.sum('amount', {
-    where: {
-      bookingid: bookingids,
-      cardno: req.user.cardno,
-      status: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING]
-    }
-  });
-
-  if (totalAmount > 0) {
-    const order = await generateOrderId(totalAmount);
-    await updateRazorpayTransactions(bookingids, order.id, t);
-    await t.commit();
-    
-    return res.status(200).send({ message: 'payment successful', data: order });
-  } else {
-    throw new ApiError(404, 'nothing to pay for');
-  }
-};
