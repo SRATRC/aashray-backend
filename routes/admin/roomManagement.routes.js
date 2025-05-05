@@ -17,7 +17,6 @@ import {
   unblockRC,
   ReservationReport,
   dayWiseGuestCountReport,
-  cancelBooking,
   availableRooms,
   updateRoom,
   flatList,
@@ -38,7 +37,6 @@ router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN))
 router.post('/bookForMumukshu', CatchAsync(roomBooking));
 router.put('/checkin/:bookingid', CatchAsync(manualCheckin));
 router.put('/checkout/:bookingid', CatchAsync(manualCheckout));
-router.put('/cancel/:bookingid', CatchAsync(cancelBooking));
 router.put('/update_room_booking', CatchAsync(updateRoomBooking));
 router.get('/room_list', CatchAsync(roomList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));

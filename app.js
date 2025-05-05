@@ -37,6 +37,7 @@ import roomManagementRoutes from './routes/admin/roomManagement.routes.js';
 import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 import accountsManagementRoutes from './routes/admin/accountsManagement.routes.js';
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagementRoutes.js';
+import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -106,6 +107,7 @@ app.use('/api/v1/admin/stay', roomManagementRoutes);
 app.use('/api/v1/admin/travel', travelManagementRoutes);
 app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
+app.use('/api/v1/admin/bookings', bookingManagementRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);

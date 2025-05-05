@@ -105,11 +105,11 @@ export async function userCancelBooking(user, booking, t) {
 }
 
 export async function adminCancelTransaction(user, transaction, t) {
-  await cancelTransaction(user, transaction, t, true);
+  return await cancelTransaction(user, transaction, t, true);
 }
 
 export async function userCancelTransaction(user, transaction, t) {
-  await cancelTransaction(user, transaction, t, false);
+  return await cancelTransaction(user, transaction, t, false);
 }
 
 // STATUS_PAYMENT_PENDING,
@@ -168,6 +168,8 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     },
     { transaction: t }
   );
+
+  return { credits }
 }
 
 export async function adjustAmount(user, transaction, amount, t) {
