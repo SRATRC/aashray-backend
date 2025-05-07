@@ -297,7 +297,14 @@ export const generateOrderId = async (amount) => {
     receipt: uuidv4()
   };
 
-  const order = await razorpay.orders.create(options);
+  var order; 
+  if (process.env.NODE_ENV == 'prod' && amount > 0) {
+    order = await razorpay.orders.create(options);
+  } else {
+    options['id'] = uuidv4();
+    order = options; 
+  }
+
   return order;
 };
 
@@ -316,4 +323,16 @@ export async function cancelPendingBookings() {
   console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
 
   // TODO: implement logic to cancel transactions
+}
+
+export async function updateRazorpayTransactions(bookingIds, razorpay_order_id, t) {
+  await Transactions.update(
+    { razorpay_order_id: razorpay_order_id },
+    {
+      where: {
+        bookingid: bookingIds
+      }, 
+      transaction: t 
+    } 
+  );
 }

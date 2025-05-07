@@ -25,6 +25,7 @@ import profileRoutes from './routes/client/profile.routes.js';
 import locationRoutes from './routes/client/location.routes.js';
 import guestRoutes from './routes/client/guestBooking.routes.js';
 import mumukshuRoutes from './routes/client/mumukshuBooking.routes.js';
+import paymentRoutes from  './routes/client/payment.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -95,6 +96,7 @@ app.use('/api/v1/utsav', utsavBookingRoutes);
 app.use('/api/v1/maintenance', maintenanceRoutes);
 app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/location', locationRoutes);
+app.use('/api/v1/razorpay', paymentRoutes);
 
 // Admin Routes
 app.use('/api/v1/admin/sudo', adminControlRoutes);
