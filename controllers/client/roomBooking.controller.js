@@ -16,11 +16,12 @@ import {
 } from '../helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
-import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
+import { createFlatBooking } from '../../helpers/roomBooking.helper.js';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -150,27 +151,26 @@ export const FlatBookingMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  let flat_bookings = [];
   const userBookingIds = {};
-
-  for (var mumukshu of mumukshus) {
-    const bookingId = uuidv4();
-
-    flat_bookings.push({
-      bookingid: bookingId,
-      cardno: mumukshu['cardno'],
-      flatno: flatDb.dataValues.flatno,
-      checkin: startDay,
-      checkout: endDay,
-      nights: nights,
-      updatedBy: req.user.cardno,
-      status: ROOM_STATUS_PENDING_CHECKIN
-    });
-
-    userBookingIds[mumukshu['cardno']] = [bookingId];
+  let amount = 0;
+  for (var mumukshu of mumukshus) { 
+    const booking = await createFlatBooking(
+      mumukshu['cardno'],
+      startDay,
+      endDay,
+      nights,
+      flatDb.dataValues.flatno,
+      req.user.cardno,
+      t
+    );
+    amount += booking.discountedAmount;
+    userBookingIds[mumukshu['cardno']] = [booking.bookingId];
   }
 
-  await FlatBooking.bulkCreate(flat_bookings, { transaction: t });
+  const order =
+    process.env.NODE_ENV == 'prod' && amount > 0
+      ? await generateOrderId(amount)
+      : { amount };
 
   await t.commit();
   
@@ -182,5 +182,7 @@ export const FlatBookingMumukshu = async (req, res) => {
     sendUnifiedEmail(cardno, bookings, req.user);
   }
   
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
+  
+  
 };
