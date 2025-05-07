@@ -289,7 +289,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
           TYPE_ADHYAYAN,
           adhyayan.amount,
           req.user.username,
-          t
+          t,
+          true
         );
       }
 
@@ -329,7 +330,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
             TYPE_ADHYAYAN,
             adhyayan.amount,
             req.user.username,
-            t
+            t,
+            true
           );
         }
 

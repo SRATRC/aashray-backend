@@ -152,7 +152,8 @@ export const bookFood = async (req, res) => {
       guestGroup,
       null,
       req.user.username,
-      t
+      t,
+      true
     );
 
   } else {

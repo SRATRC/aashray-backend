@@ -330,7 +330,8 @@ export const roomBooking = async (req, res) => {
       card.gender,
       floor_pref,
       card.cardno,
-      t
+      t,
+      true
     );
   }
 

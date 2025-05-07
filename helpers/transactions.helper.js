@@ -60,7 +60,8 @@ export async function createPendingTransaction(
   category,
   amount,
   updatedBy,
-  t
+  t,
+  cashAllowed = false
 ) {
   const transaction = await Transactions.create(
     {
@@ -68,7 +69,7 @@ export async function createPendingTransaction(
       bookingid: booking.bookingid,
       category,
       amount,
-      status: STATUS_PAYMENT_PENDING,
+      status: cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING,
       updatedBy
     },
     { transaction: t }
@@ -308,21 +309,31 @@ export const generateOrderId = async (amount) => {
   return order;
 };
 
-export async function cancelPendingBookings() {
-  const yesterday = moment.utc().subtract(1, 'day');
-
+export async function getPendingTransactions(timeFilter) {
+  // only get pending transactions for India based users
   const transactions = await Transactions.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'email', 'mobno'],
+        required: true,
+        where: {
+          country: 'INDIA'
+        }
+      }
+    ],
     where: {
+      // only get transactions with status STATUS_PAYMENT_PENDING
+      // STATUS_CASH_PENDING is reserved for transactions created from
+      // admin
       status: [STATUS_PAYMENT_PENDING],
       updatedAt: {
-        [Sequelize.Op.lte]: yesterday
+        [Sequelize.Op.lte]: timeFilter
       }
     }
   });
 
-  console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
-
-  // TODO: implement logic to cancel transactions
+  return transactions;
 }
 
 export async function updateRazorpayTransactions(bookingIds, razorpay_order_id, t) {
