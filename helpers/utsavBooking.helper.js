@@ -128,3 +128,31 @@ export async function validateUtsavs(utsavid, mumukshus) {
 
   return utsavDetails;
 }
+
+export async function validateUtsavBooking(bookingId, utsavId) {
+  const booking = await UtsavBooking.findOne({
+    where: {
+      utsavid: utsavId,
+      bookingid: bookingId
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  return booking;
+}
+
+export async function reserveUtsavSeat(utsav, t) {
+  if (utsav.available_seats <= 0) {
+    throw new ApiError(400, ERR_UTSAV_NO_SEATS_AVAILABLE);
+  }
+
+  await utsav.update(
+    {
+      available_seats: utsav.dataValues.available_seats - 1
+    },
+    { transaction: t }
+  );
+}
