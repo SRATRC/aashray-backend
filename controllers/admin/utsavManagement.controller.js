@@ -163,7 +163,9 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.start_date,
       utsav_db.end_date,
       utsav_db.status,
-      utsav_db.total_seats
+      utsav_db.total_seats,
+      utsav_db.available_seats,
+      COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count  
     FROM 
       utsav_db
     LEFT JOIN 
@@ -173,11 +175,11 @@ export const fetchAllUtsav = async (req, res) => {
     GROUP BY 
       utsav_db.id,
       utsav_db.name,
-      utsav_db.month,
       utsav_db.start_date,
       utsav_db.end_date,
       utsav_db.status,
-      utsav_db.total_seats
+      utsav_db.total_seats,
+      utsav_db.available_seats      
      ORDER BY 
       utsav_db.start_date ASC;`,
     {
@@ -361,4 +363,16 @@ export const utsavStatusUpdate = async (req, res) => {
 
   await t.commit();
   return res.status(200).send({ message: 'Updated booking status' });
+};
+
+
+export const fetchUtsav = async (req, res) => {
+  const { id } = req.params;
+  // await validateUtsavs(id);
+
+  const utsav = await UtsavDb.findOne({
+    where: { id: id }
+  });
+
+  return res.status(200).send({ message: 'Fetched Adhyayan', data: utsav });
 };

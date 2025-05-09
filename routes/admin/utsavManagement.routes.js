@@ -9,7 +9,8 @@ import {
   fetchAllUtsav,
   utsavWaitlist,
   activateUtsav,
-  utsavStatusUpdate
+  utsavStatusUpdate,
+  fetchUtsav
 } from '../../controllers/admin/utsavManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -25,6 +26,7 @@ router.post('/package', CatchAsync(addUtsavPackage));
 router.put('/update/:id', CatchAsync(updateUtsav));
 router.get('/bookings', CatchAsync(fetchUtsavBookings));
 router.get('/fetch', CatchAsync(fetchAllUtsav));
+router.get('/fetch/:id', CatchAsync(fetchUtsav));
 router.get('/waitlist/:id', CatchAsync(utsavWaitlist));
 router.put('/:id/:activate', CatchAsync(activateUtsav));
 router.put('/status', CatchAsync(utsavStatusUpdate));
