@@ -160,13 +160,10 @@ export const fetchAllUtsav = async (req, res) => {
     `SELECT 
       utsav_db.id,
       utsav_db.name,
-      utsav_db.month,
       utsav_db.start_date,
       utsav_db.end_date,
       utsav_db.status,
-      COUNT(utsav_booking.bookingid) AS total_bookings,
-      COUNT(CASE WHEN utsav_booking.status = '${STATUS_CONFIRMED}' THEN 1 END) AS confirmed_bookings,
-      COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count
+      utsav_db.total_seats
     FROM 
       utsav_db
     LEFT JOIN 
@@ -179,7 +176,8 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.month,
       utsav_db.start_date,
       utsav_db.end_date,
-      utsav_db.status
+      utsav_db.status,
+      utsav_db.total_seats
      ORDER BY 
       utsav_db.start_date ASC;`,
     {
