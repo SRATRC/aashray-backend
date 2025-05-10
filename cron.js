@@ -9,6 +9,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
+  TYPE_FLAT,
   TYPE_FOOD,
   TYPE_GUEST_ADHYAYAN, 
   TYPE_GUEST_BREAKFAST, 
@@ -26,6 +27,7 @@ import TravelDb from './models/travel_db.model.js';
 import AdminUsers from './models/admin_users.model.js';
 import { cancelFood } from './helpers/foodBooking.helper.js';
 import UtsavBooking from './models/utsav_boking.model.js';
+import FlatBooking from './models/flat_booking.model.js';
 
 // Schedule the cron job to run every 10 minutes
 const job = cron.schedule('*/10 * * * *', async () => {
@@ -74,6 +76,16 @@ async function cancelTransaction(userBookingIds, user, transaction) {
         });
         await cancelBooking(user, booking, transaction);
         addToUserBookingIdMap(userBookingIds, transaction.cardno, transaction.bookingid, TYPE_ROOM);
+        break;
+
+      case TYPE_FLAT:
+        booking = await FlatBooking.findOne({
+          where: { 
+            bookingid: transaction.bookingid
+          }
+        });
+        await cancelBooking(user, booking, transaction);
+        addToUserBookingIdMap(userBookingIds, transaction.cardno, transaction.bookingid, TYPE_FLAT);
         break;
 
       case TYPE_ADHYAYAN:
