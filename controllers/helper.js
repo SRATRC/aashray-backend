@@ -9,9 +9,6 @@ import {
   GuestRelationship
 } from '../models/associations.js';
 import {
-  STATUS_WAITING,
-  ROOM_STATUS_CHECKEDIN,
-  ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
   TYPE_ROOM,
   TYPE_TRAVEL,
@@ -207,7 +204,7 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds.hasOwnProperty(TYPE_FLAT);
+  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
 
 
   let adhyanBookingDetails = [],

@@ -12,9 +12,10 @@ import {
   calculateNights,
   checkFlatAlreadyBooked,
   sendUnifiedEmail,
-  setBookingIdMap
+  setBookingIdMap,
+  retrieveBookingIds
 } from '../helper.js';
-import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { updateRazorpayTransactions, userCancelBooking } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
@@ -167,22 +168,14 @@ export const FlatBookingMumukshu = async (req, res) => {
     userBookingIds[mumukshu['cardno']] = [booking.bookingId];
   }
 
-  const order =
-    process.env.NODE_ENV == 'prod' && amount > 0
-      ? await generateOrderId(amount)
-      : { amount };
+  const userBookingIdMap = {};
+  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
+
+  const order = await generateOrderId(amount);
+  await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
   
-  const userBookingIdMap = {};
-  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
-
-  for (const cardno in userBookingIdMap) {
-    const bookings = userBookingIdMap[cardno];
-    sendUnifiedEmail(cardno, bookings, req.user);
-  }
-  
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
-  
-  
 };

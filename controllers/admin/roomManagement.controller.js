@@ -28,7 +28,10 @@ import {
   TYPE_ROOM,
   TYPE_FLAT,
   STATUS_CASH_COMPLETED,
-  MSG_CANCEL_SUCCESSFUL
+  MSG_CANCEL_SUCCESSFUL,
+  STATUS_PAYMENT_PENDING,
+  ERR_FLAT_ALREADY_BOOKED,
+  ERR_FLAT_FAILED_TO_BOOK
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -40,6 +43,7 @@ import {
 import {
   bookDayVisit,
   checkRoomAlreadyBooked,
+  createFlatBooking,
   createRoomBooking,
   findAllRooms,
   roomCharge
@@ -347,25 +351,25 @@ export const roomBooking = async (req, res) => {
 export const flatBooking = async (req, res) => {
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
-  const user = await CardDb.findOne({
+  const card = await CardDb.findOne({
     attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email'],
     where: {
       mobno: req.params.mobno
     }
   });
 
-  if (!user) {
-    throw new ApiError(404, 'User not found');
+  if (!card) {
+    throw new ApiError(404, ERR_CARD_NOT_FOUND);
   }
 
   if (
     await checkFlatAlreadyBooked(
       req.body.checkin_date,
       req.body.checkout_date,
-      user.dataValues.cardno
+      card.cardno
     )
   ) {
-    throw new ApiError(400, 'Already Booked');
+    throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
 
   const nights = await calculateNights(
@@ -373,23 +377,20 @@ export const flatBooking = async (req, res) => {
     req.body.checkout_date
   );
 
-  const booking = await FlatBooking.create({
-    bookingid: uuidv4(),
-    cardno: user.cardno,
-    flatno: req.body.flat_no,
-    checkin: req.body.checkin_date,
-    checkout: req.body.checkout_date,
-    nights: nights,
-    status: ROOM_STATUS_PENDING_CHECKIN
-  });
-
-  if (booking == undefined) {
-    throw new ApiError(400, 'Failed to book your flat');
-  }
+  const booking = await createFlatBooking(
+    card.cardno, 
+    req.body.checkin_date, 
+    req.body.checkout_date, 
+    nights, 
+    req.body.flat_no, 
+    card.cardno, 
+    t,
+    true
+  );
 
   let bookingIdMap = {};
-  bookingIdMap[TYPE_FLAT] = [booking.bookingid];
-  sendUnifiedEmail(user.cardno, bookingIdMap, user);
+  bookingIdMap[TYPE_FLAT] = [booking.bookingId];
+  sendUnifiedEmail(card.cardno, bookingIdMap, card);
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

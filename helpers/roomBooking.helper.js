@@ -11,7 +11,10 @@ import {
   ERR_ROOM_ALREADY_BOOKED,
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
-  TYPE_FLAT
+  TYPE_FLAT,
+  STATUS_PAYMENT_PENDING,
+  STATUS_CASH_PENDING,
+  ERR_FLAT_FAILED_TO_BOOK
 } from '../config/constants.js';
 import { RoomBooking, RoomDb, UtsavDb, FlatBooking, FlatDb } from '../models/associations.js';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
@@ -400,39 +403,77 @@ export async function bookRoomDuringUtsavForMumukshus(
 
   return { t, amount, bookingIds };
 }
-export async function ifMumukshuisFlatOwner(cardno, flatno) {
-  const flat = await FlatDb.findOne({ attributes: ['flatno'],
-     where: { owner: cardno, flatno: flatno } }); 
-  return flat ? true : false;
+
+
+export async function createFlatBooking(
+  cardno, 
+  checkin, 
+  checkout, 
+  nights, 
+  flatno, 
+  updatedBy, 
+  t,
+  cashAllowed = false
+) {
+  let bookingId = uuidv4();
+  let status = cashAllowed 
+    ? STATUS_CASH_PENDING
+    : STATUS_PAYMENT_PENDING;
+
+  const mumukshuIsFlatOwner = await isMumukshuFlatOwner(cardno, flatno);
+  if (mumukshuIsFlatOwner) {
+    status = ROOM_STATUS_PENDING_CHECKIN;
+  }
+
+  const booking = await FlatBooking.create(
+    { 
+      bookingid: bookingId,
+      cardno, 
+      flatno, 
+      checkin, 
+      checkout, 
+      nights, 
+      updatedBy, 
+      status
+    },
+    { transaction: t }
+  );
+
+  if (!booking) {
+    throw new ApiError(400, ERR_FLAT_FAILED_TO_BOOK); 
+  }
+
+  let discountedAmount = 0; 
+  if (!mumukshuIsFlatOwner) {
+     // Check if flat is AC or NAC
+    let amount = roomCharge("nac") * nights;
+
+    const result = await createPendingTransaction(
+      cardno,
+      booking, 
+      TYPE_FLAT, 
+      amount, 
+      updatedBy, 
+      t,
+      cashAllowed
+    ); 
+
+    discountedAmount = result.discountedAmount;
+  }
+
+  return { t, discountedAmount, bookingId };
 }
 
+async function isMumukshuFlatOwner(cardno, flatno) {
+  const flat = await FlatDb.findOne(
+    { 
+      attributes: ['flatno'],
+      where: { 
+        owner: cardno, 
+        flatno: flatno 
+      } 
+    }
+  );
 
-export async function createFlatBooking(cardno, checkin, checkout, nights, flatno, bookedBy, t) {
-  let bookingId = uuidv4();
-  const booking = await FlatBooking.create({ 
-    bookingid: bookingId,
-     cardno: cardno, 
-     flatno: flatno, 
-     checkin: checkin, 
-     checkout: checkout, 
-     nights: nights, 
-     updatedBy: bookedBy, 
-     status: ROOM_STATUS_PENDING_CHECKIN },
-      { transaction: t });
-  let discountedAmount = 0, transaction = null; 
-  
-  if (!booking) { throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK); }
-  if (! await ifMumukshuisFlatOwner(cardno, flatno)) {
-     //Check if flat is AC or NAC 
-    let amount = roomCharge("nac") * nights;
-    const result = await 
-    createPendingTransaction(
-      bookedBy, booking, TYPE_FLAT, amount, bookedBy, t); 
-      
-    discountedAmount = result.discountedAmount; 
-    transaction = result.transaction;
-    if (!transaction)
-       { throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK); }
-  }
-  return { t, discountedAmount, bookingId };
+  return flat ? true : false;
 }

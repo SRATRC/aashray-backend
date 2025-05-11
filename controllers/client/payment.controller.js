@@ -5,7 +5,8 @@ import {
   STATUS_PAYMENT_COMPLETED,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
-  TYPE_ROOM
+  TYPE_ROOM,
+  TYPE_FLAT
 } from '../../config/constants.js';
 import { Transactions } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -55,7 +56,7 @@ export const verifyPayment = async (req, res) => {
 
     const booking = await getBooking(bookingType, transaction.bookingid);
     
-    const bookingStatus = bookingType == TYPE_ROOM
+    const bookingStatus = bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
       ? ROOM_STATUS_PENDING_CHECKIN
       : STATUS_CONFIRMED;
 

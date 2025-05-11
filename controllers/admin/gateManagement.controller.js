@@ -6,8 +6,7 @@ import {
   STATUS_SEVA_KUTIR,
   STATUS_OFFPREM,
   ROOM_STATUS_CHECKEDIN,
-  ROOM_STATUS_CHECKEDOUT,
-  ROOM_STATUS_PENDING_CHECKIN
+  ROOM_STATUS_CHECKEDOUT
 } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';

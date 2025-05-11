@@ -100,6 +100,8 @@ export const ERR_ROOM_FAILED_TO_BOOK = 'Failed to book a room';
 export const ERR_ROOM_MUST_BE_BOOKED =
   'Must have room booked on one or more selected dates';
 
+export const ERR_FLAT_FAILED_TO_BOOK = 'Failed to book flat';
+
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan already booked';
 export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan not found';
 export const ERR_ADHYAYAN_NO_SEATS_AVAILABLE =
@@ -113,7 +115,6 @@ export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
 export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
-
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
 
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
