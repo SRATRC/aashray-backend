@@ -33,7 +33,10 @@ import {
   checkUtsavAlreadyBooked,
   validateUtsavs
 } from '../../helpers/utsavBooking.helper.js';
-import { generateOrderId, updateRazorpayTransactions } from '../../helpers/transactions.helper.js';
+import {
+  generateOrderId,
+  updateRazorpayTransactions
+} from '../../helpers/transactions.helper.js';
 import {
   bookTravelForMumukshus,
   checkTravelAlreadyBooked
@@ -41,7 +44,6 @@ import {
 import {
   calculateNights,
   validateDate,
-  sendUnifiedEmail,
   setBookingIdMap,
   retrieveBookingIds
 } from '../helper.js';
@@ -73,9 +75,9 @@ export const unifiedBooking = async (req, res) => {
   }
 
   const order = await generateOrderId(amount);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);  
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
   await updateRazorpayTransactions(bookingIds, order.id, t);
-  
+
   await t.commit();
 
   // for (const cardno in userBookingIdMap) {

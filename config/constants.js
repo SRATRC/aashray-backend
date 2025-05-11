@@ -54,8 +54,6 @@ export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
 
-
-
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
 export const ROOM_WL = 'WL';
@@ -115,6 +113,8 @@ export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
 export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
+
+export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
 
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';

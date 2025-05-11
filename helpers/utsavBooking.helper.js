@@ -4,7 +4,8 @@ import {
   TYPE_UTSAV,
   STATUS_CLOSED,
   STATUS_WAITING,
-  STATUS_OPEN
+  STATUS_OPEN,
+  ERR_UTSAV_ALREADY_BOOKED
 } from '../config/constants.js';
 import {
   UtsavDb,
@@ -88,7 +89,8 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
     }
   });
 
-  if (alreadyBooked.length > 0) throw new ApiError(400, 'Already booked');
+  if (alreadyBooked.length > 0)
+    throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
 }
 
 export async function validateUtsavs(utsavid, mumukshus) {
