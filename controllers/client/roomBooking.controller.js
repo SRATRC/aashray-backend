@@ -6,7 +6,8 @@ import {
   MSG_BOOKING_SUCCESSFUL,
   TYPE_GUEST_ROOM,
   TYPE_FLAT,
-  ERR_FLAT_ALREADY_BOOKED
+  ERR_FLAT_ALREADY_BOOKED,
+  STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
 import {
   validateDate,
@@ -94,7 +95,7 @@ export const CancelBooking = async (req, res) => {
         { cardno: req.user.cardno },
         { bookedBy: req.user.cardno }
       ],
-      status: [STATUS_WAITING, ROOM_STATUS_PENDING_CHECKIN]
+      status: [STATUS_WAITING, STATUS_PAYMENT_PENDING, ROOM_STATUS_PENDING_CHECKIN]
     }
   });
 
@@ -102,13 +103,13 @@ export const CancelBooking = async (req, res) => {
     booking = await FlatBooking.findOne({
       where: {
         bookingid: bookingid,
-        [Sequelize.Op.or]: [{ cardno: req.user.cardno }],
-        status: [STATUS_WAITING, ROOM_STATUS_PENDING_CHECKIN]
+        cardno: req.user.cardno,
+        status: [STATUS_WAITING, STATUS_PAYMENT_PENDING, ROOM_STATUS_PENDING_CHECKIN]
       }
     });
-
-    if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
+
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
   await userCancelBooking(req.user, booking, t);
   await t.commit();

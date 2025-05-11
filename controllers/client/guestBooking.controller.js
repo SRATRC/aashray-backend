@@ -9,7 +9,6 @@ import {
   GuestRelationship
 } from '../../models/associations.js';
 import {
-  ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
   TYPE_EXPENSE,
   STATUS_AVAILABLE,

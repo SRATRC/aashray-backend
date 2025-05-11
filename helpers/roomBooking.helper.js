@@ -50,6 +50,7 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
       cardno: cardnos,
       status: [
         STATUS_WAITING,
+        STATUS_PAYMENT_PENDING,
         ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_PENDING_CHECKIN
       ]
@@ -246,7 +247,7 @@ export async function createRoomBooking(
     {
       bookingid: bookingId,
       roomno: roomno.dataValues.roomno,
-      status: ROOM_STATUS_PENDING_CHECKIN,
+      status: STATUS_PAYMENT_PENDING,
       cardno,
       bookedBy: bookedBy !== cardno ? bookedBy : null,
       checkin,
