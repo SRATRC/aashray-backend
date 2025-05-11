@@ -1,8 +1,7 @@
 node_modules
 uploads
 coverage
-.env.dev
-.env.prod
+.env.*
 *.pem
 .vscode
 *.mwb
