@@ -45,7 +45,7 @@ import {
   retrieveBookingIds
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { bookDayVisit, checkRoomAlreadyBooked, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import { bookDayVisit, checkRoomAlreadyBooked, createFlatBooking, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
   generateOrderId,
@@ -366,7 +366,7 @@ async function bookRoomForSingleGuest(
       nights,
       roomtype,
       gender,
-      status: ROOM_STATUS_PENDING_CHECKIN,
+      status: STATUS_PAYMENT_PENDING,
       updatedBy: user.cardno
     },
     { transaction: t }
@@ -654,42 +654,38 @@ export const guestBookingFlat = async (req, res) => {
 
   for (var guest of guests) {
     if (await checkFlatAlreadyBooked(startDay, endDay, guest['cardno']))
-      throw new ApiError(400, `flat already Booked for ${guest['name']}`);
+      throw new ApiError(400, `Flat already Booked for ${guest['name']}`);
   }
 
   const nights = await calculateNights(startDay, endDay);
-  var t = await database.transaction();
 
-  let bookings = [];
+  const t = await database.transaction();
+  req.transaction = t;
+
   const userBookingIds = {};
-
+  let amount = 0;
   for (var guest of guests) {
-    const bookingId = uuidv4();
-
-    bookings.push({
-      bookingid: bookingId,
-      cardno: guest.cardno,
-      flatno: flatDb.dataValues.flatno,
-      checkin: startDay,
-      checkout: endDay,
-      nights: nights,
-      updatedBy: req.user.cardno,
-      status: ROOM_STATUS_PENDING_CHECKIN
-    });
-
-    userBookingIds[guest.cardno] = [bookingId];
+    const booking = await createFlatBooking(
+      guest.cardno,
+      startDay,
+      endDay,
+      nights,
+      flatDb.dataValues.flatno,
+      req.user.cardno,
+      t
+    );
+    amount += booking.discountedAmount;
+    userBookingIds[guest.cardno] = [booking.bookingId];
   }
-
-  await FlatBooking.bulkCreate(bookings, { transaction: t });
-  await t.commit();
 
   const userBookingIdMap = {};
   setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
 
-  for (const cardno in userBookingIdMap) {
-    const bookings = userBookingIdMap[cardno];
-    sendUnifiedEmail(cardno, bookings, req.user);
-  }
+  const order = await generateOrderId(amount);
+  await updateRazorpayTransactions(bookingIds, order.id, t);
 
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  await t.commit();
+
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };

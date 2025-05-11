@@ -5,7 +5,8 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   MSG_BOOKING_SUCCESSFUL,
   TYPE_GUEST_ROOM,
-  TYPE_FLAT
+  TYPE_FLAT,
+  ERR_FLAT_ALREADY_BOOKED
 } from '../../config/constants.js';
 import {
   validateDate,
@@ -143,7 +144,7 @@ export const FlatBookingMumukshu = async (req, res) => {
 
   for (var mumukshu of mumukshus) {
     if (await checkFlatAlreadyBooked(startDay, endDay, mumukshu['cardno'])) {
-      throw new ApiError(400, 'Already Booked');
+      throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
     }
   }
 
