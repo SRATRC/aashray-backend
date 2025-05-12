@@ -2,8 +2,6 @@ import {
   ShibirDb,
   ShibirBookingDb,
   RoomBooking,
-  FlatBooking,
-  FlatDb,
   Transactions,
   CardDb,
   GuestRelationship
@@ -32,19 +30,22 @@ import {
   STATUS_GUEST,
   TYPE_GUEST_ROOM,
   STATUS_OPEN,
-  TYPE_FLAT
+  TYPE_UTSAV
 } from '../../config/constants.js';
 import {
   calculateNights,
   validateDate,
-  sendUnifiedEmail,
   createGuestsHelper,
   setBookingIdMap,
-  checkFlatAlreadyBooked,
   retrieveBookingIds
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { bookDayVisit, checkRoomAlreadyBooked, createFlatBooking, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import {
+  bookDayVisit,
+  checkRoomAlreadyBooked,
+  findRoom,
+  roomCharge
+} from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
   generateOrderId,
@@ -54,7 +55,11 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
-import { bookFoodForGuests, getFoodBookings } from '../../helpers/foodBooking.helper.js';
+import {
+  bookFoodForGuests,
+  getFoodBookings
+} from '../../helpers/foodBooking.helper.js';
+import { validateUtsavs } from '../../helpers/utsavBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -79,7 +84,16 @@ export const guestBooking = async (req, res) => {
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(primary_booking, t, req.user);
       amount += adhyayanResult.amount;
-      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.userBookingIds
+      );
+      break;
+
+    case TYPE_UTSAV:
+      const utsavResult = await bookUtsav(primary_booking, t, req.user);
+      amount += utsavResult.amount;
       break;
 
     default:
@@ -92,7 +106,11 @@ export const guestBooking = async (req, res) => {
         case TYPE_ROOM:
           const roomResult = await bookRoom(addon, t, req.user);
           amount += roomResult.amount;
-          setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
+          setBookingIdMap(
+            userBookingIdMap,
+            TYPE_ROOM,
+            roomResult.userBookingIds
+          );
           break;
 
         case TYPE_FOOD:
@@ -103,7 +121,11 @@ export const guestBooking = async (req, res) => {
         case TYPE_ADHYAYAN:
           const adhyayanResult = await bookAdhyayan(addon, t, req.user);
           amount += adhyayanResult.amount;
-          setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
+          setBookingIdMap(
+            userBookingIdMap,
+            TYPE_ADHYAYAN,
+            adhyayanResult.userBookingIds
+          );
           break;
 
         default:
@@ -113,9 +135,9 @@ export const guestBooking = async (req, res) => {
   }
 
   const order = await generateOrderId(amount);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);  
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
   await updateRazorpayTransactions(bookingIds, order.id, t);
-  
+
   await t.commit();
 
   // for (const cardno in userBookingIdMap) {
@@ -129,34 +151,49 @@ export const guestBooking = async (req, res) => {
 export const validateBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
-  var roomDetails = [];
-  var adhyayanDetails = [];
-  var foodDetails = {};
-  var totalCharge = 0;
+  const response = {
+    roomDetails: [],
+    adhyayanDetails: [],
+    foodDetails: {},
+    utsavDetails: [],
+    totalCharge: 0
+  };
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      roomDetails = await checkRoomAvailability(
-        req.user,
+      response.roomDetails = await checkRoomAvailability(
         req.body.primary_booking
       );
-      totalCharge += roomDetails.reduce(
+      totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
       );
       break;
 
     case TYPE_FOOD:
-      foodDetails = await checkFoodAvailability(req.body.primary_booking);
-      totalCharge += foodDetails.charge;
+      response.foodDetails = await checkFoodAvailability(
+        req.body.primary_booking
+      );
+      totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
-      adhyayanDetails = await checkAdhyayanAvailability(
+      response.adhyayanDetails = await checkAdhyayanAvailability(
         req.body.primary_booking
       );
-      totalCharge += adhyayanDetails.reduce(
+      totalCharge += response.adhyayanDetails.reduce(
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
+        0
+      );
+      break;
+
+    case TYPE_UTSAV:
+      response.utsavDetails = await validateUtsavs(
+        req.body.primary_booking.details.utsavid,
+        req.body.primary_booking.details.guests
+      );
+      totalCharge += response.utsavDetails.reduce(
+        (partialSum, utsav) => partialSum + utsav.charge,
         0
       );
       break;
@@ -169,7 +206,7 @@ export const validateBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          roomDetails = await checkRoomAvailability(req.user, addon);
+          roomDetails = await checkRoomAvailability(addon);
           totalCharge += roomDetails.reduce(
             (partialSum, room) => partialSum + room.charge,
             0
@@ -205,7 +242,7 @@ export const validateBooking = async (req, res) => {
   });
 };
 
-async function checkRoomAvailability(user, data) {
+async function checkRoomAvailability(data) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -219,11 +256,7 @@ async function checkRoomAvailability(user, data) {
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
   if (
-    await checkRoomAlreadyBooked(
-      checkin_date,
-      checkout_date,
-      ...totalGuests
-    )
+    await checkRoomAlreadyBooked(checkin_date, checkout_date, ...totalGuests)
   ) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
@@ -437,7 +470,7 @@ async function checkFoodAvailability(data) {
 
 async function bookFood(data, t, user) {
   const { start_date, end_date, guestGroup } = data.details;
-  
+
   const result = await bookFoodForGuests(
     start_date,
     end_date,
@@ -575,13 +608,68 @@ async function bookAdhyayan(data, t, user) {
 
     userBookingIds[guest] = bookingIds;
   }
-  
 
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
   return { amount, userBookingIds };
 }
+
+export const guestBookingFlat = async (req, res) => {
+  const { guests, startDay, endDay } = req.body;
+
+  const flatDb = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: req.user.cardno
+    }
+  });
+
+  if (!flatDb) throw new ApiError(404, 'Flat not found');
+
+  validateDate(startDay, endDay);
+
+  for (var guest of guests) {
+    if (await checkFlatAlreadyBooked(startDay, endDay, guest['cardno']))
+      throw new ApiError(400, `flat already Booked for ${guest['name']}`);
+  }
+
+  const nights = await calculateNights(startDay, endDay);
+  var t = await database.transaction();
+
+  let bookings = [];
+  const userBookingIds = {};
+
+  for (var guest of guests) {
+    const bookingId = uuidv4();
+
+    bookings.push({
+      bookingid: bookingId,
+      cardno: guest.cardno,
+      flatno: flatDb.dataValues.flatno,
+      checkin: startDay,
+      checkout: endDay,
+      nights: nights,
+      updatedBy: req.user.cardno,
+      status: ROOM_STATUS_PENDING_CHECKIN
+    });
+
+    userBookingIds[guest.cardno] = [bookingId];
+  }
+
+  await FlatBooking.bulkCreate(bookings, { transaction: t });
+  await t.commit();
+
+  const userBookingIdMap = {};
+  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
+
+  for (const cardno in userBookingIdMap) {
+    const bookings = userBookingIdMap[cardno];
+    sendUnifiedEmail(cardno, bookings, req.user);
+  }
+
+  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+};
 
 export const fetchGuests = async (req, res) => {
   const { cardno } = req.user;
@@ -635,56 +723,4 @@ export const checkGuests = async (req, res) => {
   } else {
     return res.status(200).send({ message: 'Guest found', data: isGuest });
   }
-};
-
-export const guestBookingFlat = async (req, res) => {
-  const { guests, startDay, endDay } = req.body;
-
-  const flatDb = await FlatDb.findOne({
-    attributes: ['flatno'],
-    where: {
-      owner: req.user.cardno
-    }
-  });
-
-  if (!flatDb) throw new ApiError(404, 'Flat not found');
-
-  validateDate(startDay, endDay);
-
-  for (var guest of guests) {
-    if (await checkFlatAlreadyBooked(startDay, endDay, guest['cardno']))
-      throw new ApiError(400, `Flat already Booked for ${guest['name']}`);
-  }
-
-  const nights = await calculateNights(startDay, endDay);
-
-  const t = await database.transaction();
-  req.transaction = t;
-
-  const userBookingIds = {};
-  let amount = 0;
-  for (var guest of guests) {
-    const booking = await createFlatBooking(
-      guest.cardno,
-      startDay,
-      endDay,
-      nights,
-      flatDb.dataValues.flatno,
-      req.user.cardno,
-      t
-    );
-    amount += booking.discountedAmount;
-    userBookingIds[guest.cardno] = [booking.bookingId];
-  }
-
-  const userBookingIdMap = {};
-  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);
-
-  const order = await generateOrderId(amount);
-  await updateRazorpayTransactions(bookingIds, order.id, t);
-
-  await t.commit();
-
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };

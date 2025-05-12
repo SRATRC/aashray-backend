@@ -6,9 +6,6 @@ import {
   TYPE_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
-  LUNCH_PRICE,
-  BREAKFAST_PRICE,
-  DINNER_PRICE,
   ERR_CARD_NOT_FOUND,
   TYPE_TRAVEL,
   ERR_INVALID_DATE,
@@ -36,7 +33,6 @@ import {
 import {
   bookFoodForMumukshus,
   bookFoodForMumukshusDuringUtsav,
-  getFoodBookings,
   validateFood
 } from '../../helpers/foodBooking.helper.js';
 import {
@@ -56,7 +52,6 @@ import {
   retrieveBookingIds
 } from '../helper.js';
 import database from '../../config/database.js';
-import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
 
