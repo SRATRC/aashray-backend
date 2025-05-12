@@ -144,11 +144,10 @@ async function book(user, body, data, userBookingIdMap, t) {
       );
       break;
 
+    //TODO: send emails for Utsav
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(user, data, t);
       amount += utsavResult.amount;
-      // TODO: send emails for Utsav
-      // setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.bookingIds);
       break;
 
     default:
