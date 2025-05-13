@@ -151,8 +151,6 @@ export const guestBooking = async (req, res) => {
 export const validateBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
-  let totalCharge = 0;
-
   const response = {
     roomDetails: [],
     adhyayanDetails: [],
@@ -166,7 +164,7 @@ export const validateBooking = async (req, res) => {
       response.roomDetails = await checkRoomAvailability(
         req.body.primary_booking
       );
-      totalCharge += response.roomDetails.reduce(
+      response.totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
       );
@@ -176,14 +174,14 @@ export const validateBooking = async (req, res) => {
       response.foodDetails = await checkFoodAvailability(
         req.body.primary_booking
       );
-      totalCharge += response.foodDetails.charge;
+      response.totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
       response.adhyayanDetails = await checkAdhyayanAvailability(
         req.body.primary_booking
       );
-      totalCharge += response.adhyayanDetails.reduce(
+      response.totalCharge += response.adhyayanDetails.reduce(
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
         0
       );
@@ -194,7 +192,7 @@ export const validateBooking = async (req, res) => {
         req.body.primary_booking.details.utsavid,
         req.body.primary_booking.details.guests
       );
-      totalCharge += response.utsavDetails.reduce(
+      response.totalCharge += response.utsavDetails.reduce(
         (partialSum, utsav) => partialSum + utsav.charge,
         0
       );
@@ -208,21 +206,21 @@ export const validateBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          roomDetails = await checkRoomAvailability(addon);
-          totalCharge += roomDetails.reduce(
+          response.roomDetails = await checkRoomAvailability(addon);
+          response.totalCharge += response.roomDetails.reduce(
             (partialSum, room) => partialSum + room.charge,
             0
           );
           break;
 
         case TYPE_FOOD:
-          foodDetails = await checkFoodAvailability(addon);
-          totalCharge += foodDetails.charge;
+          response.foodDetails = await checkFoodAvailability(addon);
+          response.totalCharge += response.foodDetails.charge;
           break;
 
         case TYPE_ADHYAYAN:
-          adhyayanDetails = await checkAdhyayanAvailability(addon);
-          totalCharge += adhyayanDetails.reduce(
+          response.adhyayanDetails = await checkAdhyayanAvailability(addon);
+          response.totalCharge += response.adhyayanDetails.reduce(
             (partialSum, adhyayan) => partialSum + adhyayan.charge,
             0
           );
