@@ -151,6 +151,8 @@ export const guestBooking = async (req, res) => {
 export const validateBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
+  let totalCharge = 0;
+
   const response = {
     roomDetails: [],
     adhyayanDetails: [],
