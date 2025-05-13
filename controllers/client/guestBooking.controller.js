@@ -235,12 +235,7 @@ export const validateBooking = async (req, res) => {
   }
 
   return res.status(200).send({
-    data: {
-      roomDetails: roomDetails,
-      adhyayanDetails: adhyayanDetails,
-      foodDetails: foodDetails,
-      totalCharge: totalCharge
-    }
+    data: response
   });
 };
 
