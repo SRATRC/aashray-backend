@@ -13,13 +13,16 @@ import {
   TYPE_ADHYAYAN,
   TYPE_GUEST_ADHYAYAN,
   ERR_CARD_NOT_FOUND,
-  ROOM_STATUS_CHECKEDIN
+  ROOM_STATUS_CHECKEDIN,
+  TYPE_ROOM,
+  TYPE_FLAT,
+  ROOM_STATUS_PENDING_CHECKIN
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
-import moment from 'moment';
+import { getBookingType } from './booking.helper.js';
 
 export async function createTransaction(
   cardno,
@@ -131,6 +134,7 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
       ? totalAmount
       : transaction.discount;
 
+  const bookingType = getBookingType(transaction);
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
@@ -138,10 +142,9 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     case STATUS_CASH_PENDING:
       if (
         credits > 0 &&
-        transaction.category != TYPE_ADHYAYAN &&
-        transaction.category != TYPE_GUEST_ADHYAYAN
+        bookingType != TYPE_ADHYAYAN
       ) {
-        await addCredit(user, transaction.cardno, credits, t);
+        await addCredit(user, transaction.cardno, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;
       }
@@ -173,52 +176,66 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
   return { credits }
 }
 
-export async function adjustAmount(user, transaction, amount, t) {
+export async function adjustAmount(
+    cardno,
+    booking,
+    transaction,
+    amount,
+    updatedBy,
+    t
+  ) {
   const originalAmount = transaction.amount + transaction.discount;
+  const bookingType = getBookingType(transaction);
 
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
-
-    await addCredit(user, transaction.cardno, credits, t);
-
-    const creditsUsed = Math.min(amount, transaction.discount);
-    const discountedAmount = amount - creditsUsed;
-
-    await transaction.update(
-      {
-        status: STATUS_PAYMENT_COMPLETED,
-        discount: creditsUsed,
-        amount: discountedAmount,
-        description: `credits added: ${credits}`,
-        updatedBy: user.username
-      },
-      { transaction: t }
+    await addCredit(user, cardno, bookingType, credits, t);
+    await useCredit(
+      cardno,
+      booking,
+      transaction,
+      amount,
+      updatedBy,
+      t
     );
+
   } else if (originalAmount < amount) {
     const balance = amount - originalAmount;
     await transaction.update(
       {
-        status: STATUS_PAYMENT_PENDING,
+        // set status to cash pending as only admin 
+        // can call this function
+        status: STATUS_CASH_PENDING,
         discount: originalAmount,
         amount: balance,
         description: `Transaction updated. New Balance ${balance}.`,
-        updatedBy: user.username
+        updatedBy: updatedBy
       },
       { transaction: t }
     );
   }
 }
 
-async function addCredit(user, cardno, credits, t) {
+async function addCredit(user, cardno, bookingType, credits, t) {
   const card = await CardDb.findOne({
     where: { cardno }
   });
 
   if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
 
+  const previousCredits = card.credits && card.credits[bookingType]
+    ? card.credits[bookingType]
+    : 0;
+
+  const updatedCredits = getUpdatedCredits(
+    card,
+    bookingType,
+    previousCredits + credits
+  );
+
   await card.update(
     {
-      credits: card.credits + credits,
+      credits: updatedCredits,
       updatedBy: user.username
     },
     { transaction: t }
@@ -239,16 +256,21 @@ export async function useCredit(
 
   if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
 
-  if (card.credits <= 0) {
+  const bookingType = getBookingType(transaction);
+
+  if (!(card.credits && card.credits[bookingType] > 0)) {
     return amount;
   }
+    
+  const credits = card.credits[bookingType];
 
-  const status =
-    amount > card.credits ? STATUS_PAYMENT_PENDING : STATUS_PAYMENT_COMPLETED;
+  const status = amount > credits 
+    ? transaction.status 
+    : STATUS_PAYMENT_COMPLETED;
 
-  const creditsUsed = Math.min(amount, card.credits);
+  const creditsUsed = Math.min(amount, credits);
   const discountedAmount = amount - creditsUsed;
-  transaction.update(
+  await transaction.update(
     {
       status,
       discount: creditsUsed,
@@ -263,10 +285,11 @@ export async function useCredit(
   // After applying credits, if the transaction is complete
   // then confirm the booking.
   if (status == STATUS_PAYMENT_COMPLETED) {
-    const bookingStatus =
-      booking instanceof RoomBooking ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED;
+    const bookingStatus = (bookingType == TYPE_ROOM || bookingType == TYPE_FLAT)
+      ? ROOM_STATUS_PENDING_CHECKIN 
+      : STATUS_CONFIRMED;
 
-    booking.update(
+    await booking.update(
       {
         status: bookingStatus,
         updatedBy
@@ -274,16 +297,36 @@ export async function useCredit(
       { transaction: t }
     );
   }
+  
+  const updatedCredits = getUpdatedCredits(
+    card,
+    bookingType,
+    credits - creditsUsed
+  );
 
   await card.update(
     {
-      credits: card.credits - creditsUsed,
+      credits: updatedCredits,
       updatedBy
     },
     { transaction: t }
   );
 
   return discountedAmount;
+}
+
+function getUpdatedCredits(card, bookingType, newCredits) {
+  const updatedCredits = card.credits
+    ? JSON.parse(JSON.stringify(card.credits))
+    : {};
+    
+  updatedCredits[bookingType] = newCredits;
+
+  if (updatedCredits[bookingType] == 0) {
+    delete updatedCredits[bookingType];
+  }
+
+  return updatedCredits;
 }
 
 export const generateOrderId = async (amount) => {

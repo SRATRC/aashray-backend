@@ -115,9 +115,8 @@ const CardDb = sequelize.define(
         '$2b$10$kyNWZgMVhB0/YIEwJaKhP.JwugrOTUojN.8jPpwS6Tc1O7Wi2yadC'
     },
     credits: {
-      type: DataTypes.DECIMAL,
-      allowNull: false,
-      defaultValue: 0
+      type: DataTypes.JSON,
+      allowNull: true
     }
   },
   {
