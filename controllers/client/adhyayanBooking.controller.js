@@ -6,7 +6,8 @@ import {
   ERR_BOOKING_NOT_FOUND,
   TYPE_GUEST_ADHYAYAN,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  ERR_BOOKING_ALREADY_CANCELLED
 } from '../../config/constants.js';
 import {
   openAdhyayanSeat,
@@ -155,24 +156,27 @@ export const FetchBookedShibir = async (req, res) => {
 
 
 export const CancelShibir = async (req, res) => {
-  const { shibir_id, bookedBy } = req.body;
+  const { bookingid } = req.body;
 
-  const adhyayan = (await validateAdhyayans(shibir_id))[0];
   const t = await database.transaction();
   req.transaction = t;
 
   const booking = await ShibirBookingDb.findOne({
-    where: {
-      shibir_id,
-      cardno: req.user.cardno,
-      bookedBy: bookedBy || null
+    where: { 
+      bookingid: bookingid,
+      [Sequelize.Op.or]: [
+        { cardno: req.user.cardno },
+        { bookedBy: req.user.cardno }
+      ],
     }
   });
 
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
   if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(booking.status)) {
-    throw new ApiError(400, 'Booking already cancelled');
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
   if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
@@ -182,13 +186,17 @@ export const CancelShibir = async (req, res) => {
   await userCancelBooking(req.user, booking, t);
   await t.commit();
 
+  const adhyayan = await ShibirDb.findOne({
+    where: { id: booking.shibir_id }
+  });
+
   sendMail({
     email: req.user.email,
     subject: 'Your Raj Adhyayan Booking has been cancelled',
     template: 'rajAdhyayanCancellation',
     context: {
       name: req.user.issuedto,
-      adhyayanName: adhyayan.dataValues.name
+      adhyayanName: adhyayan.name
     }
   });
 
@@ -198,9 +206,12 @@ export const CancelShibir = async (req, res) => {
       {
         token: req.user.pushToken,
         title: 'Booking Cancelled',
-        body: `Your booking for "${adhyayan.dataValues.name}" has been cancelled.`,
+        body: `Your booking for "${adhyayan.name}" has been cancelled.`,
         screen: 'CancelledBookings',
-        data: { shibir_id, status: 'cancelled' }
+        data: { 
+          shibir_id: adhyayan.id, 
+          status: 'cancelled' 
+        }
       }
     ]);
   }
