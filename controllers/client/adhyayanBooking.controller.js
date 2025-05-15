@@ -179,16 +179,16 @@ export const CancelShibir = async (req, res) => {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
+  const adhyayan = await ShibirDb.findOne({
+    where: { id: booking.shibir_id }
+  });
+
   if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
     await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
   }
 
   await userCancelBooking(req.user, booking, t);
   await t.commit();
-
-  const adhyayan = await ShibirDb.findOne({
-    where: { id: booking.shibir_id }
-  });
 
   sendMail({
     email: req.user.email,
