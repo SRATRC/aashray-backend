@@ -5,22 +5,26 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   MSG_BOOKING_SUCCESSFUL,
   TYPE_GUEST_ROOM,
-  TYPE_FLAT
+  TYPE_FLAT,
+  ERR_FLAT_ALREADY_BOOKED,
+  STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
 import {
   validateDate,
   calculateNights,
   checkFlatAlreadyBooked,
   sendUnifiedEmail,
-  setBookingIdMap
+  setBookingIdMap,
+  retrieveBookingIds
 } from '../helper.js';
-import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { updateRazorpayTransactions, userCancelBooking } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
-import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
+import { createFlatBooking } from '../../helpers/roomBooking.helper.js';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -91,7 +95,7 @@ export const CancelBooking = async (req, res) => {
         { cardno: req.user.cardno },
         { bookedBy: req.user.cardno }
       ],
-      status: [STATUS_WAITING, ROOM_STATUS_PENDING_CHECKIN]
+      status: [STATUS_WAITING, STATUS_PAYMENT_PENDING, ROOM_STATUS_PENDING_CHECKIN]
     }
   });
 
@@ -99,13 +103,13 @@ export const CancelBooking = async (req, res) => {
     booking = await FlatBooking.findOne({
       where: {
         bookingid: bookingid,
-        [Sequelize.Op.or]: [{ cardno: req.user.cardno }],
-        status: [STATUS_WAITING, ROOM_STATUS_PENDING_CHECKIN]
+        cardno: req.user.cardno,
+        status: [STATUS_WAITING, STATUS_PAYMENT_PENDING, ROOM_STATUS_PENDING_CHECKIN]
       }
     });
-
-    if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
+
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
   await userCancelBooking(req.user, booking, t);
   await t.commit();
@@ -141,7 +145,7 @@ export const FlatBookingMumukshu = async (req, res) => {
 
   for (var mumukshu of mumukshus) {
     if (await checkFlatAlreadyBooked(startDay, endDay, mumukshu['cardno'])) {
-      throw new ApiError(400, 'Already Booked');
+      throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
     }
   }
 
@@ -150,37 +154,30 @@ export const FlatBookingMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  let flat_bookings = [];
   const userBookingIds = {};
-
-  for (var mumukshu of mumukshus) {
-    const bookingId = uuidv4();
-
-    flat_bookings.push({
-      bookingid: bookingId,
-      cardno: mumukshu['cardno'],
-      flatno: flatDb.dataValues.flatno,
-      checkin: startDay,
-      checkout: endDay,
-      nights: nights,
-      updatedBy: req.user.cardno,
-      status: ROOM_STATUS_PENDING_CHECKIN
-    });
-
-    userBookingIds[mumukshu['cardno']] = [bookingId];
+  let amount = 0;
+  for (var mumukshu of mumukshus) { 
+    const booking = await createFlatBooking(
+      mumukshu['cardno'],
+      startDay,
+      endDay,
+      nights,
+      flatDb.dataValues.flatno,
+      req.user.cardno,
+      t
+    );
+    amount += booking.discountedAmount;
+    userBookingIds[mumukshu['cardno']] = [booking.bookingId];
   }
 
-  await FlatBooking.bulkCreate(flat_bookings, { transaction: t });
+  const userBookingIdMap = {};
+  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
+
+  const order = await generateOrderId(amount);
+  await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
   
-  const userBookingIdMap = {};
-  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
-
-  for (const cardno in userBookingIdMap) {
-    const bookings = userBookingIdMap[cardno];
-    sendUnifiedEmail(cardno, bookings, req.user);
-  }
-  
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };

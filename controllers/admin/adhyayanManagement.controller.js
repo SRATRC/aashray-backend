@@ -264,6 +264,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
     where: { bookingid: bookingid }
   });
 
+  const bookedBy = booking.bookedBy || booking.cardno;
+
   // 1. Booking Status = WAITING, Transaction is Not Created
   // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
   // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
@@ -282,12 +284,13 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
       if (!transaction) {
         transaction = await createPendingTransaction(
-          booking.cardno,
+          bookedBy,
           booking,
           TYPE_ADHYAYAN,
           adhyayan.amount,
           req.user.username,
-          t
+          t,
+          true
         );
       }
 
@@ -322,12 +325,13 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
         if (!transaction) {
           transaction = await createPendingTransaction(
-            booking.cardno,
+            bookedBy,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
             req.user.username,
-            t
+            t,
+            true
           );
         }
 

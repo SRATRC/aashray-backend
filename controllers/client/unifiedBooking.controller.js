@@ -33,7 +33,10 @@ import {
   checkUtsavAlreadyBooked,
   validateUtsavs
 } from '../../helpers/utsavBooking.helper.js';
-import { generateOrderId } from '../../helpers/transactions.helper.js';
+import {
+  generateOrderId,
+  updateRazorpayTransactions
+} from '../../helpers/transactions.helper.js';
 import {
   bookTravelForMumukshus,
   checkTravelAlreadyBooked
@@ -41,8 +44,8 @@ import {
 import {
   calculateNights,
   validateDate,
-  sendUnifiedEmail,
-  setBookingIdMap
+  setBookingIdMap,
+  retrieveBookingIds
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -71,17 +74,17 @@ export const unifiedBooking = async (req, res) => {
     }
   }
 
-  const order =
-    process.env.NODE_ENV == 'prod' && amount > 0
-      ? await generateOrderId(amount)
-      : { amount };
+  const order = await generateOrderId(amount);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
+  await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
 
-  for (const cardno in userBookingIdMap) {
-    const bookings = userBookingIdMap[cardno];
-    sendUnifiedEmail(cardno, bookings, req.user);
-  }
+  // for (const cardno in userBookingIdMap) {
+  //   const bookings = userBookingIdMap[cardno];
+  //   sendUnifiedEmail(cardno, bookings, req.user);
+  // }
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
@@ -141,10 +144,10 @@ async function book(user, body, data, userBookingIdMap, t) {
       );
       break;
 
+    //TODO: send emails for Utsav
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(user, data, t);
       amount += utsavResult.amount;
-      bookingIds[TYPE_UTSAV] = utsavResult.bookingIds;
       break;
 
     default:

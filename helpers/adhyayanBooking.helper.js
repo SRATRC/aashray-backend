@@ -14,6 +14,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCards } from './card.helper.js';
 import ApiError from '../utils/ApiError.js';
+import moment from 'moment';
+import Sequelize from 'sequelize';
 
 export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   await validateCards(mumukshus);
@@ -39,9 +41,29 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
   }
 }
 
+export async function checkAdhyayanParamGyanSabha(date) {
+  const adhyayan = await ShibirDb.findOne({
+    attributes: ['name', 'speaker'],
+    where: {
+      name: 'Param Gyaan Sabha',
+      start_date: date,
+      status: STATUS_OPEN
+    }
+  });
+
+  if (adhyayan) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function validateAdhyayans(...shibirIds) {
   const shibirs = await ShibirDb.findAll({
-    where: { id: shibirIds }
+    where: {
+      id: shibirIds,
+      start_date: { [Sequelize.Op.gt]: moment().format('YYYY-MM-DD') }
+    }
   });
 
   if (shibirs.length != shibirIds.length) {
@@ -92,7 +114,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
 
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
-            mumukshu,
+            user.cardno,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
@@ -152,8 +174,9 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
     );
 
     // for a booking in waiting status, there should be no existing transaction
+    const bookedBy = booking.bookedBy || booking.cardno;
     const transaction = await createPendingTransaction(
-      cardno,
+      bookedBy,
       booking,
       TYPE_ADHYAYAN,
       adhyayan.amount,

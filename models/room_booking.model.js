@@ -6,6 +6,7 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
+  STATUS_PAYMENT_PENDING,
   STATUS_WAITING
 } from '../config/constants.js';
 
@@ -63,6 +64,7 @@ const RoomBooking = sequelize.define(
       allowNull: false,
       values: [
         STATUS_WAITING,
+        STATUS_PAYMENT_PENDING,
         ROOM_STATUS_PENDING_CHECKIN,
         ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_CHECKEDOUT,

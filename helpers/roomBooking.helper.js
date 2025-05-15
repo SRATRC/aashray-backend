@@ -10,9 +10,13 @@ import {
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  TYPE_FLAT,
+  STATUS_PAYMENT_PENDING,
+  STATUS_CASH_PENDING,
+  ERR_FLAT_FAILED_TO_BOOK
 } from '../config/constants.js';
-import { RoomBooking, RoomDb, UtsavDb } from '../models/associations.js';
+import { RoomBooking, RoomDb, UtsavDb, FlatBooking, FlatDb } from '../models/associations.js';
 import { createPendingTransaction, useCredit } from './transactions.helper.js';
 import { calculateNights, validateDate } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -46,6 +50,7 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
       cardno: cardnos,
       status: [
         STATUS_WAITING,
+        STATUS_PAYMENT_PENDING,
         ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_PENDING_CHECKIN
       ]
@@ -228,8 +233,9 @@ export async function createRoomBooking(
   roomtype,
   user_gender,
   floor_pref,
-  updatedBy,
-  t
+  bookedBy,
+  t,
+  cashAllowed = false
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
   const roomno = await findRoom(checkin, checkout, roomtype, gender);
@@ -241,15 +247,15 @@ export async function createRoomBooking(
     {
       bookingid: bookingId,
       roomno: roomno.dataValues.roomno,
-      status: ROOM_STATUS_PENDING_CHECKIN,
+      status: STATUS_PAYMENT_PENDING,
       cardno,
-      bookedBy: updatedBy !== cardno ? updatedBy : null,
+      bookedBy: bookedBy !== cardno ? bookedBy : null,
       checkin,
       checkout,
       nights,
       roomtype,
       gender,
-      updatedBy
+      updatedBy: bookedBy
     },
     { transaction: t }
   );
@@ -261,12 +267,13 @@ export async function createRoomBooking(
   const amount = roomCharge(roomtype) * nights;
 
   const {transaction,discountedAmount} = await createPendingTransaction(
-    cardno,
+    bookedBy,
     booking,
     TYPE_ROOM,
     amount,
-    updatedBy,
-    t
+    bookedBy,
+    t,
+    cashAllowed
   );
 
   if (!transaction) {
@@ -396,4 +403,78 @@ export async function bookRoomDuringUtsavForMumukshus(
   }
 
   return { t, amount, bookingIds };
+}
+
+
+export async function createFlatBooking(
+  cardno, 
+  checkin, 
+  checkout, 
+  nights, 
+  flatno, 
+  updatedBy, 
+  t,
+  cashAllowed = false
+) {
+  let bookingId = uuidv4();
+  let status = cashAllowed 
+    ? STATUS_CASH_PENDING
+    : STATUS_PAYMENT_PENDING;
+
+  const mumukshuIsFlatOwner = await isMumukshuFlatOwner(cardno, flatno);
+  if (mumukshuIsFlatOwner) {
+    status = ROOM_STATUS_PENDING_CHECKIN;
+  }
+
+  const booking = await FlatBooking.create(
+    { 
+      bookingid: bookingId,
+      cardno, 
+      flatno, 
+      checkin, 
+      checkout, 
+      nights, 
+      updatedBy, 
+      status
+    },
+    { transaction: t }
+  );
+
+  if (!booking) {
+    throw new ApiError(400, ERR_FLAT_FAILED_TO_BOOK); 
+  }
+
+  let discountedAmount = 0; 
+  if (!mumukshuIsFlatOwner) {
+     // Check if flat is AC or NAC
+    let amount = roomCharge("nac") * nights;
+
+    const result = await createPendingTransaction(
+      cardno,
+      booking, 
+      TYPE_FLAT, 
+      amount, 
+      updatedBy, 
+      t,
+      cashAllowed
+    ); 
+
+    discountedAmount = result.discountedAmount;
+  }
+
+  return { t, discountedAmount, bookingId };
+}
+
+async function isMumukshuFlatOwner(cardno, flatno) {
+  const flat = await FlatDb.findOne(
+    { 
+      attributes: ['flatno'],
+      where: { 
+        owner: cardno, 
+        flatno: flatno 
+      } 
+    }
+  );
+
+  return flat ? true : false;
 }

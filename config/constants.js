@@ -1,21 +1,20 @@
 export const TYPE_EXPENSE = 'expense';
 export const TYPE_REFUND = 'refund';
 export const TYPE_ROOM = 'room';
-export const TYPE_GUEST_ROOM = 'guest_room';
+export const TYPE_GUEST_ROOM = 'room';
 export const TYPE_FLAT = 'flat';
-export const TYPE_GUEST_FLAT = 'guest_flat';
 export const TYPE_FOOD = 'food';
-export const TYPE_GUEST_FOOD = 'guest_food';
-export const TYPE_GUEST_BREAKFAST = 'guest_breakfast';
-export const TYPE_GUEST_LUNCH = 'guest_lunch';
-export const TYPE_GUEST_DINNER = 'guest_dinner';
+export const TYPE_GUEST_BREAKFAST = 'breakfast';
+export const TYPE_GUEST_LUNCH = 'lunch';
+export const TYPE_GUEST_DINNER = 'dinner';
 export const TYPE_TRAVEL = 'travel';
 export const TYPE_ADHYAYAN = 'adhyayan';
-export const TYPE_GUEST_ADHYAYAN = 'guest_adhyayan';
+export const TYPE_GUEST_ADHYAYAN = 'adhyayan';
 export const TYPE_UTSAV = 'utsav';
-export const TYPE_GUEST_UTSAV = 'guest_utsav';
+export const TYPE_GUEST_UTSAV = 'utsav';
 export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
+export const RAZORPAY_CALLBACK = 'razorpay_callback';
 
 // PRICES
 export const BREAKFAST_PRICE = 50;
@@ -29,6 +28,7 @@ export const FULL_TRAVEL_PRICE = 1800;
 // STATUS
 export const STATUS_WAITING = 'waiting';
 export const STATUS_CONFIRMED = 'confirmed';
+export const STATUS_AWAITING_CONFIRMATION = 'awaiting confirmation';
 export const STATUS_CANCELLED = 'cancelled';
 export const STATUS_REJECTED = 'rejected';
 export const STATUS_ACTIVE = 'active';
@@ -40,6 +40,8 @@ export const STATUS_CLOSED = 'closed';
 export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
+export const STATUS_PROCEED_FOR_PAYMENT = 'proceed for payment';
+
 export const STATUS_PAYMENT_COMPLETED = 'completed';
 export const STATUS_AWAITING_REFUND = 'awaiting refund';
 export const STATUS_CASH_PENDING = 'cash pending';
@@ -51,8 +53,6 @@ export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
-
-
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
@@ -100,6 +100,8 @@ export const ERR_ROOM_FAILED_TO_BOOK = 'Failed to book a room';
 export const ERR_ROOM_MUST_BE_BOOKED =
   'Must have room booked on one or more selected dates';
 
+export const ERR_FLAT_FAILED_TO_BOOK = 'Failed to book flat';
+
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan already booked';
 export const ERR_ADHYAYAN_NOT_FOUND = 'Adhyayan not found';
 export const ERR_ADHYAYAN_NO_SEATS_AVAILABLE =
@@ -113,6 +115,7 @@ export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
 export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
+export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
 
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';

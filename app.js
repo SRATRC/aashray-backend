@@ -1,12 +1,13 @@
 import './config/environment.js';
 import express, { urlencoded, json } from 'express';
+import { ErrorHandler } from './middleware/Error.js';
+import { httpLogger } from './middleware/Logger.js';
+import { sendNotification } from './utils/sendNotification.js';
 import cors from 'cors';
 import session from 'express-session';
 import sequelize from './config/database.js';
 import ApiError from './utils/ApiError.js';
-import { ErrorHandler } from './middleware/Error.js';
 import logger from './config/logger.js';
-import { httpLogger } from './middleware/Logger.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -24,6 +25,7 @@ import profileRoutes from './routes/client/profile.routes.js';
 import locationRoutes from './routes/client/location.routes.js';
 import guestRoutes from './routes/client/guestBooking.routes.js';
 import mumukshuRoutes from './routes/client/mumukshuBooking.routes.js';
+import paymentRoutes from  './routes/client/payment.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -36,6 +38,8 @@ import roomManagementRoutes from './routes/admin/roomManagement.routes.js';
 import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 import accountsManagementRoutes from './routes/admin/accountsManagement.routes.js';
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagementRoutes.js';
+import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
+import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -72,7 +76,7 @@ app.use(httpLogger);
 
 app.use(
   session({
-    secret: process.env['SESSION_SECRET'],
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false, maxAge: 86400000 }
@@ -93,6 +97,7 @@ app.use('/api/v1/utsav', utsavBookingRoutes);
 app.use('/api/v1/maintenance', maintenanceRoutes);
 app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/location', locationRoutes);
+app.use('/api/v1/razorpay', paymentRoutes);
 
 // Admin Routes
 app.use('/api/v1/admin/sudo', adminControlRoutes);
@@ -105,17 +110,47 @@ app.use('/api/v1/admin/stay', roomManagementRoutes);
 app.use('/api/v1/admin/travel', travelManagementRoutes);
 app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
-
+app.use('/api/v1/admin/bookings', bookingManagementRoutes);
+app.use('/api/v1/admin/utsav', utsavManagementRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
 app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/mumukshu', mumukshuRoutes);
 
+// Test route for sending notification
+app.post('/test-notification', async (req, res) => {
+  const token = req.body.token;
+
+  try {
+    const notificationResponse = await sendNotification([
+      {
+        token,
+        title: 'Test Notification',
+        body: 'This is a test notification!',
+        screen: 'TestScreen',
+        data: { someKey: 'someValue' }
+      }
+    ]);
+
+    return res.status(200).send({
+      message: 'Notification sent successfully',
+      tickets: notificationResponse
+    });
+  } catch (error) {
+    console.error('Error sending notification:', error);
+    return res.status(500).send({
+      message: 'Error sending notification',
+      error
+    });
+  }
+});
+
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {
   throw new ApiError(404, 'Page Not Found');
 });
+
 app.use(ErrorHandler);
 
 const port = process.env.PORT || 3000;

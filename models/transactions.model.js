@@ -48,6 +48,14 @@ const Transactions = sequelize.define(
       allowNull: false,
       defaultValue: 'NA'
     },
+    razorpay_order_id: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    razorpay_payment_id: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     description: {
       type: DataTypes.STRING,
       allowNull: true

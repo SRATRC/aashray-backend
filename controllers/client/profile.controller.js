@@ -5,15 +5,17 @@ import {
 } from '@aws-sdk/client-s3';
 import { CardDb, Transactions } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
-import { generateOrderId } from '../../helpers/transactions.helper.js';
+import { generateOrderId, updateRazorpayTransactions } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
 import {
+  STATUS_CASH_PENDING,
   STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
+import { retrieveBookingIds } from '../helper.js';
 
 export const updateProfile = async (req, res) => {
   const {
@@ -346,24 +348,4 @@ WHERE combined.booked_for = :cardno
   return res
     .status(200)
     .json({ message: 'transactions fetched', data: transactions });
-};
-
-//TODO: do we have to change status to paid?
-export const payNow = async (req, res) => {
-  const { bookingids } = req.body;
-
-  const totalAmount = await Transactions.sum('amount', {
-    where: {
-      bookingid: bookingids,
-      cardno: req.user.cardno,
-      status: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_COMPLETED]
-    }
-  });
-
-  if (totalAmount > 0) {
-    const order = await generateOrderId(totalAmount);
-    return res.status(200).send({ message: 'payment successful', data: order });
-  } else {
-    throw new ApiError(404, 'nothing to pay for');
-  }
 };
