@@ -226,6 +226,8 @@ export const validateBooking = async (req, res) => {
           );
           break;
 
+        //TODO: add travel for utsavs
+
         default:
           throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
       }
