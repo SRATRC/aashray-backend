@@ -59,6 +59,7 @@ CardDb.hasMany(ShibirBookingDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(ShibirBookingDb, {
+  as: 'shibirBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -83,6 +84,7 @@ CardDb.hasMany(RoomBooking, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(RoomBooking, {
+  as: 'roomBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'SET NULL',
@@ -101,6 +103,7 @@ CardDb.hasOne(UtsavBooking, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasOne(UtsavBooking, {
+  as: 'utsavBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -113,6 +116,7 @@ CardDb.hasMany(TravelDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(TravelDb, {
+  as: 'travelBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -190,7 +194,8 @@ RoomBooking.belongsTo(RoomDb, {
 });
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
-  targetKey: 'cardno'
+  targetKey: 'cardno',
+  
 });
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
@@ -232,11 +237,12 @@ ShibirBookingDb.belongsTo(ShibirDb, {
 });
 ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
-  targetKey: 'cardno'
+  targetKey: 'cardno',
 });
 ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
-  targetKey: 'cardno'
+  targetKey: 'cardno',
+  as: 'shibirBookedByCard'
 });
 
 // Maintenance
@@ -267,6 +273,7 @@ TravelDb.belongsTo(CardDb, {
   targetKey: 'cardno'
 });
 TravelDb.belongsTo(CardDb, {
+  as: 'travelBookedByCard',
   foreignKey: 'bookedBy',
   targetKey: 'cardno'
 });
@@ -283,6 +290,7 @@ UtsavBooking.belongsTo(CardDb, {
   targetKey: 'cardno'
 });
 UtsavBooking.belongsTo(CardDb, {
+  as: 'utsavBookedByCard',
   foreignKey: 'bookedBy',
   targetKey: 'cardno'
 });

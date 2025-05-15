@@ -203,20 +203,56 @@
             <h1>Booking Confirmed!</h1>
             <p class="intro">Dear {{name}},</p> <p class="intro">We are pleased to inform you that your bookings have been successfully created. Here are the details of your bookings:</p>
 
+             {{#if showUtsavDetail}}
+            <div class="details">
+                <p class="section-title"><strong>Raj Utsav - Room Booking:</strong></p>
+                <table>
+                    <thead> <tr>
+                            <th>BookingId</th>
+                            <th>Utsav Name</th>
+                            <th>Name</th>     
+                            <th>Checkin</th>
+                            <th>Checkout</th> 
+                            <th>Package</th> 
+                            <th>Status</th>
+                            </tr>
+                    </thead>
+                    <tbody> {{#each roomBookingDetails}}
+                        <tr>
+                            <td>{{bookingid}}</td>
+                            <td>{{utsavname}}</td>
+                            <td>{{name}}</td>
+                            <td>{{checkin}}</td>
+                            <td>{{checkout}}</td>
+                            <td>{{package}}</td>
+                            <td>{{status}}</td>
+                        </tr>
+                        {{/each}}
+                    </tbody>
+                </table>
+            </div>
+            {{/if}}
+
+
              {{#if showRoomDetail}}
             <div class="details">
                 <p class="section-title"><strong>Raj Sharan - Room Booking:</strong></p>
                 <table>
                     <thead> <tr>
                             <th>BookingId</th>
+                            <th>Name</th>
                             <th>Checkin</th>
-                            <th>Checkout</th> </tr>
+                            <th>Checkout</th>
+                            <th>Status</th>
+                        </tr>
                     </thead>
                     <tbody> {{#each roomBookingDetails}}
                         <tr>
                             <td>{{bookingid}}</td>
+                            <td>{{name}}</td>
                             <td>{{checkin}}</td>
                             <td>{{checkout}}</td>
+                            <td>{{status}}</td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -231,18 +267,22 @@
                      <thead>
                         <tr>
                             <th>BookingId</th>
+                            <th>Name</th>
                             <th>Flat No.</th>
                             <th>Checkin</th>
                             <th>Checkout</th>
+                            <th>Status</th>
                         </tr>
                      </thead>
                      <tbody>
                         {{#each flatBookingDetails}}
                         <tr>
                             <td>{{bookingid}}</td>
+                            <td>{{name}}</td>
                             <td>{{flatno}}</td>
                             <td>{{checkin}}</td>
                             <td>{{checkout}}</td>
+                            <td>{{status}}</td>
                         </tr>
                         {{/each}}
                      </tbody>
@@ -257,6 +297,7 @@
                    <thead>
                         <tr>
                            <th>BookingId</th>
+                           <th>Name</th>
                            <th>Adhyayan Name</th>
                            <th>Speaker</th>
                            <th>Start Date</th>
@@ -269,6 +310,7 @@
                         <tr>
                             <td>{{bookingid}}</td>
                             <td>{{name}}</td>
+                            <td>{{adhyayanname}}</td>
                             <td>{{speaker}}</td>
                             <td>{{startdate}}</td>
                             <td>{{enddate}}</td>
@@ -291,18 +333,22 @@
                    <thead>
                        <tr>
                            <th>BookingId</th>
+                           <th>Name</th>
                            <th>Date</th>
                            <th>Pickup Point</th>
                            <th>Dropoff Point</th>
+                           <th>Status</th>
                        </tr>
                    </thead>
                    <tbody>
                      {{#each travelBookingDetails}}
                         <tr>
                             <td>{{bookingid}}</td>
+                            <td>{{name}}</td>
                             <td>{{date}}</td>
                             <td>{{pickuppoint}}</td>
                             <td>{{dropoffpoint}}</td>
+                            <td>{{status}}</td>
                         </tr>
                     {{/each}}
                    </tbody>

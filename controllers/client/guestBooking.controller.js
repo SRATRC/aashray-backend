@@ -37,7 +37,9 @@ import {
   validateDate,
   createGuestsHelper,
   setBookingIdMap,
-  retrieveBookingIds
+  retrieveBookingIds,
+  sendUnifiedEmail,
+  sendUnifiedEmailForBookedBy
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -140,10 +142,15 @@ export const guestBooking = async (req, res) => {
 
   await t.commit();
 
-  // for (const cardno in userBookingIdMap) {
-  //   const bookings = userBookingIdMap[cardno];
-  //   sendUnifiedEmail(cardno, bookings, req.user);
-  // }
+  //Sending email to logged in user for self or other mumkshus
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  for (const cardno in userBookingIdMap) {
+    if(cardno != req.user.cardno) {
+    const bookings = userBookingIdMap[cardno];
+    //Sending email to other mumkshu & Guest
+    sendUnifiedEmail(cardno, bookings, req.user);
+    }
+   }
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
