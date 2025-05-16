@@ -56,14 +56,15 @@ if (!fs.existsSync(logsDir)) {
     logger.info('Connected to Database 🚀');
 
     // Synchronize the models with the database (create tables if they don't exist)
-    await sequelize.sync();
+    // await sequelize.sync();
+    await sequelize.sync({ alter: true });
   } catch (error) {
     logger.error('Unable to connect to the database:', error);
   }
 })();
 
 const corsOptions = {
-  origin: '*',
+  origin: 'http://127.0.0.1:5500',
   credentials: true,
   optionSuccessStatus: 200
 };
