@@ -17,20 +17,11 @@ import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 
 export const verifyPayment = async (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-  const body = razorpay_order_id + '|' + razorpay_payment_id;
+  const razorpay_order_id = req.body.payload.payment.entity.order_id;
+  const razorpay_payment_id = req.body.payload.payment.entity.id;
 
-  const isValidSignature = process.env.NODE_ENV == 'prod' 
-    ? validateWebhookSignature(
-        body, 
-        razorpay_signature, 
-        process.env.RAZORPAY_KEY_SECRET
-      )
-    : true;
-
-  if (!isValidSignature) {
-    throw new ApiError(400, 'Payment verification failed. Please try again.');    
-  }
+  //TODO: handle payment for all statuses: [authorized, captured, failed]
+  //TODO: store all response from webhook in a table
 
   const transactions = await Transactions.findAll({
     where: {
@@ -40,7 +31,10 @@ export const verifyPayment = async (req, res) => {
   });
 
   if (transactions.length == 0) {
-    throw new ApiError(404, 'No pending bookings found for the given order id.');
+    throw new ApiError(
+      404,
+      'No pending bookings found for the given order id.'
+    );
   }
 
   const bookedBy = await validateCard(transactions[0].cardno);
@@ -48,17 +42,17 @@ export const verifyPayment = async (req, res) => {
 
   const t = await database.transaction();
   req.transaction = t;
-  
+
   const userBookingIdMap = {};
   for (const transaction of transactions) {
-  
     const bookingType = getBookingType(transaction);
 
     const booking = await getBooking(bookingType, transaction.bookingid);
-    
-    const bookingStatus = bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
-      ? ROOM_STATUS_PENDING_CHECKIN
-      : STATUS_CONFIRMED;
+
+    const bookingStatus =
+      bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
+        ? ROOM_STATUS_PENDING_CHECKIN
+        : STATUS_CONFIRMED;
 
     await booking.update(
       {
@@ -67,7 +61,7 @@ export const verifyPayment = async (req, res) => {
       },
       { transaction: t }
     );
-  
+
     await transaction.update(
       {
         status: STATUS_PAYMENT_COMPLETED,
@@ -92,8 +86,8 @@ export const verifyPayment = async (req, res) => {
     await sendUnifiedEmail(cardno, bookings, bookedBy);
   }
 
-  res.status(200).json({ message: 'Payment successful.' });
-}
+  res.status(200).json({ message: 'Payment successful.', status: 'ok' });
+};
 
 export const createOrderIdForPendingPayments = async (req, res) => {
   const { bookingids } = req.body;
@@ -110,7 +104,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
     const order = await generateOrderId(totalAmount);
     await updateRazorpayTransactions(bookingids, order.id, t);
     await t.commit();
-    
+
     return res.status(200).send({ message: 'payment successful', data: order });
   } else {
     throw new ApiError(404, 'nothing to pay for');
@@ -118,9 +112,9 @@ export const createOrderIdForPendingPayments = async (req, res) => {
 };
 
 /*
- * Input: 
+ * Input:
  * Output:
- *    userBookingIdMap: { cardno: { type: [bookingIds] } } 
+ *    userBookingIdMap: { cardno: { type: [bookingIds] } }
  */
 export function setBookingIdMap(userBookingIdMap, type, cardno, bookingId) {
   const bookingIdsByType = userBookingIdMap[cardno] || {};

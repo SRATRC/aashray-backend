@@ -2,7 +2,6 @@ import './config/environment.js';
 import express, { urlencoded, json } from 'express';
 import { ErrorHandler } from './middleware/Error.js';
 import { httpLogger } from './middleware/Logger.js';
-import { sendNotification } from './utils/sendNotification.js';
 import cors from 'cors';
 import session from 'express-session';
 import sequelize from './config/database.js';
@@ -25,7 +24,7 @@ import profileRoutes from './routes/client/profile.routes.js';
 import locationRoutes from './routes/client/location.routes.js';
 import guestRoutes from './routes/client/guestBooking.routes.js';
 import mumukshuRoutes from './routes/client/mumukshuBooking.routes.js';
-import paymentRoutes from  './routes/client/payment.routes.js';
+import paymentRoutes from './routes/client/payment.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -118,34 +117,6 @@ app.use('/api/v1/admin/utsav', utsavManagementRoutes);
 app.use('/api/v1/unified', unifiedBookingRoutes);
 app.use('/api/v1/guest', guestRoutes);
 app.use('/api/v1/mumukshu', mumukshuRoutes);
-
-// Test route for sending notification
-app.post('/test-notification', async (req, res) => {
-  const token = req.body.token;
-
-  try {
-    const notificationResponse = await sendNotification([
-      {
-        token,
-        title: 'Test Notification',
-        body: 'This is a test notification!',
-        screen: 'TestScreen',
-        data: { someKey: 'someValue' }
-      }
-    ]);
-
-    return res.status(200).send({
-      message: 'Notification sent successfully',
-      tickets: notificationResponse
-    });
-  } catch (error) {
-    console.error('Error sending notification:', error);
-    return res.status(500).send({
-      message: 'Error sending notification',
-      error
-    });
-  }
-});
 
 // if any unknown endpoint is hit then the error is handelled
 app.use((_req, _res) => {
