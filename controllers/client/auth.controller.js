@@ -4,27 +4,6 @@ import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
 import sendMail from '../../utils/sendMail.js';
 
-
-
-export const verifyMobno = async (req, res) => {
-  const mobno = req.query.mobno;
-
-  const details = await CardDb.findOne({
-    where: {
-      mobno: mobno
-    },
-    attributes: {
-      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
-    }
-  });
-
-  if (!details) {
-    throw new ApiError(404, 'user not found');
-  }
-
-  return res.status(200).send({ message: '', data: details });
-};
-
 export const updatePassword = async (req, res) => {
   const current_password = req.body.current_password.trim();
   const new_password = req.body.new_password.trim();
@@ -56,18 +35,6 @@ export const updatePassword = async (req, res) => {
   return res
     .status(200)
     .send({ message: MSG_UPDATE_SUCCESSFUL, data: details });
-};
-
-export const login = async (req, res) => {
-  const { cardno, token } = req.body;
-  const updated = await CardDb.update(
-    { token: token },
-    { where: { cardno: cardno } }
-  );
-  if (!updated) {
-    throw new ApiError(500, 'Error while logging in user');
-  }
-  return res.status(200).send({ message: 'logged in' });
 };
 
 export const logout = async (req, res) => {
@@ -132,16 +99,17 @@ export const verifyAndLogin = async (req, res) => {
 
 export function generateTemporaryPassword() {
   // અક્ષરો, નંબરો અને વિશેષ ચિહ્નોનો સેટ
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const chars =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   const passwordLength = 5;
   let temporaryPassword = '';
-  
+
   // રેન્ડમ પાસવર્ડ જનરેટ કરો
   for (let i = 0; i < passwordLength; i++) {
     const randomIndex = Math.floor(Math.random() * chars.length);
     temporaryPassword += chars[randomIndex];
   }
-  
+
   return temporaryPassword;
 }
 
@@ -157,20 +125,18 @@ export async function forgotPassword(req, res) {
   const salt = bcrypt.genSaltSync(10);
   const hash = bcrypt.hashSync(temporaryPassword, salt);
 
-  await CardDb.update(
-    { password: hash },
-    { where: { mobno: mobno } }
-  );
+  await CardDb.update({ password: hash }, { where: { mobno: mobno } });
   sendMail({
     email: details.email,
     subject: `Your Temporary Password for Aashray App`,
     template: 'forgotPasswordEmail',
     context: {
       password: temporaryPassword,
-      name: details.issuedto,
-      
+      name: details.issuedto
     }
   });
-  return res.status(200).send({ message: 'Temporary password sent to your email', 
-    data: temporaryPassword });
+  return res.status(200).send({
+    message: 'Temporary password sent to your email',
+    data: { email: details.email }
+  });
 }

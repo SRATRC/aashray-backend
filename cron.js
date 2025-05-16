@@ -7,8 +7,10 @@ import logger from './config/logger.js';
 import { 
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_ADMIN_CANCELLED,
+  STATUS_CASH_PENDING,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
+  TYPE_FLAT,
   TYPE_FOOD,
   TYPE_GUEST_ADHYAYAN, 
   TYPE_GUEST_BREAKFAST, 
@@ -26,6 +28,10 @@ import TravelDb from './models/travel_db.model.js';
 import AdminUsers from './models/admin_users.model.js';
 import { cancelFood } from './helpers/foodBooking.helper.js';
 import UtsavBooking from './models/utsav_boking.model.js';
+import FlatBooking from './models/flat_booking.model.js';
+import { Sequelize } from 'sequelize';
+import Transactions from './models/transactions.model.js';
+import ShibirDb from './models/shibir_db.model.js';
 
 // Schedule the cron job to run every 10 minutes
 const job = cron.schedule('*/10 * * * *', async () => {
@@ -36,18 +42,12 @@ const job = cron.schedule('*/10 * * * *', async () => {
 
     const systemUser = AdminUsers.findOne({
       where: { username: "admin" } 
-    })
+    });
 
-    // Find bookings created before 1 hr, but not paid
-    const cancelTimeFilter = moment.utc().subtract(60, 'minutes');
-    const transactions = await getPendingTransactions(cancelTimeFilter);
+    await cancelPendingTransactions(systemUser);
+    await cancelRoomBookings(systemUser);
+    await cancelAdhyayanBookings(systemUser);
 
-    console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
-
-    const userBookingIds = {};
-    for (const transaction of transactions) {
-      await cancelTransaction(userBookingIds, systemUser, transaction);
-    }
 
   } catch (error) {
     logger.error('Cron job error:', error);
@@ -56,6 +56,19 @@ const job = cron.schedule('*/10 * * * *', async () => {
   // TODO: send notifications
   logger.info('Cron job finishing...');
 });
+
+async function cancelPendingTransactions(user) {
+  // Find bookings created before 1 hr, but not paid
+  const cancelTimeFilter = moment.utc().subtract(60, 'minutes');
+  const transactions = await getPendingTransactions(cancelTimeFilter);
+
+  console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
+
+  const userBookingIds = {};
+  for (const transaction of transactions) {
+    await cancelTransaction(userBookingIds, user, transaction);
+  }
+}
 
 async function cancelTransaction(userBookingIds, user, transaction) {
   logger.info(`Cancelling transaction: ${transaction.id}`); 
@@ -74,6 +87,16 @@ async function cancelTransaction(userBookingIds, user, transaction) {
         });
         await cancelBooking(user, booking, transaction);
         addToUserBookingIdMap(userBookingIds, transaction.cardno, transaction.bookingid, TYPE_ROOM);
+        break;
+
+      case TYPE_FLAT:
+        booking = await FlatBooking.findOne({
+          where: { 
+            bookingid: transaction.bookingid
+          }
+        });
+        await cancelBooking(user, booking, transaction);
+        addToUserBookingIdMap(userBookingIds, transaction.cardno, transaction.bookingid, TYPE_FLAT);
         break;
 
       case TYPE_ADHYAYAN:
@@ -175,6 +198,64 @@ function addToUserBookingIdMap(userBookingIds, cardno, bookingId, bookingType) {
   bookingIds.push(bookingId);
   bookingTypeIds[bookingType] = bookingIds;
   userBookingIds[cardno] = bookingTypeIds;
+}
+
+async function cancelRoomBookings(user) {
+  const today = moment().format('YYYY-MM-DD');
+
+  const bookings = await RoomBooking.findAll({
+    where: {
+      status: STATUS_PAYMENT_PENDING,
+      checkin: {[Sequelize.Op.lt]: today }
+    }
+  });
+
+  const transactions = await Transactions.findAll({
+    where: {
+      status: STATUS_CASH_PENDING,
+      bookingid: bookings.map((booking) => booking.bookingid)
+    }
+  });
+
+  console.log('ROOM TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
+
+  const userBookingIds = {};
+  for (const transaction of transactions) {
+    await cancelTransaction(userBookingIds, user, transaction);
+  }
+}
+
+async function cancelAdhyayanBookings(user) {
+  const today = moment().format('YYYY-MM-DD');
+
+  const bookings = await ShibirBookingDb.findAll({
+    include: [
+      {
+        model: ShibirDb,
+        required: true,
+        where: {
+          start_date: {[Sequelize.Op.lt]: today }
+        }
+      }
+    ],
+    where: {
+      status: STATUS_PAYMENT_PENDING
+    }
+  });
+
+  const transactions = await Transactions.findAll({
+    where: {
+      status: STATUS_CASH_PENDING,
+      bookingid: bookings.map((booking) => booking.bookingid)
+    }
+  });
+
+  console.log('ADHYAYAN TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
+
+  const userBookingIds = {};
+  for (const transaction of transactions) {
+    await cancelTransaction(userBookingIds, user, transaction);
+  }
 }
 
 job.start();

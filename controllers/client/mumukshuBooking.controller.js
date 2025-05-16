@@ -6,9 +6,6 @@ import {
   TYPE_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
-  LUNCH_PRICE,
-  BREAKFAST_PRICE,
-  DINNER_PRICE,
   ERR_CARD_NOT_FOUND,
   TYPE_TRAVEL,
   ERR_INVALID_DATE,
@@ -36,7 +33,6 @@ import {
 import {
   bookFoodForMumukshus,
   bookFoodForMumukshusDuringUtsav,
-  getFoodBookings,
   validateFood
 } from '../../helpers/foodBooking.helper.js';
 import {
@@ -45,10 +41,19 @@ import {
 } from '../../helpers/utsavBooking.helper.js';
 import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
-import { generateOrderId, updateRazorpayTransactions } from '../../helpers/transactions.helper.js';
-import { calculateNights, validateDate,sendUnifiedEmail, setBookingIdMap, retrieveBookingIds } from '../helper.js';
+import {
+  generateOrderId,
+  updateRazorpayTransactions
+} from '../../helpers/transactions.helper.js';
+import {
+  calculateNights,
+  validateDate,
+  setBookingIdMap,
+  retrieveBookingIds,
+  sendUnifiedEmailForBookedBy,
+  sendUnifiedEmail
+} from '../helper.js';
 import database from '../../config/database.js';
-import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
 
@@ -59,7 +64,13 @@ export const mumukshuBooking = async (req, res) => {
 
   const userBookingIdMap = {};
 
-  let amount = await book(req.body, primary_booking, t, req.user, userBookingIdMap);
+  let amount = await book(
+    req.body,
+    primary_booking,
+    t,
+    req.user,
+    userBookingIdMap
+  );
 
   if (addons) {
     for (const addon of addons) {
@@ -68,16 +79,20 @@ export const mumukshuBooking = async (req, res) => {
   }
 
   const order = await generateOrderId(amount);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);  
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
   await updateRazorpayTransactions(bookingIds, order.id, t);
-  
+
   await t.commit();
-  
-  // for (const cardno in userBookingIdMap) {
-  //   const bookings = userBookingIdMap[cardno];
-  //   sendUnifiedEmail(cardno, bookings, req.user);
-  // } 
-  
+
+  //Sending email to logged in user for self or other mumkshus
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  for (const cardno in userBookingIdMap) {
+    if(cardno != req.user.cardno) {
+    const bookings = userBookingIdMap[cardno];
+    //Sending email to other mumkshu & Guest
+    sendUnifiedEmail(cardno, bookings, req.user);
+    }
+   }
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, order });
 };
 
@@ -123,7 +138,7 @@ export const checkMumukshuOrGuest = async (req, res) => {
 
 async function book(body, data, t, user, userBookingIdMap) {
   let amount = 0;
-  
+
   switch (data.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(body, data, t, user);
@@ -137,13 +152,21 @@ async function book(body, data, t, user, userBookingIdMap) {
 
     case TYPE_TRAVEL:
       const travelResult = await bookTravel(data, t, user);
-      setBookingIdMap(userBookingIdMap, TYPE_TRAVEL, travelResult.userBookingIds);
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_TRAVEL,
+        travelResult.userBookingIds
+      );
       break;
 
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(data, t, user);
       amount += adhyayanResult.amount;
-      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.userBookingIds
+      );
       break;
 
     case TYPE_UTSAV:
@@ -171,7 +194,6 @@ async function validate(body, data, response) {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(body, data);
-      // totalCharge += foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
@@ -349,44 +371,17 @@ async function checkFoodAvailability(body, data) {
   const cards = await validateCards(mumukshus);
   for (const card of cards) {
     await validateFood(
-      start_date, 
-      end_date, 
-      body.primary_booking, 
-      body.addons, 
+      start_date,
+      end_date,
+      body.primary_booking,
+      body.addons,
       card
     );
   }
 
-  const allDates = getDates(start_date, end_date);
-  const bookings = await getFoodBookings(allDates, mumukshus);
-
-  var charge = 0;
-
-  for (const group of mumukshuGroup) {
-    const { meals, mumukshus } = group;
-    for (const date of allDates) {
-      for (const mumukshu of mumukshus) {
-        const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
-        if (booking) {
-          charge +=
-            (meals.includes('breakfast') && !booking['breakfast']
-              ? BREAKFAST_PRICE
-              : 0) +
-            (meals.includes('lunch') && !booking['lunch'] ? LUNCH_PRICE : 0) +
-            (meals.includes('dinner') && !booking['dinner'] ? DINNER_PRICE : 0);
-        } else {
-          charge +=
-            (meals.includes('breakfast') ? BREAKFAST_PRICE : 0) +
-            (meals.includes('lunch') ? LUNCH_PRICE : 0) +
-            (meals.includes('dinner') ? DINNER_PRICE : 0);
-        }
-      }
-    }
-  }
-
   return {
     status: STATUS_AVAILABLE,
-    charge
+    charge: 0
   };
 }
 

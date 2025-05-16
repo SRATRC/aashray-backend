@@ -33,7 +33,10 @@ import {
   checkUtsavAlreadyBooked,
   validateUtsavs
 } from '../../helpers/utsavBooking.helper.js';
-import { generateOrderId, updateRazorpayTransactions } from '../../helpers/transactions.helper.js';
+import {
+  generateOrderId,
+  updateRazorpayTransactions
+} from '../../helpers/transactions.helper.js';
 import {
   bookTravelForMumukshus,
   checkTravelAlreadyBooked
@@ -41,9 +44,9 @@ import {
 import {
   calculateNights,
   validateDate,
-  sendUnifiedEmail,
   setBookingIdMap,
-  retrieveBookingIds
+  retrieveBookingIds,
+  sendUnifiedEmailForBookedBy
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -73,15 +76,19 @@ export const unifiedBooking = async (req, res) => {
   }
 
   const order = await generateOrderId(amount);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);  
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
   await updateRazorpayTransactions(bookingIds, order.id, t);
-  
-  await t.commit();
 
-  // for (const cardno in userBookingIdMap) {
-  //   const bookings = userBookingIdMap[cardno];
-  //   sendUnifiedEmail(cardno, bookings, req.user);
-  // }
+  await t.commit();
+  //Sending email to logged in user for self or other mumkshus
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  for (const cardno in userBookingIdMap) {
+    if(cardno != req.user.cardno) {
+    const bookings = userBookingIdMap[cardno];
+    //Sending email to other mumkshu & Guest
+    sendUnifiedEmail(cardno, bookings, req.user);
+    }
+   }
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
@@ -142,11 +149,10 @@ async function book(user, body, data, userBookingIdMap, t) {
       );
       break;
 
+    //TODO: send emails for Utsav
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(user, data, t);
       amount += utsavResult.amount;
-      // TODO: send emails for Utsav
-      // setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.bookingIds);
       break;
 
     default:

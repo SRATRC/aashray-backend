@@ -2,14 +2,11 @@ import {
   ShibirDb,
   ShibirBookingDb,
   RoomBooking,
-  FlatBooking,
-  FlatDb,
   Transactions,
   CardDb,
   GuestRelationship
 } from '../../models/associations.js';
 import {
-  ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
   TYPE_EXPENSE,
   STATUS_AVAILABLE,
@@ -33,19 +30,24 @@ import {
   STATUS_GUEST,
   TYPE_GUEST_ROOM,
   STATUS_OPEN,
-  TYPE_FLAT
+  TYPE_UTSAV
 } from '../../config/constants.js';
 import {
   calculateNights,
   validateDate,
-  sendUnifiedEmail,
   createGuestsHelper,
   setBookingIdMap,
-  checkFlatAlreadyBooked,
-  retrieveBookingIds
+  retrieveBookingIds,
+  sendUnifiedEmail,
+  sendUnifiedEmailForBookedBy
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { bookDayVisit, checkRoomAlreadyBooked, findRoom, roomCharge } from '../../helpers/roomBooking.helper.js';
+import {
+  bookDayVisit,
+  checkRoomAlreadyBooked,
+  findRoom,
+  roomCharge
+} from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
   generateOrderId,
@@ -55,7 +57,11 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
-import { bookFoodForGuests, getFoodBookings } from '../../helpers/foodBooking.helper.js';
+import {
+  bookFoodForGuests,
+  getFoodBookings
+} from '../../helpers/foodBooking.helper.js';
+import { validateUtsavs } from '../../helpers/utsavBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -80,7 +86,16 @@ export const guestBooking = async (req, res) => {
     case TYPE_ADHYAYAN:
       const adhyayanResult = await bookAdhyayan(primary_booking, t, req.user);
       amount += adhyayanResult.amount;
-      setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.userBookingIds
+      );
+      break;
+
+    case TYPE_UTSAV:
+      const utsavResult = await bookUtsav(primary_booking, t, req.user);
+      amount += utsavResult.amount;
       break;
 
     default:
@@ -93,7 +108,11 @@ export const guestBooking = async (req, res) => {
         case TYPE_ROOM:
           const roomResult = await bookRoom(addon, t, req.user);
           amount += roomResult.amount;
-          setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
+          setBookingIdMap(
+            userBookingIdMap,
+            TYPE_ROOM,
+            roomResult.userBookingIds
+          );
           break;
 
         case TYPE_FOOD:
@@ -104,7 +123,11 @@ export const guestBooking = async (req, res) => {
         case TYPE_ADHYAYAN:
           const adhyayanResult = await bookAdhyayan(addon, t, req.user);
           amount += adhyayanResult.amount;
-          setBookingIdMap(userBookingIdMap, TYPE_ADHYAYAN, adhyayanResult.userBookingIds);
+          setBookingIdMap(
+            userBookingIdMap,
+            TYPE_ADHYAYAN,
+            adhyayanResult.userBookingIds
+          );
           break;
 
         default:
@@ -114,15 +137,20 @@ export const guestBooking = async (req, res) => {
   }
 
   const order = await generateOrderId(amount);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);  
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
   await updateRazorpayTransactions(bookingIds, order.id, t);
-  
+
   await t.commit();
 
-  // for (const cardno in userBookingIdMap) {
-  //   const bookings = userBookingIdMap[cardno];
-  //   sendUnifiedEmail(cardno, bookings, req.user);
-  // }
+  //Sending email to logged in user for self or other mumkshus
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  for (const cardno in userBookingIdMap) {
+    if(cardno != req.user.cardno) {
+    const bookings = userBookingIdMap[cardno];
+    //Sending email to other mumkshu & Guest
+    sendUnifiedEmail(cardno, bookings, req.user);
+    }
+   }
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
@@ -130,34 +158,49 @@ export const guestBooking = async (req, res) => {
 export const validateBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
 
-  var roomDetails = [];
-  var adhyayanDetails = [];
-  var foodDetails = {};
-  var totalCharge = 0;
+  const response = {
+    roomDetails: [],
+    adhyayanDetails: [],
+    foodDetails: {},
+    utsavDetails: [],
+    totalCharge: 0
+  };
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      roomDetails = await checkRoomAvailability(
-        req.user,
+      response.roomDetails = await checkRoomAvailability(
         req.body.primary_booking
       );
-      totalCharge += roomDetails.reduce(
+      response.totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
       );
       break;
 
     case TYPE_FOOD:
-      foodDetails = await checkFoodAvailability(req.body.primary_booking);
-      totalCharge += foodDetails.charge;
+      response.foodDetails = await checkFoodAvailability(
+        req.body.primary_booking
+      );
+      response.totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
-      adhyayanDetails = await checkAdhyayanAvailability(
+      response.adhyayanDetails = await checkAdhyayanAvailability(
         req.body.primary_booking
       );
-      totalCharge += adhyayanDetails.reduce(
+      response.totalCharge += response.adhyayanDetails.reduce(
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
+        0
+      );
+      break;
+
+    case TYPE_UTSAV:
+      response.utsavDetails = await validateUtsavs(
+        req.body.primary_booking.details.utsavid,
+        req.body.primary_booking.details.guests
+      );
+      response.totalCharge += response.utsavDetails.reduce(
+        (partialSum, utsav) => partialSum + utsav.charge,
         0
       );
       break;
@@ -170,25 +213,27 @@ export const validateBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          roomDetails = await checkRoomAvailability(req.user, addon);
-          totalCharge += roomDetails.reduce(
+          response.roomDetails = await checkRoomAvailability(addon);
+          response.totalCharge += response.roomDetails.reduce(
             (partialSum, room) => partialSum + room.charge,
             0
           );
           break;
 
         case TYPE_FOOD:
-          foodDetails = await checkFoodAvailability(addon);
-          totalCharge += foodDetails.charge;
+          response.foodDetails = await checkFoodAvailability(addon);
+          response.totalCharge += response.foodDetails.charge;
           break;
 
         case TYPE_ADHYAYAN:
-          adhyayanDetails = await checkAdhyayanAvailability(addon);
-          totalCharge += adhyayanDetails.reduce(
+          response.adhyayanDetails = await checkAdhyayanAvailability(addon);
+          response.totalCharge += response.adhyayanDetails.reduce(
             (partialSum, adhyayan) => partialSum + adhyayan.charge,
             0
           );
           break;
+
+        //TODO: add travel for utsavs
 
         default:
           throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
@@ -197,16 +242,11 @@ export const validateBooking = async (req, res) => {
   }
 
   return res.status(200).send({
-    data: {
-      roomDetails: roomDetails,
-      adhyayanDetails: adhyayanDetails,
-      foodDetails: foodDetails,
-      totalCharge: totalCharge
-    }
+    data: response
   });
 };
 
-async function checkRoomAvailability(user, data) {
+async function checkRoomAvailability(data) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -220,11 +260,7 @@ async function checkRoomAvailability(user, data) {
   const guest_details = guest_db.map((guest) => guest.dataValues);
 
   if (
-    await checkRoomAlreadyBooked(
-      checkin_date,
-      checkout_date,
-      ...totalGuests
-    )
+    await checkRoomAlreadyBooked(checkin_date, checkout_date, ...totalGuests)
   ) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
@@ -366,7 +402,7 @@ async function bookRoomForSingleGuest(
       nights,
       roomtype,
       gender,
-      status: ROOM_STATUS_PENDING_CHECKIN,
+      status: STATUS_PAYMENT_PENDING,
       updatedBy: user.cardno
     },
     { transaction: t }
@@ -438,7 +474,7 @@ async function checkFoodAvailability(data) {
 
 async function bookFood(data, t, user) {
   const { start_date, end_date, guestGroup } = data.details;
-  
+
   const result = await bookFoodForGuests(
     start_date,
     end_date,
@@ -576,67 +612,12 @@ async function bookAdhyayan(data, t, user) {
 
     userBookingIds[guest] = bookingIds;
   }
-  
 
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
   return { amount, userBookingIds };
 }
-
-export const fetchGuests = async (req, res) => {
-  const { cardno } = req.user;
-
-  const guests = await CardDb.findAll({
-    attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'updatedAt'],
-    include: [
-      {
-        model: GuestRelationship,
-        where: { cardno: cardno },
-        attributes: ['type']
-      }
-    ],
-    raw: true,
-    order: [['updatedAt', 'DESC']],
-    limit: 10
-  });
-
-  return res.status(200).send({
-    message: 'fetched results',
-    data: guests
-  });
-};
-
-export const createGuests = async (req, res) => {
-  const { cardno } = req.user;
-  const { guests } = req.body;
-
-  const t = await database.transaction();
-  req.transaction = t;
-
-  const allGuests = await createGuestsHelper(cardno, guests, t);
-
-  await t.commit();
-
-  return res.status(200).send({
-    message: MSG_UPDATE_SUCCESSFUL,
-    guests: allGuests
-  });
-};
-
-export const checkGuests = async (req, res) => {
-  const { mobno } = req.params;
-
-  const isGuest = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'email'],
-    where: { mobno: mobno, res_status: STATUS_GUEST }
-  });
-  if (!isGuest) {
-    return res.status(200).send({ message: 'Guest not found', data: null });
-  } else {
-    return res.status(200).send({ message: 'Guest found', data: isGuest });
-  }
-};
 
 export const guestBookingFlat = async (req, res) => {
   const { guests, startDay, endDay } = req.body;
@@ -692,4 +673,58 @@ export const guestBookingFlat = async (req, res) => {
   }
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+};
+
+export const fetchGuests = async (req, res) => {
+  const { cardno } = req.user;
+
+  const guests = await CardDb.findAll({
+    attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'updatedAt'],
+    include: [
+      {
+        model: GuestRelationship,
+        where: { cardno: cardno },
+        attributes: ['type']
+      }
+    ],
+    raw: true,
+    order: [['updatedAt', 'DESC']],
+    limit: 10
+  });
+
+  return res.status(200).send({
+    message: 'fetched results',
+    data: guests
+  });
+};
+
+export const createGuests = async (req, res) => {
+  const { cardno } = req.user;
+  const { guests } = req.body;
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const allGuests = await createGuestsHelper(cardno, guests, t);
+
+  await t.commit();
+
+  return res.status(200).send({
+    message: MSG_UPDATE_SUCCESSFUL,
+    guests: allGuests
+  });
+};
+
+export const checkGuests = async (req, res) => {
+  const { mobno } = req.params;
+
+  const isGuest = await CardDb.findOne({
+    attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'email'],
+    where: { mobno: mobno, res_status: STATUS_GUEST }
+  });
+  if (!isGuest) {
+    return res.status(200).send({ message: 'Guest not found', data: null });
+  } else {
+    return res.status(200).send({ message: 'Guest found', data: isGuest });
+  }
 };

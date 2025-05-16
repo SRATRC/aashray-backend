@@ -6,18 +6,19 @@ import {
   ShibirDb,
   TravelDb,
   CardDb,
-  GuestRelationship
+  GuestRelationship,
+  UtsavPackagesDb,
+  UtsavBooking,
+  UtsavDb
 } from '../models/associations.js';
 import {
-  STATUS_WAITING,
-  ROOM_STATUS_CHECKEDIN,
-  ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
   TYPE_ROOM,
   TYPE_TRAVEL,
   TYPE_ADHYAYAN,
   ERR_INVALID_DATE,
   TYPE_FLAT,
+  TYPE_UTSAV,
   STATUS_GUEST,
   STATUS_ACTIVE
 } from '../config/constants.js';
@@ -202,22 +203,92 @@ export function retrieveBookingIds(userBookingIdMap) {
   ).flat();
 }
 
+export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy) {
+  const flattenedMap = {};
+let isSelfBooking = true;
+Object.entries(userBookingIdMap).forEach(([cardNo, bookingInfo]) => {
+  if(cardNo != bookedBy.cardno) {
+    isSelfBooking = false;
+  }
+  Object.entries(bookingInfo).forEach(([bookingType, bookingIdArray]) => {
+    if (!flattenedMap[bookingType]) {
+      flattenedMap[bookingType] = [];
+    }
+    if (Array.isArray(bookingIdArray) && bookingIdArray.length > 0) {
+      flattenedMap[bookingType].push(bookingIdArray[0]);
+    }
+  });
+});
+if( Object.getOwnPropertyNames(flattenedMap).length != 0){
+sendUnifiedEmail(isSelfBooking ? bookedBy.cardNo : null, flattenedMap, bookedBy);
+}
+}
 
 export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds.hasOwnProperty(TYPE_FLAT);
-
-
+  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+  let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
+ 
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
-    flatBookingDetails = [];
+    flatBookingDetails = [],includeProfile = false,user;
+
+    if(cardno == null) {
+      includeProfile = true;
+    } else{
+      user = await CardDb.findOne({
+        where: { cardno }
+      });
+    } 
+  
+    if(wasUtsavBooked) {
+      const utsavBookings = await UtsavBooking.findAll({
+        
+        include: [
+          {
+            model: UtsavDb,
+            attributes: ['name'],
+            as: 'utsav',
+            where: { id: Sequelize.col('UtsavBookingDb.utsav_id') }
+          },
+          {
+            model: UtsavPackagesDb,
+            attributes: ['name'] ,
+            as: 'package',
+            where: { id: Sequelize.col('UtsavBookingDb.packageid') }
+          },
+          includeProfile ? {
+            model: CardDb,
+            attributes: ['issuedto'],
+            where: { cardno: Sequelize.col('UtsavBookingDb.cardno') },
+          } : null,
+        ],
+        where: { bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_UTSAV] } }
+      });
+      utsavBookings.forEach((utsavBooking) => {
+        utsavBookingDetails.push({
+          name: user ? user.issuedto : utsavBooking.dataValues.CardDb.issuedto,
+          utsavname: utsavBooking.dataValues.UtsavDb.name,
+          status: utsavBooking.status,
+          bookingid: utsavBooking.bookingid,
+          checkin: moment(utsavBooking.checkin).format('Do MMMM, YYYY'),
+          checkout: moment(utsavBooking.checkout).format('Do MMMM, YYYY'),
+          package: utsavBooking.dataValues.UtsavPackagesDb.name,
+        });
+      });
+    }
   //GetData for adhyan
   if (wasAdhyanBooked) {
     const adhyanBookings = await ShibirBookingDb.findAll({
       include: [
+        includeProfile ? {
+          model: CardDb,
+          attributes: ['issuedto'],
+          where: { '$ShibirBookingDb.cardno$': Sequelize.col('carddb.cardNo') }
+        } : null, 
         {
           model: ShibirDb,
           attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
@@ -232,7 +303,8 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
     adhyanBookings.forEach((adhyanBooking) => {
       adhyanBookingDetails.push({
         bookingid: adhyanBooking.bookingid,
-        name: adhyanBooking.dataValues.ShibirDb.name,
+        adhyayanname: adhyanBooking.dataValues.ShibirDb.name,
+        name: user ? user.issuedto : adhyanBooking.dataValues.CardDb.issuedto,
         speaker: adhyanBooking.dataValues.ShibirDb.speaker,
         startdate: moment(adhyanBooking.dataValues.ShibirDb.start_date).format(
           'Do MMMM, YYYY'
@@ -245,7 +317,16 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
     });
   }
   if (wasRajprvasBooked) {
+    let includeOptions = [];
+    if(includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        where: { cardno: Sequelize.col('TravelDb.cardno') }
+      });
+    }
     const travelBookings = await TravelDb.findAll({
+        include: includeOptions,
       where: {
         bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_TRAVEL] }
       }
@@ -253,6 +334,8 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
 
     travelBookings.forEach((travelBooking) => {
       travelBookingDetails.push({
+        name: user ? user.issuedto : travelBooking.dataValues.CardDb.issuedto,
+        status: travelBooking.status,
         bookingid: travelBooking.bookingid,
         date: moment(travelBooking.date).format('Do MMMM, YYYY'),
         pickuppoint: travelBooking.pickup_point,
@@ -262,13 +345,24 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   }
 
   if (wasRoomBooked) {
+    let includeOptions = [];
+    if(includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        where: { cardno: Sequelize.col('RoomBooking.cardno') }
+      });
+    }
     const roomBookings = await RoomBooking.findAll({
+      include: includeOptions,
       where: {
         bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_ROOM] }
       }
     });
     roomBookings.forEach((roomBooking) => {
       roomBookingDetails.push({
+        name: user ? user.issuedto : roomBooking.dataValues.CardDb.issuedto,
+        status: roomBooking.status,
         bookingid: roomBooking.bookingid,
         checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
         checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
@@ -277,7 +371,16 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   }
 
   if (wasFlatBooked) {
+    let includeOptions = [];
+    if(includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        as: 'flatBookingsByCardNo',
+      });
+    }
     const flatBookings = await FlatBooking.findAll({
+      include: includeOptions, 
       where: {
         bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_FLAT] }
       }
@@ -285,6 +388,8 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
 
     flatBookings.forEach((flatBooking) => {
       flatBookingDetails.push({
+        name: user ? user.issuedto : flatBooking.dataValues.CardDb.issuedto,
+        status: flatBooking.status,
         bookingid: flatBooking.bookingid,
         flatno: flatBooking.flatno,
         checkin: moment(flatBooking.checkin).format('Do MMMM, YYYY'),
@@ -293,12 +398,8 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
     });
   }
 
-  const user = await CardDb.findOne({
-    where: { cardno }
-  });
-
-  const email = user.email || bookedBy.email;
-
+  const email = user && user.email ? user.email : bookedBy.email;
+  const name = user && user.issuedto ? user.issuedto : bookedBy.issuedto;
   if (email) {
     sendMail({
       email: email,
@@ -309,7 +410,7 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
         showRoomDetail: wasRoomBooked,
         showTravelDetail: wasRajprvasBooked,
         showFlatDetail: wasFlatBooked,
-        name: user.issuedto,
+        name: name,
         roomBookingDetails,
         adhyanBookingDetails,
         travelBookingDetails,
