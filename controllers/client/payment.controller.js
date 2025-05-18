@@ -106,7 +106,6 @@ export const verifyPayment = async (req, res) => {
       logger.error(`Invalid payment status: ${JSON.stringify(req.body)}`);
       break;
   }
-
   res.status(200).json({ message: 'Payment successful.', status: 'ok' });
 };
 
