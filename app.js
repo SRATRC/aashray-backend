@@ -62,6 +62,11 @@ if (!fs.existsSync(logsDir)) {
 })();
 
 const corsOptions = {
+  // origin: [
+  //   'https://aashray.vitraagvigyaan.org',
+  //   'https://aashray-admin-lp7f.onrender.com',
+  //   'http://localhost:5500'
+  // ],
   origin: '*',
   credentials: true,
   optionSuccessStatus: 200
