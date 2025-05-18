@@ -26,6 +26,8 @@ import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
 import GuestRelationship from './guest_relationship.model.js';
 import BulkFoodBooking from './bulk_food_booking.model.js';
+import RazorpayWebhook from './razorpay_webhook.model.js';
+import RazorpaySettlement from './razorpay_settlement.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -165,7 +167,6 @@ CardDb.hasMany(MaintenanceDb, {
   as: 'maintenanceRequests'
 });
 
-
 // Food
 FoodDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
@@ -194,8 +195,7 @@ RoomBooking.belongsTo(RoomDb, {
 });
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
-  targetKey: 'cardno',
-  
+  targetKey: 'cardno'
 });
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
@@ -237,7 +237,7 @@ ShibirBookingDb.belongsTo(ShibirDb, {
 });
 ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
-  targetKey: 'cardno',
+  targetKey: 'cardno'
 });
 ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
@@ -427,5 +427,7 @@ export {
   States,
   Countries,
   GuestDb,
-  GuestRelationship
+  GuestRelationship,
+  RazorpayWebhook,
+  RazorpaySettlement
 };

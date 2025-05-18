@@ -8,82 +8,103 @@ import {
   TYPE_ROOM,
   TYPE_FLAT
 } from '../../config/constants.js';
-import { Transactions } from '../../models/associations.js';
+import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { validateWebhookSignature } from 'razorpay/dist/utils/razorpay-utils.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
+import logger from '../../config/logger.js';
 
 export const verifyPayment = async (req, res) => {
-  const razorpay_order_id = req.body.payload.payment.entity.order_id;
-  const razorpay_payment_id = req.body.payload.payment.entity.id;
-
-  //TODO: handle payment for all statuses: [authorized, captured, failed]
-  //TODO: store all response from webhook in a table
-
-  const transactions = await Transactions.findAll({
-    where: {
-      razorpay_order_id,
-      status: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING]
-    }
+  await RazorpayWebhook.create({
+    json: req.body
   });
 
-  if (transactions.length == 0) {
-    throw new ApiError(
-      404,
-      'No pending bookings found for the given order id.'
-    );
-  }
+  const razorpay_order_id = req.body.payload.payment.entity.order_id;
+  const razorpay_payment_id = req.body.payload.payment.entity.id;
+  const razorpay_fee = req.body.payload.payment.entity.fee / 100;
+  const razorpay_tax = req.body.payload.payment.entity.tax / 100;
+  const payment_method = req.body.payload.payment.entity.method;
 
-  const bookedBy = await validateCard(transactions[0].cardno);
-  const updatedBy = RAZORPAY_CALLBACK;
+  switch (req.body.payload.payment.entity.status) {
+    case 'captured':
+    case 'authorized':
+      const transactions = await Transactions.findAll({
+        where: {
+          razorpay_order_id,
+          status: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING]
+        }
+      });
 
-  const t = await database.transaction();
-  req.transaction = t;
+      if (transactions.length == 0) {
+        logger.error(
+          `No pending bookings found for the given order id: ${JSON.stringify(
+            req.body
+          )}`
+        );
+        break;
+      }
 
-  const userBookingIdMap = {};
-  for (const transaction of transactions) {
-    const bookingType = getBookingType(transaction);
+      const bookedBy = await validateCard(transactions[0].cardno);
+      const updatedBy = RAZORPAY_CALLBACK;
 
-    const booking = await getBooking(bookingType, transaction.bookingid);
+      const t = await database.transaction();
+      req.transaction = t;
 
-    const bookingStatus =
-      bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
-        ? ROOM_STATUS_PENDING_CHECKIN
-        : STATUS_CONFIRMED;
+      const userBookingIdMap = {};
+      for (const transaction of transactions) {
+        const bookingType = getBookingType(transaction);
 
-    await booking.update(
-      {
-        status: bookingStatus,
-        updatedBy
-      },
-      { transaction: t }
-    );
+        const booking = await getBooking(bookingType, transaction.bookingid);
 
-    await transaction.update(
-      {
-        status: STATUS_PAYMENT_COMPLETED,
-        razorpay_payment_id,
-        updatedBy
-      },
-      { transaction: t }
-    );
+        const bookingStatus =
+          bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
+            ? ROOM_STATUS_PENDING_CHECKIN
+            : STATUS_CONFIRMED;
 
-    setBookingIdMap(
-      userBookingIdMap,
-      bookingType,
-      booking.cardno,
-      transaction.bookingid
-    );
-  }
+        await booking.update(
+          {
+            status: bookingStatus,
+            updatedBy
+          },
+          { transaction: t }
+        );
 
-  await t.commit();
+        await transaction.update(
+          {
+            status: STATUS_PAYMENT_COMPLETED,
+            razorpay_payment_id,
+            razorpay_fee,
+            razorpay_tax,
+            payment_method,
+            updatedBy
+          },
+          { transaction: t }
+        );
 
-  for (const cardno in userBookingIdMap) {
-    const bookings = userBookingIdMap[cardno];
-    await sendUnifiedEmail(cardno, bookings, bookedBy);
+        setBookingIdMap(
+          userBookingIdMap,
+          bookingType,
+          booking.cardno,
+          transaction.bookingid
+        );
+      }
+
+      await t.commit();
+
+      for (const cardno in userBookingIdMap) {
+        const bookings = userBookingIdMap[cardno];
+        await sendUnifiedEmail(cardno, bookings, bookedBy);
+      }
+      break;
+    case 'failed':
+      logger.error(`Payment failed: ${JSON.stringify(req.body)}`);
+      break;
+    default:
+      logger.error(`Invalid payment status: ${JSON.stringify(req.body)}`);
+      break;
   }
 
   res.status(200).json({ message: 'Payment successful.', status: 'ok' });
