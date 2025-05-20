@@ -26,6 +26,8 @@ import Cities from './cities.model.js';
 import GuestDb from './guest_db.model.js';
 import GuestRelationship from './guest_relationship.model.js';
 import BulkFoodBooking from './bulk_food_booking.model.js';
+import RazorpayWebhook from './razorpay_webhook.model.js';
+import RazorpaySettlement from './razorpay_settlement.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -59,6 +61,7 @@ CardDb.hasMany(ShibirBookingDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(ShibirBookingDb, {
+  as: 'shibirBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -83,6 +86,7 @@ CardDb.hasMany(RoomBooking, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(RoomBooking, {
+  as: 'roomBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'SET NULL',
@@ -101,6 +105,7 @@ CardDb.hasOne(UtsavBooking, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasOne(UtsavBooking, {
+  as: 'utsavBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -113,6 +118,7 @@ CardDb.hasMany(TravelDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasMany(TravelDb, {
+  as: 'travelBookedByCard',
   foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -160,7 +166,6 @@ CardDb.hasMany(MaintenanceDb, {
   sourceKey: 'cardno',
   as: 'maintenanceRequests'
 });
-
 
 // Food
 FoodDb.belongsTo(CardDb, {
@@ -236,7 +241,8 @@ ShibirBookingDb.belongsTo(CardDb, {
 });
 ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
-  targetKey: 'cardno'
+  targetKey: 'cardno',
+  as: 'shibirBookedByCard'
 });
 
 // Maintenance
@@ -267,6 +273,7 @@ TravelDb.belongsTo(CardDb, {
   targetKey: 'cardno'
 });
 TravelDb.belongsTo(CardDb, {
+  as: 'travelBookedByCard',
   foreignKey: 'bookedBy',
   targetKey: 'cardno'
 });
@@ -283,6 +290,7 @@ UtsavBooking.belongsTo(CardDb, {
   targetKey: 'cardno'
 });
 UtsavBooking.belongsTo(CardDb, {
+  as: 'utsavBookedByCard',
   foreignKey: 'bookedBy',
   targetKey: 'cardno'
 });
@@ -419,5 +427,7 @@ export {
   States,
   Countries,
   GuestDb,
-  GuestRelationship
+  GuestRelationship,
+  RazorpayWebhook,
+  RazorpaySettlement
 };

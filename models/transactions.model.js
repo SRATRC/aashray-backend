@@ -43,11 +43,6 @@ const Transactions = sequelize.define(
       allowNull: false,
       defaultValue: 0
     },
-    upi_ref: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'NA'
-    },
     razorpay_order_id: {
       type: DataTypes.STRING,
       allowNull: true
@@ -56,10 +51,41 @@ const Transactions = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
+    razorpay_fee: {
+      type: DataTypes.FLOAT,
+      allowNull: true
+    },
+    razorpay_tax: {
+      type: DataTypes.FLOAT,
+      allowNull: true
+    },
+    razorpay_credit_amt: {
+      type: DataTypes.FLOAT,
+      allowNull: true
+    },
+    payment_method: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    razorpay_settlement_id: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    razorpay_settled_at: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    settlement_utr: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'NA'
+    },
+
     description: {
       type: DataTypes.STRING,
       allowNull: true
     },
+
     status: {
       type: DataTypes.ENUM,
       allowNull: false,

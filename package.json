@@ -20,7 +20,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "expo-server-sdk": "^3.15.0",
-    "express": "^4.21.0",
+    "express": "^4.21.2",
     "express-session": "^1.17.3",
     "jsonwebtoken": "^9.0.2",
     "lodash": "^4.17.21",
@@ -31,10 +31,11 @@
     "nodemailer": "^6.9.9",
     "nodemailer-express-handlebars": "^6.1.2",
     "razorpay": "^2.9.5",
-    "sequelize": "^6.34.0",
+    "sequelize": "^6.37.7",
     "uuid": "^9.0.1",
     "winston": "^3.17.0",
-    "winston-daily-rotate-file": "^5.0.0"
+    "winston-daily-rotate-file": "^5.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.25.8",
