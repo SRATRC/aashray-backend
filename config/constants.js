@@ -44,6 +44,9 @@ export const STATUS_PROCEED_FOR_PAYMENT = 'proceed for payment';
 
 export const STATUS_PAYMENT_COMPLETED = 'completed';
 export const STATUS_AWAITING_REFUND = 'awaiting refund';
+export const STATUS_PAYMENT_AUTHORIZED = 'authorized';
+export const STATUS_PAYMENT_CAPTURED = 'captured';
+export const STATUS_PAYMENT_FAILED = 'payment failed';
 export const STATUS_CASH_PENDING = 'cash pending';
 export const STATUS_CASH_COMPLETED = 'cash completed';
 export const STATUS_CREDITED = 'credited';

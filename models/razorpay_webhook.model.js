@@ -4,11 +4,10 @@ import sequelize from '../config/database.js';
 const RazorpayWebhook = sequelize.define(
   'RazorpayWebhook',
   {
-    id: {
-      type: DataTypes.INTEGER,
+    order_id: {
+      type: DataTypes.STRING,
       allowNull: false,
-      primaryKey: true,
-      autoIncrement: true
+      primaryKey: true
     },
     json: {
       type: DataTypes.JSON,

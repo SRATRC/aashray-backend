@@ -5,7 +5,10 @@ import {
 } from '@aws-sdk/client-s3';
 import { CardDb, Transactions } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
-import { generateOrderId, updateRazorpayTransactions } from '../../helpers/transactions.helper.js';
+import {
+  generateOrderId,
+  updateRazorpayTransactions
+} from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
@@ -332,7 +335,7 @@ FROM
    LEFT JOIN utsav_packages_db t6 ON t5.packageid = t6.id
    LEFT JOIN utsav_db t7 ON t5.utsavid = t7.id) AS combined -- Only include transactions that are pending
 INNER JOIN transactions ON combined.bookingid = transactions.bookingid
-AND transactions.status = 'pending' -- Get name of person who booked
+AND transactions.status IN ('pending', 'failed', 'cash pending') -- Get name of person who booked
 LEFT JOIN card_db ON combined.booked_by = card_db.cardno -- Filter by card number
 
 WHERE combined.booked_for = :cardno
