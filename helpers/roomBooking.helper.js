@@ -320,7 +320,7 @@ export async function bookRoomDuringUtsavForGuests(
     for (const guest of guests) {
       let bookingIds = [];
       const card = cardDb.find((item) => item.cardno == guest);
-        (new Date(checkin_date) < new Date(event_start_date)));
+       
       
       // Handle booking before event starts
       if (new Date(checkin_date) < new Date(event_start_date)) {
