@@ -122,5 +122,6 @@ export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
 
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
+export const MSG_BOOKING_WAITING = 'Booking waiting';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
