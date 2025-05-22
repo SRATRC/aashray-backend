@@ -21,10 +21,13 @@ import logger from '../../config/logger.js';
 
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
+  const razorpay_payment_id = req.body.payload.payment.entity.id;
   const razorpay_status = req.body.payload.payment.entity.status;
 
   await RazorpayWebhook.create({
-    order_id: req.body.payload.payment.entity.order_id,
+    order_id: razorpay_order_id,
+    payment_id: razorpay_payment_id,
+    status: razorpay_status,
     json: req.body
   });
 
