@@ -43,7 +43,7 @@ jobs:
       run: |
         pwd
         ls -lrth
-        npx sequelize db:migrate —debug
+        npx sequelize db:migrate -—debug
 
     - name: Restart PM2 process    
       run: |
