@@ -205,25 +205,25 @@
 
              {{#if showUtsavDetail}}
             <div class="details">
-                <p class="section-title"><strong>Raj Utsav - Room Booking:</strong></p>
+                <p class="section-title"><strong>Raj Utsav - Booking:</strong></p>
                 <table>
                     <thead> <tr>
                             <th>BookingId</th>
                             <th>Utsav Name</th>
                             <th>Name</th>     
-                            <th>Checkin</th>
-                            <th>Checkout</th> 
+                            <th>Start Date</th>
+                            <th>End Date</th> 
                             <th>Package</th> 
                             <th>Status</th>
                             </tr>
                     </thead>
-                    <tbody> {{#each roomBookingDetails}}
+                    <tbody> {{#each utsavBookingDetails}}
                         <tr>
                             <td>{{bookingid}}</td>
                             <td>{{utsavname}}</td>
                             <td>{{name}}</td>
-                            <td>{{checkin}}</td>
-                            <td>{{checkout}}</td>
+                            <td>{{startdate}}</td>
+                            <td>{{enddate}}</td>
                             <td>{{package}}</td>
                             <td>{{status}}</td>
                         </tr>

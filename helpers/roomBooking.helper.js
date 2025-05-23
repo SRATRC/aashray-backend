@@ -287,6 +287,129 @@ export function roomCharge(roomtype) {
   return roomtype == 'nac' ? NAC_ROOM_PRICE : AC_ROOM_PRICE;
 }
 
+export async function bookRoomDuringUtsavForGuests(
+  utsavid,
+  guestGroup,
+  t,
+  user,
+  checkin_date,
+  checkout_date
+) {
+  let userBookingIds = {};
+  const utsav = await UtsavDb.findOne({
+    where: { id: utsavid }
+  });
+
+  const guests = guestGroup.flatMap((group) => group.guests);
+  const cardDb = await validateCards(guests);
+
+  let amount = 0;
+
+  
+  for (const group of guestGroup) {
+    const { roomType, floorType, guests } =
+      group;
+
+    if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...guests)) {
+      throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
+    }
+
+    const event_start_date = utsav.start_date;
+    const event_end_date = utsav.end_date;
+   
+    for (const guest of guests) {
+      let bookingIds = [];
+      const card = cardDb.find((item) => item.cardno == guest);
+       
+      
+      // Handle booking before event starts
+      if (new Date(checkin_date) < new Date(event_start_date)) {
+        const beforeNights = await calculateNights(
+          checkin_date,
+          event_start_date
+        );
+
+        if (beforeNights > 0) {
+          const lastNightBeforeEvent = new Date(event_start_date);
+          lastNightBeforeEvent.setDate(lastNightBeforeEvent.getDate() - 1);
+
+          if (beforeNights > 1) {
+            const result = await createRoomBooking(
+              card.cardno,
+              checkin_date,
+              lastNightBeforeEvent.toISOString().split('T')[0],
+              beforeNights - 1,
+              roomType,
+              card.gender,
+              floorType,
+              user.cardno,
+              t
+            );
+            amount += result.discountedAmount;
+            bookingIds.push(result.bookingId);
+          }
+
+          // Create a waiting booking for the night exactly before event starts
+          let waitingBookingId = uuidv4();
+          const waitingResult = await RoomBooking.create(
+            {
+              bookingid: waitingBookingId,
+              cardno: card.cardno,
+              bookedBy: card.cardno !== user.cardno ? user.cardno : null,
+              roomno: 'NA',
+              checkin: lastNightBeforeEvent.toISOString().split('T')[0],
+              checkout: event_start_date,
+              nights: 1,
+              roomtype: roomType,
+              gender: floorType == 'n' ? card.gender : floorType + card.gender,
+              status: STATUS_WAITING,
+              updatedBy: user.cardno
+            },
+            { transaction: t }
+          );
+          const waitingTransaction = await createPendingTransaction(
+            user.cardno,
+            waitingResult,
+            TYPE_ROOM,
+            roomCharge(roomType),
+            user.cardno,
+            t
+          );
+          amount += waitingTransaction.discountedAmount;
+          bookingIds.push(waitingBookingId);
+        }
+      }
+
+      // Handle booking after event ends
+      if (new Date(checkout_date) > new Date(event_end_date)) {
+        const afterNights = await calculateNights(
+          event_end_date,
+          checkout_date
+        );
+
+        if (afterNights > 0) {
+          const result = await createRoomBooking(
+            card.cardno,
+            event_end_date,
+            checkout_date,
+            afterNights,
+            roomType,
+            card.gender,
+            floorType,
+            user.cardno,
+            t
+          );
+          amount += result.discountedAmount;
+          bookingIds.push(result.bookingId);
+        }
+      }
+      userBookingIds[card.cardno] = bookingIds;
+    }
+  }
+      
+  return { t, amount, userBookingIds };
+}
+
 export async function bookRoomDuringUtsavForMumukshus(
   utsavid,
   mumukshuGroup,
@@ -300,11 +423,9 @@ export async function bookRoomDuringUtsavForMumukshus(
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cardDb = await validateCards(mumukshus);
 
-  let amount = 0,
-    bookingIds = [],
-    idx = 0;
+  let amount = 0;
 
-  
+  let userBookingIds = {};
   for (const group of mumukshuGroup) {
     const { roomType, floorType, checkin_date, checkout_date, mumukshus } =
       group;
@@ -317,6 +438,8 @@ export async function bookRoomDuringUtsavForMumukshus(
     const event_end_date = utsav.end_date;
 
     for (const mumukshu of mumukshus) {
+
+      let bookingIds = [];
       const card = cardDb.find((item) => item.cardno == mumukshu);
 
       // Handle booking before event starts
@@ -343,13 +466,14 @@ export async function bookRoomDuringUtsavForMumukshus(
               t
             );
             amount += result.discountedAmount;
-            bookingIds[idx++] = result.bookingId;
+            bookingIds.push(result.bookingId);
           }
 
           // Create a waiting booking for the night exactly before event starts
+          let waitingBookingId = uuidv4();
           const waitingResult = await RoomBooking.create(
             {
-              bookingid: uuidv4(),
+              bookingid: waitingBookingId,
               cardno: card.cardno,
               bookedBy: card.cardno !== user.cardno ? user.cardno : null,
               roomno: 'NA',
@@ -372,7 +496,7 @@ export async function bookRoomDuringUtsavForMumukshus(
             t
           );
           amount += waitingTransaction.discountedAmount;
-          bookingIds[idx++] = waitingResult.bookingId;
+          bookingIds.push(waitingResult.bookingId);
         }
       }
 
@@ -396,9 +520,10 @@ export async function bookRoomDuringUtsavForMumukshus(
             t
           );
           amount += result.discountedAmount;
-          bookingIds[idx++] = result.bookingId;
+          bookingIds.push(result.bookingId);
         }
       }
+      userBookingIds[card.cardno] = bookingIds;
     }
   }
 

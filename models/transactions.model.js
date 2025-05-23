@@ -7,7 +7,10 @@ import {
   STATUS_CASH_COMPLETED,
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
-  STATUS_CREDITED
+  STATUS_CREDITED,
+  STATUS_PAYMENT_CAPTURED,
+  STATUS_PAYMENT_AUTHORIZED,
+  STATUS_PAYMENT_FAILED
 } from '../config/constants.js';
 
 const Transactions = sequelize.define(
@@ -47,56 +50,25 @@ const Transactions = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
-    razorpay_payment_id: {
-      type: DataTypes.STRING,
-      allowNull: true
-    },
-    razorpay_fee: {
-      type: DataTypes.FLOAT,
-      allowNull: false
-    },
-    razorpay_tax: {
-      type: DataTypes.FLOAT,
-      allowNull: false
-    },
-    razorpay_credit_amt: {
-      type: DataTypes.FLOAT,
-      allowNull: false
-    },
-    payment_method: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    razorpay_settlement_id: {
-      type: DataTypes.STRING,
-      allowNull: true
-    },
-    razorpay_settled_at: {
-      type: DataTypes.STRING,
-      allowNull: true
-    },
-    settlement_utr: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: 'NA'
-    },
-    
     description: {
       type: DataTypes.STRING,
       allowNull: true
     },
-    
     status: {
       type: DataTypes.ENUM,
       allowNull: false,
       values: [
+        // TODO: remove cash completed and payment completed status
         STATUS_PAYMENT_PENDING,
         STATUS_PAYMENT_COMPLETED,
         STATUS_CASH_PENDING,
         STATUS_CASH_COMPLETED,
         STATUS_CANCELLED,
         STATUS_ADMIN_CANCELLED,
-        STATUS_CREDITED
+        STATUS_CREDITED,
+        STATUS_PAYMENT_AUTHORIZED,
+        STATUS_PAYMENT_CAPTURED,
+        STATUS_PAYMENT_FAILED
       ]
     },
     updatedBy: {

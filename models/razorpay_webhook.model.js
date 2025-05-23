@@ -10,6 +10,19 @@ const RazorpayWebhook = sequelize.define(
       primaryKey: true,
       autoIncrement: true
     },
+    payment_id: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      index: true
+    },
+    order_id: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
     json: {
       type: DataTypes.JSON,
       allowNull: false
@@ -17,7 +30,16 @@ const RazorpayWebhook = sequelize.define(
   },
   {
     tableName: 'razorpay_webhook',
-    timestamps: true
+    timestamps: true,
+    indexes: [
+      {
+        unique: true,
+        fields: ['order_id', 'status']
+      },
+      {
+        fields: ['payment_id']
+      }
+    ]
   }
 );
 

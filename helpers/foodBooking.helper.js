@@ -127,6 +127,7 @@ export async function bookFoodForGuests(
   bookedBy,
   updatedBy,
   t,
+  utsaveId,
   cashAllowed = false
 ) {
   const meals_object = [
@@ -146,6 +147,7 @@ export async function bookFoodForGuests(
       type: TYPE_GUEST_DINNER
     }
   ];
+  
 
   validateDate(start_date, end_date);
 
@@ -159,7 +161,31 @@ export async function bookFoodForGuests(
     throw new ApiError(404, 'Guest not found');
   }
 
-  const allDates = getDates(start_date, end_date);
+  let allDates = [];
+
+  if(utsaveId){
+    const utsav = await UtsavDb.findOne({
+      where: { id: utsaveId }
+    });
+    const event_start_date = new Date(utsav.start_date);
+    const event_end_date = new Date(utsav.end_date);
+
+    if (new Date(start_date) < event_start_date) {
+      const beforeEventDates = getDates(start_date, event_start_date);
+      beforeEventDates.pop(); // Remove the event start date
+      allDates = [...allDates, ...beforeEventDates];
+    }
+
+    if (new Date(end_date) > event_end_date) {
+      const afterEventDates = getDates(event_end_date, end_date);
+      afterEventDates.shift(); // Remove the event end date
+      allDates = [...allDates, ...afterEventDates];
+    }
+    
+  } else {
+    allDates = getDates(start_date, end_date);
+  }
+  
   const bookings = await getFoodBookings(allDates, guests);
 
   var bookingsToCreate = [];
@@ -208,6 +234,8 @@ export async function bookFoodForGuests(
             { transaction: t }
           );
         } else {
+
+
           const bookingId = uuidv4();
 
           bookingsToCreate.push({
