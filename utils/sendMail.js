@@ -6,11 +6,11 @@ const templateDir = process.cwd() + '/emails';
 
 const sendMail = async (options) => {
   const transporter = nodeMailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
+    host: process.env.SES_SMTP_HOST,
+    port: process.env.SES_SMTP_PORT,
     auth: {
-      user: process.env.SMTP_EMAIL,
-      pass: process.env.SMTP_PASSWORD
+      user: process.env.SES_SMTP_USERNAME,
+      pass: process.env.SES_SMTP_PASSWORD
     }
   });
 
@@ -29,7 +29,7 @@ const sendMail = async (options) => {
 
   transporter.sendMail(
     {
-      from: `${process.env.SMTP_EMAIL}`,
+      from: `"Aashray" <${process.env.SES_SMTP_EMAIL}>`,
       to: options.email,
       cc: options.cc || '',
       subject: options.subject,

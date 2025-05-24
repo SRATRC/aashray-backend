@@ -5,20 +5,10 @@ import {
 } from '@aws-sdk/client-s3';
 import { CardDb, Transactions } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
-import {
-  generateOrderId,
-  updateRazorpayTransactions
-} from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
-import {
-  STATUS_CASH_PENDING,
-  STATUS_PAYMENT_COMPLETED,
-  STATUS_PAYMENT_PENDING
-} from '../../config/constants.js';
-import { retrieveBookingIds } from '../helper.js';
 
 export const updateProfile = async (req, res) => {
   const {
