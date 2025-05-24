@@ -32,8 +32,8 @@ export const FetchFoodBookings = async (req, res) => {
   };
 
   const spiceFilter = (spiceValue) => {
-    if (spice === 'all') return true;
-    return spice === 'true' ? spiceValue === true : spiceValue === false;
+    if (spice == 'all') return true;
+    return spice == 'true' ? spiceValue == 1 : spiceValue == 0;
   };
 
   const isSelf = bookedFor === 'self';
@@ -54,6 +54,7 @@ export const FetchFoodBookings = async (req, res) => {
     FROM food_db f
     LEFT JOIN card_db c ON f.cardno = c.cardno
     WHERE (f.cardno = :userCardno OR f.bookedBy = :userCardno)
+      AND f.date >= :today
       ${date ? 'AND f.date = :date' : ''}
       ${isSelf ? 'AND f.bookedBy IS NULL' : ''}
       ${isGuest ? 'AND f.cardno = :bookedFor' : ''}
@@ -64,6 +65,7 @@ export const FetchFoodBookings = async (req, res) => {
     {
       replacements: {
         userCardno: req.user.cardno,
+        today: today,
         date: date,
         bookedFor: bookedFor,
         limit: pageSize,
@@ -117,36 +119,13 @@ export const FetchFoodBookings = async (req, res) => {
     ].filter(Boolean);
   });
 
-  // Apply meal and spice filters
   const filteredData = formattedData.filter(
     (item) => mealFilter(item.mealType, true) && spiceFilter(item.spicy)
   );
 
-  let groupedData = [];
-  const upcomingData = filteredData.filter((item) =>
-    moment(item.date).isSameOrAfter(today)
-  );
-  const pastData = filteredData.filter((item) =>
-    moment(item.date).isBefore(today)
-  );
-
-  if (upcomingData.length > 0) {
-    groupedData.push({
-      title: 'upcoming',
-      data: upcomingData
-    });
-  }
-
-  if (pastData.length > 0) {
-    groupedData.push({
-      title: 'past',
-      data: pastData
-    });
-  }
-
   return res
     .status(200)
-    .send({ message: 'fetched results', data: groupedData });
+    .send({ message: 'fetched results', data: filteredData });
 };
 
 export const FetchGuestsForFilter = async (req, res) => {
