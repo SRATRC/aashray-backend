@@ -123,6 +123,7 @@ async function book(user, body, data, userBookingIdMap, t) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(user, body, data, t);
       amount += roomResult.amount;
+
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
@@ -153,6 +154,11 @@ async function book(user, body, data, userBookingIdMap, t) {
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(user, data, t);
       amount += utsavResult.amount;
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_UTSAV,
+        utsavResult.userBookingIds
+      );
       break;
 
     default:

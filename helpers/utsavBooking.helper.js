@@ -32,18 +32,10 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   await checkUtsavAlreadyBooked(utsavid, mumukshus);
 
   let total_amount = 0;
+  let available_seats = utsav.available_seats;
   
-
-  const maxBookings = utsav.maxBookings;
-  
-  const allBookings = await UtsavBooking.findAll({
-    where: {
-      utsavid: utsavid
-    }
-  });
-  let alreadyBooked = allBookings.length;
   let status = STATUS_PAYMENT_PENDING;
-  let userBookingIds = {};
+  let userBookingIds = {},waitingBookingCount = 0;
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
@@ -54,11 +46,16 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
     }
 
-    if (alreadyBooked >= maxBookings) {
+    if (available_seats <= 0) {
       status = STATUS_WAITING;
+      waitingBookingCount
+    }else{
+      status = STATUS_PAYMENT_PENDING;
+      available_seats--;
     }
 
-    const booking = await UtsavBooking.create(
+    
+      const booking = await UtsavBooking.create(
       {
         bookingid,
         utsavid,
@@ -76,7 +73,8 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       },
       { transaction: t }
     );
-    alreadyBooked++;
+  
+
     if (utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
       await createPendingTransaction(
         mumukshu.cardno,
@@ -93,7 +91,18 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     userBookingIds[mumukshu.cardno] = bookings;
   }
 
-  return { amount: total_amount, userBookingIds };
+  UtsavDb.update({
+    available_seats: available_seats
+  },{
+    where: {
+      id: utsavid
+    },
+  },
+    { transaction: t }
+  );
+
+
+  return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
 export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
