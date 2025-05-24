@@ -46,7 +46,8 @@ import {
   bookDayVisit,
   checkRoomAlreadyBooked,
   findRoom,
-  roomCharge
+  roomCharge,
+  bookRoomDuringUtsavForGuests
 } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
@@ -61,7 +62,9 @@ import {
   bookFoodForGuests,
   getFoodBookings
 } from '../../helpers/foodBooking.helper.js';
-import { validateUtsavs } from '../../helpers/utsavBooking.helper.js';
+import { validateUtsavs,
+  bookUtsavForMumukshus
+ } from '../../helpers/utsavBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -96,6 +99,11 @@ export const guestBooking = async (req, res) => {
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(primary_booking, t, req.user);
       amount += utsavResult.amount;
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_UTSAV,
+        utsavResult.userBookingIds
+      );
       break;
 
     default:
@@ -106,7 +114,7 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          const roomResult = await bookRoom(addon, t, req.user);
+          const roomResult = await bookRoom(primary_booking,addon, t, req.user);
           amount += roomResult.amount;
           setBookingIdMap(
             userBookingIdMap,
@@ -116,7 +124,7 @@ export const guestBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          const foodResult = await bookFood(addon, t, req.user);
+          const foodResult = await bookFood(primary_booking, addon, t, req.user);
           amount += foodResult.amount;
           break;
 
@@ -306,7 +314,22 @@ async function checkRoomAvailability(data) {
   return roomDetails;
 }
 
-async function bookRoom(data, t, user) {
+async function bookUtsav(data, t,user) {
+  const { utsavid, guests } = data.details;
+
+
+  const result = await bookUtsavForMumukshus(
+    utsavid,
+    guests,
+    t,
+    user
+  );
+
+  return result;
+}
+
+async function bookRoom(primary_booking,data, t, user) {
+  
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -334,37 +357,53 @@ async function bookRoom(data, t, user) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  for (const group of guestGroup) {
-    const { roomType, floorType, guests } = group;
+  if(primary_booking.booking_type == TYPE_UTSAV){
 
-    for (const guest of guests) {
-      if (nights == 0) {
-        const result = await bookDayVisit(
-          guest,
-          checkin_date,
-          checkout_date,
-          user.cardno,
-          user.cardno,
-          t
-        );
-      } else {
-        const result = await bookRoomForSingleGuest(
-          user,
-          guest,
-          guest_details,
-          checkin_date,
-          checkout_date,
-          roomType,
-          floorType,
-          nights,
-          t
-        );
-        amount += result.discountedAmount;
+    let result = await bookRoomDuringUtsavForGuests(
+      primary_booking.details.utsavid,
+      guestGroup,
+      t,
+      user,
+      checkin_date,
+      checkout_date
+    );
+    amount += result.amount;
+    userBookingIds = result.userBookingIds;
+    return { amount, userBookingIds };
+
+  }else{
+    for (const group of guestGroup) {
+      const { roomType, floorType, guests } = group;
+      let result = {};
+      for (const guest of guests) {
+        if (nights == 0) {
+          result = await bookDayVisit(
+            guest,
+            checkin_date,
+            checkout_date,
+            user.cardno,
+            user.cardno,
+            t
+          );
+        } else {
+          result = await bookRoomForSingleGuest(
+            user,
+            guest,
+            guest_details,
+            checkin_date,
+            checkout_date,
+            roomType,
+            floorType,
+            nights,
+            t
+          );
+          amount += result.discountedAmount;
+          
+        }
         userBookingIds[guest] = [result.bookingId];
       }
     }
   }
-
   return { amount, userBookingIds };
 }
 
@@ -472,16 +511,22 @@ async function checkFoodAvailability(data) {
   };
 }
 
-async function bookFood(data, t, user) {
+async function bookFood(primary_booking, data, t, user) {
   const { start_date, end_date, guestGroup } = data.details;
+  let utsaveId = null;
+  if( primary_booking.booking_type == TYPE_UTSAV){
 
+    utsaveId = primary_booking.details.utsavid;
+  }
+  
   const result = await bookFoodForGuests(
     start_date,
     end_date,
     guestGroup,
     user.cardno,
     user.cardno,
-    t
+    t,
+    utsaveId
   );
 
   return result;

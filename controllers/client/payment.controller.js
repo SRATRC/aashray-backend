@@ -2,11 +2,13 @@ import {
   STATUS_PAYMENT_PENDING,
   STATUS_CASH_PENDING,
   RAZORPAY_CALLBACK,
-  STATUS_PAYMENT_COMPLETED,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_CONFIRMED,
   TYPE_ROOM,
-  TYPE_FLAT
+  TYPE_FLAT,
+  STATUS_PAYMENT_CAPTURED,
+  STATUS_PAYMENT_FAILED,
+  STATUS_PAYMENT_AUTHORIZED
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -18,94 +20,113 @@ import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
 
 export const verifyPayment = async (req, res) => {
+  const razorpay_order_id = req.body.payload.payment.entity.order_id;
+  const razorpay_payment_id = req.body.payload.payment.entity.id;
+  const razorpay_status = req.body.payload.payment.entity.status;
+
   await RazorpayWebhook.create({
+    order_id: razorpay_order_id,
+    payment_id: razorpay_payment_id,
+    status: razorpay_status,
     json: req.body
   });
 
-  const razorpay_order_id = req.body.payload.payment.entity.order_id;
-  const razorpay_payment_id = req.body.payload.payment.entity.id;
-  const razorpay_fee = req.body.payload.payment.entity.fee / 100;
-  const razorpay_tax = req.body.payload.payment.entity.tax / 100;
-  const payment_method = req.body.payload.payment.entity.method;
+  if (razorpay_status in [STATUS_PAYMENT_CAPTURED, STATUS_PAYMENT_FAILED]) {
+    const transactions = await Transactions.findAll({
+      where: {
+        razorpay_order_id,
+        status: [
+          STATUS_PAYMENT_PENDING,
+          STATUS_CASH_PENDING,
+          STATUS_PAYMENT_FAILED
+        ]
+      }
+    });
 
-  switch (req.body.payload.payment.entity.status) {
-    case 'captured':
-    case 'authorized':
-      const transactions = await Transactions.findAll({
-        where: {
-          razorpay_order_id,
-          status: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING]
-        }
-      });
+    if (transactions.length == 0) {
+      logger.error(
+        `No pending bookings found for the given order id: ${JSON.stringify(
+          req.body
+        )}`
+      );
+      return;
+    }
 
-      if (transactions.length == 0) {
-        logger.error(
-          `No pending bookings found for the given order id: ${JSON.stringify(
-            req.body
-          )}`
-        );
-        break;
+    const bookedBy = await validateCard(transactions[0].cardno);
+    const updatedBy = RAZORPAY_CALLBACK;
+
+    const t = await database.transaction();
+    req.transaction = t;
+
+    const userBookingIdMap = {};
+    for (const transaction of transactions) {
+      const bookingType = getBookingType(transaction);
+
+      const booking = await getBooking(bookingType, transaction.bookingid);
+
+      const bookingStatus =
+        bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
+          ? ROOM_STATUS_PENDING_CHECKIN
+          : STATUS_CONFIRMED;
+
+      switch (razorpay_status) {
+        case STATUS_PAYMENT_AUTHORIZED:
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_AUTHORIZED,
+              updatedBy
+            },
+            { transaction: t }
+          );
+          break;
+        case STATUS_PAYMENT_CAPTURED:
+          await booking.update(
+            {
+              status: bookingStatus,
+              updatedBy
+            },
+            { transaction: t }
+          );
+
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_CAPTURED,
+              updatedBy
+            },
+            { transaction: t }
+          );
+          break;
+        case STATUS_PAYMENT_FAILED:
+          logger.error(`Payment failed: ${JSON.stringify(req.body)}`);
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_FAILED,
+              updatedBy
+            },
+            { transaction: t }
+          );
+          break;
+        default:
+          logger.error(`Invalid payment status: ${JSON.stringify(req.body)}`);
+          break;
       }
 
-      const bookedBy = await validateCard(transactions[0].cardno);
-      const updatedBy = RAZORPAY_CALLBACK;
+      setBookingIdMap(
+        userBookingIdMap,
+        bookingType,
+        booking.cardno,
+        transaction.bookingid
+      );
+    }
 
-      const t = await database.transaction();
-      req.transaction = t;
+    await t.commit();
 
-      const userBookingIdMap = {};
-      for (const transaction of transactions) {
-        const bookingType = getBookingType(transaction);
-
-        const booking = await getBooking(bookingType, transaction.bookingid);
-
-        const bookingStatus =
-          bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
-            ? ROOM_STATUS_PENDING_CHECKIN
-            : STATUS_CONFIRMED;
-
-        await booking.update(
-          {
-            status: bookingStatus,
-            updatedBy
-          },
-          { transaction: t }
-        );
-
-        await transaction.update(
-          {
-            status: STATUS_PAYMENT_COMPLETED,
-            razorpay_payment_id,
-            razorpay_fee,
-            razorpay_tax,
-            payment_method,
-            updatedBy
-          },
-          { transaction: t }
-        );
-
-        setBookingIdMap(
-          userBookingIdMap,
-          bookingType,
-          booking.cardno,
-          transaction.bookingid
-        );
-      }
-
-      await t.commit();
-
-      for (const cardno in userBookingIdMap) {
-        const bookings = userBookingIdMap[cardno];
-        await sendUnifiedEmail(cardno, bookings, bookedBy);
-      }
-      break;
-    case 'failed':
-      logger.error(`Payment failed: ${JSON.stringify(req.body)}`);
-      break;
-    default:
-      logger.error(`Invalid payment status: ${JSON.stringify(req.body)}`);
-      break;
+    for (const cardno in userBookingIdMap) {
+      const bookings = userBookingIdMap[cardno];
+      await sendUnifiedEmail(cardno, bookings, bookedBy);
+    }
   }
+
   res.status(200).json({ message: 'Payment successful.', status: 'ok' });
 };
 

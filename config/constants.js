@@ -44,6 +44,9 @@ export const STATUS_PROCEED_FOR_PAYMENT = 'proceed for payment';
 
 export const STATUS_PAYMENT_COMPLETED = 'completed';
 export const STATUS_AWAITING_REFUND = 'awaiting refund';
+export const STATUS_PAYMENT_AUTHORIZED = 'authorized';
+export const STATUS_PAYMENT_CAPTURED = 'captured';
+export const STATUS_PAYMENT_FAILED = 'payment failed';
 export const STATUS_CASH_PENDING = 'cash pending';
 export const STATUS_CASH_COMPLETED = 'cash completed';
 export const STATUS_CREDITED = 'credited';
@@ -119,5 +122,6 @@ export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
 
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
+export const MSG_BOOKING_WAITING = 'Booking waiting';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
