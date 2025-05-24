@@ -121,7 +121,8 @@ export async function forgotPassword(req, res) {
   if (!details) {
     throw new ApiError(404, 'user not found');
   }
-  const temporaryPassword = generateTemporaryPassword();
+  let temporaryPassword = generateTemporaryPassword();
+  temporaryPassword=temporaryPassword.trim();
   const salt = bcrypt.genSaltSync(10);
   const hash = bcrypt.hashSync(temporaryPassword, salt);
 
