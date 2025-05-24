@@ -527,7 +527,7 @@ export async function bookRoomDuringUtsavForMumukshus(
     }
   }
 
-  return { t, amount, bookingIds };
+  return { t, amount, userBookingIds };
 }
 
 

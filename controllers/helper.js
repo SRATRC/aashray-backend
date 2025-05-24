@@ -296,42 +296,42 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
       });
     }
   //GetData for adhyan
-  if (wasAdhyanBooked) {
-    const adhyanBookings = await ShibirBookingDb.findAll({
-      include: [
-        includeProfile ? {
-          model: CardDb,
-          attributes: ['issuedto'],
-          where: { '$ShibirBookingDb.cardno$': Sequelize.col('carddb.cardNo') }
-        } : null, 
-        {
-          model: ShibirDb,
-          attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
-          where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
-        }
-      ],
-      where: {
-        bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
-      },
-      order: [['cardno','ASC'],['createdAt','ASC']]
-    });
+  // if (wasAdhyanBooked) {
+  //   const adhyanBookings = await ShibirBookingDb.findAll({
+  //     include: [
+  //       includeProfile ? {
+  //         model: CardDb,
+  //         attributes: ['issuedto'],
+  //         where: { '$ShibirBookingDb.cardno$': Sequelize.col('carddb.cardNo') }
+  //       } : null, 
+  //       {
+  //         model: ShibirDb,
+  //         attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
+  //         where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
+  //       }
+  //     ],
+  //     where: {
+  //       bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
+  //     },
+  //     order: [['cardno','ASC'],['createdAt','ASC']]
+  //   });
 
-    adhyanBookings.forEach((adhyanBooking) => {
-      adhyanBookingDetails.push({
-        bookingid: adhyanBooking.bookingid,
-        adhyayanname: adhyanBooking.dataValues.ShibirDb.name,
-        name: user ? user.issuedto : adhyanBooking.dataValues.CardDb.issuedto,
-        speaker: adhyanBooking.dataValues.ShibirDb.speaker,
-        startdate: moment(adhyanBooking.dataValues.ShibirDb.start_date).format(
-          'Do MMMM, YYYY'
-        ),
-        enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
-          'Do MMMM, YYYY'
-        ),
-        status: adhyanBooking.status
-      });
-    });
-  }
+  //   adhyanBookings.forEach((adhyanBooking) => {
+  //     adhyanBookingDetails.push({
+  //       bookingid: adhyanBooking.bookingid,
+  //       adhyayanname: adhyanBooking.dataValues.ShibirDb.name,
+  //       name: user ? user.issuedto : adhyanBooking.dataValues.CardDb.issuedto,
+  //       speaker: adhyanBooking.dataValues.ShibirDb.speaker,
+  //       startdate: moment(adhyanBooking.dataValues.ShibirDb.start_date).format(
+  //         'Do MMMM, YYYY'
+  //       ),
+  //       enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
+  //         'Do MMMM, YYYY'
+  //       ),
+  //       status: adhyanBooking.status
+  //     });
+  //   });
+  // }
   if (wasRajprvasBooked) {
     let includeOptions = [];
     if(includeProfile) {
