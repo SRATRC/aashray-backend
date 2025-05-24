@@ -162,7 +162,14 @@ export const manualCheckout = async (req, res) => {
     }
 
     if (newAmount < originalAmount) {
-      await adjustAmount(req.user, transaction, newAmount, t);
+      await adjustAmount(
+        transaction.cardno,
+        booking,
+        transaction,
+        newAmount,
+        transaction.cardno,
+        t
+      );
     }
   }
 
