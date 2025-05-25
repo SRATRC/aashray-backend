@@ -29,7 +29,7 @@ const sendMail = async (options) => {
 
   transporter.sendMail(
     {
-      from: `"Aashray" <${process.env.SES_SMTP_EMAIL}>`,
+      from: `"Vitraag Vigyaan Aashray" <${process.env.SES_SMTP_EMAIL}>`,
       to: options.email,
       cc: options.cc || '',
       subject: options.subject,
