@@ -327,7 +327,10 @@ export const generateOrderId = async (amount) => {
   const options = {
     amount: amount * 100,
     currency: 'INR',
-    receipt: uuidv4()
+    receipt: uuidv4(),
+    notes: {
+      // TODO: add notes here
+    }
   };
 
   var order;
@@ -378,8 +381,8 @@ export async function updateRazorpayTransactions(
     {
       where: {
         bookingid: bookingIds
-      }
-    },
-    { transaction: t }
+      },
+      transaction: t
+    }
   );
 }
