@@ -4,7 +4,10 @@ import {
   STATUS_CONFIRMED,
   STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
-  STATUS_WAITING
+  STATUS_WAITING,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CASH_COMPLETED,
+  STATUS_CASH_PENDING
 } from '../config/constants.js';
 
 const UtsavBooking = sequelize.define(
@@ -66,7 +69,10 @@ const UtsavBooking = sequelize.define(
         STATUS_CONFIRMED,
         STATUS_CANCELLED,
         STATUS_PAYMENT_PENDING,
-        STATUS_WAITING
+        STATUS_WAITING,
+        STATUS_ADMIN_CANCELLED,
+        STATUS_CASH_COMPLETED,
+        STATUS_CASH_PENDING  
       ]
     },
     updatedBy: {

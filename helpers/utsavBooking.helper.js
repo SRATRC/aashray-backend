@@ -184,3 +184,34 @@ export async function reserveUtsavSeat(utsav, t) {
     { transaction: t }
   );
 }
+
+export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
+  console.log("Input to openUtsavSeat:", utsav, cardno, updatedBy);
+
+  // Only increase available seats if utsav is in "open" status
+  if (utsav.status !== STATUS_OPEN) return;
+
+  await utsav.update(
+    {
+      available_seats: utsav.dataValues.available_seats + 1,
+      updatedBy: updatedBy // Optional: audit trail
+    },
+    { transaction: t }
+  );
+}
+
+
+export async function validateUtsavPackage(packageId, utsavId) {
+  const packageData = await UtsavPackagesDb.findOne({
+    where: {
+      id: packageId,
+      utsavid: utsavId
+    }
+  });
+
+  if (!packageData) {
+    throw new ApiError(400, `Package with ID ${packageId} not found for Utsav ${utsavId}`);
+  }
+
+  return packageData;
+}

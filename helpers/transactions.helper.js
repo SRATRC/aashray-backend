@@ -124,6 +124,7 @@ export async function userCancelTransaction(user, transaction, t) {
 // STATUS_ADMIN_CANCELLED,
 // STATUS_CREDITED
 export async function cancelTransaction(user, transaction, t, admin = false) {
+  console.log('>> Cancel Transaction: Current status =', transaction.status);
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
   var description = transaction.description;
 
