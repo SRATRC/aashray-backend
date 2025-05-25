@@ -141,10 +141,7 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     case STATUS_CASH_COMPLETED:
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
-      if (
-        credits > 0 &&
-        bookingType != TYPE_ADHYAYAN
-      ) {
+      if (credits > 0 && bookingType != TYPE_ADHYAYAN) {
         await addCredit(user, transaction.cardno, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;
@@ -174,37 +171,29 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     { transaction: t }
   );
 
-  return { credits }
+  return { credits };
 }
 
 export async function adjustAmount(
-    cardno,
-    booking,
-    transaction,
-    amount,
-    updatedBy,
-    t
-  ) {
+  cardno,
+  booking,
+  transaction,
+  amount,
+  updatedBy,
+  t
+) {
   const originalAmount = transaction.amount + transaction.discount;
   const bookingType = getBookingType(transaction);
 
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
     await addCredit(user, cardno, bookingType, credits, t);
-    await useCredit(
-      cardno,
-      booking,
-      transaction,
-      amount,
-      updatedBy,
-      t
-    );
-
+    await useCredit(cardno, booking, transaction, amount, updatedBy, t);
   } else if (originalAmount < amount) {
     const balance = amount - originalAmount;
     await transaction.update(
       {
-        // set status to cash pending as only admin 
+        // set status to cash pending as only admin
         // can call this function
         status: STATUS_CASH_PENDING,
         discount: originalAmount,
@@ -224,9 +213,8 @@ async function addCredit(user, cardno, bookingType, credits, t) {
 
   if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
 
-  const previousCredits = card.credits && card.credits[bookingType]
-    ? card.credits[bookingType]
-    : 0;
+  const previousCredits =
+    card.credits && card.credits[bookingType] ? card.credits[bookingType] : 0;
 
   const updatedCredits = getUpdatedCredits(
     card,
@@ -262,12 +250,11 @@ export async function useCredit(
   if (!(card.credits && card.credits[bookingType] > 0)) {
     return amount;
   }
-    
+
   const credits = card.credits[bookingType];
 
-  const status = amount > credits 
-    ? transaction.status 
-    : STATUS_PAYMENT_COMPLETED;
+  const status =
+    amount > credits ? transaction.status : STATUS_PAYMENT_COMPLETED;
 
   const creditsUsed = Math.min(amount, credits);
   const discountedAmount = amount - creditsUsed;
@@ -286,9 +273,10 @@ export async function useCredit(
   // After applying credits, if the transaction is complete
   // then confirm the booking.
   if (status == STATUS_PAYMENT_COMPLETED) {
-    const bookingStatus = (bookingType == TYPE_ROOM || bookingType == TYPE_FLAT)
-      ? ROOM_STATUS_PENDING_CHECKIN 
-      : STATUS_CONFIRMED;
+    const bookingStatus =
+      bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
+        ? ROOM_STATUS_PENDING_CHECKIN
+        : STATUS_CONFIRMED;
 
     await booking.update(
       {
@@ -298,7 +286,7 @@ export async function useCredit(
       { transaction: t }
     );
   }
-  
+
   const updatedCredits = getUpdatedCredits(
     card,
     bookingType,
@@ -320,7 +308,7 @@ function getUpdatedCredits(card, bookingType, newCredits) {
   const updatedCredits = card.credits
     ? JSON.parse(JSON.stringify(card.credits))
     : {};
-    
+
   updatedCredits[bookingType] = newCredits;
 
   if (updatedCredits[bookingType] == 0) {
@@ -342,12 +330,12 @@ export const generateOrderId = async (amount) => {
     receipt: uuidv4()
   };
 
-  var order; 
-  if (process.env.NODE_ENV == 'prod' && amount > 0) {
+  var order;
+  if (amount > 0) {
     order = await razorpay.orders.create(options);
   } else {
     options['id'] = uuidv4();
-    order = options; 
+    order = options;
   }
 
   return order;
@@ -380,14 +368,18 @@ export async function getPendingTransactions(timeFilter) {
   return transactions;
 }
 
-export async function updateRazorpayTransactions(bookingIds, razorpay_order_id, t) {
+export async function updateRazorpayTransactions(
+  bookingIds,
+  razorpay_order_id,
+  t
+) {
   await Transactions.update(
     { razorpay_order_id: razorpay_order_id },
     {
       where: {
         bookingid: bookingIds
-      }, 
-      transaction: t 
-    } 
+      }
+    },
+    { transaction: t }
   );
 }

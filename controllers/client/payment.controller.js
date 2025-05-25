@@ -12,12 +12,16 @@ import {
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
-import database from '../../config/database.js';
-import ApiError from '../../utils/ApiError.js';
+import {
+  generateOrderId,
+  updateRazorpayTransactions
+} from '../../helpers/transactions.helper.js';
 import { validateWebhookSignature } from 'razorpay/dist/utils/razorpay-utils.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
+import database from '../../config/database.js';
+import ApiError from '../../utils/ApiError.js';
 
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
@@ -132,6 +136,8 @@ export const verifyPayment = async (req, res) => {
 
 export const createOrderIdForPendingPayments = async (req, res) => {
   const { bookingids } = req.body;
+
+  const t = await database.transaction();
 
   const totalAmount = await Transactions.sum('amount', {
     where: {

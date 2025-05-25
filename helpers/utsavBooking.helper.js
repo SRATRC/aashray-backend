@@ -111,10 +111,9 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
     where: {
       cardno: mumukshu_cardnos,
       utsavid: utsavid,
-      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED] }
+      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED,STATUS_WAITING] }
     }
   });
-
   if (alreadyBooked.length > 0)
     throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
 }
