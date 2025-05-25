@@ -377,8 +377,8 @@ export async function updateRazorpayTransactions(
     {
       where: {
         bookingid: bookingIds
-      },
-      transaction: t
-    }
+      }
+    },
+    { transaction: t }
   );
 }

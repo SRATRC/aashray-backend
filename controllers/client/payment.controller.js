@@ -137,6 +137,8 @@ export const verifyPayment = async (req, res) => {
 export const createOrderIdForPendingPayments = async (req, res) => {
   const { bookingids } = req.body;
 
+  const t = await database.transaction();
+
   const totalAmount = await Transactions.sum('amount', {
     where: {
       bookingid: bookingids,
