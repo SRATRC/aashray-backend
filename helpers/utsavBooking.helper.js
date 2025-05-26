@@ -32,18 +32,10 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   await checkUtsavAlreadyBooked(utsavid, mumukshus);
 
   let total_amount = 0;
+  let available_seats = utsav.available_seats;
   
-
-  const maxBookings = utsav.maxBookings;
-  
-  const allBookings = await UtsavBooking.findAll({
-    where: {
-      utsavid: utsavid
-    }
-  });
-  let alreadyBooked = allBookings.length;
   let status = STATUS_PAYMENT_PENDING;
-  let userBookingIds = {};
+  let userBookingIds = {},waitingBookingCount = 0;
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
@@ -54,11 +46,16 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
     }
 
-    if (alreadyBooked >= maxBookings) {
+    if (available_seats <= 0) {
       status = STATUS_WAITING;
+      waitingBookingCount
+    }else{
+      status = STATUS_PAYMENT_PENDING;
+      available_seats--;
     }
 
-    const booking = await UtsavBooking.create(
+    
+      const booking = await UtsavBooking.create(
       {
         bookingid,
         utsavid,
@@ -76,7 +73,8 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       },
       { transaction: t }
     );
-    alreadyBooked++;
+  
+
     if (utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
       await createPendingTransaction(
         mumukshu.cardno,
@@ -93,7 +91,18 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     userBookingIds[mumukshu.cardno] = bookings;
   }
 
-  return { amount: total_amount, userBookingIds };
+  UtsavDb.update({
+    available_seats: available_seats
+  },{
+    where: {
+      id: utsavid
+    },
+  },
+    { transaction: t }
+  );
+
+
+  return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
 export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
@@ -102,10 +111,9 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
     where: {
       cardno: mumukshu_cardnos,
       utsavid: utsavid,
-      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED] }
+      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED,STATUS_WAITING] }
     }
   });
-
   if (alreadyBooked.length > 0)
     throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
 }
@@ -174,4 +182,35 @@ export async function reserveUtsavSeat(utsav, t) {
     },
     { transaction: t }
   );
+}
+
+export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
+  console.log("Input to openUtsavSeat:", utsav, cardno, updatedBy);
+
+  // Only increase available seats if utsav is in "open" status
+  if (utsav.status !== STATUS_OPEN) return;
+
+  await utsav.update(
+    {
+      available_seats: utsav.dataValues.available_seats + 1,
+      updatedBy: updatedBy // Optional: audit trail
+    },
+    { transaction: t }
+  );
+}
+
+
+export async function validateUtsavPackage(packageId, utsavId) {
+  const packageData = await UtsavPackagesDb.findOne({
+    where: {
+      id: packageId,
+      utsavid: utsavId
+    }
+  });
+
+  if (!packageData) {
+    throw new ApiError(400, `Package with ID ${packageId} not found for Utsav ${utsavId}`);
+  }
+
+  return packageData;
 }

@@ -89,7 +89,7 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
 }
 
 export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
-  let amount = 0;
+  let amount = 0,waitingBookingCount = 0;
   const userBookingIds = {};
 
   for (const mumukshu of mumukshus) {
@@ -134,13 +134,14 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
           },
           { transaction: t }
         );
+        waitingBookingCount++;
       }
       bookingIds.push(bookingId);
     }
     userBookingIds[mumukshu] = bookingIds;
   }
 
-  return { amount, userBookingIds };
+  return { amount, userBookingIds, waitingBookingCount };
 }
 
 export async function reserveAdhyayanSeat(adhyayan, t) {

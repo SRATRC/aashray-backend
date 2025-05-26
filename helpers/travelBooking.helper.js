@@ -94,7 +94,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   if (date <= today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
-  let userBookingIds = {};
+  let userBookingIds = {},waitingBookingCount = 0;
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
@@ -126,6 +126,9 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     for (const mumukshu of mumukshus) {
       bookingId = uuidv4();
       let travelbookingStatus =  await getTravelBookingStatus(type,date,travelBookingsFordate); 
+      if(travelbookingStatus == STATUS_WAITING){
+        waitingBookingCount++;
+      }
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
@@ -146,7 +149,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return { userBookingIds };
+  return { userBookingIds, waitingBookingCount };
 }
 
 export function travelCharge(type) {

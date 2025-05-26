@@ -295,43 +295,47 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
         });
       });
     }
-  //GetData for adhyan
-  // if (wasAdhyanBooked) {
-  //   const adhyanBookings = await ShibirBookingDb.findAll({
-  //     include: [
-  //       includeProfile ? {
-  //         model: CardDb,
-  //         attributes: ['issuedto'],
-  //         where: { '$ShibirBookingDb.cardno$': Sequelize.col('carddb.cardNo') }
-  //       } : null, 
-  //       {
-  //         model: ShibirDb,
-  //         attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
-  //         where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
-  //       }
-  //     ],
-  //     where: {
-  //       bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
-  //     },
-  //     order: [['cardno','ASC'],['createdAt','ASC']]
-  //   });
 
-  //   adhyanBookings.forEach((adhyanBooking) => {
-  //     adhyanBookingDetails.push({
-  //       bookingid: adhyanBooking.bookingid,
-  //       adhyayanname: adhyanBooking.dataValues.ShibirDb.name,
-  //       name: user ? user.issuedto : adhyanBooking.dataValues.CardDb.issuedto,
-  //       speaker: adhyanBooking.dataValues.ShibirDb.speaker,
-  //       startdate: moment(adhyanBooking.dataValues.ShibirDb.start_date).format(
-  //         'Do MMMM, YYYY'
-  //       ),
-  //       enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
-  //         'Do MMMM, YYYY'
-  //       ),
-  //       status: adhyanBooking.status
-  //     });
-  //   });
-  // }
+  //GetData for adhyan
+  if (wasAdhyanBooked) {
+    
+    let includeOptions = [];
+    includeOptions.push({
+      model: ShibirDb,
+      attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
+      where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
+    });
+    if(includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        where: { cardno: Sequelize.col('ShibirBookingDb.cardno') }
+      });
+    }
+    const adhyanBookings = await ShibirBookingDb.findAll({
+      include: includeOptions,
+      where: {
+        bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
+      },
+      order: [['cardno','ASC'],['createdAt','ASC']]
+    });
+
+    adhyanBookings.forEach((adhyanBooking) => {
+      adhyanBookingDetails.push({
+        bookingid: adhyanBooking.bookingid,
+        adhyayanname: adhyanBooking.dataValues.ShibirDb.name,
+        name: user ? user.issuedto : adhyanBooking.dataValues.CardDb.issuedto,
+        speaker: adhyanBooking.dataValues.ShibirDb.speaker,
+        startdate: moment(adhyanBooking.dataValues.ShibirDb.start_date).format(
+          'Do MMMM, YYYY'
+        ),
+        enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
+          'Do MMMM, YYYY'
+        ),
+        status: adhyanBooking.status
+      });
+    });
+  }
   if (wasRajprvasBooked) {
     let includeOptions = [];
     if(includeProfile) {
@@ -346,7 +350,7 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
       where: {
         bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_TRAVEL] }
       },
-      order: [['cardno','ASC'],['createdAt','ASC']]
+      order: [['cardno','ASC'],['date','ASC']]
     });
 
     travelBookings.forEach((travelBooking) => {
@@ -375,7 +379,7 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
       where: {
         bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_ROOM] }
       },
-      order: [['cardno','ASC'],['createdAt','ASC']]
+      order: [['cardno','ASC'],['checkin','ASC']]
     });
     roomBookings.forEach((roomBooking) => {
       roomBookingDetails.push({
@@ -402,7 +406,7 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
       where: {
         bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_FLAT] }
       },
-      order: [['cardno','ASC'],['createdAt','ASC']]
+      order: [['cardno','ASC'],['checkin','ASC']]
     });
 
     flatBookings.forEach((flatBooking) => {
@@ -422,7 +426,7 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
   if (email) {
     sendMail({
       email: email,
-      subject: `Your Booking Confirmation for Stay at SRATRC`,
+      subject: `Your Booking Confirmation at SRATRC`,
       template: 'unifiedBookingEmail',
       context: {
         showAdhyanDetail: wasAdhyanBooked,

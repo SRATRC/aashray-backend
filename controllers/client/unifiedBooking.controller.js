@@ -83,12 +83,12 @@ export const unifiedBooking = async (req, res) => {
   //Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
   for (const cardno in userBookingIdMap) {
-    if(cardno != req.user.cardno) {
-    const bookings = userBookingIdMap[cardno];
-    //Sending email to other mumkshu & Guest
-    sendUnifiedEmail(cardno, bookings, req.user);
+    if (cardno != req.user.cardno) {
+      const bookings = userBookingIdMap[cardno];
+      //Sending email to other mumkshu & Guest
+      sendUnifiedEmail(cardno, bookings, req.user);
     }
-   }
+  }
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
@@ -123,6 +123,7 @@ async function book(user, body, data, userBookingIdMap, t) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(user, body, data, t);
       amount += roomResult.amount;
+
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
@@ -153,6 +154,7 @@ async function book(user, body, data, userBookingIdMap, t) {
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(user, data, t);
       amount += utsavResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
       break;
 
     default:
