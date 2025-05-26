@@ -9,6 +9,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_CASH_PENDING,
   STATUS_PAYMENT_PENDING,
+  STATUS_PROCEED_FOR_PAYMENT,
   TYPE_ADHYAYAN,
   TYPE_FLAT,
   TYPE_FOOD,
@@ -32,41 +33,93 @@ import FlatBooking from './models/flat_booking.model.js';
 import { Sequelize } from 'sequelize';
 import Transactions from './models/transactions.model.js';
 import ShibirDb from './models/shibir_db.model.js';
+import { sendUnifiedEmail } from './controllers/helper.js';
+import { sendCancellationEmail } from './helpers/mailer.helper.js';
+import { getBooking, getBookingType } from './helpers/booking.helper.js';
+
+const MAX_APP_PAYMENT_DURATION = 12*60; // 12 hrs
 
 // Schedule the cron job to run every 10 minutes
-const job = cron.schedule('*/10 * * * *', async () => {
-  logger.info('Cron job starting...');
+const job = cron.schedule('*/1 * * * *', async () => {
+  logger.info('Cron job started');
+
+  await database.authenticate();
+  const t = await database.transaction();
+
+  const systemUser = AdminUsers.findOne({
+    where: { username: "admin" } 
+  });
 
   try {
-    await database.authenticate();
+    const userBookingIds = {};
 
-    const systemUser = AdminUsers.findOne({
-      where: { username: "admin" } 
+    const bookings = new Set();
+    await getUnpaidOnlineBookings(bookings);
+    await getUnpaidPastBookings(bookings);
+
+    const bookingIds = bookings.map((booking) => {
+      booking.hasOwnProperty('bookingid')
+      ? booking.bookingid
+      : booking.id; // only for food bookings
     });
 
-    await cancelPendingTransactions(systemUser);
-    await cancelRoomBookings(systemUser);
-    await cancelAdhyayanBookings(systemUser);
+    logger.info('Bookings to cancel: ' + JSON.stringify(bookings));
+    logger.info('Bookings to cancel: ' + JSON.stringify(bookingIds));
 
+    for (const booking in bookings) {
+      await booking.update(
+        {
+          status: STATUS_ADMIN_CANCELLED,
+          updatedBy: systemUser.username
+        },
+        { transaction: t }
+      );
+    }
+
+    const transactions = await Transactions.findAll({
+      where: { bookingid: bookingIds }
+    });
+
+    for (const transaction in transactions) {
+      await adminCancelTransaction(systemUser, transaction, t);
+    }
+
+    await t.commit();
+
+    for (const cardno in userBookingIds) {
+      // if (cardno != req.user.cardno) {
+        const bookings = userBookingIds[cardno];
+        //Sending email to other mumkshu & Guest
+        await sendCancellationEmail(cardno, bookings, null);
+      // }
+    }
 
   } catch (error) {
     logger.error('Cron job error:', error);
+    await t.rollback();
   }
 
-  // TODO: send notifications
-  logger.info('Cron job finishing...');
+  logger.info('Cron job finished.');
 });
 
-async function cancelPendingTransactions(user) {
-  // Find bookings created before 1 hr, but not paid
-  const cancelTimeFilter = moment.utc().subtract(60, 'minutes');
+job.stop();
+job.start();
+
+
+
+async function getUnpaidOnlineBookings(bookings) {
+  const cancelTimeFilter = moment.utc().subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
   const transactions = await getPendingTransactions(cancelTimeFilter);
 
-  console.log('TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
-
-  const userBookingIds = {};
   for (const transaction of transactions) {
-    await cancelTransaction(userBookingIds, user, transaction);
+    const bookingType = getBookingType(transaction);
+    const booking = await getBooking(bookingType, transaction.bookingid);
+
+    bookings.add(booking);
+    // addToUserBookingIdMap(userBookingIds, transaction.cardno, transaction.bookingid, bookingType);
+    // if (booking.cardno != transaction.cardno) {
+    //   addToUserBookingIdMap(userBookingIds, booking.cardno, transaction.bookingid, bookingType);
+    // }
   }
 }
 
@@ -152,7 +205,7 @@ async function cancelTransaction(userBookingIds, user, transaction) {
   }
 }
 
-async function cancelBooking(user, booking, transaction) {
+async function cancelBooking(user, booking) {
   const t = await database.transaction();
 
   await booking.update(
@@ -193,42 +246,33 @@ async function cancelFoodBooking(user, booking, transaction) {
 
 function addToUserBookingIdMap(userBookingIds, cardno, bookingId, bookingType) {
   const bookingTypeIds = userBookingIds[cardno] || {};
-  const bookingIds = bookingTypeIds[bookingType] || [];
+  const bookingIds = bookingTypeIds[bookingType] || new Set();
 
-  bookingIds.push(bookingId);
+  bookingIds.add(bookingId);
   bookingTypeIds[bookingType] = bookingIds;
   userBookingIds[cardno] = bookingTypeIds;
 }
 
-async function cancelRoomBookings(user) {
-  const today = moment().format('YYYY-MM-DD');
+async function getUnpaidPastBookings(bookings) {
+  const today = moment().utc().format('YYYY-MM-DD');
 
-  const bookings = await RoomBooking.findAll({
+  const roomBookings = await RoomBooking.findAll({
     where: {
       status: STATUS_PAYMENT_PENDING,
       checkin: {[Sequelize.Op.lt]: today }
     }
   });
-
-  const transactions = await Transactions.findAll({
+  roomBookings.forEach(bookings.add, bookings);
+  
+  const flatBookings = await FlatBooking.findAll({
     where: {
-      status: STATUS_CASH_PENDING,
-      bookingid: bookings.map((booking) => booking.bookingid)
+      status: STATUS_PAYMENT_PENDING,
+      checkin: {[Sequelize.Op.lt]: today }
     }
   });
+  flatBookings.forEach(bookings.add, bookings);
 
-  console.log('ROOM TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
-
-  const userBookingIds = {};
-  for (const transaction of transactions) {
-    await cancelTransaction(userBookingIds, user, transaction);
-  }
-}
-
-async function cancelAdhyayanBookings(user) {
-  const today = moment().format('YYYY-MM-DD');
-
-  const bookings = await ShibirBookingDb.findAll({
+  const adhyayanBookings = await ShibirBookingDb.findAll({
     include: [
       {
         model: ShibirDb,
@@ -242,20 +286,21 @@ async function cancelAdhyayanBookings(user) {
       status: STATUS_PAYMENT_PENDING
     }
   });
+  adhyayanBookings.forEach(bookings.add, bookings);
 
-  const transactions = await Transactions.findAll({
+  const travelBookings = await TravelDb.findAll({
     where: {
-      status: STATUS_CASH_PENDING,
-      bookingid: bookings.map((booking) => booking.bookingid)
+      status: STATUS_PROCEED_FOR_PAYMENT,
+      date: {[Sequelize.Op.lt]: today }
     }
   });
+  travelBookings.forEach(bookings.add, bookings);
 
-  console.log('ADHYAYAN TRANSACTIONS TO CANCEL: ' + JSON.stringify(transactions));
-
-  const userBookingIds = {};
-  for (const transaction of transactions) {
-    await cancelTransaction(userBookingIds, user, transaction);
-  }
+  const utsavBookings = await UtsavBooking.findAll({
+    where: {
+      status: STATUS_PAYMENT_PENDING,
+      date: {[Sequelize.Op.lt]: today }
+    }
+  });
+  utsavBookings.forEach(bookings.add, bookings);
 }
-
-job.start();
