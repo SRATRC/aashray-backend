@@ -62,9 +62,10 @@ import {
   bookFoodForGuests,
   getFoodBookings
 } from '../../helpers/foodBooking.helper.js';
-import { validateUtsavs,
+import {
+  validateUtsavs,
   bookUtsavForMumukshus
- } from '../../helpers/utsavBooking.helper.js';
+} from '../../helpers/utsavBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -99,11 +100,7 @@ export const guestBooking = async (req, res) => {
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(primary_booking, t, req.user);
       amount += utsavResult.amount;
-      setBookingIdMap(
-        userBookingIdMap,
-        TYPE_UTSAV,
-        utsavResult.userBookingIds
-      );
+      setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
       break;
 
     default:
@@ -114,7 +111,7 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          const roomResult = await bookRoom(primary_booking,addon, t, req.user);
+          const roomResult = await bookRoom(addon, t, req.user);
           amount += roomResult.amount;
           setBookingIdMap(
             userBookingIdMap,
@@ -124,7 +121,7 @@ export const guestBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          const foodResult = await bookFood(primary_booking, addon, t, req.user);
+          const foodResult = await bookFood(addon, t, req.user);
           amount += foodResult.amount;
           break;
 
@@ -153,12 +150,12 @@ export const guestBooking = async (req, res) => {
   //Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
   for (const cardno in userBookingIdMap) {
-    if(cardno != req.user.cardno) {
-    const bookings = userBookingIdMap[cardno];
-    //Sending email to other mumkshu & Guest
-    sendUnifiedEmail(cardno, bookings, req.user);
+    if (cardno != req.user.cardno) {
+      const bookings = userBookingIdMap[cardno];
+      //Sending email to other mumkshu & Guest
+      sendUnifiedEmail(cardno, bookings, req.user);
     }
-   }
+  }
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
@@ -314,22 +311,15 @@ async function checkRoomAvailability(data) {
   return roomDetails;
 }
 
-async function bookUtsav(data, t,user) {
+async function bookUtsav(data, t, user) {
   const { utsavid, guests } = data.details;
 
-
-  const result = await bookUtsavForMumukshus(
-    utsavid,
-    guests,
-    t,
-    user
-  );
+  const result = await bookUtsavForMumukshus(utsavid, guests, t, user);
 
   return result;
 }
 
-async function bookRoom(primary_booking,data, t, user) {
-  
+async function bookRoom(data, t, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -357,10 +347,9 @@ async function bookRoom(primary_booking,data, t, user) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  if(primary_booking.booking_type == TYPE_UTSAV){
-
+  if (data.booking_type == TYPE_UTSAV) {
     let result = await bookRoomDuringUtsavForGuests(
-      primary_booking.details.utsavid,
+      data.details.utsavid,
       guestGroup,
       t,
       user,
@@ -370,8 +359,7 @@ async function bookRoom(primary_booking,data, t, user) {
     amount += result.amount;
     userBookingIds = result.userBookingIds;
     return { amount, userBookingIds };
-
-  }else{
+  } else {
     for (const group of guestGroup) {
       const { roomType, floorType, guests } = group;
       let result = {};
@@ -398,7 +386,6 @@ async function bookRoom(primary_booking,data, t, user) {
             t
           );
           amount += result.discountedAmount;
-          
         }
         userBookingIds[guest] = [result.bookingId];
       }
@@ -511,14 +498,13 @@ async function checkFoodAvailability(data) {
   };
 }
 
-async function bookFood(primary_booking, data, t, user) {
+async function bookFood(data, t, user) {
   const { start_date, end_date, guestGroup } = data.details;
   let utsaveId = null;
-  if( primary_booking.booking_type == TYPE_UTSAV){
-
-    utsaveId = primary_booking.details.utsavid;
+  if (data.booking_type == TYPE_UTSAV) {
+    utsaveId = data.details.utsavid;
   }
-  
+
   const result = await bookFoodForGuests(
     start_date,
     end_date,
