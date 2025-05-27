@@ -334,7 +334,7 @@ export const generateOrderId = async (amount) => {
   };
 
   var order;
-  if (amount > 0) {
+  if (process.env.NODE_ENV == 'prod' && amount > 0) {
     order = await razorpay.orders.create(options);
   } else {
     options['id'] = uuidv4();

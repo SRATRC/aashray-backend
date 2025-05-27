@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Booking Cancellation</title>
 
+  {{> styles }}
 </head>
 
 <body>
@@ -16,8 +17,9 @@
     <div class="content">
       <h1>Booking Cancelled!</h1>
       <p class="intro">Dear {{name}},</p>
-      <p class="intro">We are pleased to inform you that your bookings have been successfully cancelled. Here are
-        the details of your bookings:</p>
+      <p class="intro">We regret to inform you that your bookings have been cancelled, 
+        as payment were not made on time. Here are the details of your bookings:
+      </p>
 
       {{#if showUtsavDetail}}
       <div class="details">
@@ -137,11 +139,6 @@
             {{/each}}
           </tbody>
         </table>
-
-        <div class="note">
-          <p><strong>Please note</strong> that the adhyayan committee reserves the right to cancel your
-            booking within 7 days if you do not meet the adhyayan criteria.</p>
-        </div>
       </div>
       {{/if}}
 
@@ -173,58 +170,15 @@
           </tbody>
         </table>
       </div>
-
-      <div class="steps">
-        <h2>Standard Pickup Locations and Timings from Mumbai to Research Center:</h2>
-        <ul>
-          <li>Dadar Swaminarayan Temple - 8:00 am</li>
-          <li>Amar Mahal - Chembur / Ghatkopar - 8:20 am</li>
-          <li>Mulund - Airoli Junction - 8:40 am</li>
-        </ul>
-      </div>
-
-      <div class="steps">
-        <h2>Standard Pickup Location and Timing from Research Center to Mumbai:</h2>
-        <ul>
-          <li>Reception Area at 1:00 pm</li>
-        </ul>
-      </div>
-
-      <div class="steps">
-        <h2>Next Steps</h2>
-        <p>We will review your travel request and update the status on the Vitraag Vigyaan Aashray mobile app.
-        </p>
-        <p>Please read the Raj Pravas guidelines carefully: <a class="link"
-            href="https://drive.google.com/file/d/1kodGs34F8W3m8GHfm3bMzROaUGNoIVav/view?usp=sharing"
-            target="_blank">Click here for guidelines.</a></p>
-      </div>
-
-      <div class="steps">
-        <h2>Payment Instructions</h2>
-        <p>Once your travel booking status is <span class="highlight">Pending Payment</span>, please proceed to
-          the Vitraag Vigyaan Aashray mobile app to make your payment.</p>
-        <p>Once the payment is done, please share a screenshot along with your booking ID with the Raj Pravas
-          Team at <b>rajpravas7@gmail.com</b> or <b>+91-9769644960 / +91-9831632801</b>.</p>
-      </div>
-
-      <div class="steps">
-        <h2>Travel Confirmation</h2>
-        <p>Once your travel is confirmed, you can coordinate with Sandeep Driver at <b>+91-9769975704</b> only
-          on the date of your travel.</p>
-      </div>
       {{/if}}
 
       <div>
-        <p>You can view all your bookings, booking statuses and make any pending payments on the <a
+        <p>You can view all your bookings and their statuses on the <a
             href="https://aashray.vitraagvigyaan.org">Vitraag Vigyaan Aashray mobile app</a>.</p>
       </div>
+
       <div>
-        <p> <a href='https://aashray.vitraagvigyaan.org/files/rc_guidelines.pdf' target='_blank' class="link">Please
-            click here</a> to read the guidelines for your stay at the Research Center.
-          We hope you have a spiritually blissful stay.</p>
-        <p>If you have any questions or need further assistance, please feel free to contact us at
-          <b>+91-7875432613 / +91-9004273512</b>.
-        </p>
+        <p>If you have any questions or need further assistance, please feel free to contact us at <b>+91-7875432613 / +91-9004273512</b>.</p>
       </div>
     </div>
     <div class="footer">

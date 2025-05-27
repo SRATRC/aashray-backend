@@ -428,8 +428,8 @@ export async function sendUnifiedEmail(
     });
   }
 
-  const email = user && user.email ? user.email : bookedBy.email;
-  const name = user && user.issuedto ? user.issuedto : bookedBy.issuedto;
+  const email = user && user.email ? user.email : bookedBy && bookedBy.email;
+  const name = user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
   if (email) {
     sendMail({
       email: email,
