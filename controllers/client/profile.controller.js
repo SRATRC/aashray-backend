@@ -251,7 +251,7 @@ export const sendNotification = async (req, res) => {
 };
 
 export const fetchProfile = async (req, res) => {
-  const { cardno } = req.body;
+  const { cardno } = req.user;
 
   const profile = await CardDb.findOne({
     where: {
