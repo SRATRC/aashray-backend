@@ -234,7 +234,14 @@ export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy) {
   }
 }
 
-export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
+export async function sendUnifiedEmail(
+  cardno, 
+  bookingIds, 
+  bookedBy,
+  subject = 'Your Booking Confirmation at SRATRC',
+  template = 'unifiedBookingEmail'
+) 
+{
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
@@ -421,13 +428,13 @@ export async function sendUnifiedEmail(cardno, bookingIds, bookedBy = null) {
     });
   }
 
-  const email = user && user.email ? user.email : bookedBy.email;
-  const name = user && user.issuedto ? user.issuedto : bookedBy.issuedto;
+  const email = user && user.email ? user.email : bookedBy && bookedBy.email;
+  const name = user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
   if (email) {
     sendMail({
       email: email,
-      subject: `Your Booking Confirmation at SRATRC`,
-      template: 'unifiedBookingEmail',
+      subject,
+      template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
         showRoomDetail: wasRoomBooked,

@@ -18,7 +18,8 @@ import {
   TYPE_TRAVEL,
   TYPE_UTSAV,
   TYPE_GUEST_UTSAV,
-  TYPE_FOOD
+  TYPE_FOOD,
+  ERR_INVALID_BOOKING_TYPE
 } from '../config/constants.js';
 import ApiError from '../utils/ApiError.js';
 
@@ -88,6 +89,31 @@ export function getBookingType(transaction) {
 
   if (!bookingType) {
     throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${transaction.category}`);
+  }
+  
+  return bookingType;
+}
+
+export function getBookingTypeFromBooking(booking) {
+  
+  var bookingType;
+
+  if (booking instanceof RoomBooking) {
+    bookingType = TYPE_ROOM;
+  } else if (booking instanceof FlatBooking) {
+    bookingType = TYPE_FLAT;
+  } else if (booking instanceof FoodDb) {
+    bookingType = TYPE_FOOD;
+  } else if (booking instanceof TravelDb) {
+    bookingType = TYPE_TRAVEL;
+  } else if (booking instanceof ShibirBookingDb) {
+    bookingType = TYPE_ADHYAYAN;
+  } else if (booking instanceof UtsavBooking) {
+    bookingType = TYPE_UTSAV;
+  }
+
+  if (!bookingType) {
+    throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${typeof booking}`);
   }
   
   return bookingType;
