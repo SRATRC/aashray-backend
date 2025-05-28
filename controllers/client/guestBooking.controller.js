@@ -4,7 +4,9 @@ import {
   RoomBooking,
   Transactions,
   CardDb,
-  GuestRelationship
+  GuestRelationship,
+  FlatDb,
+  FlatBooking
 } from '../../models/associations.js';
 import {
   STATUS_PAYMENT_PENDING,
@@ -30,7 +32,9 @@ import {
   STATUS_GUEST,
   TYPE_GUEST_ROOM,
   STATUS_OPEN,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  ROOM_STATUS_PENDING_CHECKIN,
+  TYPE_FLAT
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -39,7 +43,8 @@ import {
   setBookingIdMap,
   retrieveBookingIds,
   sendUnifiedEmail,
-  sendUnifiedEmailForBookedBy
+  sendUnifiedEmailForBookedBy,
+  checkFlatAlreadyBooked
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -665,8 +670,8 @@ export const guestBookingFlat = async (req, res) => {
   validateDate(startDay, endDay);
 
   for (var guest of guests) {
-    if (await checkFlatAlreadyBooked(startDay, endDay, guest['cardno']))
-      throw new ApiError(400, `flat already Booked for ${guest['name']}`);
+    if (await checkFlatAlreadyBooked(startDay, endDay, guest))
+      throw new ApiError(400, `flat already Booked for ${guest}`);
   }
 
   const nights = await calculateNights(startDay, endDay);
@@ -680,16 +685,16 @@ export const guestBookingFlat = async (req, res) => {
 
     bookings.push({
       bookingid: bookingId,
-      cardno: guest.cardno,
+      cardno: guest,
       flatno: flatDb.dataValues.flatno,
       checkin: startDay,
       checkout: endDay,
       nights: nights,
       updatedBy: req.user.cardno,
-      status: ROOM_STATUS_PENDING_CHECKIN
+      status: STATUS_PAYMENT_PENDING
     });
 
-    userBookingIds[guest.cardno] = [bookingId];
+    userBookingIds[guest] = [bookingId];
   }
 
   await FlatBooking.bulkCreate(bookings, { transaction: t });
@@ -698,9 +703,9 @@ export const guestBookingFlat = async (req, res) => {
   const userBookingIdMap = {};
   setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
 
-  for (const cardno in userBookingIdMap) {
-    const bookings = userBookingIdMap[cardno];
-    sendUnifiedEmail(cardno, bookings, req.user);
+  for (const guest in userBookingIdMap) {
+    const bookings = userBookingIdMap[guest];
+    sendUnifiedEmailForBookedBy(bookings, req.user);
   }
 
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });

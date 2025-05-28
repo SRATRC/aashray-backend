@@ -13,11 +13,13 @@ import {
   validateDate,
   calculateNights,
   checkFlatAlreadyBooked,
-  sendUnifiedEmail,
   setBookingIdMap,
   retrieveBookingIds
 } from '../helper.js';
-import { updateRazorpayTransactions, userCancelBooking } from '../../helpers/transactions.helper.js';
+import {
+  updateRazorpayTransactions,
+  userCancelBooking
+} from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
@@ -95,7 +97,11 @@ export const CancelBooking = async (req, res) => {
         { cardno: req.user.cardno },
         { bookedBy: req.user.cardno }
       ],
-      status: [STATUS_WAITING, STATUS_PAYMENT_PENDING, ROOM_STATUS_PENDING_CHECKIN]
+      status: [
+        STATUS_WAITING,
+        STATUS_PAYMENT_PENDING,
+        ROOM_STATUS_PENDING_CHECKIN
+      ]
     }
   });
 
@@ -104,7 +110,11 @@ export const CancelBooking = async (req, res) => {
       where: {
         bookingid: bookingid,
         cardno: req.user.cardno,
-        status: [STATUS_WAITING, STATUS_PAYMENT_PENDING, ROOM_STATUS_PENDING_CHECKIN]
+        status: [
+          STATUS_WAITING,
+          STATUS_PAYMENT_PENDING,
+          ROOM_STATUS_PENDING_CHECKIN
+        ]
       }
     });
   }
@@ -156,7 +166,7 @@ export const FlatBookingMumukshu = async (req, res) => {
 
   const userBookingIds = {};
   let amount = 0;
-  for (var mumukshu of mumukshus) { 
+  for (var mumukshu of mumukshus) {
     const booking = await createFlatBooking(
       mumukshu['cardno'],
       startDay,
@@ -178,6 +188,6 @@ export const FlatBookingMumukshu = async (req, res) => {
   await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
-  
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
