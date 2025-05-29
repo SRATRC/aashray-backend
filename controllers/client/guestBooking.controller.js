@@ -34,7 +34,9 @@ import {
   STATUS_OPEN,
   TYPE_UTSAV,
   ROOM_STATUS_PENDING_CHECKIN,
-  TYPE_FLAT
+  TYPE_FLAT,
+  MSG_BOOKING_WAITING,
+  STATUS_AWAITING_CONFIRMATION
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -44,7 +46,8 @@ import {
   retrieveBookingIds,
   sendUnifiedEmail,
   sendUnifiedEmailForBookedBy,
-  checkFlatAlreadyBooked
+  checkFlatAlreadyBooked,
+  setWaitingBookingCountMap
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -79,7 +82,7 @@ export const guestBooking = async (req, res) => {
 
   let amount = 0;
   const userBookingIdMap = {};
-
+  const waitingBookingCountMap = {};
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(primary_booking, t, req.user);
@@ -100,12 +103,14 @@ export const guestBooking = async (req, res) => {
         TYPE_ADHYAYAN,
         adhyayanResult.userBookingIds
       );
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_ADHYAYAN, adhyayanResult.waitingBookingCount, adhyayanResult.userBookingIds);
       break;
 
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(primary_booking, t, req.user);
       amount += utsavResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_UTSAV, utsavResult.waitingBookingCount, utsavResult.userBookingIds);
       break;
 
     default:
@@ -138,6 +143,7 @@ export const guestBooking = async (req, res) => {
             TYPE_ADHYAYAN,
             adhyayanResult.userBookingIds
           );
+          setWaitingBookingCountMap(waitingBookingCountMap, TYPE_ADHYAYAN, adhyayanResult.waitingBookingCount, adhyayanResult.userBookingIds);
           break;
 
         default:
@@ -161,8 +167,11 @@ export const guestBooking = async (req, res) => {
       sendUnifiedEmail(cardno, bookings, req.user);
     }
   }
-
-  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
+  let message = MSG_BOOKING_SUCCESSFUL;
+  if(Object.keys(waitingBookingCountMap).length > 0) {
+    message = MSG_BOOKING_WAITING;
+  }
+  return res.status(200).send({ message: message, data: order, waitingBookingCountMap: waitingBookingCountMap });
 };
 
 export const validateBooking = async (req, res) => {
@@ -596,7 +605,7 @@ async function bookAdhyayan(data, t, user) {
 
   var booking_data = [];
   var transaction_data = [];
-
+  var waitingBookingCount = 0;
   for (const guest of guests) {
     const bookingIds = [];
     for (var shibir of shibirs) {
@@ -641,6 +650,7 @@ async function bookAdhyayan(data, t, user) {
           status: STATUS_WAITING,
           updatedBy: user.cardno
         });
+        waitingBookingCount++;
       }
 
       bookingIds.push(bookingid);
@@ -652,7 +662,7 @@ async function bookAdhyayan(data, t, user) {
   await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
   await Transactions.bulkCreate(transaction_data, { transaction: t });
 
-  return { amount, userBookingIds };
+  return { amount, userBookingIds, waitingBookingCount };
 }
 
 export const guestBookingFlat = async (req, res) => {
@@ -698,6 +708,7 @@ export const guestBookingFlat = async (req, res) => {
   }
 
   await FlatBooking.bulkCreate(bookings, { transaction: t });
+
   await t.commit();
 
   const userBookingIdMap = {};

@@ -10,10 +10,12 @@ import {
   TYPE_TRAVEL,
   ERR_INVALID_DATE,
   MSG_BOOKING_SUCCESSFUL,
+  MSG_BOOKING_WAITING,
   STATUS_RESIDENT,
   STATUS_MUMUKSHU,
   TYPE_UTSAV,
-  STATUS_GUEST
+  STATUS_GUEST,
+  STATUS_AWAITING_CONFIRMATION
 } from '../../config/constants.js';
 import {
   bookRoomDuringUtsavForMumukshus,
@@ -51,7 +53,8 @@ import {
   setBookingIdMap,
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
-  sendUnifiedEmail
+  sendUnifiedEmail,
+  setWaitingBookingCountMap
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -63,18 +66,19 @@ export const mumukshuBooking = async (req, res) => {
   req.transaction = t;
 
   const userBookingIdMap = {};
-
+  const waitingBookingCountMap = {};
   let amount = await book(
     req.body,
     primary_booking,
     t,
     req.user,
-    userBookingIdMap
+    userBookingIdMap,
+    waitingBookingCountMap
   );
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.body, addon, t, req.user, userBookingIdMap);
+      amount += await book(req.body, addon, t, req.user, userBookingIdMap,waitingBookingCountMap);
     }
   }
 
@@ -93,7 +97,9 @@ export const mumukshuBooking = async (req, res) => {
     sendUnifiedEmail(cardno, bookings, req.user);
     }
    }
-  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, order });
+   let message = Object.keys(waitingBookingCountMap).length > 0 ? MSG_BOOKING_WAITING : MSG_BOOKING_SUCCESSFUL;
+
+  return res.status(200).send({ message: message, order,waitingBookingCountMap });
 };
 
 export const validateBooking = async (req, res) => {
@@ -136,7 +142,7 @@ export const checkMumukshuOrGuest = async (req, res) => {
   return res.status(200).send({ data: cardDb });
 };
 
-async function book(body, data, t, user, userBookingIdMap) {
+async function book(body, data, t, user, userBookingIdMap,waitingBookingCountMap) {
   let amount = 0;
 
   switch (data.booking_type) {
@@ -157,6 +163,7 @@ async function book(body, data, t, user, userBookingIdMap) {
         TYPE_TRAVEL,
         travelResult.userBookingIds
       );
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_TRAVEL, travelResult.waitingBookingCount, travelResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
@@ -167,11 +174,19 @@ async function book(body, data, t, user, userBookingIdMap) {
         TYPE_ADHYAYAN,
         adhyayanResult.userBookingIds
       );
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_ADHYAYAN, adhyayanResult.waitingBookingCount, adhyayanResult.userBookingIds);
       break;
 
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(data, t, user);
       amount += utsavResult.amount;
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_UTSAV,
+        utsavResult.userBookingIds
+      );
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_UTSAV, utsavResult.waitingBookingCount, utsavResult.userBookingIds);
+
       break;
 
     default:
@@ -397,7 +412,7 @@ async function checkTravelAvailability(data) {
   await checkTravelAlreadyBooked(date, mumukshus);
 
   return {
-    status: STATUS_WAITING,
+    status: STATUS_AWAITING_CONFIRMATION,
     charge: 0
   };
 }

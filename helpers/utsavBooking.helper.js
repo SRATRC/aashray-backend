@@ -48,7 +48,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 
     if (available_seats <= 0) {
       status = STATUS_WAITING;
-      waitingBookingCount
+      waitingBookingCount++
     }else{
       status = STATUS_PAYMENT_PENDING;
       available_seats--;

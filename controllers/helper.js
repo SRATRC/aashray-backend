@@ -197,6 +197,27 @@ export function setBookingIdMap(userBookingIdMap, type, userBookingIds) {
   }
 }
 
+/**
+ * 
+ * @param {*} waitingBookingCountMap 
+ * @param {*} type 
+ * @param {*} waitingBookingCount 
+ * @param {*} totalBookingCount 
+ */
+export function setWaitingBookingCountMap(waitingBookingCountMap, type, waitingBookingCount,totalBookings) {
+
+  
+  if(waitingBookingCount > 0) {
+    const arrayOfBookingIdArrays = Object.values(totalBookings);
+    const allBookingIds = arrayOfBookingIdArrays.flat();
+    waitingBookingCountMap[type] = {
+      waiting: waitingBookingCount,
+      total: allBookingIds.length
+    };
+  }
+
+}
+
 export function retrieveBookingIds(userBookingIdMap) {
   return Object.values(userBookingIdMap).map(
     (bookingIdsByType) => Object.values(bookingIdsByType).flat()

@@ -9,7 +9,9 @@ import {
   MSG_BOOKING_SUCCESSFUL,
   STATUS_OPEN,
   TYPE_UTSAV,
-  ERR_INVALID_DATE
+  ERR_INVALID_DATE,
+  STATUS_AWAITING_CONFIRMATION,
+  MSG_BOOKING_WAITING
 } from '../../config/constants.js';
 import {
   bookRoomDuringUtsavForMumukshus,
@@ -46,6 +48,7 @@ import {
   validateDate,
   setBookingIdMap,
   retrieveBookingIds,
+  setWaitingBookingCountMap,
   sendUnifiedEmailForBookedBy
 } from '../helper.js';
 import database from '../../config/database.js';
@@ -60,18 +63,19 @@ export const unifiedBooking = async (req, res) => {
   var t = await database.transaction();
   req.transaction = t;
   const userBookingIdMap = {};
-
+  const waitingBookingCountMap = {};
   let amount = await book(
     req.user,
     req.body,
     primary_booking,
     userBookingIdMap,
+    waitingBookingCountMap,
     t
   );
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.user, req.body, addon, userBookingIdMap, t);
+      amount += await book(req.user, req.body, addon, userBookingIdMap, waitingBookingCountMap, t);
     }
   }
 
@@ -83,14 +87,18 @@ export const unifiedBooking = async (req, res) => {
   //Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
   for (const cardno in userBookingIdMap) {
-    if (cardno != req.user.cardno) {
-      const bookings = userBookingIdMap[cardno];
-      //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(cardno, bookings, req.user);
+    if(cardno != req.user.cardno) {
+    const bookings = userBookingIdMap[cardno];
+    //Sending email to other mumkshu & Guest
+    sendUnifiedEmail(cardno, bookings, req.user);
     }
-  }
+   }
 
-  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
+  let message = MSG_BOOKING_SUCCESSFUL;
+  if(Object.keys(waitingBookingCountMap).length > 0) {
+    message = MSG_BOOKING_WAITING;
+  }
+  return res.status(200).send({ message: message, data: order, waitingBookingCountMap: waitingBookingCountMap });
 };
 
 export const validateBooking = async (req, res) => {
@@ -116,7 +124,7 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-async function book(user, body, data, userBookingIdMap, t) {
+async function book(user, body, data, userBookingIdMap, waitingBookingCountMap, t) {
   let amount = 0;
 
   switch (data.booking_type) {
@@ -138,6 +146,7 @@ async function book(user, body, data, userBookingIdMap, t) {
         TYPE_TRAVEL,
         travelResult.userBookingIds
       );
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_TRAVEL, travelResult.waitingBookingCount, travelResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
@@ -148,13 +157,18 @@ async function book(user, body, data, userBookingIdMap, t) {
         TYPE_ADHYAYAN,
         adhyayanResult.userBookingIds
       );
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_ADHYAYAN, adhyayanResult.waitingBookingCount, adhyayanResult.userBookingIds);
       break;
 
-    //TODO: send emails for Utsav
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(user, data, t);
       amount += utsavResult.amount;
-      setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_UTSAV,
+        utsavResult.userBookingIds
+      );
+      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_UTSAV, utsavResult.waitingBookingCount, utsavResult.userBookingIds);
       break;
 
     default:
@@ -422,7 +436,7 @@ async function checkTravelAvailability(user, data) {
   await checkTravelAlreadyBooked(date, [user.cardno]);
 
   return {
-    status: STATUS_WAITING,
+    status: STATUS_AWAITING_CONFIRMATION,
     charge: 0
   };
 }
