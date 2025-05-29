@@ -329,12 +329,13 @@ export const generateOrderId = async (amount) => {
     currency: 'INR',
     receipt: uuidv4(),
     notes: {
-      // TODO: add notes here
+      app: 'aashray',
+      env: process.env.NODE_ENV
     }
   };
 
   var order;
-  if (process.env.NODE_ENV == 'prod' && amount > 0) {
+  if (['prod', 'qa'].includes(process.env.NODE_ENV) && amount > 0) {
     order = await razorpay.orders.create(options);
   } else {
     options['id'] = uuidv4();
