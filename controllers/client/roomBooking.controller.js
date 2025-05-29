@@ -189,5 +189,12 @@ export const FlatBookingMumukshu = async (req, res) => {
 
   await t.commit();
 
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+
+  for (const mumukshu in userBookingIdMap) {
+    const bookings = userBookingIdMap[mumukshu];
+    sendUnifiedEmailForBookedBy(bookings, req.user);
+  }
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };

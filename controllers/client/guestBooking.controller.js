@@ -55,7 +55,8 @@ import {
   checkRoomAlreadyBooked,
   findRoom,
   roomCharge,
-  bookRoomDuringUtsavForGuests
+  bookRoomDuringUtsavForGuests,
+  createFlatBooking
 } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
@@ -687,39 +688,36 @@ export const guestBookingFlat = async (req, res) => {
   const nights = await calculateNights(startDay, endDay);
   var t = await database.transaction();
 
-  let bookings = [];
-  const userBookingIds = {};
+  let amount = 0;
+  const userBookingIdMap = {};
 
   for (var guest of guests) {
-    const bookingId = uuidv4();
-
-    bookings.push({
-      bookingid: bookingId,
-      cardno: guest,
-      flatno: flatDb.dataValues.flatno,
-      checkin: startDay,
-      checkout: endDay,
-      nights: nights,
-      updatedBy: req.user.cardno,
-      status: STATUS_PAYMENT_PENDING
-    });
-
-    userBookingIds[guest] = [bookingId];
+    const result = await createFlatBooking(
+      guest,
+      startDay,
+      endDay,
+      nights,
+      flatDb.dataValues.flatno,
+      req.user.cardno,
+      t
+    );
+    amount += result.discountedAmount;
+    userBookingIdMap[guest] = [result.bookingId];
   }
 
-  await FlatBooking.bulkCreate(bookings, { transaction: t });
-
+  const order = await generateOrderId(amount);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
+  await updateRazorpayTransactions(bookingIds, order.id, t);
   await t.commit();
 
-  const userBookingIdMap = {};
-  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
 
   for (const guest in userBookingIdMap) {
     const bookings = userBookingIdMap[guest];
     sendUnifiedEmailForBookedBy(bookings, req.user);
   }
 
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
 
 export const fetchGuests = async (req, res) => {
