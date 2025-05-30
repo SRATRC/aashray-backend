@@ -39,6 +39,12 @@ jobs:
         touch .env.dev
         echo "${{ secrets.PROD_ENV_FILE }}" > .env.dev
 
+    - name: runs all pending Sequelize migrations
+      run: |
+        pwd
+        ls -lrth
+        npx sequelize db:migrate --debug
+
     - name: Restart PM2 process    
       run: |
         sudo pm2 reload BackendAPI --update-env
