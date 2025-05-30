@@ -37,7 +37,7 @@ jobs:
     - name: Set environment file
       run: |
         touch .env.dev
-        echo "${{ secrets.PROD_ENV_FILE }}" > .env.dev
+        echo "${{ secrets.PROD_ENV_FILE }}" > .env.prod
 
     - name: runs all pending Sequelize migrations
       run: |
