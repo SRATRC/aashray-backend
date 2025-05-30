@@ -21,49 +21,109 @@ export const FetchFoodBookings = async (req, res) => {
     page_size
   } = req.query;
   const page_no = parseInt(page) || 1;
-  const pageSize = parseInt(page_size) || 10;
+  const pageSize = parseInt(page_size) || 15;
   const offset = (page_no - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
 
-  const mealFilter = (mealType, exists) => {
-    if (meal === 'all') return exists;
-    return meal.split(',').includes(mealType) && exists;
-  };
-
-  const spiceFilter = (spiceValue) => {
-    if (spice === 'all') return true;
-    return spice === 'true' ? spiceValue === true : spiceValue === false;
-  };
-
   const isSelf = bookedFor === 'self';
   const isGuest = !isNaN(Number(bookedFor));
 
+  let mealConditions = [];
+  if (meal !== 'all') {
+    const mealTypes = meal.split(',');
+    if (mealTypes.includes('breakfast')) {
+      mealConditions.push("'breakfast'");
+    }
+    if (mealTypes.includes('lunch')) {
+      mealConditions.push("'lunch'");
+    }
+    if (mealTypes.includes('dinner')) {
+      mealConditions.push("'dinner'");
+    }
+  }
+
+  let spiceCondition = '';
+  if (spice === 'true') {
+    spiceCondition = 'AND meals.spicy = 1';
+  } else if (spice === 'false') {
+    spiceCondition = 'AND meals.spicy = 0';
+  }
+
+  let mealTypeCondition = '';
+  if (meal !== 'all' && mealConditions.length > 0) {
+    mealTypeCondition = `AND meals.mealType IN (${mealConditions.join(', ')})`;
+  }
+
   const foodData = await database.query(
     `
-    SELECT 
-      f.id,
-      f.date,
-      f.breakfast,
-      f.lunch,
-      f.dinner,
-      f.spicy,
-      f.bookedBy,
-      f.cardno as bookedFor,
-      c.issuedto as name
-    FROM food_db f
-    LEFT JOIN card_db c ON f.cardno = c.cardno
-    WHERE (f.cardno = :userCardno OR f.bookedBy = :userCardno)
-      ${date ? 'AND f.date = :date' : ''}
-      ${isSelf ? 'AND f.bookedBy IS NULL' : ''}
-      ${isGuest ? 'AND f.cardno = :bookedFor' : ''}
-    ORDER BY f.date DESC
+    SELECT * FROM (
+      SELECT 
+        f.id,
+        f.date,
+        'breakfast' as mealType,
+        f.spicy,
+        f.cardno as bookedFor,
+        f.bookedBy,
+        c.issuedto as name
+      FROM food_db f
+      LEFT JOIN card_db c ON f.cardno = c.cardno
+      WHERE (f.cardno = :userCardno OR f.bookedBy = :userCardno)
+        AND f.date >= :today
+        AND f.breakfast = 1
+        ${date ? 'AND f.date = :date' : ''}
+        ${isSelf ? 'AND f.bookedBy IS NULL' : ''}
+        ${isGuest ? 'AND f.cardno = :bookedFor' : ''}
+      
+      UNION ALL
+      
+      SELECT 
+        f.id,
+        f.date,
+        'lunch' as mealType,
+        f.spicy,
+        f.cardno as bookedFor,
+        f.bookedBy,
+        c.issuedto as name
+      FROM food_db f
+      LEFT JOIN card_db c ON f.cardno = c.cardno
+      WHERE (f.cardno = :userCardno OR f.bookedBy = :userCardno)
+        AND f.date >= :today
+        AND f.lunch = 1
+        ${date ? 'AND f.date = :date' : ''}
+        ${isSelf ? 'AND f.bookedBy IS NULL' : ''}
+        ${isGuest ? 'AND f.cardno = :bookedFor' : ''}
+      
+      UNION ALL
+      
+      SELECT 
+        f.id,
+        f.date,
+        'dinner' as mealType,
+        f.spicy,
+        f.cardno as bookedFor,
+        f.bookedBy,
+        c.issuedto as name
+      FROM food_db f
+      LEFT JOIN card_db c ON f.cardno = c.cardno
+      WHERE (f.cardno = :userCardno OR f.bookedBy = :userCardno)
+        AND f.date >= :today
+        AND f.dinner = 1
+        ${date ? 'AND f.date = :date' : ''}
+        ${isSelf ? 'AND f.bookedBy IS NULL' : ''}
+        ${isGuest ? 'AND f.cardno = :bookedFor' : ''}
+    ) as meals
+    WHERE 1=1
+      ${mealTypeCondition}
+      ${spiceCondition}
+    ORDER BY meals.date DESC
     LIMIT :limit 
     OFFSET :offset
     `,
     {
       replacements: {
         userCardno: req.user.cardno,
+        today: today,
         date: date,
         bookedFor: bookedFor,
         limit: pageSize,
@@ -73,80 +133,7 @@ export const FetchFoodBookings = async (req, res) => {
     }
   );
 
-  const formattedData = foodData.flatMap((item) => {
-    const {
-      id,
-      date,
-      breakfast,
-      lunch,
-      dinner,
-      spicy,
-      bookedFor,
-      bookedBy,
-      name
-    } = item;
-
-    return [
-      breakfast && {
-        id,
-        date,
-        mealType: 'breakfast',
-        spicy,
-        bookedFor,
-        bookedBy,
-        name
-      },
-      lunch && {
-        id,
-        date,
-        mealType: 'lunch',
-        spicy,
-        bookedFor,
-        bookedBy,
-        name
-      },
-      dinner && {
-        id,
-        date,
-        mealType: 'dinner',
-        spicy,
-        bookedFor,
-        bookedBy,
-        name
-      }
-    ].filter(Boolean);
-  });
-
-  // Apply meal and spice filters
-  const filteredData = formattedData.filter(
-    (item) => mealFilter(item.mealType, true) && spiceFilter(item.spicy)
-  );
-
-  let groupedData = [];
-  const upcomingData = filteredData.filter((item) =>
-    moment(item.date).isSameOrAfter(today)
-  );
-  const pastData = filteredData.filter((item) =>
-    moment(item.date).isBefore(today)
-  );
-
-  if (upcomingData.length > 0) {
-    groupedData.push({
-      title: 'upcoming',
-      data: upcomingData
-    });
-  }
-
-  if (pastData.length > 0) {
-    groupedData.push({
-      title: 'past',
-      data: pastData
-    });
-  }
-
-  return res
-    .status(200)
-    .send({ message: 'fetched results', data: groupedData });
+  return res.status(200).send({ message: 'fetched results', data: foodData });
 };
 
 export const FetchGuestsForFilter = async (req, res) => {

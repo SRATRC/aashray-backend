@@ -351,7 +351,8 @@ export async function bookRoomDuringUtsavForGuests(
 
           // Create a waiting booking for the night exactly before event starts
           let waitingBookingId = uuidv4();
-          const waitingResult = await RoomBooking.create(
+          const gender = floorType ? floorType + card.gender : card.gender;
+           await RoomBooking.create(
             {
               bookingid: waitingBookingId,
               cardno: card.cardno,
@@ -361,21 +362,13 @@ export async function bookRoomDuringUtsavForGuests(
               checkout: event_start_date,
               nights: 1,
               roomtype: roomType,
-              gender: floorType == 'n' ? card.gender : floorType + card.gender,
+              gender: gender,
               status: STATUS_WAITING,
               updatedBy: user.cardno
             },
             { transaction: t }
           );
-          const waitingTransaction = await createPendingTransaction(
-            user.cardno,
-            waitingResult,
-            TYPE_ROOM,
-            roomCharge(roomType),
-            user.cardno,
-            t
-          );
-          amount += waitingTransaction.discountedAmount;
+         
           bookingIds.push(waitingBookingId);
         }
       }
@@ -406,7 +399,6 @@ export async function bookRoomDuringUtsavForGuests(
       userBookingIds[card.cardno] = bookingIds;
     }
   }
-      
   return { t, amount, userBookingIds };
 }
 
@@ -471,7 +463,8 @@ export async function bookRoomDuringUtsavForMumukshus(
 
           // Create a waiting booking for the night exactly before event starts
           let waitingBookingId = uuidv4();
-          const waitingResult = await RoomBooking.create(
+          const gender = floorType ? floorType + card.gender : card.gender;
+          await RoomBooking.create(
             {
               bookingid: waitingBookingId,
               cardno: card.cardno,
@@ -481,22 +474,15 @@ export async function bookRoomDuringUtsavForMumukshus(
               checkout: event_start_date,
               nights: 1,
               roomtype: roomType,
-              gender: floorType == 'n' ? card.gender : floorType + card.gender,
+              gender: gender,
               status: STATUS_WAITING,
               updatedBy: user.cardno
             },
             { transaction: t }
           );
-          const waitingTransaction = await createPendingTransaction(
-            user.cardno,
-            waitingResult,
-            TYPE_ROOM,
-            roomCharge(roomType),
-            user.cardno,
-            t
-          );
-          amount += waitingTransaction.discountedAmount;
-          bookingIds.push(waitingResult.bookingId);
+
+          
+          bookingIds.push(waitingBookingId);
         }
       }
 
@@ -525,9 +511,10 @@ export async function bookRoomDuringUtsavForMumukshus(
       }
       userBookingIds[card.cardno] = bookingIds;
     }
+    
   }
 
-  return { t, amount, bookingIds };
+  return { t, amount, userBookingIds };
 }
 
 

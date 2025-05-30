@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Booking Cancellation</title>
+
+  {{> styles }}
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
+    </div>
+    <div class="content">
+      <h1>Booking Cancelled!</h1>
+      <p class="intro">Dear {{name}},</p>
+      <p class="intro">We regret to inform you that your bookings have been cancelled, 
+        as payment were not made on time. Here are the details of your bookings:
+      </p>
+
+      {{#if showUtsavDetail}}
+      <div class="details">
+        <p class="section-title"><strong>Raj Utsav - Booking:</strong></p>
+        <table>
+          <thead>
+            <tr>
+              <th>BookingId</th>
+              <th>Utsav Name</th>
+              <th>Name</th>
+              <th>Start Date</th>
+              <th>End Date</th>
+              <th>Package</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody> {{#each utsavBookingDetails}}
+            <tr>
+              <td>{{bookingid}}</td>
+              <td>{{utsavname}}</td>
+              <td>{{name}}</td>
+              <td>{{startdate}}</td>
+              <td>{{enddate}}</td>
+              <td>{{package}}</td>
+              <td>{{status}}</td>
+            </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+      {{/if}}
+
+
+      {{#if showRoomDetail}}
+      <div class="details">
+        <p class="section-title"><strong>Raj Sharan - Room Booking:</strong></p>
+        <table>
+          <thead>
+            <tr>
+              <th>BookingId</th>
+              <th>Name</th>
+              <th>Checkin</th>
+              <th>Checkout</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody> {{#each roomBookingDetails}}
+            <tr>
+              <td>{{bookingid}}</td>
+              <td>{{name}}</td>
+              <td>{{checkin}}</td>
+              <td>{{checkout}}</td>
+              <td>{{status}}</td>
+            </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+      {{/if}}
+
+      {{#if showFlatDetail}}
+      <div class="details">
+        <p class="section-title"><strong>Raj Sharan - Flat Booking:</strong></p>
+        <table>
+          <thead>
+            <tr>
+              <th>BookingId</th>
+              <th>Name</th>
+              <th>Flat No.</th>
+              <th>Checkin</th>
+              <th>Checkout</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{#each flatBookingDetails}}
+            <tr>
+              <td>{{bookingid}}</td>
+              <td>{{name}}</td>
+              <td>{{flatno}}</td>
+              <td>{{checkin}}</td>
+              <td>{{checkout}}</td>
+              <td>{{status}}</td>
+            </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+      {{/if}}
+
+      {{#if showAdhyanDetail}}
+      <div class="details">
+        <p class="section-title"><strong>Raj Adhyayan:</strong></p>
+        <table>
+          <thead>
+            <tr>
+              <th>BookingId</th>
+              <th>Name</th>
+              <th>Adhyayan Name</th>
+              <th>Speaker</th>
+              <th>Start Date</th>
+              <th>End Date</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{#each adhyanBookingDetails}}
+            <tr>
+              <td>{{bookingid}}</td>
+              <td>{{name}}</td>
+              <td>{{adhyayanname}}</td>
+              <td>{{speaker}}</td>
+              <td>{{startdate}}</td>
+              <td>{{enddate}}</td>
+              <td>{{status}}</td>
+            </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+      {{/if}}
+
+      {{#if showTravelDetail}}
+      <div class="details">
+        <p class="section-title"><strong>Raj Pravas:</strong></p>
+        <table>
+          <thead>
+            <tr>
+              <th>BookingId</th>
+              <th>Name</th>
+              <th>Date</th>
+              <th>Pickup Point</th>
+              <th>Dropoff Point</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{#each travelBookingDetails}}
+            <tr>
+              <td>{{bookingid}}</td>
+              <td>{{name}}</td>
+              <td>{{date}}</td>
+              <td>{{pickuppoint}}</td>
+              <td>{{dropoffpoint}}</td>
+              <td>{{status}}</td>
+            </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+      {{/if}}
+
+      <div>
+        <p>You can view all your bookings and their statuses on the <a
+            href="https://aashray.vitraagvigyaan.org">Vitraag Vigyaan Aashray mobile app</a>.</p>
+      </div>
+
+      <div>
+        <p>If you have any questions or need further assistance, please feel free to contact us at <b>+91-7875432613 / +91-9004273512</b>.</p>
+      </div>
+    </div>
+    <div class="footer">
+      &copy; 2025 SRATRC. All rights reserved.
+    </div>
+  </div>
+</body>
+
+</html>
