@@ -43,7 +43,7 @@ jobs:
 
     - name: runs all pending Sequelize migrations
       run: |
-        npx sequelize db:migrate --debug
+        NODE_ENV=prod npx sequelize db:migrate --debug
 
     - name: Reload PM2 process to avoid downtime   
       run: |
