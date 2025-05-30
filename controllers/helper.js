@@ -263,10 +263,11 @@ export async function sendUnifiedEmail(
   template = 'unifiedBookingEmail'
 ) 
 {
+ 
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+  let wasFlatBooked = Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
  
   let adhyanBookingDetails = [],
@@ -426,7 +427,7 @@ export async function sendUnifiedEmail(
       includeOptions.push({
         model: CardDb,
         attributes: ['issuedto'],
-        as: 'flatBookingsByCardNo',
+        where: { cardno: Sequelize.col('FlatBooking.cardno') }
       });
     }
     const flatBookings = await FlatBooking.findAll({
