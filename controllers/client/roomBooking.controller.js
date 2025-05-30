@@ -14,7 +14,8 @@ import {
   calculateNights,
   checkFlatAlreadyBooked,
   setBookingIdMap,
-  retrieveBookingIds
+  retrieveBookingIds,
+  sendUnifiedEmailForBookedBy
 } from '../helper.js';
 import {
   updateRazorpayTransactions,
