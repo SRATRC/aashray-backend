@@ -73,6 +73,8 @@ export const verifyPayment = async (req, res) => {
           ? ROOM_STATUS_PENDING_CHECKIN
           : STATUS_CONFIRMED;
 
+      
+
       switch (razorpay_status) {
         case STATUS_PAYMENT_AUTHORIZED:
           await transaction.update(
@@ -84,6 +86,7 @@ export const verifyPayment = async (req, res) => {
           );
           break;
         case STATUS_PAYMENT_CAPTURED:
+          logger.info(`TRANSACTION: ${transaction.id}, BOOKING: ${transaction.bookingid}, RAZORPAY STATUS: ${razorpay_status}`);
           await booking.update(
             {
               status: bookingStatus,
@@ -101,6 +104,7 @@ export const verifyPayment = async (req, res) => {
           );
           break;
         case STATUS_PAYMENT_FAILED:
+          logger.info(`TRANSACTION: ${transaction.id}, BOOKING: ${transaction.bookingid}, RAZORPAY STATUS: ${razorpay_status}`);
           logger.error(`Payment failed: ${JSON.stringify(req.body)}`);
           await transaction.update(
             {
@@ -125,6 +129,7 @@ export const verifyPayment = async (req, res) => {
 
     await t.commit();
 
+    logger.info(`userBookingIdMap: ${JSON.stringify(userBookingIdMap)}`);
     for (const cardno in userBookingIdMap) {
       const bookings = userBookingIdMap[cardno];
       await sendUnifiedEmail(cardno, bookings, bookedBy);
