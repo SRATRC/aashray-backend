@@ -20,6 +20,8 @@ jobs:
 
     - name: Fix permissions on project directory
       run: |
+        pwd
+        ls -lrth
         sudo chown -R ubuntu:ubuntu /home/ubuntu/actions-runner-api/_work/aashray-backend/aashray-backend
     
     - name: Checkout code
@@ -37,22 +39,21 @@ jobs:
     - name: Set environment file
       run: |
         touch .env.dev
-        echo "${{ secrets.PROD_ENV_FILE }}" > .env.dev
+        echo "${{ secrets.PROD_ENV_FILE }}" > .env.prod
 
     - name: runs all pending Sequelize migrations
       run: |
-        pwd
-        ls -lrth
-        npx sequelize db:migrate --debug
+        NODE_ENV=prod npx sequelize db:migrate --debug
 
-    - name: Restart PM2 process    
+    - name: Reload PM2 process to avoid downtime   
       run: |
         sudo pm2 reload BackendAPI --update-env
-        
-    - name: Wait for API to start
-      run: sudo sleep 3
 
     - name: Status PM2 process    
       run: |
         sudo pm2 list
+
+    - name: Show PM2 process    
+      run: |
+        sudo pm2 show BackendAPI        
     
