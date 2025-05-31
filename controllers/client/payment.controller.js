@@ -35,7 +35,10 @@ export const verifyPayment = async (req, res) => {
     json: req.body
   });
 
+
+  logger.info(`OUTSIDE RAZORPAY ORDER ID: ${razorpay_order_id}, STATUS: ${razorpay_status}`);
   if (razorpay_status in [STATUS_PAYMENT_CAPTURED, STATUS_PAYMENT_FAILED]) {
+    logger.info(`INSIDE RAZORPAY ORDER ID: ${razorpay_order_id}, STATUS: ${razorpay_status}`);
     const transactions = await Transactions.findAll({
       where: {
         razorpay_order_id,
