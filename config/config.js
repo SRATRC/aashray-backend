@@ -5,7 +5,7 @@ const { private_key } =
   process.env.NODE_ENV === 'qa' && JSON.parse(process.env.DB_CERT || '{}');
 
 const config = {
-  dev: {
+  development: {
     username: process.env.DB_USERNAME,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,

@@ -181,11 +181,11 @@ export async function checkRoomBookingProgress(
 }
 
 /*
- * Input: 
+ * Input:
  *    userBookingIds: { cardno: [bookingIds] }
- *    userBookingIdMap: { cardno: { type: [bookingIds] } } 
- * Output: 
- *    userBookingIdMap: { cardno: { type: [bookingIds] } } 
+ *    userBookingIdMap: { cardno: { type: [bookingIds] } }
+ * Output:
+ *    userBookingIdMap: { cardno: { type: [bookingIds] } }
  */
 export function setBookingIdMap(userBookingIdMap, type, userBookingIds) {
   for (const cardno in userBookingIds) {
@@ -198,16 +198,19 @@ export function setBookingIdMap(userBookingIdMap, type, userBookingIds) {
 }
 
 /**
- * 
- * @param {*} waitingBookingCountMap 
- * @param {*} type 
- * @param {*} waitingBookingCount 
- * @param {*} totalBookingCount 
+ *
+ * @param {*} waitingBookingCountMap
+ * @param {*} type
+ * @param {*} waitingBookingCount
+ * @param {*} totalBookingCount
  */
-export function setWaitingBookingCountMap(waitingBookingCountMap, type, waitingBookingCount,totalBookings) {
-
-  
-  if(waitingBookingCount > 0) {
+export function setWaitingBookingCountMap(
+  waitingBookingCountMap,
+  type,
+  waitingBookingCount,
+  totalBookings
+) {
+  if (waitingBookingCount > 0) {
     const arrayOfBookingIdArrays = Object.values(totalBookings);
     const allBookingIds = arrayOfBookingIdArrays.flat();
     waitingBookingCountMap[type] = {
@@ -215,13 +218,12 @@ export function setWaitingBookingCountMap(waitingBookingCountMap, type, waitingB
       total: allBookingIds.length
     };
   }
-
 }
 
 export function retrieveBookingIds(userBookingIdMap) {
-  return Object.values(userBookingIdMap).map(
-    (bookingIdsByType) => Object.values(bookingIdsByType).flat()
-  ).flat();
+  return Object.values(userBookingIdMap)
+    .map((bookingIdsByType) => Object.values(bookingIdsByType).flat())
+    .flat();
 }
 
 export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy) {
@@ -232,13 +234,13 @@ export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy) {
     if (cardNo !== bookedBy.cardno) {
       isSelfBooking = false;
     }
-    
+
     for (const [type, bookingIds] of Object.entries(bookingTypes)) {
       // Initialize array if not exists
       if (!flattenedMap[type]) {
         flattenedMap[type] = [];
       }
-      
+
       // Add all booking IDs for this type
       if (Array.isArray(bookingIds)) {
         flattenedMap[type] = [...flattenedMap[type], ...bookingIds];
@@ -248,92 +250,103 @@ export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy) {
   // Only send email if we have bookings
   if (Object.keys(flattenedMap).length > 0) {
     await sendUnifiedEmail(
-      isSelfBooking ? bookedBy.cardno : null, 
-      flattenedMap, 
+      isSelfBooking ? bookedBy.cardno : null,
+      flattenedMap,
       bookedBy
     );
   }
 }
 
 export async function sendUnifiedEmail(
-  cardno, 
-  bookingIds, 
+  cardno,
+  bookingIds,
   bookedBy,
   subject = 'Your Booking Confirmation at SRATRC',
   template = 'unifiedBookingEmail'
 ) 
+
 {
+ 
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = bookingIds[TYPE_FLAT] != null;
+  let wasFlatBooked = Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
- 
+
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
-    flatBookingDetails = [],utsavBookingDetails=[],includeProfile = false,user;
+    flatBookingDetails = [],
+    utsavBookingDetails = [],
+    includeProfile = false,
+    user;
 
-    if(cardno == null) {
-      includeProfile = true;
-    } else{
-      user = await CardDb.findOne({
-        where: { cardno }
-      });
-    } 
-  
-    if(wasUtsavBooked) {
-      const includeOptions = [
-        {
-          model: UtsavDb,
-          attributes: ['name','start_date','end_date'],
-          where: { id: Sequelize.col('UtsavBooking.utsavid') }  // Changed from UtsavBookingDb.utsav_id
-        },
-        {
-          model: UtsavPackagesDb,
-          attributes: ['name'],
-          where: { id: Sequelize.col('UtsavBooking.packageid') }  // Changed from UtsavBookingDb.packageid
-        }
-      ];
-      
-      // Add CardDb include only if includeProfile is true
-      if (includeProfile) {
-        includeOptions.push({
-          model: CardDb,
-          attributes: ['issuedto'],
-          where: { cardno: Sequelize.col('UtsavBooking.cardno') }
-        });
+  if (cardno == null) {
+    includeProfile = true;
+  } else {
+    user = await CardDb.findOne({
+      where: { cardno }
+    });
+  }
+
+  if (wasUtsavBooked) {
+    const includeOptions = [
+      {
+        model: UtsavDb,
+        attributes: ['name', 'start_date', 'end_date'],
+        where: { id: Sequelize.col('UtsavBooking.utsavid') } // Changed from UtsavBookingDb.utsav_id
+      },
+      {
+        model: UtsavPackagesDb,
+        attributes: ['name'],
+        where: { id: Sequelize.col('UtsavBooking.packageid') } // Changed from UtsavBookingDb.packageid
       }
-      
-      const utsavBookings = await UtsavBooking.findAll({
-        include: includeOptions,
-        where: { bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_UTSAV] } },
-        order: [['cardno','ASC'],['createdAt','ASC']]
-      });
+    ];
 
-      utsavBookings.forEach((utsavBooking) => {
-        utsavBookingDetails.push({
-          name: user ? user.issuedto : utsavBooking.dataValues.CardDb.issuedto,
-          utsavname: utsavBooking.dataValues.UtsavDb.name,
-          startdate: moment(utsavBooking.dataValues.UtsavDb.start_date).format('Do MMMM, YYYY'),
-          enddate: moment(utsavBooking.dataValues.UtsavDb.end_date).format('Do MMMM, YYYY'),
-          status: utsavBooking.status,
-          bookingid: utsavBooking.bookingid,
-          package: utsavBooking.dataValues.UtsavPackagesDb.name,
-        });
+    // Add CardDb include only if includeProfile is true
+    if (includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        where: { cardno: Sequelize.col('UtsavBooking.cardno') }
       });
     }
 
+    const utsavBookings = await UtsavBooking.findAll({
+      include: includeOptions,
+      where: { bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_UTSAV] } },
+      order: [
+        ['cardno', 'ASC'],
+        ['createdAt', 'ASC']
+      ]
+    });
+
+    utsavBookings.forEach((utsavBooking) => {
+      utsavBookingDetails.push({
+        name: user ? user.issuedto : utsavBooking.dataValues.CardDb.issuedto,
+        utsavname: utsavBooking.dataValues.UtsavDb.name,
+        startdate: moment(utsavBooking.dataValues.UtsavDb.start_date).format(
+          'Do MMMM, YYYY'
+        ),
+        enddate: moment(utsavBooking.dataValues.UtsavDb.end_date).format(
+          'Do MMMM, YYYY'
+        ),
+        status: utsavBooking.status,
+        bookingid: utsavBooking.bookingid,
+        package: utsavBooking.dataValues.UtsavPackagesDb.name
+      });
+    });
+  }
+
   //GetData for adhyan
   if (wasAdhyanBooked) {
-    
     let includeOptions = [];
     includeOptions.push({
       model: ShibirDb,
       attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
       where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
     });
-    if(includeProfile) {
+    if (includeProfile) {
       includeOptions.push({
         model: CardDb,
         attributes: ['issuedto'],
@@ -345,7 +358,10 @@ export async function sendUnifiedEmail(
       where: {
         bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
       },
-      order: [['cardno','ASC'],['createdAt','ASC']]
+      order: [
+        ['cardno', 'ASC'],
+        ['createdAt', 'ASC']
+      ]
     });
 
     adhyanBookings.forEach((adhyanBooking) => {
@@ -366,7 +382,7 @@ export async function sendUnifiedEmail(
   }
   if (wasRajprvasBooked) {
     let includeOptions = [];
-    if(includeProfile) {
+    if (includeProfile) {
       includeOptions.push({
         model: CardDb,
         attributes: ['issuedto'],
@@ -374,11 +390,14 @@ export async function sendUnifiedEmail(
       });
     }
     const travelBookings = await TravelDb.findAll({
-        include: includeOptions,
+      include: includeOptions,
       where: {
         bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_TRAVEL] }
       },
-      order: [['cardno','ASC'],['date','ASC']]
+      order: [
+        ['cardno', 'ASC'],
+        ['date', 'ASC']
+      ]
     });
 
     travelBookings.forEach((travelBooking) => {
@@ -395,7 +414,7 @@ export async function sendUnifiedEmail(
 
   if (wasRoomBooked) {
     let includeOptions = [];
-    if(includeProfile) {
+    if (includeProfile) {
       includeOptions.push({
         model: CardDb,
         attributes: ['issuedto'],
@@ -407,7 +426,10 @@ export async function sendUnifiedEmail(
       where: {
         bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_ROOM] }
       },
-      order: [['cardno','ASC'],['checkin','ASC']]
+      order: [
+        ['cardno', 'ASC'],
+        ['checkin', 'ASC']
+      ]
     });
     roomBookings.forEach((roomBooking) => {
       roomBookingDetails.push({
@@ -422,19 +444,22 @@ export async function sendUnifiedEmail(
 
   if (wasFlatBooked) {
     let includeOptions = [];
-    if(includeProfile) {
+    if (includeProfile) {
       includeOptions.push({
         model: CardDb,
         attributes: ['issuedto'],
-        as: 'flatBookingsByCardNo',
+        where: { cardno: Sequelize.col('FlatBooking.cardno') }
       });
     }
     const flatBookings = await FlatBooking.findAll({
-      include: includeOptions, 
+      include: includeOptions,
       where: {
         bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_FLAT] }
       },
-      order: [['cardno','ASC'],['checkin','ASC']]
+      order: [
+        ['cardno', 'ASC'],
+        ['checkin', 'ASC']
+      ]
     });
 
     flatBookings.forEach((flatBooking) => {
@@ -450,7 +475,8 @@ export async function sendUnifiedEmail(
   }
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
-  const name = user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
+  const name =
+    user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
   if (email) {
     sendMail({
       email: email,
