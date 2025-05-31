@@ -13,9 +13,7 @@ import {
   validateDate,
   calculateNights,
   checkFlatAlreadyBooked,
-  setBookingIdMap,
-  retrieveBookingIds,
-  sendUnifiedEmailForBookedBy
+  sendUnifiedEmail
 } from '../helper.js';
 import {
   updateRazorpayTransactions,
@@ -165,7 +163,7 @@ export const FlatBookingMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const userBookingIds = {};
+  const userBookingIds = {},bookingIds = [];
   let amount = 0;
   for (var mumukshu of mumukshus) {
     const booking = await createFlatBooking(
@@ -179,23 +177,22 @@ export const FlatBookingMumukshu = async (req, res) => {
     );
     amount += booking.discountedAmount;
     userBookingIds[mumukshu['cardno']] = [booking.bookingId];
+    bookingIds.push(booking.bookingId);
   }
-
-  const userBookingIdMap = {};
-  setBookingIdMap(userBookingIdMap, TYPE_FLAT, userBookingIds);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);
-
+  
   const order = await generateOrderId(amount);
   await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
 
-  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  sendUnifiedEmail(null,{[TYPE_FLAT] : bookingIds}, req.user);
 
-  for (const mumukshu in userBookingIdMap) {
-    const bookings = userBookingIdMap[mumukshu];
-    sendUnifiedEmailForBookedBy(bookings, req.user);
-  }
+  Object.entries(userBookingIds)
+  .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
+  .forEach(([guestCardNo, bookings]) => {
+    // Create the single-entry bookingMap object directly when calling the function
+    sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
+  });
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };

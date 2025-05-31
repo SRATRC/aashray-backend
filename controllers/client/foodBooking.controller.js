@@ -116,7 +116,7 @@ export const FetchFoodBookings = async (req, res) => {
     WHERE 1=1
       ${mealTypeCondition}
       ${spiceCondition}
-    ORDER BY meals.date DESC
+    ORDER BY meals.date ASC
     LIMIT :limit 
     OFFSET :offset
     `,

@@ -8,7 +8,8 @@ import {
   TYPE_FLAT,
   STATUS_PAYMENT_CAPTURED,
   STATUS_PAYMENT_FAILED,
-  STATUS_PAYMENT_AUTHORIZED
+  STATUS_PAYMENT_AUTHORIZED,
+  STATUS_PAYMENT_COMPLETED
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -35,10 +36,9 @@ export const verifyPayment = async (req, res) => {
     json: req.body
   });
 
-
-  logger.info(`OUTSIDE RAZORPAY ORDER ID: ${razorpay_order_id}, STATUS: ${razorpay_status}`);
-  if (razorpay_status in [STATUS_PAYMENT_CAPTURED, STATUS_PAYMENT_FAILED]) {
-    logger.info(`INSIDE RAZORPAY ORDER ID: ${razorpay_order_id}, STATUS: ${razorpay_status}`);
+  if (
+    [STATUS_PAYMENT_CAPTURED, STATUS_PAYMENT_FAILED].includes(razorpay_status)
+  ) {
     const transactions = await Transactions.findAll({
       where: {
         razorpay_order_id,
@@ -100,7 +100,7 @@ export const verifyPayment = async (req, res) => {
 
           await transaction.update(
             {
-              status: STATUS_PAYMENT_CAPTURED,
+              status: STATUS_PAYMENT_COMPLETED,
               updatedBy
             },
             { transaction: t }
