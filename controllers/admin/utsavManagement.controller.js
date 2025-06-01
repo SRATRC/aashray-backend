@@ -1,39 +1,33 @@
-import { UtsavDb, UtsavBooking, UtsavPackagesDb } from '../../models/associations.js';
-import Transactions from '../../models/transactions.model.js';
-import database from '../../config/database.js';
-import Sequelize, { QueryTypes } from 'sequelize';
-import moment from 'moment';
-import ApiError from '../../utils/ApiError.js';
+import { UtsavDb, UtsavPackagesDb } from '../../models/associations.js';
 import {
   validateUtsavBooking,
   reserveUtsavSeat,
-  validateUtsavs,
   openUtsavSeat,
   validateUtsavPackage
 } from '../../helpers/utsavBooking.helper.js';
-
+import Sequelize, { QueryTypes } from 'sequelize';
 import {
   adminCancelTransaction,
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
-
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_COMPLETED,
-  STATUS_CANCELLED,
   STATUS_CASH_COMPLETED,
   TYPE_UTSAV,
   STATUS_CREDITED
 } from '../../config/constants.js';
-
+import Transactions from '../../models/transactions.model.js';
+import database from '../../config/database.js';
+import moment from 'moment';
+import ApiError from '../../utils/ApiError.js';
 
 export const createUtsav = async (req, res) => {
-  const { name, start_date, end_date, total_seats } = req.body;
+  const { name, start_date, end_date, total_seats, location } = req.body;
 
-  // Check if Utsav already exists with same name and start date
   const alreadyExists = await UtsavDb.findOne({
     where: {
       name: { [Sequelize.Op.like]: name },
@@ -51,9 +45,10 @@ export const createUtsav = async (req, res) => {
     end_date,
     month,
     total_seats,
+    location: 'Research Centre',
     available_seats: total_seats,
-    status: 'open', // default starting status
-    updatedBy: req.user.username // optional, remove if not in schema
+    status: 'open',
+    updatedBy: req.user.username
   });
 
   return res.status(200).send({ message: 'Created Utsav', data: utsavDetails });
@@ -62,7 +57,6 @@ export const createUtsav = async (req, res) => {
 export const addUtsavPackage = async (req, res) => {
   const { utsavid, name, start_date, end_date, amount } = req.body;
 
-  // Optional: Check for duplicate package for same utsav
   const alreadyExists = await UtsavPackagesDb.findOne({
     where: {
       utsavid,
@@ -70,7 +64,11 @@ export const addUtsavPackage = async (req, res) => {
     }
   });
 
-  if (alreadyExists) throw new ApiError(400, 'Package with this name already exists for the Utsav');
+  if (alreadyExists)
+    throw new ApiError(
+      400,
+      'Package with this name already exists for the Utsav'
+    );
 
   const packageData = await UtsavPackagesDb.create({
     utsavid,
@@ -81,7 +79,9 @@ export const addUtsavPackage = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  return res.status(200).send({ message: 'Package Created', data: packageData });
+  return res
+    .status(200)
+    .send({ message: 'Package Created', data: packageData });
 };
 
 const validateUtsav = async (id) => {
@@ -91,7 +91,15 @@ const validateUtsav = async (id) => {
 };
 
 export const updateUtsav = async (req, res) => {
-  const { name, start_date, end_date, status, total_seats, comments } = req.body;
+  const {
+    name,
+    start_date,
+    end_date,
+    status,
+    total_seats,
+    comments,
+    location
+  } = req.body;
   const utsavId = req.params.id;
 
   const utsav = await validateUtsav(utsavId);
@@ -105,13 +113,12 @@ export const updateUtsav = async (req, res) => {
     status,
     total_seats,
     comments,
-    updatedBy: req.user.username // remove if not in schema
+    location,
+    updatedBy: req.user.username
   });
 
   return res.status(200).send({ message: 'Updated Utsav' });
 };
-
-
 
 export const fetchUtsavBookings = async (req, res) => {
   const utsavid = req.query.utsavid;
@@ -135,7 +142,7 @@ export const fetchUtsavBookings = async (req, res) => {
   const utsavData = await database.query(
     `SELECT 
         t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other,
-        t2.cardno, t2.issuedto, t2.mobno, t2.center, t2.res_status,
+        t2.cardno, t2.issuedto, t2.mobno, t2.center, t2.res_status, t3.location,
         t3.name AS utsav_name
      FROM utsav_booking AS t1
      LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
@@ -154,9 +161,10 @@ export const fetchUtsavBookings = async (req, res) => {
     }
   );
 
-  return res.status(200).send({ message: 'Found Utsav Bookings', data: utsavData });
+  return res
+    .status(200)
+    .send({ message: 'Found Utsav Bookings', data: utsavData });
 };
-
 
 export const fetchAllUtsav = async (req, res) => {
   const utsavs = await database.query(
@@ -167,6 +175,7 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.end_date,
       utsav_db.status,
       utsav_db.total_seats,
+      utsav_db.location,
       utsav_db.available_seats,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count  
     FROM 
@@ -182,6 +191,7 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.end_date,
       utsav_db.status,
       utsav_db.total_seats,
+      utsav_db.location,
       utsav_db.available_seats      
      ORDER BY 
       utsav_db.start_date ASC;`,
@@ -190,9 +200,10 @@ export const fetchAllUtsav = async (req, res) => {
     }
   );
 
-  return res.status(200).send({ message: 'Fetched Utsav Records', data: utsavs });
+  return res
+    .status(200)
+    .send({ message: 'Fetched Utsav Records', data: utsavs });
 };
-
 
 export const utsavWaitlist = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -211,7 +222,8 @@ export const utsavWaitlist = async (req, res) => {
       c.issuedto, 
       c.mobno, 
       c.center, 
-      c.res_status
+      c.res_status,
+      u.location
     FROM utsav_booking AS b
     LEFT JOIN utsav_db AS u 
       ON b.utsavid = u.id 
@@ -228,7 +240,6 @@ export const utsavWaitlist = async (req, res) => {
 
   res.status(200).send({ message: 'Fetched Utsav Waitlist', data });
 };
-
 
 export const activateUtsav = async (req, res) => {
   const itemUpdated = await UtsavDb.update(
@@ -249,12 +260,11 @@ export const activateUtsav = async (req, res) => {
   res.status(200).send({ message: 'Utsav status updated' });
 };
 
-
 export const utsavStatusUpdate = async (req, res) => {
   const { utsav_id, bookingid, status, upi_ref, description } = req.body;
 
   let newBookingStatus = status;
-console.log('Received status:', status);
+  console.log('Received status:', status);
 
   const t = await database.transaction();
   req.transaction = t;
@@ -267,7 +277,7 @@ console.log('Received status:', status);
   }
 
   // Cannot change any status if already admin cancelled
-  if (booking.status ===  STATUS_ADMIN_CANCELLED) {
+  if (booking.status === STATUS_ADMIN_CANCELLED) {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
@@ -280,11 +290,11 @@ console.log('Received status:', status);
   switch (status) {
     case STATUS_CONFIRMED:
       // Confirmed allowed from waiting OR payment pending
-      if (
-        
-        booking.status !== STATUS_PAYMENT_PENDING
-      ) {
-        throw new ApiError(400, 'Confirmed status can only be set from  payment pending');
+      if (booking.status !== STATUS_PAYMENT_PENDING) {
+        throw new ApiError(
+          400,
+          'Confirmed status can only be set from  payment pending'
+        );
       }
 
       if (booking.status === STATUS_WAITING) {
@@ -316,69 +326,78 @@ console.log('Received status:', status);
       }
       break;
 
-case STATUS_PAYMENT_PENDING:
-  if (booking.status !== STATUS_WAITING) {
-    throw new ApiError(400, 'Payment Pending can only be set from waiting');
-  }
+    case STATUS_PAYMENT_PENDING:
+      if (booking.status !== STATUS_WAITING) {
+        throw new ApiError(400, 'Payment Pending can only be set from waiting');
+      }
 
-  // Refresh transaction from DB just in case (to avoid stale object)
-  transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid },
-    transaction: t
-  });
+      // Refresh transaction from DB just in case (to avoid stale object)
+      transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid },
+        transaction: t
+      });
 
-  if (!transaction || ['credited', 'cancelled'].includes(transaction.status)) {
-    const packageData = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
-    if (!packageData) throw new Error('Utsav Package not found');
+      if (
+        !transaction ||
+        ['credited', 'cancelled'].includes(transaction.status)
+      ) {
+        const packageData = await UtsavPackagesDb.findByPk(booking.packageid, {
+          transaction: t
+        });
+        if (!packageData) throw new Error('Utsav Package not found');
 
-    // Double-check to avoid race condition (find/create pattern)
-    const [existingTransaction, created] = await Transactions.findOrCreate({
-      where: { bookingid: booking.bookingid },
-      defaults: {
-        cardno: booking.cardno,
-        category: TYPE_UTSAV,
-        amount: packageData.amount,
-        discount: 0,
-        razorpay_order_id: null,
-        description: req.body.description || 'Payment pending for Utsav',
-        status: STATUS_PAYMENT_PENDING,
-        updatedBy: req.user.username || 'admin'
-      },
-      transaction: t
-    });
+        // Double-check to avoid race condition (find/create pattern)
+        const [existingTransaction, created] = await Transactions.findOrCreate({
+          where: { bookingid: booking.bookingid },
+          defaults: {
+            cardno: booking.cardno,
+            category: TYPE_UTSAV,
+            amount: packageData.amount,
+            discount: 0,
+            razorpay_order_id: null,
+            description: req.body.description || 'Payment pending for Utsav',
+            status: STATUS_PAYMENT_PENDING,
+            updatedBy: req.user.username || 'admin'
+          },
+          transaction: t
+        });
 
-    if (!created) {
-  if (['credited', 'cancelled'].includes(existingTransaction.status)) {
-    // Existing transaction is not reusable → create a new one manually
-    transaction = await Transactions.create({
-      bookingid: booking.bookingid,
-      cardno: booking.cardno,
-      category: TYPE_UTSAV,
-      amount: packageData.amount,
-      discount: 0,
-      razorpay_order_id: null,
-      description: req.body.description || 'Payment pending for Utsav',
-      status: STATUS_PAYMENT_PENDING,
-      updatedBy: req.user.username || 'admin'
-    }, { transaction: t });
-  } else {
-    console.warn('Duplicate transaction avoided: already exists and active.');
-    transaction = existingTransaction;
-  }
-} else {
-  transaction = existingTransaction;
-}
+        if (!created) {
+          if (['credited', 'cancelled'].includes(existingTransaction.status)) {
+            // Existing transaction is not reusable → create a new one manually
+            transaction = await Transactions.create(
+              {
+                bookingid: booking.bookingid,
+                cardno: booking.cardno,
+                category: TYPE_UTSAV,
+                amount: packageData.amount,
+                discount: 0,
+                razorpay_order_id: null,
+                description:
+                  req.body.description || 'Payment pending for Utsav',
+                status: STATUS_PAYMENT_PENDING,
+                updatedBy: req.user.username || 'admin'
+              },
+              { transaction: t }
+            );
+          } else {
+            console.warn(
+              'Duplicate transaction avoided: already exists and active.'
+            );
+            transaction = existingTransaction;
+          }
+        } else {
+          transaction = existingTransaction;
+        }
+      } else {
+        console.warn('Valid transaction already exists. Skipping creation.');
+      }
 
-  } else {
-    console.warn('Valid transaction already exists. Skipping creation.');
-  }
-
-  newBookingStatus = STATUS_PAYMENT_PENDING;
-  break;
-
+      newBookingStatus = STATUS_PAYMENT_PENDING;
+      break;
 
     case STATUS_ADMIN_CANCELLED:
-        console.log('>> Admin cancelling booking');
+      console.log('>> Admin cancelling booking');
 
       // Admin Cancelled allowed from waiting, payment pending, or confirmed only
       if (
@@ -386,36 +405,51 @@ case STATUS_PAYMENT_PENDING:
         booking.status !== STATUS_PAYMENT_PENDING &&
         booking.status !== STATUS_CONFIRMED
       ) {
-        throw new ApiError(400, 'Admin Cancelled can only be set from waiting, payment pending or confirmed');
+        throw new ApiError(
+          400,
+          'Admin Cancelled can only be set from waiting, payment pending or confirmed'
+        );
       }
 
       if (
-  booking.status === STATUS_CONFIRMED ||
-  booking.status === STATUS_PAYMENT_PENDING
-) {
-  console.log("Booking.utsav_id:", booking.utsavid);
-  const utsav = await UtsavDb.findByPk(booking.utsavid, { transaction: t });
-  if (!utsav) {
-    throw new ApiError(404, 'Utsav not found');
-  }
+        booking.status === STATUS_CONFIRMED ||
+        booking.status === STATUS_PAYMENT_PENDING
+      ) {
+        console.log('Booking.utsav_id:', booking.utsavid);
+        const utsav = await UtsavDb.findByPk(booking.utsavid, {
+          transaction: t
+        });
+        if (!utsav) {
+          throw new ApiError(404, 'Utsav not found');
+        }
 
-  await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
-}
+        await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
+      }
 
-//       if (transaction && !['admin cancelled'].includes(transaction.status)) {
-//   await adminCancelTransaction(req.user, transaction, t);
-// } else {
-//   console.warn('Skipping transaction cancellation - already cancelled or credited');
-// }
-console.log('>> Transaction object:', transaction?.toJSON?.() || transaction);
-console.log('>> Transaction status before admin cancel check:', transaction?.status);
+      //       if (transaction && !['admin cancelled'].includes(transaction.status)) {
+      //   await adminCancelTransaction(req.user, transaction, t);
+      // } else {
+      //   console.warn('Skipping transaction cancellation - already cancelled or credited');
+      // }
+      console.log(
+        '>> Transaction object:',
+        transaction?.toJSON?.() || transaction
+      );
+      console.log(
+        '>> Transaction status before admin cancel check:',
+        transaction?.status
+      );
 
- if (transaction && ![STATUS_CREDITED, STATUS_ADMIN_CANCELLED].includes(transaction.status)) {
+      if (
+        transaction &&
+        ![STATUS_CREDITED, STATUS_ADMIN_CANCELLED].includes(transaction.status)
+      ) {
         await adminCancelTransaction(req.user, transaction, t);
-            console.log('>> Cancelling transaction...');
-
+        console.log('>> Cancelling transaction...');
       } else {
-        console.warn('Skipping transaction cancellation - already credited or cancelled');
+        console.warn(
+          'Skipping transaction cancellation - already credited or cancelled'
+        );
       }
 
       newBookingStatus = STATUS_ADMIN_CANCELLED;
@@ -441,10 +475,8 @@ console.log('>> Transaction status before admin cancel check:', transaction?.sta
   return res.status(200).send({ message: 'Updated booking status' });
 };
 
-
 export const fetchUtsav = async (req, res) => {
   const { id } = req.params;
-  // await validateUtsavs(id);
 
   const utsav = await UtsavDb.findOne({
     where: { id: id }
@@ -457,21 +489,18 @@ export const updateUtsavPackage = async (req, res) => {
   const { name, start_date, end_date, amount } = req.body;
   const { id: packageId, utsavId } = req.params;
 
-  // Validate package existence
   const utsavPackage = await validateUtsavPackage(packageId, utsavId);
-
 
   await utsavPackage.update({
     name,
     start_date,
     end_date,
     amount,
-    updatedBy: req.user.username // remove if not in schema
+    updatedBy: req.user.username
   });
 
   return res.status(200).send({ message: 'Updated Utsav Package' });
 };
-
 
 export const fetchAllPackages = async (req, res) => {
   const packages = await database.query(
@@ -503,13 +532,14 @@ export const fetchAllPackages = async (req, res) => {
     ORDER BY 
       utsav_packages_db.start_date ASC;`,
     {
-      type: QueryTypes.SELECT,
+      type: QueryTypes.SELECT
     }
   );
 
-  return res.status(200).send({ message: 'Fetched Package Records', data: packages });
+  return res
+    .status(200)
+    .send({ message: 'Fetched Package Records', data: packages });
 };
-
 
 export const fetchPackage = async (req, res) => {
   const { id } = req.params;
@@ -522,5 +552,7 @@ export const fetchPackage = async (req, res) => {
     return res.status(404).send({ message: 'Package not found' });
   }
 
-  return res.status(200).send({ message: 'Fetched Package', data: packageData });
+  return res
+    .status(200)
+    .send({ message: 'Fetched Package', data: packageData });
 };
