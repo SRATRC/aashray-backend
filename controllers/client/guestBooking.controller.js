@@ -104,14 +104,24 @@ export const guestBooking = async (req, res) => {
         TYPE_ADHYAYAN,
         adhyayanResult.userBookingIds
       );
-      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_ADHYAYAN, adhyayanResult.waitingBookingCount, adhyayanResult.userBookingIds);
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.waitingBookingCount,
+        adhyayanResult.userBookingIds
+      );
       break;
 
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(primary_booking, t, req.user);
       amount += utsavResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
-      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_UTSAV, utsavResult.waitingBookingCount, utsavResult.userBookingIds);
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
+        TYPE_UTSAV,
+        utsavResult.waitingBookingCount,
+        utsavResult.userBookingIds
+      );
       break;
 
     default:
@@ -144,7 +154,12 @@ export const guestBooking = async (req, res) => {
             TYPE_ADHYAYAN,
             adhyayanResult.userBookingIds
           );
-          setWaitingBookingCountMap(waitingBookingCountMap, TYPE_ADHYAYAN, adhyayanResult.waitingBookingCount, adhyayanResult.userBookingIds);
+          setWaitingBookingCountMap(
+            waitingBookingCountMap,
+            TYPE_ADHYAYAN,
+            adhyayanResult.waitingBookingCount,
+            adhyayanResult.userBookingIds
+          );
           break;
 
         default:
@@ -169,10 +184,14 @@ export const guestBooking = async (req, res) => {
     }
   }
   let message = MSG_BOOKING_SUCCESSFUL;
-  if(Object.keys(waitingBookingCountMap).length > 0) {
+  if (Object.keys(waitingBookingCountMap).length > 0) {
     message = MSG_BOOKING_WAITING;
   }
-  return res.status(200).send({ message: message, data: order, waitingBookingCountMap: waitingBookingCountMap });
+  return res.status(200).send({
+    message: message,
+    data: order,
+    waitingBookingCountMap: waitingBookingCountMap
+  });
 };
 
 export const validateBooking = async (req, res) => {
@@ -669,7 +688,6 @@ async function bookAdhyayan(data, t, user) {
 export const guestBookingFlat = async (req, res) => {
   const { guests, startDay, endDay } = req.body;
 
-  
   const flatDb = await FlatDb.findOne({
     attributes: ['flatno'],
     where: {
@@ -690,8 +708,9 @@ export const guestBookingFlat = async (req, res) => {
   var t = await database.transaction();
 
   let amount = 0;
-  const bookingIds = [],userBookingIdMap = {};
-  
+  const bookingIds = [],
+    userBookingIdMap = {};
+
   for (var guest of guests) {
     const result = await createFlatBooking(
       guest,
@@ -708,18 +727,18 @@ export const guestBookingFlat = async (req, res) => {
   }
 
   const order = await generateOrderId(amount);
-  
+
   await updateRazorpayTransactions(bookingIds, order.id, t);
   await t.commit();
 
-  sendUnifiedEmail(null,{[TYPE_FLAT] : bookingIds}, req.user);
+  sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user);
 
   Object.entries(userBookingIdMap)
-  .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
-  .forEach(([guestCardNo, bookings]) => {
-    // Create the single-entry bookingMap object directly when calling the function
-    sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
-  });
+    .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
+    .forEach(([guestCardNo, bookings]) => {
+      // Create the single-entry bookingMap object directly when calling the function
+      sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
+    });
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };
@@ -767,13 +786,17 @@ export const createGuests = async (req, res) => {
 export const checkGuests = async (req, res) => {
   const { mobno } = req.params;
 
-  const isGuest = await CardDb.findOne({
+  const user = await CardDb.findOne({
     attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'email'],
-    where: { mobno: mobno, res_status: STATUS_GUEST }
+    where: { mobno: mobno }
   });
-  if (!isGuest) {
+  if (!user) {
     return res.status(200).send({ message: 'Guest not found', data: null });
+  }
+
+  if (user.res_status == STATUS_GUEST) {
+    return res.status(200).send({ message: 'Guest found', data: user });
   } else {
-    return res.status(200).send({ message: 'Guest found', data: isGuest });
+    throw new ApiError(401, 'User is not a guest');
   }
 };
