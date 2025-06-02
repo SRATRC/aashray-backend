@@ -79,7 +79,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
 export const ViewRequest = CatchAsync(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * (pageSize - 1);
   const status = req.query.status?.toLowerCase() || 'all';
 
   const whereClause = {

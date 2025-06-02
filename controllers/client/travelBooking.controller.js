@@ -15,7 +15,7 @@ import { STATUS_AWAITING_CONFIRMATION } from '../../config/constants.js';
 export const FetchUpcoming = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * (pageSize - 1);
 
   const data = await database.query(
     `SELECT t1.bookingid,
@@ -74,18 +74,18 @@ export const CancelTravel = async (req, res) => {
 
   sendMail({
     email: req.user.email,
-     subject: 'Your Raj Pravas (Travel) booking has been cancelled',
-     template: 'rajPravasCancellation',
-     context: {
-       name: req.user.issuedto,
-       bookingid:bookingid,
-       date: booking.date,
-       pickup:booking.pickup_point,
-       drop:booking.drop_point
-     }
-   });
-   //bring people from the waiting to awaiting confrimation.
-   updateWaitingTravelBooking(booking.date);
-   
+    subject: 'Your Raj Pravas (Travel) booking has been cancelled',
+    template: 'rajPravasCancellation',
+    context: {
+      name: req.user.issuedto,
+      bookingid: bookingid,
+      date: booking.date,
+      pickup: booking.pickup_point,
+      drop: booking.drop_point
+    }
+  });
+  //bring people from the waiting to awaiting confrimation.
+  updateWaitingTravelBooking(booking.date);
+
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
