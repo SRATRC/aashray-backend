@@ -304,6 +304,18 @@ export async function useCredit(
   return discountedAmount;
 }
 
+export function usableCredits(card, bookingType, amount) {
+  const credits = card.credits && card.credits[bookingType]
+    ? Math.min(amount, card.credits[bookingType])
+    : 0;
+  
+  // store the updated credits on the card model itself so that 
+  // the next call for the same card will reflect what's available
+  card.credits[bookingType] = card.credits[bookingType] - credits;
+
+  return credits;
+}
+
 function getUpdatedCredits(card, bookingType, newCredits) {
   const updatedCredits = card.credits
     ? JSON.parse(JSON.stringify(card.credits))
