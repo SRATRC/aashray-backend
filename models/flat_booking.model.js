@@ -26,6 +26,14 @@ const FlatBooking = sequelize.define(
         key: 'cardno'
       }
     },
+    bookedBy: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      references: {
+        model: 'card_db',
+        key: 'cardno'
+      }
+    },
     flatno: {
       type: DataTypes.INTEGER,
       allowNull: true,
