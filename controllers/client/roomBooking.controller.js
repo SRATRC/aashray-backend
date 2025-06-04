@@ -20,17 +20,17 @@ import {
   userCancelBooking
 } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
+import { createFlatBooking } from '../../helpers/roomBooking.helper.js';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-import { createFlatBooking } from '../../helpers/roomBooking.helper.js';
-import { generateOrderId } from '../../helpers/transactions.helper.js';
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * (pageSize - 1);
 
   const user_bookings = await database.query(
     `
@@ -163,7 +163,8 @@ export const FlatBookingMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const userBookingIds = {},bookingIds = [];
+  const userBookingIds = {},
+    bookingIds = [];
   let amount = 0;
   for (var mumukshu of mumukshus) {
     const booking = await createFlatBooking(
@@ -179,20 +180,20 @@ export const FlatBookingMumukshu = async (req, res) => {
     userBookingIds[mumukshu['cardno']] = [booking.bookingId];
     bookingIds.push(booking.bookingId);
   }
-  
+
   const order = await generateOrderId(amount);
   await updateRazorpayTransactions(bookingIds, order.id, t);
 
   await t.commit();
 
-  sendUnifiedEmail(null,{[TYPE_FLAT] : bookingIds}, req.user);
+  sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user);
 
   Object.entries(userBookingIds)
-  .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
-  .forEach(([guestCardNo, bookings]) => {
-    // Create the single-entry bookingMap object directly when calling the function
-    sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
-  });
+    .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
+    .forEach(([guestCardNo, bookings]) => {
+      // Create the single-entry bookingMap object directly when calling the function
+      sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
+    });
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };

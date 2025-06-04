@@ -114,7 +114,6 @@ export const fetchAllAdhyayan = async (req, res) => {
   return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
 
-
 export const fetchAdhyayan = async (req, res) => {
   const { id } = req.params;
   await validateAdhyayans(id);
@@ -141,7 +140,7 @@ export const fetchAdhyayanBookings = async (req, res) => {
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * (pageSize - 1);
   await validateAdhyayans(shibir_id);
 
   const adhyayanData = await database.query(

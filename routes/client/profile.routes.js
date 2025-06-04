@@ -5,8 +5,7 @@ import {
   upload,
   transactions,
   sendNotification,
-  fetchProfile,
-  fetchPendingTransactions
+  fetchProfile
 } from '../../controllers/client/profile.controller.js';
 import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -17,6 +16,5 @@ router.put('/', CatchAsync(updateProfile));
 router.post('/upload', CatchAsync(upload));
 router.get('/transactions', CatchAsync(transactions));
 router.post('/notification', CatchAsync(sendNotification));
-router.get('/pendingPayments', CatchAsync(fetchPendingTransactions));
 
 export default router;

@@ -3,7 +3,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand
 } from '@aws-sdk/client-s3';
-import { CardDb, Transactions } from '../../models/associations.js';
+import { CardDb } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -144,32 +144,95 @@ export const transactions = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
-  const status = req.query.status.toLowerCase() || 'all';
 
-  const whereClause = {
-    cardno: req.user.cardno
+  let status = req.query.status || null;
+  if (status) {
+    if (typeof status === 'string' && status.includes(',')) {
+      status = status.split(',').map((s) => s.trim());
+    }
+    if (!Array.isArray(status)) {
+      status = [status];
+    }
+
+    status = status.filter((s) => s && s !== 'all');
+    if (status.length === 0) {
+      status = null;
+    }
+  }
+
+  const category = req.query.category || null;
+  const cardno = req.user.cardno;
+
+  let whereClause = `WHERE transactions.cardno = :cardno`;
+
+  if (status && status.length > 0) {
+    if (status.length === 1) {
+      whereClause += ` AND transactions.status = :status`;
+    } else {
+      whereClause += ` AND transactions.status IN (:status)`;
+    }
+  }
+
+  if (category && category !== 'all') {
+    whereClause += ` AND transactions.category = :category`;
+  }
+
+  const replacements = {
+    cardno: cardno,
+    limit: pageSize,
+    offset: offset
   };
 
-  if (status != 'all') {
-    whereClause.status = status;
+  if (status && status.length > 0) {
+    replacements.status = status.length === 1 ? status[0] : status;
+  }
+  if (category) {
+    replacements.category = category;
   }
 
-  if (req.query.category) {
-    whereClause.category = req.query.category;
-  }
+  const query = `
+    SELECT transactions.bookingid,
+           transactions.amount,
+           transactions.category,
+           transactions.status,
+           transactions.discount,
+           transactions.description,
+           transactions.createdAt,
+           COALESCE(rb.cardno, fb.cardno, tb.cardno, sb.cardno, ub.cardno) AS booked_for,
+           COALESCE(rb.bookedBy, fb.bookedBy, tb.bookedBy, sb.bookedBy, ub.bookedBy) AS booked_by,
+           COALESCE(rb.checkin, fb.checkin, tb.date, sdb.start_date, updb.start_date) AS start_day,
+           COALESCE(rb.checkout, fb.checkout, NULL, sdb.end_date, updb.end_date) AS end_day,
+           COALESCE(sdb.name, udb.name) AS name,
+           card_db.issuedto AS booked_for_name
+    FROM transactions
+    LEFT JOIN room_booking rb ON transactions.bookingid = rb.bookingid AND transactions.category = 'room'
+    LEFT JOIN flat_booking fb ON transactions.bookingid = fb.bookingid AND transactions.category = 'flat'
+    LEFT JOIN travel_db tb ON transactions.bookingid = tb.bookingid AND transactions.category = 'travel'
+    LEFT JOIN shibir_booking_db sb ON transactions.bookingid = sb.bookingid AND transactions.category = 'shibir'
+    LEFT JOIN shibir_db sdb ON sb.shibir_id = sdb.id
+    LEFT JOIN utsav_booking ub ON transactions.bookingid = ub.bookingid AND transactions.category = 'utsav'
+    LEFT JOIN utsav_packages_db updb ON ub.packageid = updb.id
+    LEFT JOIN utsav_db udb ON ub.utsavid = udb.id
+    LEFT JOIN card_db ON COALESCE(rb.cardno, fb.cardno, tb.cardno, sb.cardno, ub.cardno) = card_db.cardno
+    ${whereClause}
+    ORDER BY transactions.createdAt DESC
+    LIMIT :limit OFFSET :offset
+  `;
 
-  const transactions = await Transactions.findAll({
-    where: whereClause,
-    attributes: {
-      exclude: ['id', 'cardno', 'upi_ref', 'updatedAt', 'updatedBy']
-    },
-    order: [['createdAt', 'DESC']],
-    offset,
-    limit: pageSize
+  const transactions = await database.query(query, {
+    replacements,
+    type: database.QueryTypes.SELECT
   });
-  return res
-    .status(200)
-    .send({ message: 'fetched transactions', data: transactions });
+
+  return res.status(200).json({
+    message: 'transactions fetched',
+    data: transactions,
+    pagination: {
+      page,
+      pageSize,
+      hasMore: transactions.length === pageSize
+    }
+  });
 };
 
 export const sendNotification = async (req, res) => {
@@ -275,70 +338,4 @@ export const fetchProfile = async (req, res) => {
   }
 
   return res.status(200).json({ message: 'Profile fetched', data: profile });
-};
-
-export const fetchPendingTransactions = async (req, res) => {
-  const transactions = await database.query(
-    `SELECT combined.bookingid,
-       combined.booked_for,
-       combined.booked_by,
-       combined.start_day,
-       combined.end_day,
-       combined.name,
-       card_db.issuedto AS booked_by_name,
-       transactions.amount,
-       transactions.category
-FROM
-  (-- Room Bookings
- SELECT t1.bookingid,
-        t1.cardno AS booked_for,
-        t1.bookedBy AS booked_by,
-        t1.checkin AS start_day,
-        t1.checkout AS end_day,
-        NULL AS name
-   FROM room_booking t1
-   UNION ALL -- Travel Bookings
- SELECT t2.bookingid,
-        t2.cardno AS booked_for,
-        t2.bookedBy AS booked_by,
-        t2.date AS start_day,
-        NULL AS end_day,
-        NULL AS name
-   FROM travel_db t2
-   UNION ALL -- Shibir Bookings
- SELECT t3.bookingid,
-        t3.cardno AS booked_for,
-        t3.bookedBy AS booked_by,
-        t4.start_date AS start_day,
-        t4.end_date AS end_day,
-        t4.name
-   FROM shibir_booking_db t3
-   LEFT JOIN shibir_db t4 ON t3.shibir_id = t4.id
-   UNION ALL -- Utsav Bookings
- SELECT t5.bookingid,
-        t5.cardno AS booked_for,
-        t5.bookedBy AS booked_by,
-        t6.start_date AS start_day,
-        t6.end_date AS end_day,
-        t7.name
-   FROM utsav_booking t5
-   LEFT JOIN utsav_packages_db t6 ON t5.packageid = t6.id
-   LEFT JOIN utsav_db t7 ON t5.utsavid = t7.id) AS combined -- Only include transactions that are pending
-INNER JOIN transactions ON combined.bookingid = transactions.bookingid
-AND transactions.status IN ('pending', 'failed', 'cash pending') -- Get name of person who booked
-LEFT JOIN card_db ON combined.booked_by = card_db.cardno -- Filter by card number
-
-WHERE combined.booked_for = :cardno
-  OR combined.booked_by = :cardno;`,
-    {
-      replacements: {
-        cardno: req.user.cardno
-      },
-      type: database.QueryTypes.SELECT
-    }
-  );
-
-  return res
-    .status(200)
-    .json({ message: 'transactions fetched', data: transactions });
 };

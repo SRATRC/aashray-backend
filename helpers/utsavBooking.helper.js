@@ -77,7 +77,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 
     if (utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
       await createPendingTransaction(
-        mumukshu.cardno,
+        user.cardno,
         booking,
         TYPE_UTSAV,
         package_info.amount,

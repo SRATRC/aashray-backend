@@ -73,6 +73,13 @@ CardDb.hasMany(FlatBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+CardDb.hasMany(FlatBooking, {
+  as: 'flatBookedByCard',
+  foreignKey: 'bookedBy',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 CardDb.hasMany(FlatDb, {
   foreignKey: 'owner',
   sourceKey: 'cardno',
@@ -211,6 +218,11 @@ FlatDb.belongsTo(CardDb, {
 FlatBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
+});
+FlatBooking.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
+  targetKey: 'cardno',
+  as: 'bookedByCard'
 });
 
 FlatDb.hasMany(FlatBooking, {
