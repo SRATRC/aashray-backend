@@ -57,6 +57,7 @@ import ApiError from '../../utils/ApiError.js';
 import {
   adjustAmount
 } from '../../helpers/transactions.helper.js';
+import { validateCard } from '../../helpers/card.helper.js';
 
 export const manualCheckin = async (req, res) => {
   const t = await database.transaction();
@@ -148,6 +149,7 @@ export const manualCheckout = async (req, res) => {
   }
 
   const nights = await calculateNights(booking.checkin, today);
+  const card = await validateCard(transaction.cardno);
 
   // early checkout
   if (today < booking.checkout) {
@@ -163,7 +165,7 @@ export const manualCheckout = async (req, res) => {
 
     if (newAmount < originalAmount) {
       await adjustAmount(
-        transaction.cardno,
+        card,
         booking,
         transaction,
         newAmount,
@@ -340,7 +342,7 @@ export const roomBooking = async (req, res) => {
       room_type,
       card.gender,
       floor_pref,
-      card.cardno,
+      card,
       t,
       true
     );
@@ -359,7 +361,7 @@ export const flatBooking = async (req, res) => {
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
   const card = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email'],
+    attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email', 'credits'],
     where: {
       mobno: req.params.mobno
     }
@@ -390,7 +392,7 @@ export const flatBooking = async (req, res) => {
     req.body.checkout_date, 
     nights, 
     req.body.flat_no, 
-    card.cardno, 
+    card, 
     t,
     true
   );

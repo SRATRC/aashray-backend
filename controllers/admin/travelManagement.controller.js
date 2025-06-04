@@ -24,6 +24,7 @@ import {
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
+import { validateCard } from '../../helpers/card.helper.js';
 
 function getAdditionalConditions(statuses, pickupRC, dropRC, replacementMap) {
   let additionalWhereClause = '';
@@ -129,7 +130,8 @@ export const updateBookingStatus = async (req, res) => {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
-  const bookedBy = booking.bookedBy || booking.cardno;
+  const cardno = booking.bookedBy || booking.cardno;
+  const bookedByCard = await validateCard(cardno);
 
   let transaction = await Transactions.findOne({ where: { bookingid } });
 
@@ -137,7 +139,7 @@ export const updateBookingStatus = async (req, res) => {
     case STATUS_PROCEED_FOR_PAYMENT:
       if (!transaction) {
         transaction = await createPendingTransaction(
-          bookedBy,
+          bookedByCard,
           booking,
           TYPE_TRAVEL,
           charges,

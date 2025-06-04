@@ -173,7 +173,7 @@ export const FlatBookingMumukshu = async (req, res) => {
       endDay,
       nights,
       flatDb.dataValues.flatno,
-      req.user.cardno,
+      req.user,
       t
     );
     amount += booking.discountedAmount;

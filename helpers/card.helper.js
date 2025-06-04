@@ -18,7 +18,7 @@ export async function userIsPR(cardno) {
 export async function validateCard(cardno) {
   const card = await CardDb.findOne({
     where: { cardno },
-    attributes: ['id', 'cardno', 'gender', 'res_status']
+    attributes: ['id', 'cardno', 'gender', 'res_status', 'credits']
   });
 
   if (!card) {

@@ -11,9 +11,7 @@ import {
   STATUS_CREDITED,
   STATUS_CONFIRMED,
   TYPE_ADHYAYAN,
-  TYPE_GUEST_ADHYAYAN,
   ERR_CARD_NOT_FOUND,
-  ROOM_STATUS_CHECKEDIN,
   TYPE_ROOM,
   TYPE_FLAT,
   ROOM_STATUS_PENDING_CHECKIN
@@ -58,7 +56,7 @@ export async function createTransaction(
 }
 
 export async function createPendingTransaction(
-  cardno,
+  card,
   booking,
   category,
   amount,
@@ -68,7 +66,7 @@ export async function createPendingTransaction(
 ) {
   const transaction = await Transactions.create(
     {
-      cardno,
+      cardno: card.cardno,
       bookingid: booking.bookingid,
       category,
       amount,
@@ -79,7 +77,7 @@ export async function createPendingTransaction(
   );
 
   const discountedAmount = await useCredit(
-    cardno,
+    card,
     booking,
     transaction,
     amount,
@@ -136,13 +134,22 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
       : transaction.discount;
 
   const bookingType = getBookingType(transaction);
+
+  const card = await CardDb.findOne({
+    where: { cardno: transaction.cardno }
+  });
+
+  if (!card) {
+    throw new ApiError(404, ERR_CARD_NOT_FOUND);
+  }
+
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:
     case STATUS_CASH_COMPLETED:
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
       if (credits > 0 && bookingType != TYPE_ADHYAYAN) {
-        await addCredit(user, transaction.cardno, bookingType, credits, t);
+        await addCredit(user, card, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;
       }
@@ -175,7 +182,7 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
 }
 
 export async function adjustAmount(
-  cardno,
+  card,
   booking,
   transaction,
   amount,
@@ -187,8 +194,8 @@ export async function adjustAmount(
 
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
-    await addCredit(user, cardno, bookingType, credits, t);
-    await useCredit(cardno, booking, transaction, amount, updatedBy, t);
+    await addCredit(user, card, bookingType, credits, t);
+    await useCredit(card, booking, transaction, amount, updatedBy, t);
   } else if (originalAmount < amount) {
     const balance = amount - originalAmount;
     await transaction.update(
@@ -206,13 +213,7 @@ export async function adjustAmount(
   }
 }
 
-async function addCredit(user, cardno, bookingType, credits, t) {
-  const card = await CardDb.findOne({
-    where: { cardno }
-  });
-
-  if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
-
+async function addCredit(user, card, bookingType, credits, t) {
   const previousCredits =
     card.credits && card.credits[bookingType] ? card.credits[bookingType] : 0;
 
@@ -232,18 +233,13 @@ async function addCredit(user, cardno, bookingType, credits, t) {
 }
 
 async function useCredit(
-  cardno,
+  card,
   booking,
   transaction,
   amount,
   updatedBy,
   t
 ) {
-  const card = await CardDb.findOne({
-    where: { cardno: cardno }
-  });
-
-  if (!card) new ApiError(400, ERR_CARD_NOT_FOUND);
 
   const bookingType = getBookingType(transaction);
 

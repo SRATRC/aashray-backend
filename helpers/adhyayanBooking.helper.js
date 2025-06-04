@@ -12,7 +12,7 @@ import {
 import { ShibirBookingDb, ShibirDb } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
-import { validateCards } from './card.helper.js';
+import { validateCard, validateCards } from './card.helper.js';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
@@ -114,7 +114,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
 
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
-            user.cardno,
+            user,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
@@ -176,8 +176,9 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
 
     // for a booking in waiting status, there should be no existing transaction
     const bookedBy = booking.bookedBy || booking.cardno;
+    const card = await validateCard(bookedBy);
     const transaction = await createPendingTransaction(
-      bookedBy,
+      card,
       booking,
       TYPE_ADHYAYAN,
       adhyayan.amount,

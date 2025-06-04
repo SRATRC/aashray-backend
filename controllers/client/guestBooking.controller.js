@@ -479,7 +479,7 @@ async function bookRoomForSingleGuest(
   const amount = roomCharge(roomtype) * nights;
 
   const { transaction, discountedAmount } = await createPendingTransaction(
-    user.cardno,
+    user,
     booking,
     TYPE_GUEST_ROOM,
     amount,
@@ -722,7 +722,7 @@ export const guestBookingFlat = async (req, res) => {
       endDay,
       nights,
       flatDb.dataValues.flatno,
-      req.user.cardno,
+      req.user,
       t
     );
     amount += result.discountedAmount;
