@@ -17,7 +17,7 @@ import {
   ERR_FLAT_FAILED_TO_BOOK
 } from '../config/constants.js';
 import { RoomBooking, RoomDb, UtsavDb, FlatBooking, FlatDb } from '../models/associations.js';
-import { createPendingTransaction, useCredit } from './transactions.helper.js';
+import { createPendingTransaction } from './transactions.helper.js';
 import { calculateNights, validateDate } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';

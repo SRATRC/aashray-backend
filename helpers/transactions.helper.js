@@ -231,7 +231,7 @@ async function addCredit(user, cardno, bookingType, credits, t) {
   );
 }
 
-export async function useCredit(
+async function useCredit(
   cardno,
   booking,
   transaction,
