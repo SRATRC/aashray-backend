@@ -45,7 +45,8 @@ import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import {
   calculateNights,
@@ -114,11 +115,11 @@ export const validateBooking = async (req, res) => {
     totalCharge: 0
   };
 
-  await validate(req.body, primary_booking, response);
+  await validate(req.body, req.user, primary_booking, response);
 
   if (addons) {
     for (const addon of addons) {
-      await validate(req.body, addon, response);
+      await validate(req.body, req.user, addon, response);
     }
   }
 
@@ -196,11 +197,11 @@ async function book(body, data, t, user, userBookingIdMap,waitingBookingCountMap
   return amount;
 }
 
-async function validate(body, data, response) {
+async function validate(body, user, data, response) {
   let totalCharge = 0;
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(data);
+      response.roomDetails = await checkRoomAvailability(data, user);
       totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -321,7 +322,7 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function checkRoomAvailability(data) {
+async function checkRoomAvailability(data, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
 
@@ -345,6 +346,7 @@ async function checkRoomAvailability(data) {
 
       var status = STATUS_WAITING;
       var charge = 0;
+      var availableCredits = 0;
 
       const gender = floorType
         ? floorType + card.dataValues.gender
@@ -360,16 +362,17 @@ async function checkRoomAvailability(data) {
         if (roomno) {
           status = STATUS_AVAILABLE;
           charge = roomCharge(roomType) * nights;
+          availableCredits = usableCredits(user, TYPE_ROOM, charge);
         }
       } else {
         status = STATUS_AVAILABLE;
-        charge = 0;
       }
 
       roomDetails.push({
         mumukshu,
         status,
-        charge
+        charge,
+        availableCredits
       });
     }
   }

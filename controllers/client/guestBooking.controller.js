@@ -313,7 +313,7 @@ async function checkRoomAvailability(data, user) {
     for (const guest of guests) {
       var status = STATUS_WAITING;
       var charge = 0;
-      var discount = 0;
+      var availableCredits = 0;
 
       const gender = floorType
         ? floorType +
@@ -331,7 +331,7 @@ async function checkRoomAvailability(data, user) {
         if (room) {
           status = STATUS_AVAILABLE;
           charge = roomCharge(roomType) * nights;
-          discount = usableCredits(user, TYPE_ROOM, charge);
+          availableCredits = usableCredits(user, TYPE_ROOM, charge);
         }
       } else {
         status = STATUS_AVAILABLE;
@@ -341,7 +341,7 @@ async function checkRoomAvailability(data, user) {
         guestId: guest,
         status,
         charge,
-        discount
+        availableCredits
       });
     }
   }

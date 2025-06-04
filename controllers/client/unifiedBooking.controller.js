@@ -384,7 +384,7 @@ async function checkRoomAvailability(user, data) {
 
   var status = STATUS_WAITING;
   var charge = 0;
-  var discount = 0;
+  var availableCredits = 0;
 
   if (nights > 0) {
     const roomno = await findRoom(
@@ -396,7 +396,7 @@ async function checkRoomAvailability(user, data) {
     if (roomno) {
       status = STATUS_AVAILABLE;
       charge = roomCharge(room_type) * nights;
-      discount = usableCredits(user, TYPE_ROOM, charge);
+      availableCredits = usableCredits(user, TYPE_ROOM, charge);
     }
   } else {
     status = STATUS_AVAILABLE;
@@ -405,7 +405,7 @@ async function checkRoomAvailability(user, data) {
   return {
     status,
     charge,
-    discount
+    availableCredits
   };
 }
 
