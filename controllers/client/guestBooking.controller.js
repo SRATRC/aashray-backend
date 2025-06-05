@@ -57,7 +57,8 @@ import {
 import {
   createPendingTransaction,
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -205,7 +206,8 @@ export const validateBooking = async (req, res) => {
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
       response.roomDetails = await checkRoomAvailability(
-        req.body.primary_booking
+        req.body.primary_booking,
+        req.user
       );
       response.totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
@@ -249,7 +251,7 @@ export const validateBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          response.roomDetails = await checkRoomAvailability(addon);
+          response.roomDetails = await checkRoomAvailability(addon, req.user);
           response.totalCharge += response.roomDetails.reduce(
             (partialSum, room) => partialSum + room.charge,
             0
@@ -282,7 +284,7 @@ export const validateBooking = async (req, res) => {
   });
 };
 
-async function checkRoomAvailability(data) {
+async function checkRoomAvailability(data, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -308,6 +310,7 @@ async function checkRoomAvailability(data) {
     for (const guest of guests) {
       var status = STATUS_WAITING;
       var charge = 0;
+      var availableCredits = 0;
 
       const gender = floorType
         ? floorType +
@@ -325,16 +328,17 @@ async function checkRoomAvailability(data) {
         if (room) {
           status = STATUS_AVAILABLE;
           charge = roomCharge(roomType) * nights;
+          availableCredits = usableCredits(user, TYPE_ROOM, charge);
         }
       } else {
         status = STATUS_AVAILABLE;
-        charge = 0;
       }
 
       roomDetails.push({
         guestId: guest,
         status,
-        charge
+        charge,
+        availableCredits
       });
     }
   }
@@ -472,7 +476,7 @@ async function bookRoomForSingleGuest(
   const amount = roomCharge(roomtype) * nights;
 
   const { transaction, discountedAmount } = await createPendingTransaction(
-    user.cardno,
+    user,
     booking,
     TYPE_GUEST_ROOM,
     amount,
@@ -707,7 +711,7 @@ export const guestBookingFlat = async (req, res) => {
       endDay,
       nights,
       flatDb.dataValues.flatno,
-      req.user.cardno,
+      req.user,
       t
     );
     amount += result.discountedAmount;

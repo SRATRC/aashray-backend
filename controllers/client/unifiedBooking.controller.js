@@ -37,7 +37,8 @@ import {
 } from '../../helpers/utsavBooking.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import {
   bookTravelForMumukshus,
@@ -383,6 +384,7 @@ async function checkRoomAvailability(user, data) {
 
   var status = STATUS_WAITING;
   var charge = 0;
+  var availableCredits = 0;
 
   if (nights > 0) {
     const roomno = await findRoom(
@@ -394,15 +396,16 @@ async function checkRoomAvailability(user, data) {
     if (roomno) {
       status = STATUS_AVAILABLE;
       charge = roomCharge(room_type) * nights;
+      availableCredits = usableCredits(user, TYPE_ROOM, charge);
     }
   } else {
     status = STATUS_AVAILABLE;
-    charge = 0;
   }
 
   return {
     status,
-    charge
+    charge,
+    availableCredits
   };
 }
 

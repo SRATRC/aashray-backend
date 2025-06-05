@@ -24,6 +24,7 @@ import Transactions from '../../models/transactions.model.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
+import { validateCard } from '../../helpers/card.helper.js';
 
 export const createUtsav = async (req, res) => {
   const { name, start_date, end_date, total_seats, location } = req.body;
@@ -285,8 +286,6 @@ export const utsavStatusUpdate = async (req, res) => {
     where: { bookingid: bookingid }
   });
 
-  const bookedBy = booking.bookedBy || booking.cardno;
-
   switch (status) {
     case STATUS_CONFIRMED:
       // Confirmed allowed from waiting OR payment pending
@@ -302,8 +301,11 @@ export const utsavStatusUpdate = async (req, res) => {
       }
 
       if (!transaction) {
+        const cardno = booking.bookedBy || booking.cardno;
+        const card = await validateCard(cardno);
+
         transaction = await createPendingTransaction(
-          bookedBy,
+          card,
           booking,
           TYPE_UTSAV,
           utsav.amount,

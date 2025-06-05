@@ -17,7 +17,7 @@ import {
   ERR_FLAT_FAILED_TO_BOOK
 } from '../config/constants.js';
 import { RoomBooking, RoomDb, UtsavDb, FlatBooking, FlatDb } from '../models/associations.js';
-import { createPendingTransaction, useCredit } from './transactions.helper.js';
+import { createPendingTransaction } from './transactions.helper.js';
 import { calculateNights, validateDate } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
@@ -213,7 +213,7 @@ export async function bookRoomForMumukshus(
           roomType,
           card.gender,
           floorType,
-          user.cardno,
+          user,
           t
         );
 
@@ -233,12 +233,14 @@ export async function createRoomBooking(
   roomtype,
   user_gender,
   floor_pref,
-  bookedBy,
+  user,
   t,
   cashAllowed = false
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
   const roomno = await findRoom(checkin, checkout, roomtype, gender);
+  const bookedBy = user.cardno !== cardno ? user.cardno : null;
+
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
@@ -249,13 +251,13 @@ export async function createRoomBooking(
       roomno: roomno.dataValues.roomno,
       status: STATUS_PAYMENT_PENDING,
       cardno,
-      bookedBy: bookedBy !== cardno ? bookedBy : null,
+      bookedBy,
       checkin,
       checkout,
       nights,
       roomtype,
       gender,
-      updatedBy: bookedBy
+      updatedBy: user.cardno
     },
     { transaction: t }
   );
@@ -267,11 +269,11 @@ export async function createRoomBooking(
   const amount = roomCharge(roomtype) * nights;
 
   const {transaction,discountedAmount} = await createPendingTransaction(
-    bookedBy,
+    user,
     booking,
     TYPE_ROOM,
     amount,
-    bookedBy,
+    user.cardno,
     t,
     cashAllowed
   );
@@ -342,7 +344,7 @@ export async function bookRoomDuringUtsavForGuests(
               roomType,
               card.gender,
               floorType,
-              user.cardno,
+              user,
               t
             );
             amount += result.discountedAmount;
@@ -389,7 +391,7 @@ export async function bookRoomDuringUtsavForGuests(
             roomType,
             card.gender,
             floorType,
-            user.cardno,
+            user,
             t
           );
           amount += result.discountedAmount;
@@ -454,7 +456,7 @@ export async function bookRoomDuringUtsavForMumukshus(
               roomType,
               card.gender,
               floorType,
-              user.cardno,
+              user,
               t
             );
             amount += result.discountedAmount;
@@ -502,7 +504,7 @@ export async function bookRoomDuringUtsavForMumukshus(
             roomType,
             card.gender,
             floorType,
-            user.cardno,
+            user,
             t
           );
           amount += result.discountedAmount;
@@ -524,7 +526,7 @@ export async function createFlatBooking(
   checkout, 
   nights, 
   flatno, 
-  updatedBy, 
+  user, 
   t,
   cashAllowed = false
 ) {
@@ -546,7 +548,7 @@ export async function createFlatBooking(
       checkin, 
       checkout, 
       nights, 
-      updatedBy, 
+      updatedBy: user.cardno,
       status
     },
     { transaction: t }
@@ -562,11 +564,11 @@ export async function createFlatBooking(
     let amount = roomCharge("nac") * nights;
 
     const result = await createPendingTransaction(
-      cardno,
+      user,
       booking, 
-      TYPE_FLAT, 
+      TYPE_FLAT,
       amount, 
-      updatedBy, 
+      user.cardno, 
       t,
       cashAllowed
     ); 

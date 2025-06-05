@@ -1,15 +1,12 @@
 import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
-  FULL_TRAVEL_PRICE,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
   STATUS_CANCELLED,
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
-  TRAVEL_PRICE,
-  TRAVEL_TYPE_FULL,
   TRAVEL_TYPE_SINGLE
 } from '../config/constants.js';
 import { TravelDb } from '../models/associations.js';
@@ -150,8 +147,4 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   return { userBookingIds, waitingBookingCount };
-}
-
-export function travelCharge(type) {
-  return type == TRAVEL_TYPE_FULL ? FULL_TRAVEL_PRICE : TRAVEL_PRICE;
 }

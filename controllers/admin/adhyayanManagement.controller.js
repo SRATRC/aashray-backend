@@ -25,6 +25,7 @@ import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import Transactions from '../../models/transactions.model.js';
+import { validateCard } from '../../helpers/card.helper.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -209,7 +210,6 @@ export const updateAdhyayan = async (req, res) => {
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
 
-// TODO: ask what shall be done in this function
 export const adhyayanReport = async (req, res) => {
   res.status(200).send({ message: 'Fetched Adhyayan Report' });
 };
@@ -263,7 +263,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
     where: { bookingid: bookingid }
   });
 
-  const bookedBy = booking.bookedBy || booking.cardno;
+  const cardno = booking.bookedBy || booking.cardno;
+  const card = await validateCard(cardno);
 
   // 1. Booking Status = WAITING, Transaction is Not Created
   // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
@@ -283,7 +284,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
       if (!transaction) {
         transaction = await createPendingTransaction(
-          bookedBy,
+          card,
           booking,
           TYPE_ADHYAYAN,
           adhyayan.amount,
@@ -324,7 +325,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
         if (!transaction) {
           transaction = await createPendingTransaction(
-            bookedBy,
+            card,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,

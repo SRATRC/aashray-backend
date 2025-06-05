@@ -17,13 +17,11 @@ export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 
 // PRICES
-export const BREAKFAST_PRICE = 50;
-export const LUNCH_PRICE = 100;
-export const DINNER_PRICE = 100;
+export const BREAKFAST_PRICE = 60;
+export const LUNCH_PRICE = 120;
+export const DINNER_PRICE = 120;
 export const NAC_ROOM_PRICE = 700;
 export const AC_ROOM_PRICE = 1100;
-export const TRAVEL_PRICE = 350; // TODO: each location has its price prices
-export const FULL_TRAVEL_PRICE = 1800;
 
 // STATUS
 export const STATUS_WAITING = 'waiting';
