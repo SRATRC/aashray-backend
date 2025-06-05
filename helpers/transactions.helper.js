@@ -16,7 +16,8 @@ import {
   ROOM_STATUS_CHECKEDIN,
   TYPE_ROOM,
   TYPE_FLAT,
-  ROOM_STATUS_PENDING_CHECKIN
+  ROOM_STATUS_PENDING_CHECKIN,
+  STATUS_PAYMENT_FAILED
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
@@ -116,13 +117,6 @@ export async function userCancelTransaction(user, transaction, t) {
   return await cancelTransaction(user, transaction, t, false);
 }
 
-// STATUS_PAYMENT_PENDING,
-// STATUS_PAYMENT_COMPLETED,
-// STATUS_CASH_PENDING,
-// STATUS_CASH_COMPLETED,
-// STATUS_CANCELLED,
-// STATUS_ADMIN_CANCELLED,
-// STATUS_CREDITED
 export async function cancelTransaction(user, transaction, t, admin = false) {
   console.log('>> Cancel Transaction: Current status =', transaction.status);
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
@@ -141,6 +135,7 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
     case STATUS_CASH_COMPLETED:
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
+    case STATUS_PAYMENT_FAILED:
       if (credits > 0 && bookingType != TYPE_ADHYAYAN) {
         await addCredit(user, transaction.cardno, bookingType, credits, t);
         status = STATUS_CREDITED;
