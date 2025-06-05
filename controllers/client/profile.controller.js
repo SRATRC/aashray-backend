@@ -208,7 +208,7 @@ export const transactions = async (req, res) => {
     LEFT JOIN room_booking rb ON transactions.bookingid = rb.bookingid AND transactions.category = 'room'
     LEFT JOIN flat_booking fb ON transactions.bookingid = fb.bookingid AND transactions.category = 'flat'
     LEFT JOIN travel_db tb ON transactions.bookingid = tb.bookingid AND transactions.category = 'travel'
-    LEFT JOIN shibir_booking_db sb ON transactions.bookingid = sb.bookingid AND transactions.category = 'shibir'
+    LEFT JOIN shibir_booking_db sb ON transactions.bookingid = sb.bookingid AND transactions.category = 'adhyayan'
     LEFT JOIN shibir_db sdb ON sb.shibir_id = sdb.id
     LEFT JOIN utsav_booking ub ON transactions.bookingid = ub.bookingid AND transactions.category = 'utsav'
     LEFT JOIN utsav_packages_db updb ON ub.packageid = updb.id
