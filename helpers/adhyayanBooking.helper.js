@@ -27,11 +27,11 @@ export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   return result;
 }
 
-export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
+export async function checkAdhyayanAlreadyBooked(shibirIds, ...users) {
   const booking = await ShibirBookingDb.findOne({
     where: {
       shibir_id: shibirIds,
-      cardno: mumukshus,
+      cardno: users,
       status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING]
     }
   });
@@ -88,11 +88,12 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
   return booking;
 }
 
-export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
-  let amount = 0,waitingBookingCount = 0;
+export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
+  let amount = 0,
+    waitingBookingCount = 0;
   const userBookingIds = {};
 
-  for (const mumukshu of mumukshus) {
+  for (const user of users) {
     const bookingIds = [];
     for (const adhyayan of adhyayans) {
       const bookingId = uuidv4();

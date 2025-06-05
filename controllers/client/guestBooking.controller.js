@@ -5,8 +5,7 @@ import {
   Transactions,
   CardDb,
   GuestRelationship,
-  FlatDb,
-  FlatBooking
+  FlatDb
 } from '../../models/associations.js';
 import {
   STATUS_PAYMENT_PENDING,
@@ -22,7 +21,6 @@ import {
   ERR_ROOM_NO_BED_AVAILABLE,
   ERR_ROOM_ALREADY_BOOKED,
   ERR_ROOM_FAILED_TO_BOOK,
-  ERR_ADHYAYAN_ALREADY_BOOKED,
   ERR_ADHYAYAN_NOT_FOUND,
   LUNCH_PRICE,
   BREAKFAST_PRICE,
@@ -33,10 +31,8 @@ import {
   TYPE_GUEST_ROOM,
   STATUS_OPEN,
   TYPE_UTSAV,
-  ROOM_STATUS_PENDING_CHECKIN,
   TYPE_FLAT,
-  MSG_BOOKING_WAITING,
-  STATUS_AWAITING_CONFIRMATION
+  MSG_BOOKING_WAITING
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -75,6 +71,7 @@ import {
   validateUtsavs,
   bookUtsavForMumukshus
 } from '../../helpers/utsavBooking.helper.js';
+import { checkAdhyayanAlreadyBooked } from '../../helpers/adhyayanBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -567,6 +564,8 @@ async function checkAdhyayanAvailability(data) {
     throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
   }
 
+  await checkAdhyayanAlreadyBooked(shibir_ids, ...guests);
+
   var adhyayanDetails = [];
   for (var shibir of shibirs) {
     var available = 0;
@@ -599,17 +598,7 @@ async function bookAdhyayan(data, t, user) {
   let amount = 0,
     idx = 0;
 
-  const isBooked = await ShibirBookingDb.findAll({
-    where: {
-      shibir_id: shibir_ids,
-      cardno: guests,
-      status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING]
-    }
-  });
-
-  if (isBooked.length > 0) {
-    throw new ApiError(400, ERR_ADHYAYAN_ALREADY_BOOKED);
-  }
+  await checkAdhyayanAlreadyBooked(shibir_ids, ...guests);
 
   const shibirs = await ShibirDb.findAll({
     where: {
