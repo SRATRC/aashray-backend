@@ -50,22 +50,26 @@ FROM
           t1.status,
           t1.gender
    FROM room_booking t1
+   WHERE t1.cardno = :cardno
+     OR t1.bookedBy = :cardno
    UNION SELECT t4.bookingid,
           t4.cardno AS bookedFor,
-          NULL AS bookedBy,
+          t5.owner bookedBy,
           t4.flatno AS roomno,
           t4.checkin,
           t4.checkout,
           t4.nights,
           'flat' AS roomtype,
           t4.status,
+          
           NULL AS gender
-   FROM flat_booking t4) AS combined
+          
+   FROM flat_booking t4 join flatdb t5 on t5.flatno = t4.flatno where t5.owner = :cardno
+   OR t4.cardno = :cardno)
+   AS combined
    LEFT JOIN transactions t2 ON combined.bookingid = t2.bookingid
    AND t2.category IN (:category)
    LEFT JOIN card_db t3 ON t3.cardno = combined.bookedFor
-   WHERE combined.bookedFor = :cardno
-     OR combined.bookedBy = :cardno
    ORDER BY combined.checkin DESC
    LIMIT :limit
    OFFSET :offset;
