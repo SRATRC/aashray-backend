@@ -210,7 +210,6 @@ export const updateAdhyayan = async (req, res) => {
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
 
-// TODO: ask what shall be done in this function
 export const adhyayanReport = async (req, res) => {
   res.status(200).send({ message: 'Fetched Adhyayan Report' });
 };
