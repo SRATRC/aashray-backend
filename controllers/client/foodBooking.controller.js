@@ -22,7 +22,7 @@ export const FetchFoodBookings = async (req, res) => {
   } = req.query;
   const page_no = parseInt(page) || 1;
   const pageSize = parseInt(page_size) || 15;
-  const offset = (page_no - 1) * (pageSize - 1);
+  const offset = (page_no - 1) * pageSize;
 
   const today = moment().format('YYYY-MM-DD');
 
