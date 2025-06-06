@@ -92,6 +92,11 @@ export const guestBooking = async (req, res) => {
     case TYPE_FOOD:
       const foodResult = await bookFood(primary_booking, t, req.user);
       amount += foodResult.amount;
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_FOOD,
+        foodResult.userBookingIds
+      );
       break;
 
     case TYPE_ADHYAYAN:
@@ -142,6 +147,11 @@ export const guestBooking = async (req, res) => {
         case TYPE_FOOD:
           const foodResult = await bookFood(addon, t, req.user);
           amount += foodResult.amount;
+          setBookingIdMap(
+            userBookingIdMap,
+            TYPE_FOOD,
+            foodResult.userBookingIds
+          );
           break;
 
         case TYPE_ADHYAYAN:
