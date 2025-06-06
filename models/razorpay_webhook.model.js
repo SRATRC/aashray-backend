@@ -23,6 +23,7 @@ const RazorpayWebhook = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
+    
     json: {
       type: DataTypes.JSON,
       allowNull: false

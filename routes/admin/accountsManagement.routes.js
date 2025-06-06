@@ -10,23 +10,31 @@ import CatchAsync from '../../utils/CatchAsync.js';
 
 import {
   fetchCompletedTransactions,
+  fetchPendingTransactions,
+  fetchAllCreditTransactions,
   uploadRazorpaySettlementExcel,
   updateSettlementFieldsFromExcel,
   fetchAllSettlements,
   fetchTransactionsBySettlementId,
-  fetchTransactionsByPaymentId
+  fetchTransactionsByPaymentId,
+  fetchCredits,
+  fetchCreditTransactions
 } from '../../controllers/admin/accountsManagement.controller.js';
 import catchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_ACCOUNTS_ADMIN));
 
-router.get('/fetch', CatchAsync(fetchCompletedTransactions));
+router.get('/fetchcompleted', CatchAsync(fetchCompletedTransactions));
+router.get('/fetchpending', CatchAsync(fetchPendingTransactions));
+router.get('/fetchcredits', CatchAsync(fetchAllCreditTransactions));
 router.post('/setrep', upload.single('file'), CatchAsync(uploadRazorpaySettlementExcel));
 router.post('/updateset', upload.single('file'), CatchAsync(updateSettlementFieldsFromExcel));
 router.get('/fetchset', CatchAsync(fetchAllSettlements));
 router.get('/fetchTransactions/:settlementId', catchAsync(fetchTransactionsBySettlementId));
 router.get('/fetchTransactions/payment/:razorpay_payment_id', catchAsync(fetchTransactionsByPaymentId));
+router.get('/credits', catchAsync(fetchCredits));
+router.get('/fetchcreditstransactions', catchAsync(fetchCreditTransactions));
 
 
 
