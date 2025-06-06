@@ -277,9 +277,10 @@ export async function bookFoodForGuests(
   }
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
-  await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+  const transactions = await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+  const transactionIds = transactions.map((item) => item.id);
 
-  return { amount, userBookingIds };
+  return { amount, userBookingIds, transactionIds };
 }
 
 export async function validateFood(

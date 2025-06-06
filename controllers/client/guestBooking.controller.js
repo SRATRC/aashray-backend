@@ -82,6 +82,8 @@ export const guestBooking = async (req, res) => {
   let amount = 0;
   const userBookingIdMap = {};
   const waitingBookingCountMap = {};
+  const transactionIds = [];
+  
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(primary_booking, t, req.user);
@@ -92,11 +94,7 @@ export const guestBooking = async (req, res) => {
     case TYPE_FOOD:
       const foodResult = await bookFood(primary_booking, t, req.user);
       amount += foodResult.amount;
-      setBookingIdMap(
-        userBookingIdMap,
-        TYPE_FOOD,
-        foodResult.userBookingIds
-      );
+      transactionIds.push(...foodResult.transactionIds);
       break;
 
     case TYPE_ADHYAYAN:
@@ -147,11 +145,7 @@ export const guestBooking = async (req, res) => {
         case TYPE_FOOD:
           const foodResult = await bookFood(addon, t, req.user);
           amount += foodResult.amount;
-          setBookingIdMap(
-            userBookingIdMap,
-            TYPE_FOOD,
-            foodResult.userBookingIds
-          );
+          transactionIds.push(...foodResult.transactionIds);
           break;
 
         case TYPE_ADHYAYAN:
@@ -178,7 +172,7 @@ export const guestBooking = async (req, res) => {
 
   const order = await generateOrderId(amount);
   const bookingIds = retrieveBookingIds(userBookingIdMap);
-  await updateRazorpayTransactions(bookingIds, order.id, t);
+  await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
 
   await t.commit();
 
@@ -731,7 +725,7 @@ export const guestBookingFlat = async (req, res) => {
 
   const order = await generateOrderId(amount);
 
-  await updateRazorpayTransactions(bookingIds, order.id, t);
+  await updateRazorpayTransactions(bookingIds, [], order.id, t);
   await t.commit();
 
   sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user);

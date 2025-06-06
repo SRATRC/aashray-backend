@@ -163,7 +163,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
 
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
-    await updateRazorpayTransactions(bookingids, order.id, t);
+    await updateRazorpayTransactions(bookingids, [], order.id, t);
     await t.commit();
 
     return res.status(200).send({ message: 'payment successful', data: order });
