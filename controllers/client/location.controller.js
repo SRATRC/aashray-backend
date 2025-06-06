@@ -6,7 +6,6 @@ import Cities from '../../models/cities.model.js';
 import _ from 'lodash';
 const { chunk } = _;
 
-// TODO: delete this route in production and all relevant files
 export const addData = async (req, res) => {
   const data = JSON.parse(fs.readFileSync('data.json', 'utf8'));
   const t = await database.transaction();
