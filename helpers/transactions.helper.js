@@ -394,6 +394,7 @@ export async function getPendingTransactions(timeFilter) {
 
 export async function updateRazorpayTransactions(
   bookingIds,
+  transactionIds,
   razorpay_order_id,
   t
 ) {
@@ -401,7 +402,10 @@ export async function updateRazorpayTransactions(
     { razorpay_order_id: razorpay_order_id },
     {
       where: {
-        bookingid: bookingIds
+        [Sequelize.Op.or]: [
+          { bookingid: bookingIds },
+          { id: transactionIds }
+        ]
       },
       transaction: t
     }

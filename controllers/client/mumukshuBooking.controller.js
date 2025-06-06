@@ -85,7 +85,7 @@ export const mumukshuBooking = async (req, res) => {
 
   const order = await generateOrderId(amount);
   const bookingIds = retrieveBookingIds(userBookingIdMap);
-  await updateRazorpayTransactions(bookingIds, order.id, t);
+  await updateRazorpayTransactions(bookingIds, [], order.id, t);
 
   await t.commit();
 
