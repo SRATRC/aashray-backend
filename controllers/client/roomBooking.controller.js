@@ -186,7 +186,7 @@ export const FlatBookingMumukshu = async (req, res) => {
   }
 
   const order = await generateOrderId(amount);
-  await updateRazorpayTransactions(bookingIds, order.id, t);
+  await updateRazorpayTransactions(bookingIds, [], order.id, t);
 
   await t.commit();
 
