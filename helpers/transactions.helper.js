@@ -208,13 +208,23 @@ export async function adjustAmount(
   }
 }
 
+function getCreditType(bookingType) {
+  const creditType = bookingType == TYPE_FLAT
+    ? TYPE_ROOM
+    : bookingType;
+
+  return creditType;
+}
+
 async function addCredit(user, card, bookingType, credits, t) {
+  const creditType = getCreditType(bookingType)
+
   const previousCredits =
-    card.credits && card.credits[bookingType] ? card.credits[bookingType] : 0;
+    card.credits && card.credits[creditType] ? card.credits[creditType] : 0;
 
   const updatedCredits = getUpdatedCredits(
     card,
-    bookingType,
+    creditType,
     previousCredits + credits
   );
 
@@ -237,12 +247,13 @@ async function useCredit(
 ) {
 
   const bookingType = getBookingType(transaction);
+  const creditType = getCreditType(bookingType);
 
-  if (!(card.credits && card.credits[bookingType] > 0)) {
+  if (!(card.credits && card.credits[creditType] > 0)) {
     return amount;
   }
 
-  const credits = card.credits[bookingType];
+  const credits = card.credits[creditType];
 
   const status =
     amount > credits ? transaction.status : STATUS_PAYMENT_COMPLETED;
@@ -280,7 +291,7 @@ async function useCredit(
 
   const updatedCredits = getUpdatedCredits(
     card,
-    bookingType,
+    creditType,
     credits - creditsUsed
   );
 
@@ -296,8 +307,10 @@ async function useCredit(
 }
 
 export function usableCredits(card, bookingType, amount) {
-  const totalCredits = card.credits && card.credits[bookingType]
-    ? card.credits[bookingType]
+  const creditType = getCreditType(bookingType);
+
+  const totalCredits = card.credits && card.credits[creditType]
+    ? card.credits[creditType]
     : 0;
     
   const usableCredits = Math.min(amount, totalCredits);
@@ -306,20 +319,20 @@ export function usableCredits(card, bookingType, amount) {
   // the next call for the same card will reflect what's available
   card.credits = card.credits || {};
 
-  card.credits[bookingType] = totalCredits - usableCredits;
+  card.credits[creditType] = totalCredits - usableCredits;
 
   return usableCredits;
 }
 
-function getUpdatedCredits(card, bookingType, newCredits) {
+function getUpdatedCredits(card, creditType, newCredits) {
   const updatedCredits = card.credits
     ? JSON.parse(JSON.stringify(card.credits))
     : {};
 
-  updatedCredits[bookingType] = newCredits;
+  updatedCredits[creditType] = newCredits;
 
-  if (updatedCredits[bookingType] == 0) {
-    delete updatedCredits[bookingType];
+  if (updatedCredits[creditType] == 0) {
+    delete updatedCredits[creditType];
   }
 
   return updatedCredits;
