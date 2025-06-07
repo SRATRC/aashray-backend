@@ -195,6 +195,7 @@ export async function bookFoodForGuests(
   var bookingsToCreate = [];
   var transactionsToCreate = [];
   var amount = 0;
+  const userBookingIds = {};
 
   for (const group of guestGroup) {
     const { meals, spicy, high_tea, guests } = group;
@@ -206,6 +207,7 @@ export async function bookFoodForGuests(
     const mealSelections = { breakfast, lunch, dinner };
 
     for (const guest of guests) {
+      const bookingIds = [];
       for (const date of allDates) {
         const booking = bookings[guest] && bookings[guest][date];
 
@@ -237,9 +239,9 @@ export async function bookFoodForGuests(
             },
             { transaction: t }
           );
+
+          bookingIds.push(booking.id);
         } else {
-
-
           const bookingId = uuidv4();
 
           bookingsToCreate.push({
@@ -270,15 +272,19 @@ export async function bookFoodForGuests(
               });
             }
           });
+
+          bookingIds.push(bookingId);
         }
       }
+      userBookingIds[guest] = bookingIds;
     }
   }
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
-  await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+  const transactions = await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+  const transactionIds = transactions.map((item) => item.id);
 
-  return { amount };
+  return { amount, userBookingIds, transactionIds };
 }
 
 export async function validateFood(

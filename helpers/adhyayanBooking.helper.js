@@ -93,7 +93,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
     waitingBookingCount = 0;
   const userBookingIds = {};
 
-  for (const user of users) {
+  for (const booking_user of users) {
     const bookingIds = [];
     for (const adhyayan of adhyayans) {
       const bookingId = uuidv4();
@@ -103,8 +103,8 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
-            cardno: mumukshu,
-            bookedBy: user.cardno !== mumukshu ? user.cardno : null,
+            cardno: booking_user,
+            bookedBy: user.cardno !== booking_user ? user.cardno : null,
             shibir_id: adhyayan.id,
             status:
               adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED,
@@ -129,7 +129,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
         await ShibirBookingDb.create(
           {
             bookingid: bookingId,
-            cardno: mumukshu,
+            cardno: booking_user,
             shibir_id: adhyayan.id,
             status: STATUS_WAITING
           },
@@ -139,7 +139,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
       }
       bookingIds.push(bookingId);
     }
-    userBookingIds[mumukshu] = bookingIds;
+    userBookingIds[booking_user] = bookingIds;
   }
 
   return { amount, userBookingIds, waitingBookingCount };
