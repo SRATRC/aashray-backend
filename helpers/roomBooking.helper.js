@@ -14,7 +14,8 @@ import {
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
   STATUS_CASH_PENDING,
-  ERR_FLAT_FAILED_TO_BOOK
+  ERR_FLAT_FAILED_TO_BOOK,
+  ERR_ROOM_NOT_BETWEEN_UTSAV
 } from '../config/constants.js';
 import { RoomBooking, RoomDb, UtsavDb, FlatBooking, FlatDb } from '../models/associations.js';
 import { createPendingTransaction } from './transactions.helper.js';
@@ -302,6 +303,12 @@ export async function bookRoomDuringUtsavForGuests(
     where: { id: utsavid }
   });
 
+  validateDate(checkin_date, checkout_date);
+  if(new Date(checkin_date) > new Date(utsav.end_date) 
+    || new Date(checkout_date) < new Date(utsav.start_date)){
+    throw new ApiError(400, ERR_ROOM_NOT_BETWEEN_UTSAV);
+  }  
+
   const guests = guestGroup.flatMap((group) => group.guests);
   const cardDb = await validateCards(guests);
 
@@ -406,30 +413,47 @@ export async function bookRoomDuringUtsavForGuests(
 
 export async function bookRoomDuringUtsavForMumukshus(
   utsavid,
+  checkin_date,
+  checkout_date,
   mumukshuGroup,
   t,
   user
 ) {
+  validateDate(checkin_date, checkout_date);
+  
   const utsav = await UtsavDb.findOne({
     where: { id: utsavid }
   });
 
+  
+      
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cardDb = await validateCards(mumukshus);
 
   let amount = 0;
 
   let userBookingIds = {};
+  const event_start_date = utsav.start_date;
+  const event_end_date = utsav.end_date;
+
+      
+      if(new Date(checkin_date) > new Date(event_end_date) 
+        || new Date(checkout_date) < new Date(event_start_date)){
+        throw new ApiError(400, ERR_ROOM_NOT_BETWEEN_UTSAV);
+      }  
+  
   for (const group of mumukshuGroup) {
-    const { roomType, floorType, checkin_date, checkout_date, mumukshus } =
+    const { roomType, floorType, mumukshus } =
       group;
 
+      
+
+    
     if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
       throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
     }
 
-    const event_start_date = utsav.start_date;
-    const event_end_date = utsav.end_date;
+    
 
     for (const mumukshu of mumukshus) {
 

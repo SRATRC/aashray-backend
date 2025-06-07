@@ -249,11 +249,12 @@ async function validate(body, user, data, response) {
 
 async function bookRoom(body, data, t, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
-
   let result = {};
   if (body.primary_booking.booking_type == TYPE_UTSAV) {
     result = await bookRoomDuringUtsavForMumukshus(
       body.primary_booking.details.utsavid,
+      checkin_date,
+      checkout_date,
       mumukshuGroup,
       t,
       user

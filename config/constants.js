@@ -95,6 +95,9 @@ export const ERR_BLOCKED_DATES = 'Dates are blocked';
 
 export const ERR_ROOM_NO_BED_AVAILABLE = 'No beds available';
 export const ERR_ROOM_ALREADY_BOOKED = 'Room already booked';
+export const ERR_ROOM_NOT_BETWEEN_UTSAV = 'Checkin/checkout date should be inclusive of Utsav Start/End date ';
+export const ERR_FOOD_NOT_BETWEEN_UTSAV = 'start/end date should be inclusive of Utsav Start/End date ';
+
 export const ERR_ROOM_NOT_FOUND = 'Room not found';
 export const ERR_ROOM_INVALID_DURATION = 'Invalid booking duration';
 export const ERR_ROOM_FAILED_TO_BOOK = 'Failed to book a room';

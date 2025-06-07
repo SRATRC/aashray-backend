@@ -130,7 +130,7 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          const roomResult = await bookRoom(addon, t, req.user);
+          const roomResult = await bookRoom(primary_booking, addon, t, req.user);
           amount += roomResult.amount;
           setBookingIdMap(
             userBookingIdMap,
@@ -140,7 +140,7 @@ export const guestBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          const foodResult = await bookFood(addon, t, req.user);
+          const foodResult = await bookFood(primary_booking,addon, t, req.user);
           amount += foodResult.amount;
           break;
 
@@ -354,7 +354,7 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function bookRoom(data, t, user) {
+async function bookRoom(primary_booking,data, t, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -382,9 +382,10 @@ async function bookRoom(data, t, user) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  if (data.booking_type == TYPE_UTSAV) {
+  if (primary_booking.booking_type == TYPE_UTSAV) {
+    const { utsavid, guests } = primary_booking.details;
     let result = await bookRoomDuringUtsavForGuests(
-      data.details.utsavid,
+      utsavid,
       guestGroup,
       t,
       user,
@@ -533,13 +534,12 @@ async function checkFoodAvailability(data) {
   };
 }
 
-async function bookFood(data, t, user) {
-  const { start_date, end_date, guestGroup } = data.details;
-  let utsaveId = null;
-  if (data.booking_type == TYPE_UTSAV) {
-    utsaveId = data.details.utsavid;
-  }
+ 
 
+async function bookFood(primary_booking,data, t, user) {
+  const { start_date, end_date, guestGroup } = data.details;
+  const utsavid = primary_booking.booking_type == TYPE_UTSAV ? primary_booking.details.utsavid : null;
+  
   const result = await bookFoodForGuests(
     start_date,
     end_date,
@@ -547,7 +547,7 @@ async function bookFood(data, t, user) {
     user.cardno,
     user.cardno,
     t,
-    utsaveId
+    utsavid
   );
 
   return result;
