@@ -138,19 +138,21 @@ export async function validateUtsavs(utsavid, mumukshus) {
       throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
     }
 
-    if (utsav.status === STATUS_CLOSED) {
-      utsavDetails.push({
-        utsavId: utsavid,
-        status: STATUS_WAITING,
-        charge: 0
-      });
-    } else {
-      utsavDetails.push({
-        utsavId: utsavid,
-        status: STATUS_PAYMENT_PENDING,
-        charge: package_info.amount
-      });
+    var status = STATUS_WAITING;
+    var charge = 0;
+    var availableCredits = 0;
+
+    if (utsav.status === STATUS_OPEN) {
+      status = STATUS_PAYMENT_PENDING;
+      charge = package_info.amount;
     }
+
+    utsavDetails.push({
+      utsavId: utsavid,
+      status,
+      charge,
+      availableCredits
+    });
   }
 
   return utsavDetails;
