@@ -486,8 +486,11 @@ async function checkUtsavAvailability(user, data) {
     }
   ]);
 
-  const utsavDetails = await validateUtsavs(utsavid, [
-    {
+  const utsavDetails = await validateUtsavs(
+    user,
+    utsavid, 
+    [
+      {
       cardno: user.cardno,
       packageid
     }

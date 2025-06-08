@@ -248,6 +248,7 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_UTSAV:
       response.utsavDetails = await validateUtsavs(
+        req.user,
         req.body.primary_booking.details.utsavid,
         req.body.primary_booking.details.guests
       );

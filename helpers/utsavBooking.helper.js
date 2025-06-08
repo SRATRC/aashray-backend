@@ -12,7 +12,7 @@ import {
   UtsavPackagesDb,
   UtsavBooking
 } from '../models/associations.js';
-import { createPendingTransaction } from './transactions.helper.js';
+import { createPendingTransaction, usableCredits } from './transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
@@ -118,7 +118,7 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
     throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
 }
 
-export async function validateUtsavs(utsavid, mumukshus) {
+export async function validateUtsavs(user, utsavid, mumukshus) {
   var utsavDetails = [];
 
   const utsav = await UtsavDb.findOne({
@@ -145,6 +145,7 @@ export async function validateUtsavs(utsavid, mumukshus) {
     if (utsav.status === STATUS_OPEN) {
       status = STATUS_PAYMENT_PENDING;
       charge = package_info.amount;
+      availableCredits = usableCredits(user, TYPE_UTSAV, charge);
     }
 
     utsavDetails.push({
