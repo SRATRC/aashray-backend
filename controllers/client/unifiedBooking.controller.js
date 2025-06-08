@@ -228,14 +228,15 @@ async function bookRoom(user, body, data, t) {
   if (body.primary_booking.booking_type == TYPE_UTSAV) {
     result = await bookRoomDuringUtsavForMumukshus(
       body.primary_booking.details.utsavid,
+      checkin_date,
+      checkout_date,
       [
         {
           mumukshus: [user.cardno],
           roomType: room_type,
           floorType: floor_pref,
           packageid: body.primary_booking.details.packageid,
-          checkin_date,
-          checkout_date
+          
         }
       ],
       t,
