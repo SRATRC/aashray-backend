@@ -83,7 +83,7 @@ export const guestBooking = async (req, res) => {
   const userBookingIdMap = {};
   const waitingBookingCountMap = {};
   const transactionIds = [];
-  
+
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
       const roomResult = await bookRoom(primary_booking, t, req.user);
@@ -133,7 +133,12 @@ export const guestBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          const roomResult = await bookRoom(primary_booking, addon, t, req.user);
+          const roomResult = await bookRoom(
+            primary_booking,
+            addon,
+            t,
+            req.user
+          );
           amount += roomResult.amount;
           setBookingIdMap(
             userBookingIdMap,
@@ -143,7 +148,12 @@ export const guestBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          const foodResult = await bookFood(primary_booking,addon, t, req.user);
+          const foodResult = await bookFood(
+            primary_booking,
+            addon,
+            t,
+            req.user
+          );
           amount += foodResult.amount;
           transactionIds.push(...foodResult.transactionIds);
           break;
@@ -358,7 +368,7 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function bookRoom(primary_booking,data, t, user) {
+async function bookRoom(primary_booking, data, t, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -538,12 +548,13 @@ async function checkFoodAvailability(data) {
   };
 }
 
- 
-
-async function bookFood(primary_booking,data, t, user) {
+async function bookFood(primary_booking, data, t, user) {
   const { start_date, end_date, guestGroup } = data.details;
-  const utsavid = primary_booking.booking_type == TYPE_UTSAV ? primary_booking.details.utsavid : null;
-  
+  const utsavid =
+    primary_booking.booking_type == TYPE_UTSAV
+      ? primary_booking.details.utsavid
+      : null;
+
   const result = await bookFoodForGuests(
     start_date,
     end_date,
@@ -784,7 +795,14 @@ export const checkGuests = async (req, res) => {
   const { mobno } = req.params;
 
   const user = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'email'],
+    attributes: [
+      'cardno',
+      'issuedto',
+      'mobno',
+      'gender',
+      'email',
+      'res_status'
+    ],
     where: { mobno: mobno }
   });
   if (!user) {
