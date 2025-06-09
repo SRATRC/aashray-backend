@@ -12,7 +12,10 @@ import {
   UtsavPackagesDb,
   UtsavBooking
 } from '../models/associations.js';
-import { createPendingTransaction, usableCredits } from './transactions.helper.js';
+import {
+  createPendingTransaction,
+  usableCredits
+} from './transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
@@ -33,14 +36,17 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 
   let total_amount = 0;
   let available_seats = utsav.available_seats;
-  
+
   let status = STATUS_PAYMENT_PENDING;
-  let userBookingIds = {},waitingBookingCount = 0;
+  let userBookingIds = {},
+    waitingBookingCount = 0;
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
-    
-    const package_info = packages.find((p) => p.id === Number(mumukshu.packageid));
+
+    const package_info = packages.find(
+      (p) => p.id === Number(mumukshu.packageid)
+    );
 
     if (!package_info) {
       throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
@@ -48,14 +54,13 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 
     if (available_seats <= 0) {
       status = STATUS_WAITING;
-      waitingBookingCount++
-    }else{
+      waitingBookingCount++;
+    } else {
       status = STATUS_PAYMENT_PENDING;
       available_seats--;
     }
 
-    
-      const booking = await UtsavBooking.create(
+    const booking = await UtsavBooking.create(
       {
         bookingid,
         utsavid,
@@ -65,15 +70,12 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         arrival: mumukshu.arrival,
         carno: mumukshu.carno,
         other: mumukshu.other,
-        status:
-          utsav.status === STATUS_CLOSED
-            ? STATUS_WAITING
-            : status,
+        volunteer: mumukshu.volunteer,
+        status: utsav.status === STATUS_CLOSED ? STATUS_WAITING : status,
         updatedBy: user.cardno
       },
       { transaction: t }
     );
-  
 
     if (utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
       await createPendingTransaction(
@@ -91,16 +93,17 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     userBookingIds[mumukshu.cardno] = bookings;
   }
 
-  UtsavDb.update({
-    available_seats: available_seats
-  },{
-    where: {
-      id: utsavid
+  UtsavDb.update(
+    {
+      available_seats: available_seats
     },
-  },
+    {
+      where: {
+        id: utsavid
+      }
+    },
     { transaction: t }
   );
-
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
@@ -111,7 +114,13 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
     where: {
       cardno: mumukshu_cardnos,
       utsavid: utsavid,
-      status: { [Sequelize.Op.in]: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED,STATUS_WAITING] }
+      status: {
+        [Sequelize.Op.in]: [
+          STATUS_PAYMENT_PENDING,
+          STATUS_CONFIRMED,
+          STATUS_WAITING
+        ]
+      }
     }
   });
   if (alreadyBooked.length > 0)
@@ -188,7 +197,7 @@ export async function reserveUtsavSeat(utsav, t) {
 }
 
 export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
-  console.log("Input to openUtsavSeat:", utsav, cardno, updatedBy);
+  console.log('Input to openUtsavSeat:', utsav, cardno, updatedBy);
 
   // Only increase available seats if utsav is in "open" status
   if (utsav.status !== STATUS_OPEN) return;
@@ -202,7 +211,6 @@ export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
   );
 }
 
-
 export async function validateUtsavPackage(packageId, utsavId) {
   const packageData = await UtsavPackagesDb.findOne({
     where: {
@@ -212,7 +220,10 @@ export async function validateUtsavPackage(packageId, utsavId) {
   });
 
   if (!packageData) {
-    throw new ApiError(400, `Package with ID ${packageId} not found for Utsav ${utsavId}`);
+    throw new ApiError(
+      400,
+      `Package with ID ${packageId} not found for Utsav ${utsavId}`
+    );
   }
 
   return packageData;

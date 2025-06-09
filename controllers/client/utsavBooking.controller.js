@@ -90,6 +90,7 @@ export const ViewUtsavBookings = async (req, res) => {
        t3.name AS package_name,
        t3.start_date AS package_start,
        t3.end_date AS package_end,
+       t1.volunteer,
        t1.cardno,
        t1.bookedBy,
        t5.issuedto AS user_name,
