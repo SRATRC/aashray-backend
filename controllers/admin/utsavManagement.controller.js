@@ -357,11 +357,7 @@ export const utsavStatusUpdate = async (req, res) => {
       if (transaction.status === STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-<<<<<<< HEAD
             
-=======
-            status: STATUS_CASH_COMPLETED,
->>>>>>> f3041e7491f44deef537b8b689f31774fc710493
             description: description,
             updatedBy: req.user.username
           },

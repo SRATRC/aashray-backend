@@ -172,7 +172,6 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
-<<<<<<< HEAD
   if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
     await transaction.update(
       {
@@ -185,24 +184,6 @@ export const updateBookingStatus = async (req, res) => {
     );
   }
   break;
-=======
-      if (
-        transaction &&
-        ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
-          transaction.status
-        )
-      ) {
-        await transaction.update(
-          {
-            status: STATUS_CASH_COMPLETED,
-            description,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
-      }
-      break;
->>>>>>> f3041e7491f44deef537b8b689f31774fc710493
 
     case STATUS_WAITING:
     default:
@@ -239,11 +220,7 @@ export const updateBookingStatus = async (req, res) => {
 };
 
 export const updateTransactionStatus = async (req, res) => {
-<<<<<<< HEAD
   const { cardno, bookingid, type, payment_status, amount } = req.body;
-=======
-  const { cardno, bookingid, type } = req.body;
->>>>>>> f3041e7491f44deef537b8b689f31774fc710493
 
   const booking = await TravelDb.findOne({
     where: {

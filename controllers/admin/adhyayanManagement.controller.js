@@ -242,10 +242,7 @@ export const adhyayanWaitlist = async (req, res) => {
 };
 
 export const adhyayanPendinglist = async (req, res) => {
-<<<<<<< HEAD
   const { shibir_id, bookingid, status, description } = req.body;
-=======
->>>>>>> f3041e7491f44deef537b8b689f31774fc710493
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -333,12 +330,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
       if (transaction.status == STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-<<<<<<< HEAD
             
             
-=======
-            status: STATUS_CASH_COMPLETED,
->>>>>>> f3041e7491f44deef537b8b689f31774fc710493
             description: description,
             updatedBy: req.user.username
           },
