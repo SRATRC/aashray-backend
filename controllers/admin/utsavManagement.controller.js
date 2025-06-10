@@ -17,6 +17,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_COMPLETED,
+  STATUS_CASH_PENDING,
   TYPE_UTSAV,
   STATUS_CREDITED
 } from '../../config/constants.js';
@@ -132,8 +133,9 @@ export const fetchUtsavBookings = async (req, res) => {
   let statusToBeIncluded = [STATUS_CONFIRMED];
   if (status === 'waiting') {
     statusToBeIncluded = [STATUS_WAITING];
+  } else if (status === 'pending') {
+    statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
   }
-
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
@@ -143,7 +145,7 @@ export const fetchUtsavBookings = async (req, res) => {
   const utsavData = await database.query(
     `SELECT 
         t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other,
-        t2.cardno, t2.issuedto, t2.mobno, t2.center, t2.res_status, t3.location,
+        t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t3.location,
         t3.name AS utsav_name
      FROM utsav_booking AS t1
      LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
@@ -178,7 +180,8 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.total_seats,
       utsav_db.location,
       utsav_db.available_seats,
-      COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count  
+      COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      COUNT(CASE WHEN utsav_booking.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count  
     FROM 
       utsav_db
     LEFT JOIN 
@@ -242,6 +245,42 @@ export const utsavWaitlist = async (req, res) => {
   res.status(200).send({ message: 'Fetched Utsav Waitlist', data });
 };
 
+export const utsavPendinglist = async (req, res) => {
+  const today = moment().format('YYYY-MM-DD');
+
+  const data = await database.query(
+    `SELECT 
+      b.bookingid, 
+      b.utsavid, 
+      b.bookedby, 
+      b.status, 
+      u.id AS utsav_id, 
+      u.name, 
+      u.start_date, 
+      u.end_date, 
+      c.cardno, 
+      c.issuedto, 
+      c.mobno, 
+      c.center, 
+      c.res_status,
+      u.location
+    FROM utsav_booking AS b
+    LEFT JOIN utsav_db AS u 
+      ON b.utsavid = u.id 
+      AND u.start_date >= :date
+    LEFT JOIN card_db AS c 
+      ON b.cardno = c.cardno 
+    WHERE b.status = :status`,
+    {
+      replacements: { date: today, status: STATUS_PAYMENT_PENDING },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
+
+  res.status(200).send({ message: 'Fetched Utsav Waitlist', data });
+};
+
 export const activateUtsav = async (req, res) => {
   const itemUpdated = await UtsavDb.update(
     {
@@ -262,7 +301,7 @@ export const activateUtsav = async (req, res) => {
 };
 
 export const utsavStatusUpdate = async (req, res) => {
-  const { utsav_id, bookingid, status, upi_ref, description } = req.body;
+  const { utsav_id, bookingid, status,  description } = req.body;
 
   let newBookingStatus = status;
   console.log('Received status:', status);
@@ -318,8 +357,7 @@ export const utsavStatusUpdate = async (req, res) => {
       if (transaction.status === STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-            upi_ref: upi_ref || 'NA',
-            status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+            
             description: description,
             updatedBy: req.user.username
           },
@@ -559,26 +597,25 @@ export const fetchPackage = async (req, res) => {
     .send({ message: 'Fetched Package', data: packageData });
 };
 
-
 export const fetchAllUtsavList = async (req, res) => {
   try {
     const adhyayans = await database.query(
       `SELECT id, name FROM utsav_db ORDER BY id ASC`,
       {
         type: QueryTypes.SELECT,
-        raw: true,
+        raw: true
       }
     );
 
     return res.status(200).json({
       message: 'Fetched adhyayan list',
-      data: adhyayans,
+      data: adhyayans
     });
   } catch (error) {
     console.error('Error fetching adhyayans:', error);
     return res.status(500).json({
       message: 'Failed to fetch adhyayan list',
-      error: error.message,
+      error: error.message
     });
   }
 };

@@ -79,7 +79,14 @@ export const unifiedBooking = async (req, res) => {
 
   if (addons) {
     for (const addon of addons) {
-      amount += await book(req.user, req.body, addon, userBookingIdMap, waitingBookingCountMap, t);
+      amount += await book(
+        req.user,
+        req.body,
+        addon,
+        userBookingIdMap,
+        waitingBookingCountMap,
+        t
+      );
     }
   }
 
@@ -91,18 +98,24 @@ export const unifiedBooking = async (req, res) => {
   //Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
   for (const cardno in userBookingIdMap) {
-    if(cardno != req.user.cardno) {
-    const bookings = userBookingIdMap[cardno];
-    //Sending email to other mumkshu & Guest
-    sendUnifiedEmail(cardno, bookings, req.user);
+    if (cardno != req.user.cardno) {
+      const bookings = userBookingIdMap[cardno];
+      //Sending email to other mumkshu & Guest
+      sendUnifiedEmail(cardno, bookings, req.user);
     }
-   }
+  }
 
   let message = MSG_BOOKING_SUCCESSFUL;
-  if(Object.keys(waitingBookingCountMap).length > 0) {
+  if (Object.keys(waitingBookingCountMap).length > 0) {
     message = MSG_BOOKING_WAITING;
   }
-  return res.status(200).send({ message: message, data: order, waitingBookingCountMap: waitingBookingCountMap });
+  return res
+    .status(200)
+    .send({
+      message: message,
+      data: order,
+      waitingBookingCountMap: waitingBookingCountMap
+    });
 };
 
 export const validateBooking = async (req, res) => {
@@ -135,7 +148,14 @@ export const validateBooking = async (req, res) => {
   return res.status(200).send({ data: response });
 };
 
-async function book(user, body, data, userBookingIdMap, waitingBookingCountMap, t) {
+async function book(
+  user,
+  body,
+  data,
+  userBookingIdMap,
+  waitingBookingCountMap,
+  t
+) {
   let amount = 0;
 
   switch (data.booking_type) {
@@ -157,7 +177,12 @@ async function book(user, body, data, userBookingIdMap, waitingBookingCountMap, 
         TYPE_TRAVEL,
         travelResult.userBookingIds
       );
-      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_TRAVEL, travelResult.waitingBookingCount, travelResult.userBookingIds);
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
+        TYPE_TRAVEL,
+        travelResult.waitingBookingCount,
+        travelResult.userBookingIds
+      );
       break;
 
     case TYPE_ADHYAYAN:
@@ -168,18 +193,24 @@ async function book(user, body, data, userBookingIdMap, waitingBookingCountMap, 
         TYPE_ADHYAYAN,
         adhyayanResult.userBookingIds
       );
-      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_ADHYAYAN, adhyayanResult.waitingBookingCount, adhyayanResult.userBookingIds);
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.waitingBookingCount,
+        adhyayanResult.userBookingIds
+      );
       break;
 
     case TYPE_UTSAV:
       const utsavResult = await bookUtsav(user, data, t);
       amount += utsavResult.amount;
-      setBookingIdMap(
-        userBookingIdMap,
+      setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
         TYPE_UTSAV,
+        utsavResult.waitingBookingCount,
         utsavResult.userBookingIds
       );
-      setWaitingBookingCountMap(waitingBookingCountMap, TYPE_UTSAV, utsavResult.waitingBookingCount, utsavResult.userBookingIds);
       break;
 
     default:
@@ -248,8 +279,7 @@ async function bookRoom(user, body, data, t) {
           mumukshus: [user.cardno],
           roomType: room_type,
           floorType: floor_pref,
-          packageid: body.primary_booking.details.packageid,
-          
+          packageid: body.primary_booking.details.packageid
         }
       ],
       t,
@@ -368,7 +398,7 @@ async function bookAdhyayan(user, data, t) {
 }
 
 async function bookUtsav(user, data, t) {
-  const { utsavid, packageid, arrival, carno, other } = data.details;
+  const { utsavid, packageid, arrival, carno, other, volunteer } = data.details;
 
   const result = await bookUtsavForMumukshus(
     utsavid,
@@ -378,7 +408,8 @@ async function bookUtsav(user, data, t) {
         packageid,
         arrival,
         carno,
-        other
+        other,
+        volunteer
       }
     ],
     t,
@@ -509,7 +540,7 @@ async function checkUtsavAvailability(user, data) {
     }
   ]);
 
-  const utsavDetails = await validateUtsavs(utsavid, [
+  const utsavDetails = await validateUtsavs(user, utsavid, [
     {
       cardno: user.cardno,
       packageid

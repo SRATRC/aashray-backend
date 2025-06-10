@@ -241,6 +241,7 @@ async function validate(body, user, data, response) {
 
     case TYPE_UTSAV:
       response.utsavDetails = await validateUtsavs(
+        user,
         data.details.utsavid,
         data.details.mumukshus
       );
