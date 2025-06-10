@@ -219,7 +219,7 @@ export const adhyayanReport = async (req, res) => {
 };
 
 export const adhyayanWaitlist = async (req, res) => {
-  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
+  const { shibir_id, bookingid, status, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -242,7 +242,7 @@ export const adhyayanWaitlist = async (req, res) => {
 };
 
 export const adhyayanPendinglist = async (req, res) => {
-  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
+  const { shibir_id, bookingid, status, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -265,7 +265,7 @@ export const adhyayanPendinglist = async (req, res) => {
 };
 
 export const adhyayanStatusUpdate = async (req, res) => {
-  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
+  const { shibir_id, bookingid, status, description } = req.body;
 
   var newBookingStatus = status;
 
@@ -327,8 +327,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
       if (transaction.status == STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-            upi_ref: upi_ref || 'NA',
-            status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+            
+            
             description: description,
             updatedBy: req.user.username
           },

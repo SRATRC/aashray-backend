@@ -301,7 +301,7 @@ export const activateUtsav = async (req, res) => {
 };
 
 export const utsavStatusUpdate = async (req, res) => {
-  const { utsav_id, bookingid, status, upi_ref, description } = req.body;
+  const { utsav_id, bookingid, status,  description } = req.body;
 
   let newBookingStatus = status;
   console.log('Received status:', status);
@@ -357,8 +357,7 @@ export const utsavStatusUpdate = async (req, res) => {
       if (transaction.status === STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-            upi_ref: upi_ref || 'NA',
-            status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+            
             description: description,
             updatedBy: req.user.username
           },

@@ -96,7 +96,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   const data = await database.query(
     `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage,
             t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
-            t2.amount, DATE(t2.updatedAt) as paymentDate, t2.upi_ref, t2.status as paymentStatus, t3.res_status
+            t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
      FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
@@ -112,7 +112,7 @@ export const fetchUpcomingBookings = async (req, res) => {
 };
 
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments, upiRef, description,charges } = req.body;
+  const { bookingid, status, adminComments,  description,charges } = req.body;
   let newBookingStatus = status;
 
   const t = await database.transaction();
@@ -166,8 +166,8 @@ export const updateBookingStatus = async (req, res) => {
   if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
     await transaction.update(
       {
-        upi_ref: upiRef || 'NA',
-        status: upiRef ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+        
+        
         description,
         updatedBy: req.user.username
       },
@@ -211,7 +211,7 @@ export const updateBookingStatus = async (req, res) => {
 };
 
 export const updateTransactionStatus = async (req, res) => {
-  const { cardno, bookingid, type, payment_status, amount, upi_ref } = req.body;
+  const { cardno, bookingid, type, payment_status, amount } = req.body;
 
   const booking = await TravelDb.findOne({
     where: {
