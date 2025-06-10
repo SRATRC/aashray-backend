@@ -357,7 +357,11 @@ export const utsavStatusUpdate = async (req, res) => {
       if (transaction.status === STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
+<<<<<<< HEAD
             
+=======
+            status: STATUS_CASH_COMPLETED,
+>>>>>>> f3041e7491f44deef537b8b689f31774fc710493
             description: description,
             updatedBy: req.user.username
           },
@@ -597,26 +601,25 @@ export const fetchPackage = async (req, res) => {
     .send({ message: 'Fetched Package', data: packageData });
 };
 
-
 export const fetchAllUtsavList = async (req, res) => {
   try {
     const adhyayans = await database.query(
       `SELECT id, name FROM utsav_db ORDER BY id ASC`,
       {
         type: QueryTypes.SELECT,
-        raw: true,
+        raw: true
       }
     );
 
     return res.status(200).json({
       message: 'Fetched adhyayan list',
-      data: adhyayans,
+      data: adhyayans
     });
   } catch (error) {
     console.error('Error fetching adhyayans:', error);
     return res.status(500).json({
       message: 'Failed to fetch adhyayan list',
-      error: error.message,
+      error: error.message
     });
   }
 };
