@@ -54,18 +54,15 @@ FROM
      OR t1.bookedBy = :cardno
    UNION SELECT t4.bookingid,
           t4.cardno AS bookedFor,
-          t5.owner bookedBy,
+          t4.bookedBy bookedBy,
           t4.flatno AS roomno,
           t4.checkin,
           t4.checkout,
           t4.nights,
           'flat' AS roomtype,
           t4.status,
-          
           NULL AS gender
-          
-   FROM flat_booking t4 join flatdb t5 on t5.flatno = t4.flatno where t5.owner = :cardno
-   OR t4.cardno = :cardno)
+   FROM flat_booking t4)
    AS combined
    LEFT JOIN transactions t2 ON combined.bookingid = t2.bookingid
    AND t2.category IN (:category)
@@ -77,7 +74,7 @@ FROM
     {
       replacements: {
         cardno: req.user.cardno,
-        category: [TYPE_ROOM, TYPE_GUEST_ROOM],
+        category: [TYPE_ROOM, TYPE_GUEST_ROOM, TYPE_FLAT],
         limit: pageSize,
         offset: offset
       },
