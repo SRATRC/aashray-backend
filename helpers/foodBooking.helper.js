@@ -9,14 +9,14 @@ import {
   STATUS_RESIDENT,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
-  TYPE_GUEST_LUNCH,
-  ERR_FOOD_NOT_BETWEEN_UTSAV
+  TYPE_GUEST_LUNCH
 } from '../config/constants.js';
 import {
   checkFlatAlreadyBooked,
   checkRoomBookingProgress,
   checkSpecialAllowance,
-  validateDate
+  validateDate,
+  validateBookingDatesBetweenUtsav
 } from '../controllers/helper.js';
 import {
   CardDb,
@@ -170,10 +170,7 @@ export async function bookFoodForGuests(
     });
     const event_start_date = new Date(utsav.start_date);
     const event_end_date = new Date(utsav.end_date);
-    if(new Date(start_date) > new Date(event_end_date) 
-      || new Date(end_date) < new Date(event_start_date)){
-      throw new ApiError(400, ERR_FOOD_NOT_BETWEEN_UTSAV);
-    }  
+    validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
     if (new Date(start_date) < event_start_date) {
       const beforeEventDates = getDates(start_date, event_start_date);
       beforeEventDates.pop(); // Remove the event start date
@@ -431,10 +428,7 @@ export async function bookFoodForMumukshusDuringUtsav(
   const event_start_date = new Date(utsav.start_date);
   const event_end_date = new Date(utsav.end_date);
 
-  if(new Date(start_date) > new Date(event_end_date) 
-    || new Date(end_date) < new Date(event_start_date)){
-    throw new ApiError(400, ERR_FOOD_NOT_BETWEEN_UTSAV);
-  }  
+  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cards = await validateCards(mumukshus);

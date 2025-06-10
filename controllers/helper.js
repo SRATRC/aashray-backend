@@ -20,7 +20,8 @@ import {
   TYPE_FLAT,
   TYPE_UTSAV,
   STATUS_GUEST,
-  STATUS_ACTIVE
+  STATUS_ACTIVE,
+  ERR_DATES_NOT_BETWEEN_UTSAV
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -629,4 +630,13 @@ export async function createCardIds(count) {
   }
 
   return newIds;
+}
+
+export function validateBookingDatesBetweenUtsav(start_date, end_date, utsav) {
+  if(utsav) {
+    if(new Date(start_date) > new Date(utsav.end_date) 
+      || new Date(end_date) < new Date(utsav.start_date)){
+      throw new ApiError(400, ERR_DATES_NOT_BETWEEN_UTSAV);
+    }  
+  }
 }

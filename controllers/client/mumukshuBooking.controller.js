@@ -22,8 +22,10 @@ import {
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
   findRoom,
-  roomCharge
+  roomCharge,
+  checkRoomAvailabilityDuringUtsav
 } from '../../helpers/roomBooking.helper.js';
+import { UtsavDb } from '../../models/associations.js';
 import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
@@ -55,7 +57,8 @@ import {
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
   sendUnifiedEmail,
-  setWaitingBookingCountMap
+  setWaitingBookingCountMap,
+  validateBookingDatesBetweenUtsav
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -86,7 +89,6 @@ export const mumukshuBooking = async (req, res) => {
   const order = await generateOrderId(amount);
   const bookingIds = retrieveBookingIds(userBookingIdMap);
   await updateRazorpayTransactions(bookingIds, [], order.id, t);
-
   await t.commit();
 
   //Sending email to logged in user for self or other mumkshus
@@ -198,10 +200,19 @@ async function book(body, data, t, user, userBookingIdMap,waitingBookingCountMap
 }
 
 async function validate(body, user, data, response) {
+  
+  let utsav = null;
+  if(body.primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: body.primary_booking.details.utsavid
+      }
+    });
+  }
   let totalCharge = 0;
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(data, user);
+      response.roomDetails = await checkRoomAvailability(data, user, utsav);
       totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -209,7 +220,7 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data);
+      response.foodDetails = await checkFoodAvailability(body, data, utsav);
       break;
 
     case TYPE_ADHYAYAN:
@@ -323,18 +334,20 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function checkRoomAvailability(data, user) {
+
+async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
-
+  
+  validateBookingDatesBetweenUtsav(checkin_date, checkout_date, utsav);
+  
+  let nights = await calculateNights(checkin_date, checkout_date);;
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cardDb = await validateCards(mumukshus);
 
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
-
-  const nights = await calculateNights(checkin_date, checkout_date);
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
@@ -345,15 +358,19 @@ async function checkRoomAvailability(data, user) {
         (item) => item.dataValues.cardno == mumukshu
       )[0];
 
-      var status = STATUS_WAITING;
-      var charge = 0;
-      var availableCredits = 0;
-
       const gender = floorType
         ? floorType + card.dataValues.gender
         : card.dataValues.gender;
 
-      if (nights > 0) {
+      if(utsav) {
+        roomDetails.push(...await checkRoomAvailabilityDuringUtsav(checkin_date, checkout_date, roomType, gender, utsav,mumukshu,user));
+      }else{
+      
+      var status = STATUS_WAITING;
+      var charge = 0;
+      var availableCredits = 0;
+      
+        if (nights > 0) {
         const roomno = await findRoom(
           checkin_date,
           checkout_date,
@@ -377,13 +394,16 @@ async function checkRoomAvailability(data, user) {
       });
     }
   }
+  }
 
   return roomDetails;
 }
 
-async function checkFoodAvailability(body, data) {
+async function checkFoodAvailability(body, data, utsav) {
   const { start_date, end_date, mumukshuGroup } = data.details;
   validateDate(start_date, end_date);
+
+  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
 
