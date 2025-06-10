@@ -242,7 +242,6 @@ export const adhyayanWaitlist = async (req, res) => {
 };
 
 export const adhyayanPendinglist = async (req, res) => {
-  const { shibir_id, bookingid, status, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -330,8 +329,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
       if (transaction.status == STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-            
-            
+            status: STATUS_CASH_COMPLETED,
             description: description,
             updatedBy: req.user.username
           },
