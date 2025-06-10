@@ -465,27 +465,38 @@ export const addBulkMenu = async (req, res) => {
   const { menus } = req.body;
 
   if (!Array.isArray(menus)) {
+    console.log("Invalid menus payload:", req.body);
     return res.status(400).json({ message: "Invalid format" });
   }
 
   try {
-    // You can validate each item here
-    const bulkData = menus.map(item => ({
-      date: item.date,
-      breakfast: item.breakfast || '',
-      lunch: item.lunch || '',
-      dinner: item.dinner || '',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    }));
+    console.log("Received menus:", menus);
 
-    await Menu.bulkCreate(bulkData, {
+    const validMenus = menus
+      .filter(item => item.date && item.breakfast !== undefined && item.lunch !== undefined && item.dinner !== undefined)
+      .map(item => ({
+        date: item.date,
+        breakfast: item.breakfast || '',
+        lunch: item.lunch || '',
+        dinner: item.dinner || '',
+        updatedBy: 'admin',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }));
+
+    console.log("Valid menus to upload:", validMenus);
+
+    if (validMenus.length === 0) {
+      return res.status(400).json({ message: "No valid menu records found." });
+    }
+
+    await Menu.bulkCreate(validMenus, {
       updateOnDuplicate: ['breakfast', 'lunch', 'dinner', 'updatedAt']
     });
 
     res.status(200).json({ message: "Menus uploaded successfully" });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error('Bulk Upload Error:', err);
+    res.status(500).json({ message: "Server error while uploading menus" });
   }
 };

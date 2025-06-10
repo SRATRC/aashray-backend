@@ -386,6 +386,9 @@ export const flatBooking = async (req, res) => {
     req.body.checkout_date
   );
 
+    const t = await database.transaction();
+  req.transaction = t;
+
   const booking = await createFlatBooking(
     card.cardno, 
     req.body.checkin_date, 
@@ -397,10 +400,13 @@ export const flatBooking = async (req, res) => {
     true
   );
 
-  let bookingIdMap = {};
-  bookingIdMap[TYPE_FLAT] = [booking.bookingId];
-  sendUnifiedEmail(card.cardno, bookingIdMap, card);
-
+    await t.commit();
+  if (booking.bookingId != null) {
+    let bookingIds = {};
+    bookingIds[TYPE_FLAT] = [booking.bookingId];
+    sendUnifiedEmail(card.cardno, bookingIds, card);
+  }
+  
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 

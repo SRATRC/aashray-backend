@@ -32,6 +32,27 @@ export const createCard = async (req, res) => {
     throw new ApiError(400, 'Card already exists');
   }
 
+  // const user = await CardDb.create({
+  //   cardno: cardno,
+  //   issuedto: issuedto,
+  //   gender: gender,
+  //   dob: dob,
+  //   mobno: mobno,
+  //   email: email,
+  //   idType: idType,
+  //   idNo: idNo,
+  //   address: address,
+  //   country: country,
+  //   state: state,
+  //   city: city,
+  //   pin: pin,
+  //   center: centre,
+  //   status: STATUS_OFFPREM,
+  //   res_status: res_status,
+  //   updatedBy: req.user.username
+  // });
+
+try {
   const user = await CardDb.create({
     cardno: cardno,
     issuedto: issuedto,
@@ -53,12 +74,18 @@ export const createCard = async (req, res) => {
   });
 
   if (!user)
-    throw new ApiError(500, 'Error occured while registering the card');
+    throw new ApiError(500, 'Error occurred while registering the card');
 
   return res
     .status(200)
     .send({ message: 'Successfully registered card', data: user });
-};
+
+} catch (error) {
+  console.error("Sequelize Validation Error:", error.errors || error);
+  return res
+    .status(500)
+    .json({ message: "Validation error", details: error.errors || error.message });
+}}
 
 export const fetchAllCards = async (req, res) => {
   

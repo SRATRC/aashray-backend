@@ -555,10 +555,12 @@ export async function createFlatBooking(
   cashAllowed = false
 ) {
   let bookingId = uuidv4();
-  let status = cashAllowed 
-    ? STATUS_CASH_PENDING
-    : STATUS_PAYMENT_PENDING;
+  // let status = cashAllowed 
+  //   ? STATUS_CASH_PENDING
+  //   : STATUS_PAYMENT_PENDING;
 
+  let status = STATUS_PAYMENT_PENDING; 
+    
   const mumukshuIsFlatOwner = await isMumukshuFlatOwner(cardno, flatno);
   if (mumukshuIsFlatOwner) {
     status = ROOM_STATUS_PENDING_CHECKIN;

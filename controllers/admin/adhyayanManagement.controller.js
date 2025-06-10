@@ -7,6 +7,7 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_CANCELLED,
   STATUS_CASH_COMPLETED,
+  STATUS_CASH_PENDING,
   TYPE_ADHYAYAN,
   ERR_BOOKING_ALREADY_CANCELLED
 } from '../../config/constants.js';
@@ -81,6 +82,7 @@ export const fetchAllAdhyayan = async (req, res) => {
       shibir_db.total_seats,
       shibir_db.available_seats,
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
       shibir_db.food_allowed,
       shibir_db.comments,
       shibir_db.status,
@@ -133,11 +135,13 @@ export const fetchAdhyayanBookings = async (req, res) => {
     status = status.replace(/^"|"$/g, '');
     status = status.trim();
   }
-  let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_PAYMENT_PENDING];
+  let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED];
 
-  if (status != null && status == 'waiting') {
-    statusToBeIncluded = [STATUS_WAITING];
-  }
+  if (status === 'waiting') {
+  statusToBeIncluded = [STATUS_WAITING];
+} else if (status === 'pending') {
+  statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
+}
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
@@ -145,7 +149,7 @@ export const fetchAdhyayanBookings = async (req, res) => {
   await validateAdhyayans(shibir_id);
 
   const adhyayanData = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.cardno, t2.issuedto, t2.mobno, t2.center, t2.res_status,t3.name
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status,t3.name
     FROM shibir_booking_db AS t1
     LEFT JOIN card_db AS t2 
     ON t1.cardno = t2.cardno 
@@ -230,6 +234,29 @@ export const adhyayanWaitlist = async (req, res) => {
     WHERE t1.status = :status`,
     {
       replacements: { date: today, status: STATUS_WAITING },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
+  res.status(200).send({ message: 'Fetched Adhyayan', data: data });
+};
+
+export const adhyayanPendinglist = async (req, res) => {
+  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
+  const today = moment().format('YYYY-MM-DD');
+
+  const data = await database.query(
+    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.id, t2.name, t2.speaker, 
+    t2.start_date, t2.end_date, t3.cardno, t3.issuedto, t3.mobno, t3.center, t3.res_status
+    FROM shibir_booking_db AS t1
+    LEFT JOIN shibir_db AS t2 
+    ON t1.shibir_id = t2.id 
+    AND t2.start_date >= :date
+    LEFT JOIN card_db AS t3 
+    ON t1.cardno = t3.cardno 
+    WHERE t1.status = :statuses`,
+    {
+      replacements: { date: today, statuses: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING] },
       raw: true,
       type: QueryTypes.SELECT
     }
