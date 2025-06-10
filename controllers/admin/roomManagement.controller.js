@@ -517,7 +517,11 @@ export const roomList = async (req, res) => {
 };
 
 export const flatList = async (req, res) => {
-  const flats = await FlatDb.findAll();
+  const flats = await FlatDb.findAll({
+    attributes: [
+      [sequelize.fn('DISTINCT', sequelize.col('flatno')), 'flatno']
+    ]
+  });
   return res.status(200).send({ message: 'Success', data: flats });
 };
 
