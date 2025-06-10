@@ -152,7 +152,7 @@ export async function validateUtsavs(user, utsavid, mumukshus) {
     var availableCredits = 0;
 
     if (utsav.status === STATUS_OPEN) {
-      status = STATUS_PAYMENT_PENDING;
+      status = STATUS_CONFIRMED;
       charge = package_info.amount;
       availableCredits = usableCredits(user, TYPE_UTSAV, charge);
     }
