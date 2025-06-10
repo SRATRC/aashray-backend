@@ -138,10 +138,10 @@ export const fetchAdhyayanBookings = async (req, res) => {
   let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED];
 
   if (status === 'waiting') {
-  statusToBeIncluded = [STATUS_WAITING];
-} else if (status === 'pending') {
-  statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
-}
+    statusToBeIncluded = [STATUS_WAITING];
+  } else if (status === 'pending') {
+    statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
+  }
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
@@ -219,7 +219,6 @@ export const adhyayanReport = async (req, res) => {
 };
 
 export const adhyayanWaitlist = async (req, res) => {
-  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -242,7 +241,6 @@ export const adhyayanWaitlist = async (req, res) => {
 };
 
 export const adhyayanPendinglist = async (req, res) => {
-  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -256,7 +254,10 @@ export const adhyayanPendinglist = async (req, res) => {
     ON t1.cardno = t3.cardno 
     WHERE t1.status = :statuses`,
     {
-      replacements: { date: today, statuses: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING] },
+      replacements: {
+        date: today,
+        statuses: [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING]
+      },
       raw: true,
       type: QueryTypes.SELECT
     }
@@ -265,7 +266,7 @@ export const adhyayanPendinglist = async (req, res) => {
 };
 
 export const adhyayanStatusUpdate = async (req, res) => {
-  const { shibir_id, bookingid, status, upi_ref, description } = req.body;
+  const { shibir_id, bookingid, status, description } = req.body;
 
   var newBookingStatus = status;
 
@@ -327,8 +328,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
       if (transaction.status == STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-            upi_ref: upi_ref || 'NA',
-            status: upi_ref ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
+            status: STATUS_CASH_COMPLETED,
             description: description,
             updatedBy: req.user.username
           },
@@ -419,26 +419,25 @@ export const activateAdhyayan = async (req, res) => {
   res.status(200).send({ message: 'Adhyayan status updated' });
 };
 
-
 export const fetchAllAdhyayanList = async (req, res) => {
   try {
     const adhyayans = await database.query(
       `SELECT id, name FROM shibir_db ORDER BY id ASC`,
       {
         type: QueryTypes.SELECT,
-        raw: true,
+        raw: true
       }
     );
 
     return res.status(200).json({
       message: 'Fetched adhyayan list',
-      data: adhyayans,
+      data: adhyayans
     });
   } catch (error) {
     console.error('Error fetching adhyayans:', error);
     return res.status(500).json({
       message: 'Failed to fetch adhyayan list',
-      error: error.message,
+      error: error.message
     });
   }
 };
