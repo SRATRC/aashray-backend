@@ -19,7 +19,8 @@ import {
   STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
   TYPE_UTSAV,
-  STATUS_CREDITED
+  STATUS_CREDITED,
+  STATUS_CANCELLED
 } from '../../config/constants.js';
 import Transactions from '../../models/transactions.model.js';
 import database from '../../config/database.js';
@@ -482,7 +483,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
       if (
         transaction &&
-        ![STATUS_CREDITED, STATUS_ADMIN_CANCELLED].includes(transaction.status)
+        ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(transaction.status)
       ) {
         await adminCancelTransaction(req.user, transaction, t);
         console.log('>> Cancelling transaction...');
