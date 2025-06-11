@@ -231,7 +231,8 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
-        req.body.primary_booking
+        req.body.primary_booking,
+        req.user
       );
       response.totalCharge += response.foodDetails.charge;
       break;
@@ -274,7 +275,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          response.foodDetails = await checkFoodAvailability(addon);
+          response.foodDetails = await checkFoodAvailability(addon, req.user);
           response.totalCharge += response.foodDetails.charge;
           break;
 
@@ -507,7 +508,7 @@ async function bookRoomForSingleGuest(
   return { t, discountedAmount, bookingId };
 }
 
-async function checkFoodAvailability(data) {
+async function checkFoodAvailability(data, user) {
   const { start_date, end_date, guestGroup } = data.details;
 
   validateDate(start_date, end_date);
@@ -517,6 +518,8 @@ async function checkFoodAvailability(data) {
   const bookings = await getFoodBookings(allDates, guests);
 
   var charge = 0;
+  var availableCredits = 0;
+
   for (const group of guestGroup) {
     const { meals, guests } = group;
 
@@ -542,10 +545,12 @@ async function checkFoodAvailability(data) {
       }
     }
   }
+  availableCredits = usableCredits(user, TYPE_FOOD, charge);
 
   return {
     status: STATUS_AVAILABLE,
-    charge
+    charge,
+    availableCredits
   };
 }
 

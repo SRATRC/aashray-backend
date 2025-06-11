@@ -379,7 +379,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
     });
 
     if (!booking) {
-      return; // Skip if no matching booking found
+      continue; // Skip if no matching booking found
     }
 
     // Create the update object: setting the specific meal to 0 (cancelled)
