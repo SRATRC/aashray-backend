@@ -36,10 +36,13 @@ export const verifyPayment = async (req, res) => {
     json: req.body
   });
 
+  var transactions;
+  var message;
+
   if (
     [STATUS_PAYMENT_CAPTURED, STATUS_PAYMENT_FAILED].includes(razorpay_status)
   ) {
-    const transactions = await Transactions.findAll({
+    transactions = await Transactions.findAll({
       where: {
         razorpay_order_id,
         status: [
@@ -49,16 +52,9 @@ export const verifyPayment = async (req, res) => {
         ]
       }
     });
+  }
 
-    if (transactions.length == 0) {
-      logger.error(
-        `No pending bookings found for the given order id: ${JSON.stringify(
-          req.body
-        )}`
-      );
-      return;
-    }
-
+  if (transactions && transactions.length > 0) {
     const bookedBy = await validateCard(transactions[0].cardno);
     const updatedBy = RAZORPAY_CALLBACK;
 
@@ -139,9 +135,14 @@ export const verifyPayment = async (req, res) => {
       const bookings = userBookingIdMap[cardno];
       await sendUnifiedEmail(cardno, bookings, bookedBy);
     }
+    message = 'Payment successful.';
+  } else {
+    message = `No pending bookings found for the given order id: ${razorpay_order_id}`;
+    logger.error(`No pending bookings found for the given order id: ${JSON.stringify(
+      req.body
+    )}`);
   }
-
-  res.status(200).json({ message: 'Payment successful.', status: 'ok' });
+  res.status(200).json({ message, status: 'ok' });
 };
 
 export const createOrderIdForPendingPayments = async (req, res) => {

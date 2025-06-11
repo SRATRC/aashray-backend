@@ -485,7 +485,7 @@ export const utsavStatusUpdate = async (req, res) => {
         transaction &&
         ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(transaction.status)
       ) {
-        await adminCancelTransaction(req.user, transaction, t);
+        await adminCancelTransaction(req.user, null, transaction, t);
         console.log('>> Cancelling transaction...');
       } else {
         console.warn(

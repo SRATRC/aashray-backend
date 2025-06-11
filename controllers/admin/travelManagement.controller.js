@@ -166,7 +166,7 @@ export const updateBookingStatus = async (req, res) => {
 
     case STATUS_ADMIN_CANCELLED:
       if (transaction) {
-        await adminCancelTransaction(req.user, transaction, t);
+        await adminCancelTransaction(req.user, bookedByCard, transaction, t);
         updateWaitingTravelBooking(booking.date);
       }
       break;
@@ -240,7 +240,7 @@ export const updateTransactionStatus = async (req, res) => {
 
   if (!transaction) throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
 
-  await adminCancelTransaction(req.user, transaction, t);
+  await adminCancelTransaction(req.user, null, transaction, t);
 
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });

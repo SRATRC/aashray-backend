@@ -24,7 +24,7 @@ import {
   Transactions,
   UtsavDb
 } from '../models/associations.js';
-import { validateCards } from './card.helper.js';
+import { validateCard, validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { cancelTransaction } from './transactions.helper.js';
@@ -360,6 +360,8 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
     return res.status(400).json({ message: 'Invalid request data' });
   }
 
+  const card = await validateCard(cardno);
+
   const today = moment().format('YYYY-MM-DD');
   const validDate = admin ? today : today + 1;
   const validFoodData = food_data.filter((item) => item.date >= validDate);
@@ -403,7 +405,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       });
 
       if (transaction) {
-        await cancelTransaction(user, transaction, t, admin);
+        await cancelTransaction(user, card, transaction, t, admin);
       }
     }
   }
