@@ -17,7 +17,8 @@ import {
   bookRoomDuringUtsavForMumukshus,
   bookRoomForMumukshus,
   findRoom,
-  roomCharge
+  roomCharge,
+  checkRoomAvailabilityDuringUtsav
 } from '../../helpers/roomBooking.helper.js';
 import {
   bookAdhyayanForMumukshus,
@@ -50,11 +51,13 @@ import {
   setBookingIdMap,
   retrieveBookingIds,
   setWaitingBookingCountMap,
-  sendUnifiedEmailForBookedBy
+  sendUnifiedEmailForBookedBy,
+  validateBookingDatesBetweenUtsav
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
+import { UtsavDb } from '../../models/associations.js';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -126,12 +129,19 @@ export const validateBooking = async (req, res) => {
     utsavDetails: [],
     totalCharge: 0
   };
-
-  await validate(req.body, req.user, primary_booking, response);
+  let utsav = null;
+  if(primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
+  await validate(req.body, req.user, primary_booking, response,utsav);
 
   if (addons) {
     for (const addon of addons) {
-      await validate(req.body, req.user, addon, response);
+      await validate(req.body, req.user, addon, response,utsav);
     }
   }
 
@@ -209,17 +219,20 @@ async function book(
   return amount;
 }
 
-async function validate(body, user, data, response) {
+async function validate(body, user, data, response,utsav) {
   let totalCharge = 0;
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(user, data);
-      totalCharge += response.roomDetails.charge;
+      response.roomDetails = await checkRoomAvailability(user, data,utsav);
+      totalCharge += response.roomDetails.reduce(
+        (partialSum, room) => partialSum + room.charge,
+        0
+      );
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(user, body, data);
+      response.foodDetails = await checkFoodAvailability(user, body, data,utsav);
       // food charges are not added for Mumukshus
       break;
 
@@ -406,12 +419,19 @@ async function bookUtsav(user, data, t) {
   return result;
 }
 
-async function checkRoomAvailability(user, data) {
+async function checkRoomAvailability(user, data,utsav) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
   validateDate(checkin_date, checkout_date);
+  validateBookingDatesBetweenUtsav(checkin_date, checkout_date, utsav);
 
   const gender = floor_pref ? floor_pref + user.gender : user.gender;
+
+  if(utsav){
+    
+    return checkRoomAvailabilityDuringUtsav(checkin_date, checkout_date, room_type, gender, utsav,user.cardno,user);
+
+  }else{  
   const nights = await calculateNights(checkin_date, checkout_date);
 
   var status = STATUS_WAITING;
@@ -434,18 +454,21 @@ async function checkRoomAvailability(user, data) {
     status = STATUS_AVAILABLE;
   }
 
-  return {
-    status,
-    charge,
-    availableCredits
-  };
+  return [{
+    mumukshu: user.cardno,
+    status: status,
+    charge: charge,
+    availableCredits: availableCredits,
+    dates: checkin_date+" to "+checkout_date
+  }];
+}
 }
 
-async function checkFoodAvailability(user, body, data) {
+async function checkFoodAvailability(user, body, data,utsav) {
   const { start_date, end_date } = data.details;
 
   validateDate(start_date, end_date);
-
+  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
   await validateFood(
     start_date,
     end_date,

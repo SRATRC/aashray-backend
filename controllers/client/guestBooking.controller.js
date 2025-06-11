@@ -5,7 +5,8 @@ import {
   Transactions,
   CardDb,
   GuestRelationship,
-  FlatDb
+  FlatDb,
+  UtsavDb
 } from '../../models/associations.js';
 import {
   STATUS_PAYMENT_PENDING,
@@ -43,7 +44,8 @@ import {
   sendUnifiedEmail,
   sendUnifiedEmailForBookedBy,
   checkFlatAlreadyBooked,
-  setWaitingBookingCountMap
+  setWaitingBookingCountMap,
+  validateBookingDatesBetweenUtsav
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -52,7 +54,8 @@ import {
   findRoom,
   roomCharge,
   bookRoomDuringUtsavForGuests,
-  createFlatBooking
+  createFlatBooking,
+  checkRoomAvailabilityDuringUtsav
 } from '../../helpers/roomBooking.helper.js';
 import {
   createPendingTransaction,
@@ -217,11 +220,20 @@ export const validateBooking = async (req, res) => {
     totalCharge: 0
   };
 
+  var utsav = null;
+  if(primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
       response.roomDetails = await checkRoomAvailability(
         req.body.primary_booking,
-        req.user
+        req.user,
+        utsav
       );
       response.totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
@@ -232,7 +244,8 @@ export const validateBooking = async (req, res) => {
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
         req.body.primary_booking,
-        req.user
+        req.user,
+        utsav
       );
       response.totalCharge += response.foodDetails.charge;
       break;
@@ -267,7 +280,7 @@ export const validateBooking = async (req, res) => {
     for (const addon of addons) {
       switch (addon.booking_type) {
         case TYPE_ROOM:
-          response.roomDetails = await checkRoomAvailability(addon, req.user);
+          response.roomDetails = await checkRoomAvailability(addon, req.user, utsav);
           response.totalCharge += response.roomDetails.reduce(
             (partialSum, room) => partialSum + room.charge,
             0
@@ -275,7 +288,7 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_FOOD:
-          response.foodDetails = await checkFoodAvailability(addon, req.user);
+          response.foodDetails = await checkFoodAvailability(addon, req.user, utsav);
           response.totalCharge += response.foodDetails.charge;
           break;
 
@@ -300,10 +313,14 @@ export const validateBooking = async (req, res) => {
   });
 };
 
-async function checkRoomAvailability(data, user) {
+async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
-
   validateDate(checkin_date, checkout_date);
+
+
+  validateBookingDatesBetweenUtsav(checkin_date, checkout_date, utsav);
+ 
+
   const nights = await calculateNights(checkin_date, checkout_date);
 
   const totalGuests = guestGroup.flatMap((group) => group.guests);
@@ -324,15 +341,19 @@ async function checkRoomAvailability(data, user) {
     const { roomType, floorType, guests } = group;
 
     for (const guest of guests) {
-      var status = STATUS_WAITING;
-      var charge = 0;
-      var availableCredits = 0;
-
       const gender = floorType
         ? floorType +
           guest_details.filter((item) => item.cardno == guest)[0].gender
         : guest_details.filter((item) => item.cardno == guest)[0].gender;
 
+      if(utsav){
+        roomDetails.push(...await checkRoomAvailabilityDuringUtsav(checkin_date, checkout_date, roomType, gender, utsav,guest,user));
+      }else{
+      var status = STATUS_WAITING;
+      var charge = 0;
+      var availableCredits = 0;
+
+      
       if (nights > 0) {
         const room = await findRoom(
           checkin_date,
@@ -355,7 +376,8 @@ async function checkRoomAvailability(data, user) {
         status,
         charge,
         availableCredits
-      });
+        });
+      }
     }
   }
 
@@ -508,13 +530,36 @@ async function bookRoomForSingleGuest(
   return { t, discountedAmount, bookingId };
 }
 
-async function checkFoodAvailability(data, user) {
+async function checkFoodAvailability(data, user, utsav) {
   const { start_date, end_date, guestGroup } = data.details;
 
   validateDate(start_date, end_date);
+  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
+
+  let allDates = [];
+  if(utsav) {
+    
+    const event_start_date = utsav.start_date;
+    const event_end_date =  utsav.end_date;
+    
+    if (new Date(start_date) < event_start_date) {
+      const beforeEventDates = getDates(start_date, event_start_date);
+      beforeEventDates.pop(); // Remove the event start date
+      allDates = [...allDates, ...beforeEventDates];
+    }
+
+    if (new Date(end_date) > event_end_date) {
+      const afterEventDates = getDates(event_end_date, end_date);
+      afterEventDates.shift(); // Remove the event end date
+      allDates = [...allDates, ...afterEventDates];
+    }
+
+  }else{
+    allDates = getDates(start_date, end_date);
+  }
 
   const guests = guestGroup.flatMap((group) => group.guests);
-  const allDates = getDates(start_date, end_date);
+  
   const bookings = await getFoodBookings(allDates, guests);
 
   var charge = 0;

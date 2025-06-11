@@ -1,7 +1,5 @@
-import { CardDb, RoomBooking, Transactions } from '../models/associations.js';
+import { CardDb, Transactions } from '../models/associations.js';
 import {
-  TRANSACTION_TYPE_UPI,
-  TRANSACTION_TYPE_CASH,
   STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_COMPLETED,
   STATUS_PAYMENT_PENDING,
@@ -22,39 +20,6 @@ import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
 import { getBookingType } from './booking.helper.js';
-
-export async function createTransaction(
-  cardno,
-  bookingid,
-  category,
-  amount,
-  upi_ref,
-  type,
-  updatedBy,
-  t
-) {
-  const status =
-    type == TRANSACTION_TYPE_UPI
-      ? STATUS_PAYMENT_COMPLETED
-      : type == TRANSACTION_TYPE_CASH
-      ? STATUS_CASH_COMPLETED
-      : null;
-
-  const transaction = await Transactions.create(
-    {
-      cardno,
-      bookingid,
-      category,
-      amount,
-      upi_ref,
-      status: STATUS_PAYMENT_PENDING,
-      updatedBy
-    },
-    { transaction: t }
-  );
-
-  return transaction;
-}
 
 export async function createPendingTransaction(
   card,
@@ -209,15 +174,13 @@ export async function adjustAmount(
 }
 
 function getCreditType(bookingType) {
-  const creditType = bookingType == TYPE_FLAT
-    ? TYPE_ROOM
-    : bookingType;
+  const creditType = bookingType == TYPE_FLAT ? TYPE_ROOM : bookingType;
 
   return creditType;
 }
 
 async function addCredit(user, card, bookingType, credits, t) {
-  const creditType = getCreditType(bookingType)
+  const creditType = getCreditType(bookingType);
 
   const previousCredits =
     card.credits && card.credits[creditType] ? card.credits[creditType] : 0;
@@ -237,15 +200,7 @@ async function addCredit(user, card, bookingType, credits, t) {
   );
 }
 
-async function useCredit(
-  card,
-  booking,
-  transaction,
-  amount,
-  updatedBy,
-  t
-) {
-
+async function useCredit(card, booking, transaction, amount, updatedBy, t) {
   const bookingType = getBookingType(transaction);
   const creditType = getCreditType(bookingType);
 
@@ -309,13 +264,12 @@ async function useCredit(
 export function usableCredits(card, bookingType, amount) {
   const creditType = getCreditType(bookingType);
 
-  const totalCredits = card.credits && card.credits[creditType]
-    ? card.credits[creditType]
-    : 0;
-    
+  const totalCredits =
+    card.credits && card.credits[creditType] ? card.credits[creditType] : 0;
+
   const usableCredits = Math.min(amount, totalCredits);
-  
-  // store the updated credits on the card model itself so that 
+
+  // store the updated credits on the card model itself so that
   // the next call for the same card will reflect what's available
   card.credits = card.credits || {};
 
@@ -402,10 +356,7 @@ export async function updateRazorpayTransactions(
     { razorpay_order_id: razorpay_order_id },
     {
       where: {
-        [Sequelize.Op.or]: [
-          { bookingid: bookingIds },
-          { id: transactionIds }
-        ]
+        [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }]
       },
       transaction: t
     }

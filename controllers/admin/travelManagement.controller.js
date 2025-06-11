@@ -1,7 +1,7 @@
 import { TravelDb, CardDb, Transactions } from '../../models/associations.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-import sendMail from '../../utils/sendMail.js';import moment from 'moment';
+import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
 import {
   ERR_BOOKING_ALREADY_CANCELLED,
@@ -12,11 +12,9 @@ import {
   STATUS_CANCELLED,
   STATUS_CONFIRMED,
   STATUS_PAYMENT_COMPLETED,
-  STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
   TYPE_TRAVEL,
   STATUS_CASH_COMPLETED,
-  STATUS_AWAITING_CONFIRMATION,
   STATUS_PROCEED_FOR_PAYMENT
 } from '../../config/constants.js';
 import {
@@ -35,11 +33,11 @@ function getAdditionalConditions(statuses, pickupRC, dropRC, replacementMap) {
   }
 
   if (pickupRC === 'true') {
-    additionalWhereClause += ' AND t1.pickup_point = \'RC\'';
+    additionalWhereClause += " AND t1.pickup_point = 'RC'";
   }
 
   if (dropRC === 'true') {
-    additionalWhereClause += ' AND t1.drop_point = \'RC\'';
+    additionalWhereClause += " AND t1.drop_point = 'RC'";
   }
 
   return additionalWhereClause;
@@ -59,7 +57,12 @@ export const fectchSummary = async (req, res) => {
     endDate: end_date
   };
 
-  const additionalWhereClause = getAdditionalConditions(normalizedStatuses, pickupRC, dropRC, replacementMap);
+  const additionalWhereClause = getAdditionalConditions(
+    normalizedStatuses,
+    pickupRC,
+    dropRC,
+    replacementMap
+  );
 
   const data = await database.query(
     `SELECT t1.status, COUNT(*) as count
@@ -71,6 +74,7 @@ export const fectchSummary = async (req, res) => {
       type: Sequelize.QueryTypes.SELECT
     }
   );
+  console.log('Summary data from DB:', data);
 
   return res.status(200).send({ message: 'Fetched data', data });
 };
@@ -90,12 +94,17 @@ export const fetchUpcomingBookings = async (req, res) => {
     category: TYPE_TRAVEL
   };
 
-  const additionalWhereClause = getAdditionalConditions(normalizedStatuses, pickupRC, dropRC, replacementMap);
+  const additionalWhereClause = getAdditionalConditions(
+    normalizedStatuses,
+    pickupRC,
+    dropRC,
+    replacementMap
+  );
 
   const data = await database.query(
     `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage,
             t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
-            t2.amount, t2.upi_ref, t2.status as paymentStatus, t3.res_status
+            t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
      FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
@@ -111,7 +120,7 @@ export const fetchUpcomingBookings = async (req, res) => {
 };
 
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments, upiRef, description,charges } = req.body;
+  const { bookingid, status, adminComments,  description,charges } = req.body;
   let newBookingStatus = status;
 
   const t = await database.transaction();
@@ -119,13 +128,14 @@ export const updateBookingStatus = async (req, res) => {
 
   const booking = await TravelDb.findOne({
     where: {
-      bookingid,
-      status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED, STATUS_PAYMENT_PENDING]
+      bookingid
+      // status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED, STATUS_PAYMENT_PENDING, STATUS_PROCEED_FOR_PAYMENT]
     }
   });
 
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
-  if (status == booking.status) throw new ApiError(400, 'Status is same as before');
+  if (status == booking.status)
+    throw new ApiError(400, 'Status is same as before');
   if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
@@ -162,18 +172,18 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
-      if (transaction && transaction.status === STATUS_PAYMENT_PENDING) {
-        await transaction.update(
-          {
-            upi_ref: upiRef || 'NA',
-            status: upiRef ? STATUS_PAYMENT_COMPLETED : STATUS_CASH_COMPLETED,
-            description,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
-      }
-      break;
+  if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+    await transaction.update(
+      {
+        
+        
+        description,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
+  break;
 
     case STATUS_WAITING:
     default:
@@ -210,7 +220,7 @@ export const updateBookingStatus = async (req, res) => {
 };
 
 export const updateTransactionStatus = async (req, res) => {
-  const { cardno, bookingid, type, payment_status, amount, upi_ref } = req.body;
+  const { cardno, bookingid, type, payment_status, amount } = req.body;
 
   const booking = await TravelDb.findOne({
     where: {

@@ -5,7 +5,8 @@ import {
   STATUS_CLOSED,
   STATUS_WAITING,
   STATUS_OPEN,
-  ERR_UTSAV_ALREADY_BOOKED
+  ERR_UTSAV_ALREADY_BOOKED,
+  STATUS_AVAILABLE
 } from '../config/constants.js';
 import {
   UtsavDb,
@@ -152,7 +153,7 @@ export async function validateUtsavs(user, utsavid, mumukshus) {
     var availableCredits = 0;
 
     if (utsav.status === STATUS_OPEN) {
-      status = STATUS_PAYMENT_PENDING;
+      status = STATUS_AVAILABLE;
       charge = package_info.amount;
       availableCredits = usableCredits(user, TYPE_UTSAV, charge);
     }
