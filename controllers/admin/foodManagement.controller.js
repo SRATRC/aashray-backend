@@ -225,6 +225,7 @@ export const cancelBooking = async (req, res) => {
   }
 
   const bookedBy = booking.bookedBy || booking.cardno;
+  const bookedByCard = await validateCard(bookedBy);
   const bookedFor = booking.bookedBy ? booking.cardno : null;
   const food_data = [];
 
@@ -238,9 +239,9 @@ export const cancelBooking = async (req, res) => {
 
   await cancelFood(
     req.user, 
-    bookedBy, 
+    bookedByCard, 
     food_data, 
-    t, 
+    t,
     true);
 
   await t.commit();
