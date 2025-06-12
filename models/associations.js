@@ -12,6 +12,7 @@ import Departments from './departments.model.js';
 import MaintenanceDb from './maintenance_db.model.js';
 import TravelDb from './travel_db.model.js';
 import WifiDb from './wifi.model.js';
+import CentreDb from './centre_db.model.js';
 import UtsavBooking from './utsav_boking.model.js';
 import UtsavDb from './utsav_db.model.js';
 import UtsavPackagesDb from './utsav_packages.model.js';
@@ -420,6 +421,7 @@ export {
   MaintenanceDb,
   GateRecord,
   FoodDb,
+  CentreDb,
   BulkFoodBooking,
   FoodPhysicalPlate,
   RoomBooking,
