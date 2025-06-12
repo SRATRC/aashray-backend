@@ -62,6 +62,10 @@ const TravelDb = sequelize.define(
       allowNull: false,
       defaultValue: 0
     },
+    total_people: {
+      type: DataTypes.INTEGER,
+      allowNull: true
+    },
     comments: {
       type: DataTypes.STRING,
       allowNull: true

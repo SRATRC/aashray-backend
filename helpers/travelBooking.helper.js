@@ -9,14 +9,13 @@ import {
   STATUS_WAITING,
   TRAVEL_TYPE_SINGLE
 } from '../config/constants.js';
-import { TravelDb } from '../models/associations.js';
+import { CardDb, TravelDb } from '../models/associations.js';
 import { validateCards } from './card.helper.js';
+import { checkAdhyayanParamGyanSabha } from './adhyayanBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
-import { checkAdhyayanParamGyanSabha } from './adhyayanBooking.helper.js';
-import { CardDb } from '../models/associations.js';
 import sendMail from '../utils/sendMail.js';
 
 export async function checkTravelAlreadyBooked(date, ...mumukshus) {
@@ -32,21 +31,19 @@ export async function checkTravelAlreadyBooked(date, ...mumukshus) {
     throw new ApiError(400, ERR_TRAVEL_ALREADY_BOOKED);
   }
 }
- 
- async function getTravelBookingStatus(type,date,travelBookingsFordate){
 
-  if ( type == TRAVEL_TYPE_SINGLE && travelBookingsFordate > 4 ){
-    if(await checkAdhyayanParamGyanSabha(date) ){
+async function getTravelBookingStatus(type, date, travelBookingsFordate) {
+  if (type == TRAVEL_TYPE_SINGLE && travelBookingsFordate > 4) {
+    if (await checkAdhyayanParamGyanSabha(date)) {
       return STATUS_AWAITING_CONFIRMATION;
     }
     return STATUS_WAITING;
-  }else{
+  } else {
     return STATUS_AWAITING_CONFIRMATION;
   }
-
 }
 
-export async function updateWaitingTravelBooking(date){
+export async function updateWaitingTravelBooking(date) {
   const travelBookingsFordate = await TravelDb.findOne({
     where: {
       date: date,
@@ -55,14 +52,17 @@ export async function updateWaitingTravelBooking(date){
     order: [['createdAt', 'ASC']]
   });
 
-  if( travelBookingsFordate ){
-    await TravelDb.update({
-      status: STATUS_AWAITING_CONFIRMATION
-    }, {
-      where: {
-        bookingid: travelBookingsFordate.bookingid
+  if (travelBookingsFordate) {
+    await TravelDb.update(
+      {
+        status: STATUS_AWAITING_CONFIRMATION
+      },
+      {
+        where: {
+          bookingid: travelBookingsFordate.bookingid
+        }
       }
-    });
+    );
     const user = await CardDb.findOne({
       where: {
         cardno: travelBookingsFordate.cardno
@@ -75,37 +75,37 @@ export async function updateWaitingTravelBooking(date){
       template: 'rajPravasStatusUpdate',
       context: {
         name: user.issuedto,
-        bookingid:travelBookingsFordate.bookingid,
+        bookingid: travelBookingsFordate.bookingid,
         date: travelBookingsFordate.date,
-        pickup:travelBookingsFordate.pickup_point,
-        drop:travelBookingsFordate.drop_point,
+        pickup: travelBookingsFordate.pickup_point,
+        drop: travelBookingsFordate.drop_point,
         status: STATUS_AWAITING_CONFIRMATION
       }
     });
   }
 }
 
-
 export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   const today = moment().format('YYYY-MM-DD');
   if (date <= today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
-  let userBookingIds = {},waitingBookingCount = 0;
+  let userBookingIds = {},
+    waitingBookingCount = 0;
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
   await checkTravelAlreadyBooked(date, mumukshus);
 
   const bookings = await TravelDb.findAll({
     where: {
-      type:TRAVEL_TYPE_SINGLE,
+      type: TRAVEL_TYPE_SINGLE,
       status: {
-        [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED,STATUS_CANCELLED]
+        [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED, STATUS_CANCELLED]
       },
       date: date
     }
   });
-  let travelBookingsFordate=bookings.length;
+  let travelBookingsFordate = bookings.length;
   var bookingsToCreate = [],
     bookingId;
   for (const group of mumukshuGroup) {
@@ -117,13 +117,18 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
       type,
       mumukshus,
       arrival_time,
-      leaving_post_adhyayan
+      leaving_post_adhyayan,
+      total_people = 1
     } = group;
 
     for (const mumukshu of mumukshus) {
       bookingId = uuidv4();
-      let travelbookingStatus =  await getTravelBookingStatus(type,date,travelBookingsFordate); 
-      if(travelbookingStatus == STATUS_WAITING){
+      let travelbookingStatus = await getTravelBookingStatus(
+        type,
+        date,
+        travelBookingsFordate
+      );
+      if (travelbookingStatus == STATUS_WAITING) {
         waitingBookingCount++;
       }
       bookingsToCreate.push({
@@ -138,6 +143,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         luggage,
         arrival_time,
         leaving_post_adhyayan,
+        total_people,
         comments,
         updatedBy: user.cardno
       });
