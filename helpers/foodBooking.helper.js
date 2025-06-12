@@ -355,12 +355,12 @@ export function createGroupFoodRequestForGuest(
   ];
 }
 
-export async function cancelFood(user, cardno, food_data, t, admin = false) {
+export async function cancelFood(user, bookedByCard, food_data, t, admin = false) {
+  const cardno = bookedByCard.cardno;
+  
   if (!cardno || !Array.isArray(food_data)) {
     return res.status(400).json({ message: 'Invalid request data' });
   }
-
-  const card = await validateCard(cardno);
 
   const today = moment().format('YYYY-MM-DD');
   const validDate = admin ? today : today + 1;
@@ -398,14 +398,13 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       // Find and update the transaction to mark it as credited
       const transaction = await Transactions.findOne({
         where: {
-          cardno,
           bookingid: booking.id,
           category: mealTypeMapping[mealType]
         }
       });
 
       if (transaction) {
-        await cancelTransaction(user, card, transaction, t, admin);
+        await cancelTransaction(user, bookedByCard, transaction, t, admin);
       }
     }
   }
