@@ -33,7 +33,10 @@ import {
   STATUS_OPEN,
   TYPE_UTSAV,
   TYPE_FLAT,
-  MSG_BOOKING_WAITING
+  MSG_BOOKING_WAITING,
+  SUBJECT_BOOKING_PENDING,
+  BOOKING_STATUS_PENDING,
+  WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -190,12 +193,12 @@ export const guestBooking = async (req, res) => {
   await t.commit();
 
   //Sending email to logged in user for self or other mumkshus
-  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(cardno, bookings, req.user);
+      sendUnifiedEmail(cardno, bookings, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
     }
   }
   let message = MSG_BOOKING_SUCCESSFUL;
@@ -785,13 +788,13 @@ export const guestBookingFlat = async (req, res) => {
   await updateRazorpayTransactions(bookingIds, [], order.id, t);
   await t.commit();
 
-  sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user);
+  sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user, SUBJECT_BOOKING_PENDING, BOOKING_STATUS_PENDING, WELCOME_MESSAGE_PENDING);
 
   Object.entries(userBookingIdMap)
     .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
     .forEach(([guestCardNo, bookings]) => {
       // Create the single-entry bookingMap object directly when calling the function
-      sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
+      sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user, SUBJECT_BOOKING_PENDING, BOOKING_STATUS_PENDING, WELCOME_MESSAGE_PENDING);
     });
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });

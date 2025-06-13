@@ -15,7 +15,10 @@ import {
   STATUS_MUMUKSHU,
   TYPE_UTSAV,
   STATUS_GUEST,
-  STATUS_AWAITING_CONFIRMATION
+  STATUS_AWAITING_CONFIRMATION, 
+  SUBJECT_BOOKING_PENDING,
+  BOOKING_STATUS_PENDING,
+  WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
   bookRoomDuringUtsavForMumukshus,
@@ -92,12 +95,12 @@ export const mumukshuBooking = async (req, res) => {
   await t.commit();
 
   //Sending email to logged in user for self or other mumkshus
-  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
   for (const cardno in userBookingIdMap) {
     if(cardno != req.user.cardno) {
     const bookings = userBookingIdMap[cardno];
     //Sending email to other mumkshu & Guest
-    sendUnifiedEmail(cardno, bookings, req.user);
+    sendUnifiedEmail(cardno, bookings, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
     }
    }
    let message = Object.keys(waitingBookingCountMap).length > 0 ? MSG_BOOKING_WAITING : MSG_BOOKING_SUCCESSFUL;

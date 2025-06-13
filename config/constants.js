@@ -125,3 +125,10 @@ export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
+
+export const SUBJECT_BOOKING_PENDING = 'Vitraag Vigyaan Aashray: Bookings Temporarily Reserved';
+export const BOOKING_STATUS_PENDING = 'temporarily reserved';
+
+export const WELCOME_MESSAGE_PENDING = 'Your booking is temporarily reserved, but payment is required within 24 hours to confirm it';
+
+

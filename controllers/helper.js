@@ -227,7 +227,7 @@ export function retrieveBookingIds(userBookingIdMap) {
     .flat();
 }
 
-export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy) {
+export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy,subject,bookingStatus,welcomeMessage) {
   const flattenedMap = {};
   let isSelfBooking = true;
   // First, collect all booking IDs by type
@@ -253,7 +253,10 @@ export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy) {
     await sendUnifiedEmail(
       isSelfBooking ? bookedBy.cardno : null,
       flattenedMap,
-      bookedBy
+      bookedBy,
+      subject,
+      bookingStatus,
+      welcomeMessage  
     );
   }
 }
@@ -262,7 +265,9 @@ export async function sendUnifiedEmail(
   cardno,
   bookingIds,
   bookedBy,
-  subject = 'Your Booking Confirmation at SRATRC',
+  subject = 'Vitraag Vigyaan Aashray: Bookings Confirmed',
+  bookingStatus = 'Confirmed',
+  welcomeMessage = 'We are pleased to inform you that your bookings have been confirmed.',
   template = 'unifiedBookingEmail'
 ) 
 
@@ -273,7 +278,8 @@ export async function sendUnifiedEmail(
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
   let wasFlatBooked = Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
-
+  let showTravelConfirmationDetail = (bookingStatus == 'Confirmed' && wasRajprvasBooked) ;
+  
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
@@ -475,6 +481,12 @@ export async function sendUnifiedEmail(
     });
   }
 
+  const country = user && user.country ? user.country : bookedBy && bookedBy.country;
+  let showNRIRelatedDetails = false;
+  if(country && country != 'India'){
+    showNRIRelatedDetails = true;
+  }
+
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
     user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
@@ -494,7 +506,11 @@ export async function sendUnifiedEmail(
         adhyanBookingDetails,
         travelBookingDetails,
         flatBookingDetails,
-        utsavBookingDetails
+        utsavBookingDetails,
+        bookingStatus,
+        welcomeMessage,
+        showTravelConfirmationDetail,
+        showNRIRelatedDetails
       }
     });
   }

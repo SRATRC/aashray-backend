@@ -7,7 +7,10 @@ import {
   TYPE_GUEST_ROOM,
   TYPE_FLAT,
   ERR_FLAT_ALREADY_BOOKED,
-  STATUS_PAYMENT_PENDING
+  STATUS_PAYMENT_PENDING,
+  SUBJECT_BOOKING_PENDING,
+  BOOKING_STATUS_PENDING,
+  WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
   validateDate,
@@ -187,13 +190,13 @@ export const FlatBookingMumukshu = async (req, res) => {
 
   await t.commit();
 
-  sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user);
+  sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user, SUBJECT_BOOKING_PENDING, BOOKING_STATUS_PENDING, WELCOME_MESSAGE_PENDING);
 
   Object.entries(userBookingIds)
     .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
     .forEach(([guestCardNo, bookings]) => {
       // Create the single-entry bookingMap object directly when calling the function
-      sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
+      sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user, SUBJECT_BOOKING_PENDING, BOOKING_STATUS_PENDING, WELCOME_MESSAGE_PENDING);
     });
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
