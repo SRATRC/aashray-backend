@@ -357,14 +357,12 @@ export function createGroupFoodRequestForGuest(
 
 export async function cancelFood(user, bookedByCard, food_data, t, admin = false) {
   const cardno = bookedByCard.cardno;
-  
-  if (!cardno || !Array.isArray(food_data)) {
-    return res.status(400).json({ message: 'Invalid request data' });
-  }
 
   const today = moment().format('YYYY-MM-DD');
   const validDate = admin ? today : today + 1;
   const validFoodData = food_data.filter((item) => item.date >= validDate);
+
+  const transactionsByCardno = {};
 
   for (const item of validFoodData) {
     const { date, mealType, bookedFor } = item;
@@ -404,7 +402,10 @@ export async function cancelFood(user, bookedByCard, food_data, t, admin = false
       });
 
       if (transaction) {
-        await cancelTransaction(user, bookedByCard, transaction, t, admin);
+        // await cancelTransaction(user, bookedByCard, transaction, t, admin);
+        if (!transactionsByCardno[transaction.cardno]) {
+
+        }
       }
     }
   }
