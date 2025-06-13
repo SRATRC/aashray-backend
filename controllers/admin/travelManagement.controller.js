@@ -65,10 +65,42 @@ export const fectchSummary = async (req, res) => {
   );
 
   const data = await database.query(
-    `SELECT t1.status, COUNT(*) as count
-     FROM travel_db t1
-     WHERE t1.date >= :startDate AND t1.date <= :endDate ${additionalWhereClause}
-     GROUP BY t1.status`,
+    `SELECT
+  CASE
+    WHEN t1.pickup_point IN (
+      'Dadar (Swami Narayan Temple)', 
+      'Amar Mahal', 
+      'Airoli', 
+      'Vile Parle (Sahara Star)', 
+      'Airport Terminal 1', 
+      'Airport Terminal 2', 
+      'Railway Station (Bandra Terminus)', 
+      'Railway Station (Kurla Terminus)', 
+      'Railway Station (CSMT)', 
+      'Railway Station (Mumbai Central)'
+    ) THEN 'Mumbai to Research Centre'
+    
+    WHEN t1.drop_point IN (
+      'Dadar (Swami Narayan Temple)', 
+      'Amar Mahal', 
+      'Airoli', 
+      'Vile Parle (Sahara Star)', 
+      'Airport Terminal 1', 
+      'Airport Terminal 2', 
+      'Railway Station (Bandra Terminus)', 
+      'Railway Station (Kurla Terminus)', 
+      'Railway Station (CSMT)', 
+      'Railway Station (Mumbai Central)'
+    ) THEN 'Research Centre to Mumbai'
+    ELSE 'Other'
+  END AS destination,
+  t1.status,
+  COUNT(*) AS count
+FROM travel_db t1
+WHERE t1.date >= :startDate AND t1.date <= :endDate
+${additionalWhereClause} -- Your existing dynamic filtering conditions
+GROUP BY destination, t1.status
+ORDER BY destination, t1.status`,
     {
       replacements: replacementMap,
       type: Sequelize.QueryTypes.SELECT
@@ -102,7 +134,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   );
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.arrival_time AS arrival_time, t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, DATE(t1.arrival_time), t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
             t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
             t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
      FROM travel_db t1
