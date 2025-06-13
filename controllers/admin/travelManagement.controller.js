@@ -65,10 +65,62 @@ export const fectchSummary = async (req, res) => {
   );
 
   const data = await database.query(
-    `SELECT t1.status, COUNT(*) as count
-     FROM travel_db t1
-     WHERE t1.date >= :startDate AND t1.date <= :endDate ${additionalWhereClause}
-     GROUP BY t1.status`,
+    `SELECT
+  CASE
+    WHEN t1.pickup_point IN (
+      'dadar',
+      'Dadar (Swami Narayan Temple)', 
+      'Dadar (Swaminarayan Temple)',
+      'Amar Mahal', 
+      'Airoli', 
+      'Vile Parle (Sahara Star)', 
+      'Airport Terminal 1', 
+      'Airport Terminal 2', 
+      'Railway Station (Bandra Terminus)', 
+      'Railway Station (Kurla Terminus)',
+      'Railway station (LTT - Kurla)', 
+      'Railway Station (CSMT)', 
+      'Railway Station (Mumbai Central)',
+      'mullund',
+      'AIRPORT T1',
+      'AIRPORT T2',
+      'OTHER',
+      'RAILWAY STATION (LTT - KURLA)',
+      'VILE PARLE (SAHARA STAR HOTEL)',
+      'Full Car Booking'
+    ) THEN 'Mumbai to Research Centre'
+    
+    WHEN t1.drop_point IN (
+      'dadar',
+      'Dadar (Swami Narayan Temple)', 
+      'Dadar (Swaminarayan Temple)',
+      'Amar Mahal', 
+      'Airoli', 
+      'Vile Parle (Sahara Star)', 
+      'Airport Terminal 1', 
+      'Airport Terminal 2', 
+      'Railway Station (Bandra Terminus)', 
+      'Railway Station (Kurla Terminus)', 
+      'Railway station (LTT - Kurla)',
+      'Railway Station (CSMT)', 
+      'Railway Station (Mumbai Central)',
+      'mullund',
+      'AIRPORT T1',
+      'AIRPORT T2',
+      'OTHER',
+      'RAILWAY STATION (LTT - KURLA)',
+      'VILE PARLE (SAHARA STAR HOTEL)',
+      'Full Car Booking'
+    ) THEN 'Research Centre to Mumbai'
+    ELSE 'Other'
+  END AS destination,
+  t1.status,
+  COUNT(*) AS count
+FROM travel_db t1
+WHERE t1.date >= :startDate AND t1.date <= :endDate
+${additionalWhereClause} -- Your existing dynamic filtering conditions
+GROUP BY destination, t1.status
+ORDER BY destination, t1.status`,
     {
       replacements: replacementMap,
       type: Sequelize.QueryTypes.SELECT
@@ -102,7 +154,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   );
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.arrival_time AS arrival_time, t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, DATE(t1.arrival_time), t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
             t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
             t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
      FROM travel_db t1
@@ -120,6 +172,97 @@ console.log("Fetched travel data:", data);
   return res.status(200).send({ message: 'Fetched data', data });
   
 };
+
+import { QueryTypes } from 'sequelize'; // Make sure you import this if you're using Sequelize
+
+export const fetchBookingForDriver = async (req, res) => {
+  try {
+    const data = await database.query(
+      `
+      SELECT
+        t3.issuedto AS Mumukshu_Name,
+        t3.mobno AS Mobile_Number,
+
+        CASE
+          WHEN t1.pickup_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+            'Airport Terminal 1', 'Airport Terminal 2', 
+            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+          ) THEN 'Mumbai to Research Centre'
+          WHEN t1.drop_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+            'Airport Terminal 1', 'Airport Terminal 2', 
+            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+          ) THEN 'Research Centre to Mumbai'
+          ELSE 'Unknown'
+        END AS Travelling_From,
+
+        CASE
+          WHEN t1.pickup_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+            'Airport Terminal 1', 'Airport Terminal 2', 
+            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+          ) THEN t1.pickup_point
+          WHEN t1.drop_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+            'Airport Terminal 1', 'Airport Terminal 2', 
+            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+          ) THEN t1.drop_point
+          ELSE NULL
+        END AS \`Pickup/Dropoff_Point\`,
+
+        t1.arrival_time AS Arrival_Time,
+
+        CASE
+          WHEN LOWER(t1.type) = 'full car' THEN 'Yes'
+          ELSE 'No'
+        END AS Full_Car_Booking,
+
+        CASE
+          WHEN LOWER(t1.type) = 'full car' THEN t1.total_people
+          ELSE NULL
+        END AS Total_People
+
+      FROM travel_db t1
+      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+      WHERE t1.status = 'confirmed'
+        AND t1.date = CASE
+          WHEN CURTIME() < '20:00:00' THEN CURDATE()
+          ELSE CURDATE() + INTERVAL 1 DAY
+        END
+      ORDER BY Travelling_From ASC
+      `,
+      { type: QueryTypes.SELECT }
+    );
+
+    console.log("Fetched travel data for driver:", data);
+    return res.status(200).send({ message: 'Fetched data', data });
+  } catch (error) {
+    console.error("Error fetching data for driver:", error);
+    return res.status(500).send({ message: 'Something went wrong', error });
+  }
+};
+
 
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status, adminComments,  description,charges } = req.body;
