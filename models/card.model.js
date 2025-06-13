@@ -117,6 +117,13 @@ const CardDb = sequelize.define(
     credits: {
       type: DataTypes.JSON,
       allowNull: true
+    },
+
+    username: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        return this.cardno;
+      }
     }
   },
   {
