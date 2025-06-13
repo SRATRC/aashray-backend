@@ -102,7 +102,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   );
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.type, t1.luggage,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.arrival_time AS arrival_time, t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
             t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
             t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
      FROM travel_db t1
@@ -115,8 +115,10 @@ export const fetchUpcomingBookings = async (req, res) => {
       type: Sequelize.QueryTypes.SELECT
     }
   );
+console.log("Fetched travel data:", data);
 
   return res.status(200).send({ message: 'Fetched data', data });
+  
 };
 
 export const updateBookingStatus = async (req, res) => {
