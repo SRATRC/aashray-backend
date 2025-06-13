@@ -15,15 +15,20 @@ import {
   STATUS_MUMUKSHU,
   TYPE_UTSAV,
   STATUS_GUEST,
-  STATUS_AWAITING_CONFIRMATION
+  STATUS_AWAITING_CONFIRMATION, 
+  SUBJECT_BOOKING_PENDING,
+  BOOKING_STATUS_PENDING,
+  WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
   bookRoomDuringUtsavForMumukshus,
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
   findRoom,
-  roomCharge
+  roomCharge,
+  checkRoomAvailabilityDuringUtsav
 } from '../../helpers/roomBooking.helper.js';
+import { UtsavDb } from '../../models/associations.js';
 import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
@@ -45,7 +50,8 @@ import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import {
   calculateNights,
@@ -54,7 +60,8 @@ import {
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
   sendUnifiedEmail,
-  setWaitingBookingCountMap
+  setWaitingBookingCountMap,
+  validateBookingDatesBetweenUtsav
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -84,17 +91,16 @@ export const mumukshuBooking = async (req, res) => {
 
   const order = await generateOrderId(amount);
   const bookingIds = retrieveBookingIds(userBookingIdMap);
-  await updateRazorpayTransactions(bookingIds, order.id, t);
-
+  await updateRazorpayTransactions(bookingIds, [], order.id, t);
   await t.commit();
 
   //Sending email to logged in user for self or other mumkshus
-  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user);
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
   for (const cardno in userBookingIdMap) {
     if(cardno != req.user.cardno) {
     const bookings = userBookingIdMap[cardno];
     //Sending email to other mumkshu & Guest
-    sendUnifiedEmail(cardno, bookings, req.user);
+    sendUnifiedEmail(cardno, bookings, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
     }
    }
    let message = Object.keys(waitingBookingCountMap).length > 0 ? MSG_BOOKING_WAITING : MSG_BOOKING_SUCCESSFUL;
@@ -114,11 +120,11 @@ export const validateBooking = async (req, res) => {
     totalCharge: 0
   };
 
-  await validate(req.body, primary_booking, response);
+  await validate(req.body, req.user, primary_booking, response);
 
   if (addons) {
     for (const addon of addons) {
-      await validate(req.body, addon, response);
+      await validate(req.body, req.user, addon, response);
     }
   }
 
@@ -196,11 +202,20 @@ async function book(body, data, t, user, userBookingIdMap,waitingBookingCountMap
   return amount;
 }
 
-async function validate(body, data, response) {
+async function validate(body, user, data, response) {
+  
+  let utsav = null;
+  if(body.primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: body.primary_booking.details.utsavid
+      }
+    });
+  }
   let totalCharge = 0;
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(data);
+      response.roomDetails = await checkRoomAvailability(data, user, utsav);
       totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -208,7 +223,7 @@ async function validate(body, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data);
+      response.foodDetails = await checkFoodAvailability(body, data, utsav);
       break;
 
     case TYPE_ADHYAYAN:
@@ -229,6 +244,7 @@ async function validate(body, data, response) {
 
     case TYPE_UTSAV:
       response.utsavDetails = await validateUtsavs(
+        user,
         data.details.utsavid,
         data.details.mumukshus
       );
@@ -248,11 +264,12 @@ async function validate(body, data, response) {
 
 async function bookRoom(body, data, t, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
-
   let result = {};
   if (body.primary_booking.booking_type == TYPE_UTSAV) {
     result = await bookRoomDuringUtsavForMumukshus(
       body.primary_booking.details.utsavid,
+      checkin_date,
+      checkout_date,
       mumukshuGroup,
       t,
       user
@@ -321,18 +338,20 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function checkRoomAvailability(data) {
+
+async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
-
+  
+  validateBookingDatesBetweenUtsav(checkin_date, checkout_date, utsav);
+  
+  let nights = await calculateNights(checkin_date, checkout_date);;
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cardDb = await validateCards(mumukshus);
 
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
-
-  const nights = await calculateNights(checkin_date, checkout_date);
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
@@ -343,14 +362,19 @@ async function checkRoomAvailability(data) {
         (item) => item.dataValues.cardno == mumukshu
       )[0];
 
-      var status = STATUS_WAITING;
-      var charge = 0;
-
       const gender = floorType
         ? floorType + card.dataValues.gender
         : card.dataValues.gender;
 
-      if (nights > 0) {
+      if(utsav) {
+        roomDetails.push(...await checkRoomAvailabilityDuringUtsav(checkin_date, checkout_date, roomType, gender, utsav,mumukshu,user));
+      }else{
+      
+      var status = STATUS_WAITING;
+      var charge = 0;
+      var availableCredits = 0;
+      
+        if (nights > 0) {
         const roomno = await findRoom(
           checkin_date,
           checkout_date,
@@ -360,26 +384,30 @@ async function checkRoomAvailability(data) {
         if (roomno) {
           status = STATUS_AVAILABLE;
           charge = roomCharge(roomType) * nights;
+          availableCredits = usableCredits(user, TYPE_ROOM, charge);
         }
       } else {
         status = STATUS_AVAILABLE;
-        charge = 0;
       }
 
       roomDetails.push({
         mumukshu,
         status,
-        charge
+        charge,
+        availableCredits
       });
     }
+  }
   }
 
   return roomDetails;
 }
 
-async function checkFoodAvailability(body, data) {
+async function checkFoodAvailability(body, data, utsav) {
   const { start_date, end_date, mumukshuGroup } = data.details;
   validateDate(start_date, end_date);
+
+  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
 

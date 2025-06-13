@@ -34,6 +34,11 @@ const UtsavDb = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
+    location: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: 'Research Centre'
+    },
     comments: {
       type: DataTypes.STRING,
       allowNull: true

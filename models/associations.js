@@ -12,6 +12,7 @@ import Departments from './departments.model.js';
 import MaintenanceDb from './maintenance_db.model.js';
 import TravelDb from './travel_db.model.js';
 import WifiDb from './wifi.model.js';
+import CentreDb from './centre_db.model.js';
 import UtsavBooking from './utsav_boking.model.js';
 import UtsavDb from './utsav_db.model.js';
 import UtsavPackagesDb from './utsav_packages.model.js';
@@ -28,6 +29,7 @@ import GuestRelationship from './guest_relationship.model.js';
 import BulkFoodBooking from './bulk_food_booking.model.js';
 import RazorpayWebhook from './razorpay_webhook.model.js';
 import RazorpaySettlement from './razorpay_settlement.model.js';
+import SupportTickets from './support_tickets.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -69,6 +71,13 @@ CardDb.hasMany(ShibirBookingDb, {
 });
 CardDb.hasMany(FlatBooking, {
   foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(FlatBooking, {
+  as: 'flatBookedByCard',
+  foreignKey: 'bookedBy',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -148,6 +157,12 @@ CardDb.hasMany(GuestRelationship, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+CardDb.hasMany(SupportTickets, {
+  foreignKey: 'issued_by',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 
 // Transactions
 Transactions.belongsTo(CardDb, {
@@ -211,6 +226,11 @@ FlatDb.belongsTo(CardDb, {
 FlatBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
+});
+FlatBooking.belongsTo(CardDb, {
+  foreignKey: 'bookedBy',
+  targetKey: 'cardno',
+  as: 'bookedByCard'
 });
 
 FlatDb.hasMany(FlatBooking, {
@@ -399,6 +419,12 @@ GuestRelationship.belongsTo(CardDb, {
   targetKey: 'cardno'
 });
 
+// support
+SupportTickets.belongsTo(CardDb, {
+  foreignKey: 'issued_by',
+  targetKey: 'cardno'
+});
+
 export {
   CardDb,
   Transactions,
@@ -408,6 +434,7 @@ export {
   MaintenanceDb,
   GateRecord,
   FoodDb,
+  CentreDb,
   BulkFoodBooking,
   FoodPhysicalPlate,
   RoomBooking,
@@ -429,5 +456,6 @@ export {
   GuestDb,
   GuestRelationship,
   RazorpayWebhook,
-  RazorpaySettlement
+  RazorpaySettlement,
+  SupportTickets
 };

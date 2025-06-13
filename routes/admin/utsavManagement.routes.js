@@ -13,7 +13,9 @@ import {
   fetchUtsav,
   updateUtsavPackage,
   fetchAllPackages,
-  fetchPackage
+  fetchPackage,
+  fetchAllUtsavList,
+  utsavPendinglist
 } from '../../controllers/admin/utsavManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -34,7 +36,9 @@ router.get('/fetch', CatchAsync(fetchAllUtsav));
 router.get('/fetch/:id', CatchAsync(fetchUtsav));
 router.get('/fetchpackage/:id', CatchAsync(fetchPackage));
 router.get('/waitlist/:id', CatchAsync(utsavWaitlist));
+router.get('/pendinglist/:id', CatchAsync(utsavPendinglist));
 router.put('/:id/:activate', CatchAsync(activateUtsav));
 router.put('/status', CatchAsync(utsavStatusUpdate));
+router.get('/fetchList', CatchAsync(fetchAllUtsavList));
 
 export default router;

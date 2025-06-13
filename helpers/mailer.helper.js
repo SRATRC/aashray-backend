@@ -12,7 +12,9 @@ export async function sendCancellationEmail(
     cardno,
     bookingIds,
     bookedBy,
-    'Vitraag Vigyaan Aashray: Bookings Cancelled',
+    'Vitraag Vigyaan Aashray: Bookings Cancelled',  
+    'cancelled',
+    'We are sorry to inform you that your bookings have been cancelled.',
     'unifiedCancellationEmail'
   );
 }

@@ -1,42 +1,19 @@
 import {
-  STATUS_PAYMENT_PENDING,
-  STATUS_CONFIRMED,
-  STATUS_OPEN,
-  TYPE_UTSAV,
-  TYPE_GUEST_UTSAV,
-  MSG_BOOKING_SUCCESSFUL,
-  STATUS_CLOSED,
   ERR_BOOKING_NOT_FOUND,
   MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
-import {
-  UtsavDb,
-  UtsavPackagesDb,
-  UtsavBooking,
-  CardDb
-} from '../../models/associations.js';
-import { v4 as uuidv4 } from 'uuid';
-import {
-  createPendingTransaction,
-  generateOrderId,
-  updateRazorpayTransactions,
-  userCancelBooking
-} from '../../helpers/transactions.helper.js';
-import { createGuestsHelper } from '../helper.js';
-import sendMail from '../../utils/sendMail.js';
+import { UtsavBooking } from '../../models/associations.js';
+import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import moment from 'moment';
-import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-
 
 export const FetchUpcoming = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * (pageSize - 1);
 
   const utsavs = await database.query(
     `
@@ -45,6 +22,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.start_date AS utsav_start,
        t1.end_date AS utsav_end,
        t1.month AS utsav_month,
+       t1.location AS utsav_location,
        t1.status AS utsav_status,
        JSON_ARRAYAGG(
            JSON_OBJECT(
@@ -97,7 +75,6 @@ export const FetchUpcoming = async (req, res) => {
 export const ViewUtsavBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-
   const offset = (page - 1) * pageSize;
 
   const utsavs = await database.query(
@@ -108,10 +85,12 @@ export const ViewUtsavBookings = async (req, res) => {
        t2.start_date AS utsav_start_date,
        t2.end_date AS utsav_end_date,
        t2.month,
+       t2.location AS utsav_location,
        t1.packageid,
        t3.name AS package_name,
        t3.start_date AS package_start,
        t3.end_date AS package_end,
+       t1.volunteer,
        t1.cardno,
        t1.bookedBy,
        t5.issuedto AS user_name,

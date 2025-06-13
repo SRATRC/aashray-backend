@@ -1,12 +1,14 @@
 import fs from 'fs';
 import database from '../../config/database.js';
-import Countries from '../../models/countries.model.js';
-import States from '../../models/states.model.js';
-import Cities from '../../models/cities.model.js';
+import {
+  Countries,
+  States,
+  Cities,
+  CentreDb
+} from '../../models/associations.js';
 import _ from 'lodash';
 const { chunk } = _;
 
-// TODO: delete this route in production and all relevant files
 export const addData = async (req, res) => {
   const data = JSON.parse(fs.readFileSync('data.json', 'utf8'));
   const t = await database.transaction();
@@ -118,7 +120,13 @@ export const getCities = async (req, res) => {
   return res.status(200).send({ message: 'fetched cities', data: data });
 };
 
-
-
-
-
+export const getCentres = async (req, res) => {
+  const data = await CentreDb.findAll({
+    attributes: [
+      ['id', 'key'],
+      ['name', 'value']
+    ],
+    order: [['name', 'ASC']]
+  });
+  return res.status(200).send({ message: 'fetched centres', data: data });
+};

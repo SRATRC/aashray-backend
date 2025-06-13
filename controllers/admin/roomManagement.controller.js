@@ -57,6 +57,7 @@ import ApiError from '../../utils/ApiError.js';
 import {
   adjustAmount
 } from '../../helpers/transactions.helper.js';
+import { validateCard } from '../../helpers/card.helper.js';
 
 export const manualCheckin = async (req, res) => {
   const t = await database.transaction();
@@ -148,6 +149,7 @@ export const manualCheckout = async (req, res) => {
   }
 
   const nights = await calculateNights(booking.checkin, today);
+  const card = await validateCard(transaction.cardno);
 
   // early checkout
   if (today < booking.checkout) {
@@ -163,7 +165,7 @@ export const manualCheckout = async (req, res) => {
 
     if (newAmount < originalAmount) {
       await adjustAmount(
-        transaction.cardno,
+        card,
         booking,
         transaction,
         newAmount,
@@ -340,7 +342,7 @@ export const roomBooking = async (req, res) => {
       room_type,
       card.gender,
       floor_pref,
-      card.cardno,
+      card,
       t,
       true
     );
@@ -359,7 +361,7 @@ export const flatBooking = async (req, res) => {
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
   const card = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email'],
+    attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email', 'credits'],
     where: {
       mobno: req.params.mobno
     }
@@ -384,21 +386,27 @@ export const flatBooking = async (req, res) => {
     req.body.checkout_date
   );
 
+    const t = await database.transaction();
+  req.transaction = t;
+
   const booking = await createFlatBooking(
     card.cardno, 
     req.body.checkin_date, 
     req.body.checkout_date, 
     nights, 
     req.body.flat_no, 
-    card.cardno, 
+    card, 
     t,
     true
   );
 
-  let bookingIdMap = {};
-  bookingIdMap[TYPE_FLAT] = [booking.bookingId];
-  sendUnifiedEmail(card.cardno, bookingIdMap, card);
-
+    await t.commit();
+  if (booking.bookingId != null) {
+    let bookingIds = {};
+    bookingIds[TYPE_FLAT] = [booking.bookingId];
+    sendUnifiedEmail(card.cardno, bookingIds, card);
+  }
+  
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
@@ -509,7 +517,11 @@ export const roomList = async (req, res) => {
 };
 
 export const flatList = async (req, res) => {
-  const flats = await FlatDb.findAll();
+  const flats = await FlatDb.findAll({
+    attributes: [
+      [Sequelize.fn('DISTINCT', Sequelize.col('flatno')), 'flatno']
+    ]
+  });
   return res.status(200).send({ message: 'Success', data: flats });
 };
 

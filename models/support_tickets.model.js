@@ -1,8 +1,8 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
 
-const RazorpayWebhook = sequelize.define(
-  'RazorpayWebhook',
+const SupportTickets = sequelize.define(
+  'SupportTickets',
   {
     id: {
       type: DataTypes.INTEGER,
@@ -10,34 +10,27 @@ const RazorpayWebhook = sequelize.define(
       primaryKey: true,
       autoIncrement: true
     },
-    payment_id: {
+    issued_by: {
       type: DataTypes.STRING,
       allowNull: false,
-      index: true
+      references: {
+        model: 'card_db',
+        key: 'cardno'
+      }
     },
-    order_id: {
+    service: {
       type: DataTypes.STRING,
       allowNull: false
     },
-    status: {
+    issue: {
       type: DataTypes.STRING,
-      allowNull: false
-    },
-
-    json: {
-      type: DataTypes.JSON,
       allowNull: false
     }
   },
   {
-    tableName: 'razorpay_webhook',
-    timestamps: true,
-    indexes: [
-      {
-        fields: ['payment_id']
-      }
-    ]
+    tableName: 'support_tickets',
+    timestamps: true
   }
 );
 
-export default RazorpayWebhook;
+export default SupportTickets;

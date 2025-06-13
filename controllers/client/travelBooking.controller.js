@@ -74,18 +74,18 @@ export const CancelTravel = async (req, res) => {
 
   sendMail({
     email: req.user.email,
-     subject: 'Your Raj Pravas (Travel) booking has been cancelled',
-     template: 'rajPravasCancellation',
-     context: {
-       name: req.user.issuedto,
-       bookingid:bookingid,
-       date: booking.date,
-       pickup:booking.pickup_point,
-       drop:booking.drop_point
-     }
-   });
-   //bring people from the waiting to awaiting confrimation.
-   updateWaitingTravelBooking(booking.date);
-   
+    subject: 'Your Raj Pravas (Travel) booking has been cancelled',
+    template: 'rajPravasCancellation',
+    context: {
+      name: req.user.issuedto,
+      bookingid: bookingid,
+      date: booking.date,
+      pickup: booking.pickup_point,
+      drop: booking.drop_point
+    }
+  });
+  //bring people from the waiting to awaiting confrimation.
+  updateWaitingTravelBooking(booking.date);
+
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };

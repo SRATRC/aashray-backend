@@ -15,7 +15,8 @@ import {
   checkFlatAlreadyBooked,
   checkRoomBookingProgress,
   checkSpecialAllowance,
-  validateDate
+  validateDate,
+  validateBookingDatesBetweenUtsav
 } from '../controllers/helper.js';
 import {
   CardDb,
@@ -23,7 +24,7 @@ import {
   Transactions,
   UtsavDb
 } from '../models/associations.js';
-import { validateCards } from './card.helper.js';
+import { validateCard, validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { cancelTransaction } from './transactions.helper.js';
@@ -169,7 +170,7 @@ export async function bookFoodForGuests(
     });
     const event_start_date = new Date(utsav.start_date);
     const event_end_date = new Date(utsav.end_date);
-
+    validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
     if (new Date(start_date) < event_start_date) {
       const beforeEventDates = getDates(start_date, event_start_date);
       beforeEventDates.pop(); // Remove the event start date
@@ -191,6 +192,7 @@ export async function bookFoodForGuests(
   var bookingsToCreate = [];
   var transactionsToCreate = [];
   var amount = 0;
+  const userBookingIds = {};
 
   for (const group of guestGroup) {
     const { meals, spicy, high_tea, guests } = group;
@@ -202,6 +204,7 @@ export async function bookFoodForGuests(
     const mealSelections = { breakfast, lunch, dinner };
 
     for (const guest of guests) {
+      const bookingIds = [];
       for (const date of allDates) {
         const booking = bookings[guest] && bookings[guest][date];
 
@@ -233,9 +236,9 @@ export async function bookFoodForGuests(
             },
             { transaction: t }
           );
+
+          bookingIds.push(booking.id);
         } else {
-
-
           const bookingId = uuidv4();
 
           bookingsToCreate.push({
@@ -266,15 +269,19 @@ export async function bookFoodForGuests(
               });
             }
           });
+
+          bookingIds.push(bookingId);
         }
       }
+      userBookingIds[guest] = bookingIds;
     }
   }
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
-  await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+  const transactions = await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+  const transactionIds = transactions.map((item) => item.id);
 
-  return { amount };
+  return { amount, userBookingIds, transactionIds };
 }
 
 export async function validateFood(
@@ -348,7 +355,9 @@ export function createGroupFoodRequestForGuest(
   ];
 }
 
-export async function cancelFood(user, cardno, food_data, t, admin = false) {
+export async function cancelFood(user, bookedByCard, food_data, t, admin = false) {
+  const cardno = bookedByCard.cardno;
+  
   if (!cardno || !Array.isArray(food_data)) {
     return res.status(400).json({ message: 'Invalid request data' });
   }
@@ -369,7 +378,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
     });
 
     if (!booking) {
-      return; // Skip if no matching booking found
+      continue; // Skip if no matching booking found
     }
 
     // Create the update object: setting the specific meal to 0 (cancelled)
@@ -389,14 +398,13 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       // Find and update the transaction to mark it as credited
       const transaction = await Transactions.findOne({
         where: {
-          cardno,
           bookingid: booking.id,
           category: mealTypeMapping[mealType]
         }
       });
 
       if (transaction) {
-        await cancelTransaction(user, transaction, t, admin);
+        await cancelTransaction(user, bookedByCard, transaction, t, admin);
       }
     }
   }
@@ -411,11 +419,17 @@ export async function bookFoodForMumukshusDuringUtsav(
   updatedBy,
   t
 ) {
+  validateDate(start_date, end_date);
+
+  
+
   const utsav = await UtsavDb.findOne({
     where: { id: primary_booking.details.utsavid }
   });
   const event_start_date = new Date(utsav.start_date);
   const event_end_date = new Date(utsav.end_date);
+
+  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cards = await validateCards(mumukshus);

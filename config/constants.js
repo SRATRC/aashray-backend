@@ -17,13 +17,11 @@ export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 
 // PRICES
-export const BREAKFAST_PRICE = 50;
-export const LUNCH_PRICE = 100;
-export const DINNER_PRICE = 100;
+export const BREAKFAST_PRICE = 60;
+export const LUNCH_PRICE = 120;
+export const DINNER_PRICE = 120;
 export const NAC_ROOM_PRICE = 700;
 export const AC_ROOM_PRICE = 1100;
-export const TRAVEL_PRICE = 350; // TODO: each location has its price prices
-export const FULL_TRAVEL_PRICE = 1800;
 
 // STATUS
 export const STATUS_WAITING = 'waiting';
@@ -97,6 +95,8 @@ export const ERR_BLOCKED_DATES = 'Dates are blocked';
 
 export const ERR_ROOM_NO_BED_AVAILABLE = 'No beds available';
 export const ERR_ROOM_ALREADY_BOOKED = 'Room already booked';
+export const ERR_DATES_NOT_BETWEEN_UTSAV = 'Booking start/end date should be inclusive of Utsav Start/End date ';
+
 export const ERR_ROOM_NOT_FOUND = 'Room not found';
 export const ERR_ROOM_INVALID_DURATION = 'Invalid booking duration';
 export const ERR_ROOM_FAILED_TO_BOOK = 'Failed to book a room';
@@ -125,3 +125,10 @@ export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
+
+export const SUBJECT_BOOKING_PENDING = 'Vitraag Vigyaan Aashray: Bookings Temporarily Reserved';
+export const BOOKING_STATUS_PENDING = 'temporarily reserved';
+
+export const WELCOME_MESSAGE_PENDING = 'Your booking is temporarily reserved, but payment is required within 24 hours to confirm it';
+
+

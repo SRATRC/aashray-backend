@@ -23,25 +23,33 @@ import ShibirDb from './models/shibir_db.model.js';
 import { sendCancellationEmail } from './helpers/mailer.helper.js';
 import { getBooking, getBookingType, getBookingTypeFromBooking } from './helpers/booking.helper.js';
 import UtsavDb from './models/utsav_db.model.js';
+import { validateCard } from './helpers/card.helper.js';
 
-const MAX_APP_PAYMENT_DURATION = 12*60; // 12 hrs
+const MAX_APP_PAYMENT_DURATION = 24*60; // 24 hrs
 
 // Schedule the cron job to run every 10 minutes
 const job = cron.schedule('*/1 * * * *', async () => {
   logger.info('Cron job started');
 
   await database.authenticate();
-  const t = await database.transaction();
+
 
   const systemUser = AdminUsers.findOne({
     where: { username: "admin" } 
   });
 
   const userBookingIds = {};
-  try {
-    await cancelUnpaidOnlineBookings(systemUser, userBookingIds, t);
-    await cancelUnpaidPastBookings(systemUser, userBookingIds, t);
+  const transactions = [];
+  const bookings = [];
 
+  try {
+    const t = await database.transaction();
+
+    await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
+    await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+
+    await cancelBookings(systemUser, bookings, userBookingIds, t);
+    await cancelTransactions(systemUser, transactions, t);
     await t.commit();
 
     for (const cardno in userBookingIds) {
@@ -60,37 +68,64 @@ const job = cron.schedule('*/1 * * * *', async () => {
 job.stop();
 job.start();
 
-async function cancelUnpaidOnlineBookings(systemUser, userBookingIds, t) {
-  const cancelTimeFilter = moment.utc().subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
-  const transactions = await getPendingTransactions(cancelTimeFilter);
+async function cancelTransactions(systemUser, transactions, t) {
+  const transactionsByCard = transactions.reduce((acc, transaction) => {
+    const cardno = transaction.cardno;
+    acc[cardno] = acc[cardno] || [];
+    acc[cardno].push(transaction);
+    return acc;
+  }, {});
 
-  for (const transaction of transactions) {
-    const bookingType = getBookingType(transaction);
-    const booking = await getBooking(bookingType, transaction.bookingid);
+  for (const cardno in transactionsByCard) {
+    const cardTransactions = transactionsByCard[cardno];
+    const card = await validateCard(cardno);
 
-    if (bookingType == TYPE_FOOD) {
-      await cancelFoodBooking(systemUser, booking, transaction, t)
-    } else {
-      await cancelBooking(systemUser, userBookingIds, booking, t);
-      await adminCancelTransaction(systemUser, transaction, t);
+    for (const transaction of cardTransactions) {
+      const bookingType = getBookingType(transaction);
+      if (bookingType == TYPE_FOOD) {
+        logger.info("Cancelling Food Transaction : " + JSON.stringify(transaction.id));
+        await cancelFoodTransaction(systemUser, card, transaction, t)
+      } else {
+        logger.info("Cancelling Transaction : " + JSON.stringify(transaction.id));
+        await adminCancelTransaction(systemUser, card, transaction, t);
+      }
     }
   }
 }
 
-async function cancelBooking(user, userBookingIds, booking, t) {
-  await booking.update(
-    {
-      status: STATUS_ADMIN_CANCELLED,
-      updatedBy: user.username
-    },
-    { transaction: t }
-  );
+async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
+  const cancelTimeFilter = moment.utc().subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
+  const pendingTransactions = await getPendingTransactions(cancelTimeFilter);
 
-  addToUserBookingIdMap(userBookingIds, booking);
+  for (const transaction of pendingTransactions) {
+    const bookingType = getBookingType(transaction);
+    // TODO: optimize, get all bookings at once
+    
+    // Food bookings are handled in a special way
+    if (bookingType != TYPE_FOOD) {
+      const booking = await getBooking(bookingType, transaction.bookingid);
+      bookings.push(booking);
+    }
+    transactions.push(transaction);
+  }
 }
 
-async function cancelFoodBooking(user, booking, transaction, t) {
-  const bookedBy = booking.bookedBy || booking.cardno;
+async function cancelBookings(systemUser, bookings, userBookingIds, t) {
+  for (const booking of bookings) {
+    logger.info("Cancelling Booking " + JSON.stringify(booking.bookingid));
+    await booking.update(
+      {
+        status: STATUS_ADMIN_CANCELLED,
+        updatedBy: systemUser.username
+      },
+      { transaction: t }
+    );
+    addToUserBookingIdMap(userBookingIds, booking);
+  }
+}
+
+async function cancelFoodTransaction(user, bookedByCard, transaction, t) {
+  const booking = await getBooking(TYPE_FOOD, transaction.bookingid);
   const bookedFor = booking.bookedBy ? booking.cardno : null;
 
   const foodData = [];
@@ -102,7 +137,7 @@ async function cancelFoodBooking(user, booking, transaction, t) {
 
   await cancelFood(
     user, 
-    bookedBy, 
+    bookedByCard, 
     foodData, 
     t, 
     true);
@@ -110,33 +145,25 @@ async function cancelFoodBooking(user, booking, transaction, t) {
 
 function addToUserBookingIdMap(userBookingIds, booking) {
   const bookingType = getBookingTypeFromBooking(booking);
-  const cardnos = [booking.cardno];
-  // if (booking.bookedBy) {
-  //   cardnos.push(booking.bookedBy);
-  // }
+  const cardno = booking.cardno;
 
-  cardnos.forEach((cardno) => {
-    const bookingTypeIds = userBookingIds[cardno] || {};
-    const bookingIds = bookingTypeIds[bookingType] || [];
-  
-    bookingIds.push(booking.bookingid);
-    bookingTypeIds[bookingType] = bookingIds;
-    userBookingIds[cardno] = bookingTypeIds;
-  });
+  const bookingIdsByType = userBookingIds[cardno] || {};
+  const bookingIds = bookingIdsByType[bookingType] || [];
+
+  bookingIds.push(booking.bookingid);
+  bookingIdsByType[bookingType] = bookingIds;
+  userBookingIds[cardno] = bookingIdsByType;
 }
 
-async function cancelUnpaidPastBookings(systemUser, userBookingIds, t) {
-  const bookings = await getUnpaidPastBookings();
-  for (const booking of bookings) {
-    await cancelBooking(systemUser, userBookingIds, booking, t);
-  }
+async function getUnpaidPastBookingsAndTransactions(bookings, transactions) {
+  const pastBookings = await getUnpaidPastBookings();
 
-  const transactions = await Transactions.findAll({
-    where: { bookingid: bookings.map(i => i.bookingid) }
+  const pastTransactions = await Transactions.findAll({
+    where: { bookingid: pastBookings.map(i => i.bookingid) }
   });
-  for (const transaction of transactions) {
-    await adminCancelTransaction(systemUser, transaction, t);
-  } 
+
+  bookings.push(...pastBookings);
+  transactions.push(...pastTransactions);
 }
 
 async function getUnpaidPastBookings() {

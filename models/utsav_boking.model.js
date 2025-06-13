@@ -58,6 +58,10 @@ const UtsavBooking = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
+    volunteer: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     other: {
       type: DataTypes.STRING,
       allowNull: true
@@ -72,7 +76,7 @@ const UtsavBooking = sequelize.define(
         STATUS_WAITING,
         STATUS_ADMIN_CANCELLED,
         STATUS_CASH_COMPLETED,
-        STATUS_CASH_PENDING  
+        STATUS_CASH_PENDING
       ]
     },
     updatedBy: {

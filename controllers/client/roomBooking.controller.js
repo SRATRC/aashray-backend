@@ -7,7 +7,10 @@ import {
   TYPE_GUEST_ROOM,
   TYPE_FLAT,
   ERR_FLAT_ALREADY_BOOKED,
-  STATUS_PAYMENT_PENDING
+  STATUS_PAYMENT_PENDING,
+  SUBJECT_BOOKING_PENDING,
+  BOOKING_STATUS_PENDING,
+  WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
   validateDate,
@@ -20,17 +23,17 @@ import {
   userCancelBooking
 } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
+import { createFlatBooking } from '../../helpers/roomBooking.helper.js';
+import { generateOrderId } from '../../helpers/transactions.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-import { createFlatBooking } from '../../helpers/roomBooking.helper.js';
-import { generateOrderId } from '../../helpers/transactions.helper.js';
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * pageSize;
+  const offset = (page - 1) * (pageSize - 1);
 
   const user_bookings = await database.query(
     `
@@ -50,9 +53,11 @@ FROM
           t1.status,
           t1.gender
    FROM room_booking t1
+   WHERE t1.cardno = :cardno
+     OR t1.bookedBy = :cardno
    UNION SELECT t4.bookingid,
           t4.cardno AS bookedFor,
-          NULL AS bookedBy,
+          t4.bookedBy bookedBy,
           t4.flatno AS roomno,
           t4.checkin,
           t4.checkout,
@@ -60,12 +65,11 @@ FROM
           'flat' AS roomtype,
           t4.status,
           NULL AS gender
-   FROM flat_booking t4) AS combined
+   FROM flat_booking t4)
+   AS combined
    LEFT JOIN transactions t2 ON combined.bookingid = t2.bookingid
    AND t2.category IN (:category)
    LEFT JOIN card_db t3 ON t3.cardno = combined.bookedFor
-   WHERE combined.bookedFor = :cardno
-     OR combined.bookedBy = :cardno
    ORDER BY combined.checkin DESC
    LIMIT :limit
    OFFSET :offset;
@@ -73,7 +77,7 @@ FROM
     {
       replacements: {
         cardno: req.user.cardno,
-        category: [TYPE_ROOM, TYPE_GUEST_ROOM],
+        category: [TYPE_ROOM, TYPE_GUEST_ROOM, TYPE_FLAT],
         limit: pageSize,
         offset: offset
       },
@@ -163,7 +167,8 @@ export const FlatBookingMumukshu = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const userBookingIds = {},bookingIds = [];
+  const userBookingIds = {},
+    bookingIds = [];
   let amount = 0;
   for (var mumukshu of mumukshus) {
     const booking = await createFlatBooking(
@@ -172,27 +177,27 @@ export const FlatBookingMumukshu = async (req, res) => {
       endDay,
       nights,
       flatDb.dataValues.flatno,
-      req.user.cardno,
+      req.user,
       t
     );
     amount += booking.discountedAmount;
     userBookingIds[mumukshu['cardno']] = [booking.bookingId];
     bookingIds.push(booking.bookingId);
   }
-  
+
   const order = await generateOrderId(amount);
-  await updateRazorpayTransactions(bookingIds, order.id, t);
+  await updateRazorpayTransactions(bookingIds, [], order.id, t);
 
   await t.commit();
 
-  sendUnifiedEmail(null,{[TYPE_FLAT] : bookingIds}, req.user);
+  sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user, SUBJECT_BOOKING_PENDING, BOOKING_STATUS_PENDING, WELCOME_MESSAGE_PENDING);
 
   Object.entries(userBookingIds)
-  .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
-  .forEach(([guestCardNo, bookings]) => {
-    // Create the single-entry bookingMap object directly when calling the function
-    sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user);
-  });
+    .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
+    .forEach(([guestCardNo, bookings]) => {
+      // Create the single-entry bookingMap object directly when calling the function
+      sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user, SUBJECT_BOOKING_PENDING, BOOKING_STATUS_PENDING, WELCOME_MESSAGE_PENDING);
+    });
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
 };

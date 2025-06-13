@@ -27,7 +27,6 @@ export const FetchAllShibir = async (req, res) => {
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-
   const offset = (page - 1) * pageSize;
 
   const shibirs = await ShibirDb.findAll({
@@ -154,7 +153,6 @@ export const FetchBookedShibir = async (req, res) => {
 //   return res.status(200).send({ message: 'Shibir booking cancelled' });
 // };
 
-
 export const CancelShibir = async (req, res) => {
   const { bookingid } = req.body;
 
@@ -162,12 +160,12 @@ export const CancelShibir = async (req, res) => {
   req.transaction = t;
 
   const booking = await ShibirBookingDb.findOne({
-    where: { 
+    where: {
       bookingid: bookingid,
       [Sequelize.Op.or]: [
         { cardno: req.user.cardno },
         { bookedBy: req.user.cardno }
-      ],
+      ]
     }
   });
 
@@ -208,9 +206,9 @@ export const CancelShibir = async (req, res) => {
         title: 'Booking Cancelled',
         body: `Your booking for "${adhyayan.name}" has been cancelled.`,
         screen: 'CancelledBookings',
-        data: { 
-          shibir_id: adhyayan.id, 
-          status: 'cancelled' 
+        data: {
+          shibir_id: adhyayan.id,
+          status: 'cancelled'
         }
       }
     ]);

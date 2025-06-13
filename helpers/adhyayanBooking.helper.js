@@ -12,7 +12,7 @@ import {
 import { ShibirBookingDb, ShibirDb } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
-import { validateCards } from './card.helper.js';
+import { validateCard, validateCards } from './card.helper.js';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
@@ -27,11 +27,11 @@ export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   return result;
 }
 
-export async function checkAdhyayanAlreadyBooked(shibirIds, ...mumukshus) {
+export async function checkAdhyayanAlreadyBooked(shibirIds, ...users) {
   const booking = await ShibirBookingDb.findOne({
     where: {
       shibir_id: shibirIds,
-      cardno: mumukshus,
+      cardno: users,
       status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING]
     }
   });
@@ -88,11 +88,12 @@ export async function validateAdhyayanBooking(bookingId, shibirId) {
   return booking;
 }
 
-export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
-  let amount = 0,waitingBookingCount = 0;
+export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
+  let amount = 0,
+    waitingBookingCount = 0;
   const userBookingIds = {};
 
-  for (const mumukshu of mumukshus) {
+  for (const booking_user of users) {
     const bookingIds = [];
     for (const adhyayan of adhyayans) {
       const bookingId = uuidv4();
@@ -102,8 +103,8 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
-            cardno: mumukshu,
-            bookedBy: user.cardno !== mumukshu ? user.cardno : null,
+            cardno: booking_user,
+            bookedBy: user.cardno !== booking_user ? user.cardno : null,
             shibir_id: adhyayan.id,
             status:
               adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED,
@@ -114,7 +115,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
 
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
-            user.cardno,
+            user,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
@@ -128,7 +129,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
         await ShibirBookingDb.create(
           {
             bookingid: bookingId,
-            cardno: mumukshu,
+            cardno: booking_user,
             shibir_id: adhyayan.id,
             status: STATUS_WAITING
           },
@@ -138,7 +139,7 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...mumukshus) {
       }
       bookingIds.push(bookingId);
     }
-    userBookingIds[mumukshu] = bookingIds;
+    userBookingIds[booking_user] = bookingIds;
   }
 
   return { amount, userBookingIds, waitingBookingCount };
@@ -176,8 +177,9 @@ export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
 
     // for a booking in waiting status, there should be no existing transaction
     const bookedBy = booking.bookedBy || booking.cardno;
+    const card = await validateCard(bookedBy);
     const transaction = await createPendingTransaction(
-      bookedBy,
+      card,
       booking,
       TYPE_ADHYAYAN,
       adhyayan.amount,
