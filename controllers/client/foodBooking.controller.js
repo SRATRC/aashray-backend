@@ -173,11 +173,11 @@ export const CancelFood = async (req, res) => {
 
   const { cardno, food_data } = req.body;
 
-  if (!Array.isArray(food_data)) {
+  if (!cardno || !Array.isArray(food_data)) {
     return res.status(400).json({ message: 'Invalid request data' });
   }
 
-  await cancelFood(req.user, req.user, food_data, t);
+  await cancelFood(req.user, cardno, food_data, t);
 
   await t.commit();
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });

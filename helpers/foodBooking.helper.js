@@ -27,7 +27,7 @@ import {
 import { validateCard, validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { cancelTransaction } from './transactions.helper.js';
+import { cancelTransaction, cancelTransactions } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
@@ -355,14 +355,32 @@ export function createGroupFoodRequestForGuest(
   ];
 }
 
-export async function cancelFood(user, bookedByCard, food_data, t, admin = false) {
-  const cardno = bookedByCard.cardno;
+export async function cancelMeal(user, bookingId, mealType, t) {
+  // Create the update object: setting the specific meal to 0 (cancelled)
+  const updateFields = {};
 
+  if (mealType === 'breakfast') updateFields.breakfast = 0;
+  if (mealType === 'lunch') updateFields.lunch = 0;
+  if (mealType === 'dinner') updateFields.dinner = 0;
+
+  updateFields.updatedBy = user.username;
+
+  // Update the meal booking
+  await FoodDb.update(
+    updateFields, 
+    {
+      where: { id: bookingId },
+      transaction: t
+    }
+  );
+}
+
+export async function cancelFood(user, cardno, food_data, t, admin = false) {
   const today = moment().format('YYYY-MM-DD');
   const validDate = admin ? today : today + 1;
   const validFoodData = food_data.filter((item) => item.date >= validDate);
 
-  const transactionsByCardno = {};
+  const transactions = [];
 
   for (const item of validFoodData) {
     const { date, mealType, bookedFor } = item;
@@ -379,17 +397,7 @@ export async function cancelFood(user, bookedByCard, food_data, t, admin = false
       continue; // Skip if no matching booking found
     }
 
-    // Create the update object: setting the specific meal to 0 (cancelled)
-    const updateFields = {};
-    if (mealType === 'breakfast') updateFields.breakfast = 0;
-    if (mealType === 'lunch') updateFields.lunch = 0;
-    if (mealType === 'dinner') updateFields.dinner = 0;
-
-    // Update the meal booking
-    await FoodDb.update(updateFields, {
-      where: { id: booking.id },
-      transaction: t
-    });
+    await cancelMeal(user, booking.id, mealType, t);
 
     // Handle guest meal transaction cancellation
     if (bookedFor) {
@@ -402,13 +410,12 @@ export async function cancelFood(user, bookedByCard, food_data, t, admin = false
       });
 
       if (transaction) {
-        // await cancelTransaction(user, bookedByCard, transaction, t, admin);
-        if (!transactionsByCardno[transaction.cardno]) {
-
-        }
+        transactions.push(transaction);
       }
     }
   }
+
+  await cancelTransactions(user, transactions, t, admin);
 }
 
 export async function bookFoodForMumukshusDuringUtsav(

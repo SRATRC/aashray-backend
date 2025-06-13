@@ -1,6 +1,6 @@
 import './config/environment.js';
 import moment from 'moment';
-import { adminCancelTransaction, getPendingTransactions } from './helpers/transactions.helper.js';
+import { adminCancelTransaction, cancelTransactions, getPendingTransactions } from './helpers/transactions.helper.js';
 import database from './config/database.js';
 import cron from 'node-cron';
 import logger from './config/logger.js';
@@ -14,7 +14,7 @@ import RoomBooking from './models/room_booking.model.js';
 import ShibirBookingDb from './models/shibir_booking_db.model.js';
 import TravelDb from './models/travel_db.model.js';
 import AdminUsers from './models/admin_users.model.js';
-import { cancelFood } from './helpers/foodBooking.helper.js';
+import { cancelFood, cancelMeal } from './helpers/foodBooking.helper.js';
 import UtsavBooking from './models/utsav_boking.model.js';
 import FlatBooking from './models/flat_booking.model.js';
 import { Sequelize } from 'sequelize';
@@ -49,7 +49,8 @@ const job = cron.schedule('*/1 * * * *', async () => {
     await getUnpaidPastBookingsAndTransactions(bookings, transactions);
 
     await cancelBookings(systemUser, bookings, userBookingIds, t);
-    await cancelTransactions(systemUser, transactions, t);
+    await cancelTransactions(systemUser, transactions, t, true);
+    await cancelMeals(systemUser, transactions, t);
     await t.commit();
 
     for (const cardno in userBookingIds) {
@@ -68,27 +69,16 @@ const job = cron.schedule('*/1 * * * *', async () => {
 job.stop();
 job.start();
 
-async function cancelTransactions(systemUser, transactions, t) {
-  const transactionsByCard = transactions.reduce((acc, transaction) => {
-    const cardno = transaction.cardno;
-    acc[cardno] = acc[cardno] || [];
-    acc[cardno].push(transaction);
-    return acc;
-  }, {});
-
-  for (const cardno in transactionsByCard) {
-    const cardTransactions = transactionsByCard[cardno];
-    const card = await validateCard(cardno);
-
-    for (const transaction of cardTransactions) {
-      const bookingType = getBookingType(transaction);
-      if (bookingType == TYPE_FOOD) {
-        logger.info("Cancelling Food Transaction : " + JSON.stringify(transaction.id));
-        await cancelFoodTransaction(systemUser, card, transaction, t)
-      } else {
-        logger.info("Cancelling Transaction : " + JSON.stringify(transaction.id));
-        await adminCancelTransaction(systemUser, card, transaction, t);
-      }
+async function cancelMeals(systemUser, transactions, t) {
+  for (const transaction of transactions) {
+    const bookingType = getBookingType(transaction);
+    if (bookingType == TYPE_FOOD) {
+      await cancelMeal(
+        systemUser, 
+        transaction.bookingid, 
+        transaction.category, 
+        t
+      );
     }
   }
 }
@@ -122,25 +112,6 @@ async function cancelBookings(systemUser, bookings, userBookingIds, t) {
     );
     addToUserBookingIdMap(userBookingIds, booking);
   }
-}
-
-async function cancelFoodTransaction(user, bookedByCard, transaction, t) {
-  const booking = await getBooking(TYPE_FOOD, transaction.bookingid);
-  const bookedFor = booking.bookedBy ? booking.cardno : null;
-
-  const foodData = [];
-  foodData.push({
-    date: booking.date,
-    mealType: transaction.category,
-    bookedFor
-  });
-
-  await cancelFood(
-    user, 
-    bookedByCard, 
-    foodData, 
-    t, 
-    true);
 }
 
 function addToUserBookingIdMap(userBookingIds, booking) {
