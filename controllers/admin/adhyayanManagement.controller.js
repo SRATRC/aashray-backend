@@ -293,7 +293,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
   });
 
   const cardno = booking.bookedBy || booking.cardno;
-  const card = await validateCard(cardno);
+  const bookedByCard = await validateCard(cardno);
 
   // 1. Booking Status = WAITING, Transaction is Not Created
   // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
@@ -313,7 +313,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
       if (!transaction) {
         transaction = await createPendingTransaction(
-          card,
+          bookedByCard,
           booking,
           TYPE_ADHYAYAN,
           adhyayan.amount,
@@ -353,7 +353,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
         if (!transaction) {
           transaction = await createPendingTransaction(
-            card,
+            bookedByCard,
             booking,
             TYPE_ADHYAYAN,
             adhyayan.amount,
@@ -381,7 +381,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
       }
 
       if (transaction) {
-        await adminCancelTransaction(req.user, transaction, t);
+        await adminCancelTransaction(req.user, bookedByCard, transaction, t);
       }
       break;
 

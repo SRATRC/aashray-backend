@@ -112,13 +112,11 @@ export const unifiedBooking = async (req, res) => {
   if (Object.keys(waitingBookingCountMap).length > 0) {
     message = MSG_BOOKING_WAITING;
   }
-  return res
-    .status(200)
-    .send({
-      message: message,
-      data: order,
-      waitingBookingCountMap: waitingBookingCountMap
-    });
+  return res.status(200).send({
+    message: message,
+    data: order,
+    waitingBookingCountMap: waitingBookingCountMap
+  });
 };
 
 export const validateBooking = async (req, res) => {
@@ -133,18 +131,18 @@ export const validateBooking = async (req, res) => {
     totalCharge: 0
   };
   let utsav = null;
-  if(primary_booking.booking_type == TYPE_UTSAV) {
+  if (primary_booking.booking_type == TYPE_UTSAV) {
     utsav = await UtsavDb.findOne({
       where: {
         id: primary_booking.details.utsavid
       }
     });
   }
-  await validate(req.body, req.user, primary_booking, response,utsav);
+  await validate(req.body, req.user, primary_booking, response, utsav);
 
   if (addons) {
     for (const addon of addons) {
-      await validate(req.body, req.user, addon, response,utsav);
+      await validate(req.body, req.user, addon, response, utsav);
     }
   }
 
@@ -222,12 +220,12 @@ async function book(
   return amount;
 }
 
-async function validate(body, user, data, response,utsav) {
+async function validate(body, user, data, response, utsav) {
   let totalCharge = 0;
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(user, data,utsav);
+      response.roomDetails = await checkRoomAvailability(user, data, utsav);
       totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -235,7 +233,12 @@ async function validate(body, user, data, response,utsav) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(user, body, data,utsav);
+      response.foodDetails = await checkFoodAvailability(
+        user,
+        body,
+        data,
+        utsav
+      );
       // food charges are not added for Mumukshus
       break;
 
@@ -363,6 +366,7 @@ async function bookTravel(user, data, t) {
     comments,
     type,
     arrival_time = null,
+    total_people = 1,
     leaving_post_adhyayan
   } = data.details;
 
@@ -377,6 +381,7 @@ async function bookTravel(user, data, t) {
         comments,
         type,
         arrival_time,
+        total_people,
         leaving_post_adhyayan
       }
     ],
@@ -422,7 +427,7 @@ async function bookUtsav(user, data, t) {
   return result;
 }
 
-async function checkRoomAvailability(user, data,utsav) {
+async function checkRoomAvailability(user, data, utsav) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
   validateDate(checkin_date, checkout_date);
@@ -430,44 +435,52 @@ async function checkRoomAvailability(user, data,utsav) {
 
   const gender = floor_pref ? floor_pref + user.gender : user.gender;
 
-  if(utsav){
-    
-    return checkRoomAvailabilityDuringUtsav(checkin_date, checkout_date, room_type, gender, utsav,user.cardno,user);
-
-  }else{  
-  const nights = await calculateNights(checkin_date, checkout_date);
-
-  var status = STATUS_WAITING;
-  var charge = 0;
-  var availableCredits = 0;
-
-  if (nights > 0) {
-    const roomno = await findRoom(
+  if (utsav) {
+    return checkRoomAvailabilityDuringUtsav(
       checkin_date,
       checkout_date,
       room_type,
-      gender
+      gender,
+      utsav,
+      user.cardno,
+      user
     );
-    if (roomno) {
-      status = STATUS_AVAILABLE;
-      charge = roomCharge(room_type) * nights;
-      availableCredits = usableCredits(user, TYPE_ROOM, charge);
-    }
   } else {
-    status = STATUS_AVAILABLE;
+    const nights = await calculateNights(checkin_date, checkout_date);
+
+    var status = STATUS_WAITING;
+    var charge = 0;
+    var availableCredits = 0;
+
+    if (nights > 0) {
+      const roomno = await findRoom(
+        checkin_date,
+        checkout_date,
+        room_type,
+        gender
+      );
+      if (roomno) {
+        status = STATUS_AVAILABLE;
+        charge = roomCharge(room_type) * nights;
+        availableCredits = usableCredits(user, TYPE_ROOM, charge);
+      }
+    } else {
+      status = STATUS_AVAILABLE;
+    }
+
+    return [
+      {
+        mumukshu: user.cardno,
+        status: status,
+        charge: charge,
+        availableCredits: availableCredits,
+        dates: checkin_date + ' to ' + checkout_date
+      }
+    ];
   }
-
-  return [{
-    mumukshu: user.cardno,
-    status: status,
-    charge: charge,
-    availableCredits: availableCredits,
-    dates: checkin_date+" to "+checkout_date
-  }];
-}
 }
 
-async function checkFoodAvailability(user, body, data,utsav) {
+async function checkFoodAvailability(user, body, data, utsav) {
   const { start_date, end_date } = data.details;
 
   validateDate(start_date, end_date);

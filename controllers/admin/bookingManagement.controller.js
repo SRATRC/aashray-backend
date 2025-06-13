@@ -64,7 +64,7 @@ export const cancelBooking = async (req, res) => {
 
   var result = null;
   if (transaction) {
-    result = await adminCancelTransaction(req.user, transaction, t);
+    result = await adminCancelTransaction(req.user, null, transaction, t);
   }
 
   await booking.update(

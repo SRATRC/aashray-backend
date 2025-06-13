@@ -20,6 +20,7 @@ import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
 import { getBookingType } from './booking.helper.js';
+import { validateCard } from './card.helper.js';
 
 export async function createPendingTransaction(
   card,
@@ -60,7 +61,7 @@ export async function userCancelBooking(user, booking, t) {
   });
 
   if (transaction) {
-    await userCancelTransaction(user, transaction, t);
+    await userCancelTransaction(user, null, transaction, t);
   }
 
   await booking.update(
@@ -72,16 +73,21 @@ export async function userCancelBooking(user, booking, t) {
   );
 }
 
-export async function adminCancelTransaction(user, transaction, t) {
-  return await cancelTransaction(user, transaction, t, true);
+export async function adminCancelTransaction(user, card, transaction, t) {
+  return await cancelTransaction(user, card, transaction, t, true);
 }
 
-export async function userCancelTransaction(user, transaction, t) {
-  return await cancelTransaction(user, transaction, t, false);
+export async function userCancelTransaction(user, card, transaction, t) {
+  return await cancelTransaction(user, card, transaction, t, false);
 }
 
-export async function cancelTransaction(user, transaction, t, admin = false) {
+export async function cancelTransaction(user, card, transaction, t, admin = false) {
   console.log('>> Cancel Transaction: Current status =', transaction.status);
+
+  if (!card) {
+    card = await validateCard(transaction.cardno);
+  }
+
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
   var description = transaction.description;
 
@@ -93,14 +99,6 @@ export async function cancelTransaction(user, transaction, t, admin = false) {
       : transaction.discount;
 
   const bookingType = getBookingType(transaction);
-
-  const card = await CardDb.findOne({
-    where: { cardno: transaction.cardno }
-  });
-
-  if (!card) {
-    throw new ApiError(404, ERR_CARD_NOT_FOUND);
-  }
 
   switch (transaction.status) {
     case STATUS_PAYMENT_COMPLETED:

@@ -24,7 +24,7 @@ import {
   Transactions,
   UtsavDb
 } from '../models/associations.js';
-import { validateCards } from './card.helper.js';
+import { validateCard, validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { cancelTransaction } from './transactions.helper.js';
@@ -355,7 +355,9 @@ export function createGroupFoodRequestForGuest(
   ];
 }
 
-export async function cancelFood(user, cardno, food_data, t, admin = false) {
+export async function cancelFood(user, bookedByCard, food_data, t, admin = false) {
+  const cardno = bookedByCard.cardno;
+  
   if (!cardno || !Array.isArray(food_data)) {
     return res.status(400).json({ message: 'Invalid request data' });
   }
@@ -376,7 +378,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
     });
 
     if (!booking) {
-      return; // Skip if no matching booking found
+      continue; // Skip if no matching booking found
     }
 
     // Create the update object: setting the specific meal to 0 (cancelled)
@@ -396,14 +398,13 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       // Find and update the transaction to mark it as credited
       const transaction = await Transactions.findOne({
         where: {
-          cardno,
           bookingid: booking.id,
           category: mealTypeMapping[mealType]
         }
       });
 
       if (transaction) {
-        await cancelTransaction(user, transaction, t, admin);
+        await cancelTransaction(user, bookedByCard, transaction, t, admin);
       }
     }
   }
