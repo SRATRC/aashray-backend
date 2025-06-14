@@ -13,12 +13,12 @@
             <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
         </div>
         <div class="content" >
-            <h1>Booking {{bookingStatus}}</h1>
-            <p class="intro">Dear {{name}},</p> <p class="intro"> {{welcomeMessage}}.Here are the details of your bookings:</p>
+            <h1>Bookings {{bookingStatus}}</h1>
+            <p class="intro">Dear {{name}},</p> <p class="intro"> {{welcomeMessage}} Here are the details of your bookings:</p>
            
          {{#if showUtsavDetail}}
             <div class="details">
-                <p class="section-title"><strong>Raj Utsav - Booking:</strong></p>
+                <p class="section-title"><strong>Raj Utsav Booking:</strong></p>
                 <table>
                     <thead> <tr>
                             <th>BookingId</th>
@@ -105,7 +105,7 @@
 
             {{#if showAdhyanDetail}}
              <div class="details" >
-                <p class="section-title"><strong>Raj Adhyayan:</strong></p>
+                <p class="section-title"><strong>Raj Adhyayan Booking:</strong></p>
                 <table>
                    <thead>
                         <tr>
@@ -141,7 +141,7 @@
 
            {{#if showTravelDetail}}
              <div class="details" >
-                <p class="section-title"><strong>Raj Pravas:</strong></p>
+                <p class="section-title"><strong>Raj Pravas - Travel Booking:</strong></p>
                 <table>
                    <thead>
                        <tr>
@@ -168,16 +168,21 @@
                 </table>
             </div>
             {{/if}}
+
+            {{#if showTravelConfirmationDetail}}
+              {{> _rajPravasConfirmation}}
+            {{/if}}
+
             <div class="details">
-                <p class="section-title"><strong></strong>Booking Status Definitions</strong></p>
+                <p class="section-title"><strong>Booking Status Definitions</strong></p>
                 <p><b>pending:</b> This means you need to complete your payment within 24 hours to secure your booking on the Vitraag Vigyaan Aashray mobile app.</p>
                 <p><b>waiting:</b> This indicates that your booking has been received and is awaiting confirmation from the administrator.</p>
-                <p><b>awaiting confirmation:</b>Your travel booking details have been submitted and are being reviewed by the administrator. 
+                <p><b>awaiting confirmation:</b> Your travel booking details have been submitted and are being reviewed by the administrator. 
                           Once reviewed, the status will change to <b>proceed for payment.</b></p>
                 <p><b>proceed for payment:</b> Your travel booking is approved and payment need to be made on the Vitraag Vigyaan Aashray mobile app.</p>
                 <p><b>confirmed:</b> Great news! Your booking has been successfully confirmed.</p>
-
             </div>
+
             {{#if showNRIRelatedDetails}}
             <div class="details">
                 <p class="section-title"><strong>NRIs</strong></p>
@@ -185,48 +190,14 @@
                     You can make payment for booking at Research Center.</p>
             </div>
             {{/if}}
-            {{#if showTravelConfirmationDetail}}
-            <div class="details">
-                <p class="section-title"><strong>Standard Pickup Locations and Timings for Raj Pravas</strong></p>
-                <table>
-                   <thead>
-                       <tr>
-                           <th>From Mumbai to Research Center:</th>
-                           <th>From Research Center to Mumbai</th>
-                       </tr>
-                   </thead>
-                   <tbody>
-                       <tr>
-                           <td> <ul>
-                    <li>Dadar Swaminarayan Temple - 8:00 am</li>
-                    <li>Amar Mahal - Chembur / Ghatkopar - 8:20 am</li>
-                    <li>Mulund - Airoli Junction - 8:40 am</li>
-                </ul></td>
-                <td> 
 
-                        <li>Reception Area at 1:00 pm</li>
-                    </ul>
-                </td>
-                       </tr>
-            </tbody>
-            </table>
-            </div>
             <div class="steps">
-                <h2>Travel Confirmation</h2>
-                <p>You can coordinate with Sandeep Driver at <b>+91-9769975704</b> only on the date of your travel.</p>
-                <p>Please read the Raj Pravas guidelines carefully: <a class="link" href="https://drive.google.com/file/d/1kodGs34F8W3m8GHfm3bMzROaUGNoIVav/view?usp=sharing" target="_blank">Click here for guidelines.</a></p>
-
-            </div>
-            {{/if}}
-
-            <div>
               <p>You can view all your bookings, booking statuses and make any pending payments on the <a href="https://aashray.vitraagvigyaan.org">Vitraag Vigyaan Aashray mobile app</a>.</p>
-            </div>
-            <div>
-              <p> <a href='https://aashray.vitraagvigyaan.org/files/rc_guidelines.pdf' target='_blank' class="link">Please click here</a> to read the guidelines for your stay at the Research Center. We hope you have a spiritually blissful stay.</p>
+              <p> <a href='https://drive.google.com/file/d/1nTqWPlsiFZUc_rulepkbo7eLYaM3MidM/view' target='_blank' class="link">Please click here</a> to read the guidelines for your stay at the Research Center. We hope you have a spiritually blissful stay.</p>
               <p>If you have any questions or need further assistance, please feel free to contact us at <b>+91-7875432613 / +91-9004273512</b>.</p>
            </div>
-       </div> <div class="footer">
+       </div>
+       <div class="footer">
           &copy; 2025 SRATRC. All rights reserved.
         </div>
     </div>
