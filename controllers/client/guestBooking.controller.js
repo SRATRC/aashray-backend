@@ -92,13 +92,23 @@ export const guestBooking = async (req, res) => {
 
   switch (primary_booking.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(primary_booking, t, req.user);
+      const roomResult = await bookRoom(
+        primary_booking,
+        primary_booking,
+        t,
+        req.user
+      );
       amount += roomResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
-      const foodResult = await bookFood(primary_booking, t, req.user);
+      const foodResult = await bookFood(
+        primary_booking,
+        primary_booking,
+        t,
+        req.user
+      );
       amount += foodResult.amount;
       transactionIds.push(...foodResult.transactionIds);
       break;
