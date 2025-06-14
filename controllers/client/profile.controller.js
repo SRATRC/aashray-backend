@@ -17,6 +17,8 @@ export const updateProfile = async (req, res) => {
     dob,
     address,
     mobno,
+    idType,
+    idNo,
     email,
     country,
     state,
@@ -31,12 +33,14 @@ export const updateProfile = async (req, res) => {
       dob,
       address,
       mobno,
+      idType,
+      idNo,
       email,
       country,
       state,
       city,
       pin,
-      center: center
+      center
     },
     {
       where: {
