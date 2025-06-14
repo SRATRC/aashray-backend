@@ -131,4 +131,6 @@ export const BOOKING_STATUS_PENDING = 'Temporarily Reserved';
 
 export const WELCOME_MESSAGE_PENDING = 'Your bookings are temporarily reserved, but payment is required within 24 hours to confirm.';
 
+export const RAJ_PRAVAS_EMAIL = "rajpravas7@gmail.com";
+
 

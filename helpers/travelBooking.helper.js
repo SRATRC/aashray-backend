@@ -1,6 +1,7 @@
 import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
+  RAJ_PRAVAS_EMAIL,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
   STATUS_CANCELLED,
@@ -69,8 +70,11 @@ export async function updateWaitingTravelBooking(date) {
       }
     });
 
+    const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
+
     sendMail({
       email: user.email,
+      cc,
       subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
       template: 'rajPravasStatusUpdate',
       context: {

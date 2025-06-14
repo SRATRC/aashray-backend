@@ -15,7 +15,8 @@ import {
   STATUS_WAITING,
   TYPE_TRAVEL,
   STATUS_CASH_COMPLETED,
-  STATUS_PROCEED_FOR_PAYMENT
+  STATUS_PROCEED_FOR_PAYMENT,
+  RAJ_PRAVAS_EMAIL
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
@@ -378,9 +379,11 @@ export const updateBookingStatus = async (req, res) => {
   );
 
   const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
+  const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
 
   sendMail({
     email: card.email,
+    cc,
     subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
     template: 'rajPravasStatusUpdate',
     context: {

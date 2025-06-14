@@ -2,7 +2,8 @@ import { TravelDb } from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
-  MSG_CANCEL_SUCCESSFUL
+  MSG_CANCEL_SUCCESSFUL,
+  RAJ_PRAVAS_EMAIL
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
@@ -72,8 +73,11 @@ export const CancelTravel = async (req, res) => {
   await userCancelBooking(req.user, booking, t);
   await t.commit();
 
+  const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
+
   sendMail({
     email: req.user.email,
+    cc,
     subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Cancelled',
     template: 'rajPravasCancellation',
     context: {
