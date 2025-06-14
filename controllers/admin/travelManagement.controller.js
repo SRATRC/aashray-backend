@@ -300,7 +300,7 @@ ORDER BY
 
 
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments,  description,charges } = req.body;
+  const { bookingid, status, adminComments,  description, charges } = req.body;
   let newBookingStatus = status;
 
   const t = await database.transaction();
@@ -352,18 +352,16 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
-  if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-    await transaction.update(
-      {
-        
-        
-        description,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
-  }
-  break;
+      if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+        await transaction.update(
+          {
+            description,
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      }
+      break;
 
     case STATUS_WAITING:
     default:
@@ -383,7 +381,7 @@ export const updateBookingStatus = async (req, res) => {
 
   sendMail({
     email: card.email,
-    subject: 'Status changed for your Raj Pravas Booking',
+    subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
     template: 'rajPravasStatusUpdate',
     context: {
       name: card.issuedto,
