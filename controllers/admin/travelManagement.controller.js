@@ -154,7 +154,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   );
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, DATE(t1.arrival_time), t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.arrival_time, t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
             t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
             t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
      FROM travel_db t1
@@ -195,6 +195,7 @@ export const fetchBookingForDriver = async (req, res) => {
       'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
       'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
     ) THEN 'Mumbai to Research Centre'
+
     WHEN t1.drop_point IN (
       'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
       'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
@@ -205,17 +206,61 @@ export const fetchBookingForDriver = async (req, res) => {
       'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
       'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
     ) THEN 'Research Centre to Mumbai'
+
     ELSE 'Unknown'
   END AS Travelling_From,
 
   CASE
-    WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
-         OR LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
-      THEN 'Dadar (Swami Narayan Temple)'
-    WHEN LOWER(t1.pickup_point) = 'amar mahal' OR LOWER(t1.drop_point) = 'amar mahal'
-      THEN 'Amar Mahal'
-    WHEN LOWER(t1.pickup_point) = 'airoli' OR LOWER(t1.drop_point) = 'airoli'
-      THEN 'Airoli'
+    WHEN
+      -- From Mumbai to RC → show pickup
+      (
+        t1.pickup_point IN (
+          'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+          'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+          'Airport Terminal 1', 'Airport Terminal 2', 
+          'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+          'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+          'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+          'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+          'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+        )
+      )
+    THEN
+      CASE
+        WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
+          THEN 'Dadar (Swami Narayan Temple)'
+        WHEN LOWER(t1.pickup_point) = 'amar mahal'
+          THEN 'Amar Mahal'
+        WHEN LOWER(t1.pickup_point) = 'airoli'
+          THEN 'Airoli'
+        ELSE t1.pickup_point
+      END
+
+    WHEN
+      -- From RC to Mumbai → show drop
+      (
+        t1.drop_point IN (
+          'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+          'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+          'Airport Terminal 1', 'Airport Terminal 2', 
+          'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+          'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+          'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+          'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+          'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+        )
+      )
+    THEN
+      CASE
+        WHEN LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
+          THEN 'Dadar (Swami Narayan Temple)'
+        WHEN LOWER(t1.drop_point) = 'amar mahal'
+          THEN 'Amar Mahal'
+        WHEN LOWER(t1.drop_point) = 'airoli'
+          THEN 'Airoli'
+        ELSE t1.drop_point
+      END
+
     ELSE COALESCE(t1.pickup_point, t1.drop_point)
   END AS \`Pickup/Dropoff_Point\`
 
@@ -240,6 +285,7 @@ ORDER BY
     ELSE 4
   END,
   \`Pickup/Dropoff_Point\`;
+
 `,
       { type: QueryTypes.SELECT }
     );
