@@ -180,78 +180,67 @@ export const fetchBookingForDriver = async (req, res) => {
     const data = await database.query(
       `
       SELECT
-        t3.issuedto AS Mumukshu_Name,
-        t3.mobno AS Mobile_Number,
+  t1.date,
+  t3.issuedto AS Mumukshu_Name,
+  t3.mobno AS Mobile_Number,
 
-        CASE
-          WHEN t1.pickup_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
-            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
-            'Airport Terminal 1', 'Airport Terminal 2', 
-            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
-            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
-            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
-            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
-            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
-          ) THEN 'Mumbai to Research Centre'
-          WHEN t1.drop_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
-            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
-            'Airport Terminal 1', 'Airport Terminal 2', 
-            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
-            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
-            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
-            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
-            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
-          ) THEN 'Research Centre to Mumbai'
-          ELSE 'Unknown'
-        END AS Travelling_From,
+  CASE
+    WHEN t1.pickup_point IN (
+      'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+      'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+      'Airport Terminal 1', 'Airport Terminal 2', 
+      'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+      'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+      'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+      'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+      'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+    ) THEN 'Mumbai to Research Centre'
+    WHEN t1.drop_point IN (
+      'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
+      'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
+      'Airport Terminal 1', 'Airport Terminal 2', 
+      'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
+      'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
+      'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
+      'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
+      'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
+    ) THEN 'Research Centre to Mumbai'
+    ELSE 'Unknown'
+  END AS Travelling_From,
 
-        CASE
-          WHEN t1.pickup_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
-            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
-            'Airport Terminal 1', 'Airport Terminal 2', 
-            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
-            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
-            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
-            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
-            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
-          ) THEN t1.pickup_point
-          WHEN t1.drop_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)',
-            'Amar Mahal', 'Airoli', 'Vile Parle (Sahara Star)', 
-            'Airport Terminal 1', 'Airport Terminal 2', 
-            'Railway Station (Bandra Terminus)', 'Railway Station (Kurla Terminus)', 
-            'Railway station (LTT - Kurla)', 'Railway Station (CSMT)', 
-            'Railway Station (Mumbai Central)', 'mullund', 'AIRPORT T1',
-            'AIRPORT T2', 'OTHER', 'RAILWAY STATION (LTT - KURLA)',
-            'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking'
-          ) THEN t1.drop_point
-          ELSE NULL
-        END AS \`Pickup/Dropoff_Point\`,
+  CASE
+    WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
+         OR LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
+      THEN 'Dadar (Swami Narayan Temple)'
+    WHEN LOWER(t1.pickup_point) = 'amar mahal' OR LOWER(t1.drop_point) = 'amar mahal'
+      THEN 'Amar Mahal'
+    WHEN LOWER(t1.pickup_point) = 'airoli' OR LOWER(t1.drop_point) = 'airoli'
+      THEN 'Airoli'
+    ELSE COALESCE(t1.pickup_point, t1.drop_point)
+  END AS \`Pickup/Dropoff_Point\`
 
-        t1.arrival_time AS Arrival_Time,
+FROM travel_db t1
+LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+WHERE t1.status = 'confirmed'
+  AND t1.date = CASE
+    WHEN CURTIME() < '20:00:00' THEN CURDATE()
+    ELSE CURDATE() + INTERVAL 1 DAY
+  END
 
-        CASE
-          WHEN LOWER(t1.type) = 'full car' THEN 'Yes'
-          ELSE 'No'
-        END AS Full_Car_Booking,
-
-        CASE
-          WHEN LOWER(t1.type) = 'full car' THEN t1.total_people
-          ELSE NULL
-        END AS Total_People
-
-      FROM travel_db t1
-      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-      WHERE t1.status = 'confirmed'
-        AND t1.date = CASE
-          WHEN CURTIME() < '20:00:00' THEN CURDATE()
-          ELSE CURDATE() + INTERVAL 1 DAY
-        END
-      ORDER BY Travelling_From ASC
-      `,
+ORDER BY
+  Travelling_From ASC,
+  CASE
+    WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
+         OR LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)')
+      THEN 1
+    WHEN LOWER(t1.pickup_point) = 'amar mahal' OR LOWER(t1.drop_point) = 'amar mahal'
+      THEN 2
+    WHEN LOWER(t1.pickup_point) = 'airoli' OR LOWER(t1.drop_point) = 'airoli'
+      THEN 3
+    ELSE 4
+  END,
+  \`Pickup/Dropoff_Point\`;
+`,
       { type: QueryTypes.SELECT }
     );
 
