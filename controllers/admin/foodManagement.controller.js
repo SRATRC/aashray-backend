@@ -3,7 +3,8 @@ import {
   CardDb,
   FoodDb,
   FoodPhysicalPlate,
-  Menu
+  Menu,
+  Transactions
 } from '../../models/associations.js';
 import {
   MSG_CANCEL_SUCCESSFUL,
@@ -19,8 +20,9 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
-import { bookFoodForGuests, bookFoodForMumukshus, cancelFood, createGroupFoodRequest, createGroupFoodRequestForGuest } from '../../helpers/foodBooking.helper.js';
+import { bookFoodForGuests, bookFoodForMumukshus, cancelFood, cancelMeal, createGroupFoodRequest, createGroupFoodRequestForGuest } from '../../helpers/foodBooking.helper.js';
 import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
+import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 
 export const issuePlate = async (req, res) => {
   const currentTime = moment.utc();
@@ -153,6 +155,7 @@ export const bookFood = async (req, res) => {
       null,
       req.user.username,
       t,
+      null,
       true
     );
 
@@ -213,6 +216,8 @@ export const cancelBooking = async (req, res) => {
   const bookingid = req.params.bookingid;
   const mealType = req.query.mealType;
 
+  const t = await database.transaction();
+
   const booking = await FoodDb.findOne({
     where: { 
       id: bookingid,
@@ -224,25 +229,24 @@ export const cancelBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const bookedBy = booking.bookedBy || booking.cardno;
-  const bookedByCard = await validateCard(bookedBy);
-  const bookedFor = booking.bookedBy ? booking.cardno : null;
-  const food_data = [];
+  await cancelMeal(req.user, bookingid, mealType, t);
 
-  food_data.push({
-    date: booking.date,
-    mealType,
-    bookedFor
+  const transaction = await Transactions.findOne({
+    where: {
+      bookingid: booking.id,
+      category: mealType
+    }
   });
-  
-  const t = await database.transaction();
 
-  await cancelFood(
-    req.user, 
-    bookedByCard, 
-    food_data, 
-    t,
-    true);
+  if (transaction) {
+    const card = await validateCard(transaction.cardno);
+    await adminCancelTransaction(
+      req.user, 
+      card,
+      transaction,
+      t
+    );
+  }
 
   await t.commit();
   return res

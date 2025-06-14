@@ -81,6 +81,24 @@ export async function userCancelTransaction(user, card, transaction, t) {
   return await cancelTransaction(user, card, transaction, t, false);
 }
 
+export async function cancelTransactions(user, transactions, t, admin = false) {
+  const transactionsByCard = transactions.reduce((acc, transaction) => {
+    const cardno = transaction.cardno;
+    acc[cardno] = acc[cardno] || [];
+    acc[cardno].push(transaction);
+    return acc;
+  }, {});
+
+  for (const cardno in transactionsByCard) {
+    const cardTransactions = transactionsByCard[cardno];
+    const card = await validateCard(cardno);
+
+    for (const transaction of cardTransactions) {
+      await cancelTransaction(user, card, transaction, t, admin);
+    }
+  }
+}
+
 export async function cancelTransaction(user, card, transaction, t, admin = false) {
   console.log('>> Cancel Transaction: Current status =', transaction.status);
 
