@@ -324,7 +324,6 @@ export const generateOrderId = async (amount) => {
     amount: amount * 100,
     currency: 'INR',
     receipt: uuidv4(),
-    method: 'upi',
     notes: {
       app: 'aashray',
       env: process.env.NODE_ENV
