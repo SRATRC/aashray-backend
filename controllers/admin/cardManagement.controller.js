@@ -192,8 +192,8 @@ export const searchCardsByName = async (req, res) => {
       const json = card.toJSON();
       return {
         ...json,
-        referenceCardno: json.guestRelationship?.referenceCardno || '',
-        guestType: json.guestRelationship?.guestType || ''
+        referenceCardno: json.GuestRelationship?.referenceCardno || '',
+        guestType: json.GuestRelationship?.guestType || ''
       };
     });
 
