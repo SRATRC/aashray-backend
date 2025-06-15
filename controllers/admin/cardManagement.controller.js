@@ -160,16 +160,100 @@ export const fetchAllCards = async (req, res) => {
   return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
 
-export const searchCardsByName = async (req, res) => {
+// export const searchCardsByName = async (req, res) => {
   
-  const data = await CardDb.findAll({
-    where: {
-      issuedto: { [Sequelize.Op.like]: `%${req.params.name}%` }
-    },
-  });
+//   const data = await CardDb.findAll({
+//     where: {
+//       issuedto: { [Sequelize.Op.like]: `%${req.params.name}%` }
+//     },
+//   });
 
-  return res.status(200).send({ message: 'Fetched all cards', data: data });
+//   return res.status(200).send({ message: 'Fetched all cards', data: data });
+// };
+
+export const searchCardsByName = async (req, res) => {
+  try {
+    const data = await CardDb.findAll({
+      where: {
+        issuedto: {
+          [Sequelize.Op.like]: `%${req.params.name}%`
+        }
+      },
+      include: [
+        {
+          model: GuestRelationship,
+          as: 'guestRelationship',
+          required: false
+        }
+      ]
+    });
+
+    const formattedData = data.map(card => {
+      const json = card.toJSON();
+      return {
+        ...json,
+        referenceCardno: json.guestRelationship?.referenceCardno || '',
+        guestType: json.guestRelationship?.guestType || ''
+      };
+    });
+
+    return res.status(200).send({ message: 'Fetched all cards', data: formattedData });
+  } catch (err) {
+    console.error('Error in searchCardsByName:', err);
+    return res.status(500).send({ message: 'Something went wrong' });
+  }
 };
+
+// export const updateCard = async (req, res) => {
+//   const {
+//     cardno,
+//     issuedto,
+//     gender,
+//     dob,
+//     mobno,
+//     email,
+//     idType,
+//     idNo,
+//     address,
+//     city,
+//     state,
+//     pin,
+//     centre,
+//     status,
+//     res_status
+//   } = req.body;
+
+//   const card = await CardDb.findOne({
+//     where: { cardno: cardno }
+//   });
+
+//   if (!card) {
+//     throw new ApiError(400, ERR_CARD_NOT_FOUND);
+//   }
+
+//   await card.update(
+//     {
+//       issuedto: issuedto,
+//       gender: gender,
+//       dob: dob,
+//       mobno: mobno,
+//       email: email,
+//       idType: idType,
+//       idNo: idNo,
+//       address: address,
+//       city: city,
+//       state: state,
+//       pin: pin,
+//       center: centre,
+//       status: status,
+//       res_status: res_status,
+//       updatedBy: req.user.username
+//     }
+//   );
+
+//   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+// };
+
 
 export const updateCard = async (req, res) => {
   const {
@@ -187,36 +271,65 @@ export const updateCard = async (req, res) => {
     pin,
     centre,
     status,
-    res_status
+    res_status,
+    referenceCardno,
+    guestType
   } = req.body;
 
-  const card = await CardDb.findOne({
-    where: { cardno: cardno }
-  });
+  const card = await CardDb.findOne({ where: { cardno } });
 
   if (!card) {
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
-  await card.update(
-    {
-      issuedto: issuedto,
-      gender: gender,
-      dob: dob,
-      mobno: mobno,
-      email: email,
-      idType: idType,
-      idNo: idNo,
-      address: address,
-      city: city,
-      state: state,
-      pin: pin,
-      center: centre,
-      status: status,
-      res_status: res_status,
-      updatedBy: req.user.username
+  // Validation for guest
+  if (res_status === 'GUEST') {
+    if (!referenceCardno || !guestType) {
+      throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
     }
-  );
+  }
+
+  await card.update({
+    issuedto,
+    gender,
+    dob,
+    mobno,
+    email,
+    idType,
+    idNo,
+    address,
+    city,
+    state,
+    pin,
+    center: centre,
+    status,
+    res_status,
+    updatedBy: req.user.username
+  });
+
+  // Update or create guest relationship
+  if (res_status === 'GUEST') {
+    const [relation, created] = await GuestRelationship.findOrCreate({
+      where: { guestCardno: cardno },
+      defaults: {
+        guestCardno: cardno,
+        referenceCardno,
+        guestType,
+        createdBy: req.user.username
+      }
+    });
+
+    if (!created) {
+      await relation.update({
+        referenceCardno,
+        guestType,
+        updatedBy: req.user.username
+      });
+    }
+  } else {
+    // If not a guest anymore, remove guest_relationship if it exists
+    await GuestRelationship.destroy({ where: { guestCardno: cardno } });
+  }
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
