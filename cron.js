@@ -27,12 +27,15 @@ import { validateCard } from './helpers/card.helper.js';
 
 const MAX_APP_PAYMENT_DURATION = 24*60; // 24 hrs
 
+let isRunning = false; // Track task status
+
 // Schedule the cron job to run every 10 minutes
 const job = cron.schedule('*/1 * * * *', async () => {
   logger.info('Cron job started');
 
-  await database.authenticate();
+  isRunning = true;
 
+  await database.authenticate();
 
   const systemUser = AdminUsers.findOne({
     where: { username: "admin" } 
@@ -43,9 +46,10 @@ const job = cron.schedule('*/1 * * * *', async () => {
   const bookings = [];
 
   try {
+    
     const t = await database.transaction();
-
     await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
+    
     await getUnpaidPastBookingsAndTransactions(bookings, transactions);
 
     await cancelBookings(systemUser, bookings, userBookingIds, t);
@@ -57,17 +61,41 @@ const job = cron.schedule('*/1 * * * *', async () => {
       const bookingIds = userBookingIds[cardno];
       await sendCancellationEmail(cardno, bookingIds, null);
     }
-
   } catch (error) {
     logger.error('Cron job error:', error);
     await t.rollback();
+  } finally {
+    isRunning = false;
   }
 
   logger.info('Cron job finished.');
 });
 
-job.stop();
 job.start();
+
+// Graceful shutdown handler
+const gracefulShutdown = async () => {
+  console.log('Gracefully shutting down cron service...');
+
+  // Stop future jobs from being triggered
+  job.stop();
+
+  // Wait for the current task to finish if it's running
+  const waitInterval = setInterval(() => {
+    if (!isRunning) {
+      console.log('All tasks completed. Exiting...');
+      clearInterval(waitInterval);
+      process.exit(0);
+    } else {
+      console.log('Waiting for current task to finish...');
+    }
+  }, 10000);
+};
+
+process.on('SIGINT', gracefulShutdown);  // e.g., Ctrl+C
+process.on('SIGTERM', gracefulShutdown); // PM2 stop/reload
+
+
 
 async function cancelMeals(systemUser, transactions, t) {
   for (const transaction of transactions) {
