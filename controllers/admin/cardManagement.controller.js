@@ -182,7 +182,7 @@ export const searchCardsByName = async (req, res) => {
       include: [
         {
           model: GuestRelationship,
-          as: 'guestRelationship',
+          as: 'GuestRelationship',
           required: false
         }
       ]
