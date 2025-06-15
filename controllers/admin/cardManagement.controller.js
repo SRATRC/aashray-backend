@@ -277,9 +277,9 @@ export const updateCard = async (req, res) => {
   // Update or create guest relationship
   if (res_status === 'GUEST') {
     const [relation, created] = await GuestRelationship.findOrCreate({
-      where: { guestCardno: cardno },
+      where: { cardno: cardno },
       defaults: {
-        guestCardno: cardno,
+        cardno: cardno,
         referenceCardno,
         guestType,
         createdBy: req.user.username
@@ -295,7 +295,7 @@ export const updateCard = async (req, res) => {
     }
   } else {
     // If not a guest anymore, remove guest_relationship if it exists
-    await GuestRelationship.destroy({ where: { guestCardno: cardno } });
+    await GuestRelationship.destroy({ where: { cardno: cardno } });
   }
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
