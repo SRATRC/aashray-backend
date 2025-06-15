@@ -160,48 +160,15 @@ export const fetchAllCards = async (req, res) => {
   return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
 
-// export const searchCardsByName = async (req, res) => {
-  
-//   const data = await CardDb.findAll({
-//     where: {
-//       issuedto: { [Sequelize.Op.like]: `%${req.params.name}%` }
-//     },
-//   });
-
-//   return res.status(200).send({ message: 'Fetched all cards', data: data });
-// };
-
 export const searchCardsByName = async (req, res) => {
-  try {
-    const data = await CardDb.findAll({
-      where: {
-        issuedto: {
-          [Sequelize.Op.like]: `%${req.params.name}%`
-        }
-      },
-      include: [
-        {
-          model: GuestRelationship,
-          as: 'GuestRelationship',
-          required: false
-        }
-      ]
-    });
+  
+  const data = await CardDb.findAll({
+    where: {
+      issuedto: { [Sequelize.Op.like]: `%${req.params.name}%` }
+    },
+  });
 
-    const formattedData = data.map(card => {
-      const json = card.toJSON();
-      return {
-        ...json,
-        referenceCardno: json.GuestRelationship?.referenceCardno || '',
-        guestType: json.GuestRelationship?.guestType || ''
-      };
-    });
-
-    return res.status(200).send({ message: 'Fetched all cards', data: formattedData });
-  } catch (err) {
-    console.error('Error in searchCardsByName:', err);
-    return res.status(500).send({ message: 'Something went wrong' });
-  }
+  return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
 
 // export const updateCard = async (req, res) => {
