@@ -8,7 +8,7 @@ import {
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_CHECKEDOUT
 } from '../../config/constants.js';
-import Sequelize from 'sequelize';
+import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import database from '../../config/database.js';
 
@@ -137,6 +137,20 @@ export const gateExit = async (req, res) => {
 };
 
 export const gateRecord = async (req, res) => {
-  const result = await GateRecord.findAll();
+  const result = await database.query(`
+  SELECT 
+    gr.*, 
+    cd.issuedto, 
+    cd.mobno
+  FROM 
+    gate_record AS gr
+  LEFT JOIN 
+    card_db AS cd 
+  ON 
+    gr.cardno = cd.cardno
+`, {
+  type: Sequelize.QueryTypes.SELECT
+});
+
   return res.status(200).send({ message: 'Success', data: result });
 };
