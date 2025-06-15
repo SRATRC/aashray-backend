@@ -99,7 +99,13 @@ export async function cancelTransactions(user, transactions, t, admin = false) {
   }
 }
 
-export async function cancelTransaction(user, card, transaction, t, admin = false) {
+export async function cancelTransaction(
+  user,
+  card,
+  transaction,
+  t,
+  admin = false
+) {
   console.log('>> Cancel Transaction: Current status =', transaction.status);
 
   if (!card) {
@@ -318,6 +324,7 @@ export const generateOrderId = async (amount) => {
     amount: amount * 100,
     currency: 'INR',
     receipt: uuidv4(),
+    method: 'upi',
     notes: {
       app: 'aashray',
       env: process.env.NODE_ENV
