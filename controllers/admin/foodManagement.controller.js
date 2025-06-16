@@ -329,10 +329,21 @@ export const foodReport = async (req, res) => {
       SUM(CASE WHEN breakfast_plate_issued = 1 THEN 1 ELSE 0 END) as breakfast_plate_issued,
       SUM(CASE WHEN lunch_plate_issued = 1 THEN 1 ELSE 0 END) AS lunch_plate_issued,
       SUM(CASE WHEN dinner_plate_issued = 1 THEN 1 ELSE 0 END) AS dinner_plate_issued,
-      SUM(CASE WHEN breakfast_plate_issued = 0 THEN 1 ELSE 0 END) AS breakfast_noshow,
-      SUM(CASE WHEN lunch_plate_issued = 0 THEN 1 ELSE 0 END) AS lunch_noshow,
-      SUM(CASE WHEN dinner_plate_issued = 0 THEN 1 ELSE 0 END) AS dinner_noshow,
-      SUM(CASE WHEN hightea = 'TEA' THEN 1 ELSE 0 END) AS tea,
+      SUM(CASE 
+      WHEN breakfast = 1 AND breakfast_plate_issued = 0 
+      THEN 1 ELSE 0 
+    END) AS breakfast_noshow,
+
+SUM(CASE 
+      WHEN lunch = 1 AND lunch_plate_issued = 0 
+      THEN 1 ELSE 0 
+    END) AS lunch_noshow,
+
+SUM(CASE 
+      WHEN dinner = 1 AND dinner_plate_issued = 0 
+      THEN 1 ELSE 0 
+    END) AS dinner_noshow
+SUM(CASE WHEN hightea = 'TEA' THEN 1 ELSE 0 END) AS tea,
       SUM(CASE WHEN hightea = 'COFFEE' THEN 1 ELSE 0 END) AS coffee,
       SUM(CASE WHEN spicy = 0 THEN 1 ELSE 0 END) as non_spicy,
       COALESCE(breakfast_physical_plates, 0) AS breakfast_physical_plates,
