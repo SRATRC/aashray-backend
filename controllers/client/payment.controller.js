@@ -138,9 +138,11 @@ export const verifyPayment = async (req, res) => {
     message = 'Payment successful.';
   } else {
     message = `No pending bookings found for the given order id: ${razorpay_order_id}`;
-    logger.error(`No pending bookings found for the given order id: ${JSON.stringify(
-      req.body
-    )}`);
+    logger.error(
+      `No pending bookings found for the given order id: ${JSON.stringify(
+        req.body
+      )}`
+    );
   }
   res.status(200).json({ message, status: 'ok' });
 };
