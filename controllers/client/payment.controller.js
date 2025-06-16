@@ -138,21 +138,27 @@ export const verifyPayment = async (req, res) => {
     message = 'Payment successful.';
   } else {
     message = `No pending bookings found for the given order id: ${razorpay_order_id}`;
-    logger.error(`No pending bookings found for the given order id: ${JSON.stringify(
-      req.body
-    )}`);
+    logger.error(
+      `No pending bookings found for the given order id: ${JSON.stringify(
+        req.body
+      )}`
+    );
   }
   res.status(200).json({ message, status: 'ok' });
 };
 
 export const createOrderIdForPendingPayments = async (req, res) => {
-  const { bookingids } = req.body;
-
+  const { data } = req.body;
   const t = await database.transaction();
 
-  const totalAmount = await Transactions.sum('amount', {
+  const bookingCategoryMap = data.reduce((map, item) => {
+    map[item.bookingid] = item.category;
+    return map;
+  }, {});
+
+  const transactions = await Transactions.findAll({
     where: {
-      bookingid: bookingids,
+      bookingid: Object.keys(bookingCategoryMap),
       cardno: req.user.cardno,
       status: [
         STATUS_PAYMENT_PENDING,
@@ -162,9 +168,21 @@ export const createOrderIdForPendingPayments = async (req, res) => {
     }
   });
 
+  const totalAmount = transactions.reduce((sum, transaction) => {
+    const category = bookingCategoryMap[transaction.bookingid];
+    if (category === getBookingType(transaction)) {
+      return sum + transaction.amount;
+    }
+    return sum;
+  }, 0);
+
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
-    await updateRazorpayTransactions(bookingids, [], order.id, t);
+    const validBookingIds = transactions
+      .filter((t) => bookingCategoryMap[t.bookingid] === getBookingType(t))
+      .map((t) => t.bookingid);
+
+    await updateRazorpayTransactions(validBookingIds, [], order.id, t);
     await t.commit();
 
     return res.status(200).send({ message: 'payment successful', data: order });
