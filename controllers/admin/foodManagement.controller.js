@@ -20,7 +20,14 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
-import { bookFoodForGuests, bookFoodForMumukshus, cancelFood, cancelMeal, createGroupFoodRequest, createGroupFoodRequestForGuest } from '../../helpers/foodBooking.helper.js';
+import {
+  bookFoodForGuests,
+  bookFoodForMumukshus,
+  cancelFood,
+  cancelMeal,
+  createGroupFoodRequest,
+  createGroupFoodRequestForGuest
+} from '../../helpers/foodBooking.helper.js';
 import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 
@@ -68,13 +75,13 @@ export const issuePlate = async (req, res) => {
   }
 
   // Issue plate
-  await booking.update(
-    {
-      [plateField]: true
-    }
-  );
+  await booking.update({
+    [plateField]: true
+  });
 
-  return res.status(200).send({ message: `Plate for ${currentMeal} issued successfully` });
+  return res
+    .status(200)
+    .send({ message: `Plate for ${currentMeal} issued successfully` });
 };
 
 export const physicalPlatesIssued = async (req, res) => {
@@ -99,29 +106,24 @@ export const physicalPlatesIssued = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  return res
-    .status(200)
-    .send({ message: 'Added plate count successfully' });
+  return res.status(200).send({ message: 'Added plate count successfully' });
 };
 
 export const fetchPhysicalPlateIssued = async (req, res) => {
-  
   const data = await FoodPhysicalPlate.findAll({
     order: [['date', 'ASC']]
   });
 
-  return res
-    .status(200)
-    .send({ message: MSG_FETCH_SUCCESSFUL, data: data });
+  return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: data });
 };
 
 export const bookFood = async (req, res) => {
-  var cardno = req.body.cardno;
   const {
+    cardno,
     mobno,
-    start_date, 
-    end_date, 
-    breakfast, 
+    start_date,
+    end_date,
+    breakfast,
     lunch,
     dinner,
     spicy,
@@ -143,11 +145,11 @@ export const bookFood = async (req, res) => {
       cardno,
       breakfast,
       lunch,
-      dinner, 
+      dinner,
       spicy,
       hightea
     );
-    
+
     await bookFoodForGuests(
       start_date,
       end_date,
@@ -158,25 +160,25 @@ export const bookFood = async (req, res) => {
       null,
       true
     );
-
   } else {
     const mumukshuGroup = createGroupFoodRequest(
       cardno,
       breakfast,
       lunch,
-      dinner, 
+      dinner,
       spicy,
       hightea
     );
-    
+
     await bookFoodForMumukshus(
       start_date,
       end_date,
       mumukshuGroup,
       null,
       null,
-      req.user.username,
-      t
+      null,
+      t,
+      req.user.username
     );
   }
 
@@ -187,14 +189,22 @@ export const bookFood = async (req, res) => {
 export const fetchFoodBookings = async (req, res) => {
   var { cardno, mobno } = req.query;
 
-  if ((cardno == undefined || cardno == "") && mobno) {
+  if ((cardno == undefined || cardno == '') && mobno) {
     cardno = (await findCardByMobno(mobno)).cardno;
   }
 
   const today = moment().format('YYYY-MM-DD');
 
   const bookings = await FoodDb.findAll({
-    attributes: ['id', 'date', 'breakfast', 'lunch', 'dinner', 'spicy', 'hightea'],
+    attributes: [
+      'id',
+      'date',
+      'breakfast',
+      'lunch',
+      'dinner',
+      'spicy',
+      'hightea'
+    ],
     where: {
       cardno,
       date: { [Sequelize.Op.gte]: today },
@@ -210,7 +220,7 @@ export const fetchFoodBookings = async (req, res) => {
   return res
     .status(200)
     .send({ message: MSG_FETCH_SUCCESSFUL, data: bookings });
-}
+};
 
 export const cancelBooking = async (req, res) => {
   const bookingid = req.params.bookingid;
@@ -219,7 +229,7 @@ export const cancelBooking = async (req, res) => {
   const t = await database.transaction();
 
   const booking = await FoodDb.findOne({
-    where: { 
+    where: {
       id: bookingid,
       [mealType]: true
     }
@@ -240,44 +250,28 @@ export const cancelBooking = async (req, res) => {
 
   if (transaction) {
     const card = await validateCard(transaction.cardno);
-    await adminCancelTransaction(
-      req.user, 
-      card,
-      transaction,
-      t
-    );
+    await adminCancelTransaction(req.user, card, transaction, t);
   }
 
   await t.commit();
-  return res
-    .status(200)
-    .send({ message: MSG_CANCEL_SUCCESSFUL });
+  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const bulkBooking = async (req, res) => {
-  const {
+  const { cardno, date, guestCount, breakfast, lunch, dinner, department } =
+    req.body;
+
+  const booking = await BulkFoodBooking.create({
+    bookingid: uuidv4(),
     cardno,
     date,
-    guestCount, 
+    guestCount,
     breakfast,
-    lunch, 
+    lunch,
     dinner,
-    department
-  } = req.body;
-
-  const booking = await BulkFoodBooking.create(
-    {
-      bookingid: uuidv4(),
-      cardno,
-      date,
-      guestCount,
-      breakfast,
-      lunch,
-      dinner,
-      department,
-      updatedBy: req.user.username
-    }
-  );
+    department,
+    updatedBy: req.user.username
+  });
 
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -295,7 +289,7 @@ export const fetchBulkBookings = async (req, res) => {
       }
     ],
     where: {
-      ...((cardno != "") && { cardno }),
+      ...(cardno != '' && { cardno }),
       date: { [Sequelize.Op.gt]: today }
     },
     order: [['date', 'ASC']]
@@ -318,7 +312,7 @@ export const cancelBulkBooking = async (req, res) => {
   }
 
   await booking.destroy();
-  
+
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
@@ -362,9 +356,9 @@ export const foodReport = async (req, res) => {
     GROUP BY food_db.date 
     ORDER BY food_db.date ASC;`,
     {
-      replacements: { 
+      replacements: {
         start_date,
-        end_date 
+        end_date
       },
       type: Sequelize.QueryTypes.SELECT
     }
@@ -377,7 +371,7 @@ export const foodReportDetails = async (req, res) => {
   const { meal, is_issued, date } = req.query;
 
   const bookings = await FoodDb.findAll({
-    attributes: ['id','date'],
+    attributes: ['id', 'date'],
     include: [
       {
         model: CardDb,
@@ -388,7 +382,7 @@ export const foodReportDetails = async (req, res) => {
     where: {
       date,
       [meal + '_plate_issued']: is_issued
-    },
+    }
     // order: [['CardDb.issuedto', 'ASC']]
   });
 
@@ -440,14 +434,12 @@ export const updateMenu = async (req, res) => {
     throw new ApiError(404, 'Menu not found for the given date.');
   }
 
-  await menu.update(
-    {
-      breakfast,
-      lunch,
-      dinner,
-      updatedBy: req.user.username
-    }
-  );
+  await menu.update({
+    breakfast,
+    lunch,
+    dinner,
+    updatedBy: req.user.username
+  });
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
@@ -470,16 +462,22 @@ export const addBulkMenu = async (req, res) => {
   const { menus } = req.body;
 
   if (!Array.isArray(menus)) {
-    console.log("Invalid menus payload:", req.body);
-    return res.status(400).json({ message: "Invalid format" });
+    console.log('Invalid menus payload:', req.body);
+    return res.status(400).json({ message: 'Invalid format' });
   }
 
   try {
-    console.log("Received menus:", menus);
+    console.log('Received menus:', menus);
 
     const validMenus = menus
-      .filter(item => item.date && item.breakfast !== undefined && item.lunch !== undefined && item.dinner !== undefined)
-      .map(item => ({
+      .filter(
+        (item) =>
+          item.date &&
+          item.breakfast !== undefined &&
+          item.lunch !== undefined &&
+          item.dinner !== undefined
+      )
+      .map((item) => ({
         date: item.date,
         breakfast: item.breakfast || '',
         lunch: item.lunch || '',
@@ -489,19 +487,19 @@ export const addBulkMenu = async (req, res) => {
         updatedAt: new Date()
       }));
 
-    console.log("Valid menus to upload:", validMenus);
+    console.log('Valid menus to upload:', validMenus);
 
     if (validMenus.length === 0) {
-      return res.status(400).json({ message: "No valid menu records found." });
+      return res.status(400).json({ message: 'No valid menu records found.' });
     }
 
     await Menu.bulkCreate(validMenus, {
       updateOnDuplicate: ['breakfast', 'lunch', 'dinner', 'updatedAt']
     });
 
-    res.status(200).json({ message: "Menus uploaded successfully" });
+    res.status(200).json({ message: 'Menus uploaded successfully' });
   } catch (err) {
     console.error('Bulk Upload Error:', err);
-    res.status(500).json({ message: "Server error while uploading menus" });
+    res.status(500).json({ message: 'Server error while uploading menus' });
   }
 };
