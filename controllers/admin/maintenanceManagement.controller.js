@@ -3,7 +3,7 @@ import {
   STATUS_OPEN,
   STATUS_CLOSED
 } from '../../config/constants.js';
-import { QueryTypes } from 'sequelize';
+import { QueryTypes,Sequelize } from 'sequelize';
 import database from '../../config/database.js';
 // import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
@@ -13,6 +13,7 @@ import {
   CardDb,
   MaintenanceDb
 } from '../../models/associations.js';
+
 
 export const fetchMaintenanceReport = async (req, res) => {
   const { department } = req.params;
@@ -36,9 +37,19 @@ export const fetchMaintenanceReport = async (req, res) => {
     ],
     where: { 
       department,
-      status: [STATUS_OPEN, STATUS_INPROGRESS]
+      status: [STATUS_OPEN, STATUS_INPROGRESS, STATUS_CLOSED]
     },
-    order: [['createdAt', 'ASC']]
+    order: [
+      [Sequelize.literal(`
+        CASE 
+          WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_OPEN}' THEN 0
+          WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_INPROGRESS}' THEN 1
+          WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_CLOSED}' THEN 2
+          ELSE 3
+        END
+      `), 'ASC'],
+      ['createdAt', 'ASC']
+    ]
   });
 
   return res.status(200).send({

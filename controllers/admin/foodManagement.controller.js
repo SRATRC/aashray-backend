@@ -50,13 +50,19 @@ export const issuePlate = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  // Determine current meal period
-  let currentMeal = null;
-  for (const meal of ['breakfast', 'lunch', 'dinner']) {
-    if (currentTime.isSameOrBefore(mealTimes[meal])) {
-      currentMeal = meal;
-      break;
+  // Use meal from request body if provided, otherwise determine from time
+  let currentMeal = req.body.meal;
+
+  if (!currentMeal) {
+    // Determine current meal period from time
+    for (const meal of ['breakfast', 'lunch', 'dinner']) {
+      if (currentTime.isSameOrBefore(mealTimes[meal])) {
+        currentMeal = meal;
+        break;
+      }
     }
+  } else if (!['breakfast', 'lunch', 'dinner'].includes(currentMeal)) {
+    throw new ApiError(400, 'Invalid meal type provided');
   }
 
   if (!currentMeal) {
@@ -329,9 +335,9 @@ export const foodReport = async (req, res) => {
       SUM(CASE WHEN breakfast_plate_issued = 1 THEN 1 ELSE 0 END) as breakfast_plate_issued,
       SUM(CASE WHEN lunch_plate_issued = 1 THEN 1 ELSE 0 END) AS lunch_plate_issued,
       SUM(CASE WHEN dinner_plate_issued = 1 THEN 1 ELSE 0 END) AS dinner_plate_issued,
-      SUM(CASE WHEN breakfast_plate_issued = 0 THEN 1 ELSE 0 END) AS breakfast_noshow,
-      SUM(CASE WHEN lunch_plate_issued = 0 THEN 1 ELSE 0 END) AS lunch_noshow,
-      SUM(CASE WHEN dinner_plate_issued = 0 THEN 1 ELSE 0 END) AS dinner_noshow,
+      SUM(CASE WHEN breakfast = 1 AND breakfast_plate_issued = 0 THEN 1 ELSE 0 END) AS breakfast_noshow,
+      SUM(CASE WHEN lunch = 1 AND lunch_plate_issued = 0 THEN 1 ELSE 0 END) AS lunch_noshow,
+      SUM(CASE WHEN dinner = 1 AND dinner_plate_issued = 0 THEN 1 ELSE 0 END) AS dinner_noshow,
       SUM(CASE WHEN hightea = 'COFFEE' THEN 1 ELSE 0 END) AS coffee,
       SUM(CASE WHEN spicy = 0 THEN 1 ELSE 0 END) as non_spicy,
       COALESCE(breakfast_physical_plates, 0) AS breakfast_physical_plates,
@@ -366,6 +372,29 @@ export const foodReport = async (req, res) => {
   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
 };
 
+// export const foodReportDetails = async (req, res) => {
+//   const { meal, is_issued, date } = req.query;
+
+//   const bookings = await FoodDb.findAll({
+//     attributes: ['id', 'date'],
+//     include: [
+//       {
+//         model: CardDb,
+//         attributes: ['cardno', 'issuedto', 'mobno'],
+//         required: true
+//       }
+//     ],
+//     where: {
+//       date,
+//       [meal]: true,
+//       [meal + '_plate_issued']: is_issued
+//     }
+//     // order: [['CardDb.issuedto', 'ASC']]
+//   });
+
+//   return res.status(200).send({ data: bookings });
+// };
+
 export const foodReportDetails = async (req, res) => {
   const { meal, is_issued, date } = req.query;
 
@@ -380,9 +409,10 @@ export const foodReportDetails = async (req, res) => {
     ],
     where: {
       date,
+      [meal]: true,
       [meal + '_plate_issued']: is_issued
-    }
-    // order: [['CardDb.issuedto', 'ASC']]
+    },
+    order: [[CardDb, 'issuedto', 'ASC']] // 👈 sort by issuedto A–Z
   });
 
   return res.status(200).send({ data: bookings });

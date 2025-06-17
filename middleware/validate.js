@@ -34,7 +34,10 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
   if (blockedDates.length > 0) {
     const blockingInfo = blockedDates
       .map(
-        (block) => `${block.checkin} to ${block.checkout} for ${block.comments}`
+        (block) =>
+          `${moment(block.checkin).format('Do MMMM, YYYY')} to ${moment(
+            block.checkout
+          ).format('Do MMMM, YYYY')} for ${block.comments}`
       )
       .join(', ');
 

@@ -7,6 +7,7 @@ import {
   STATUS_GUEST,
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
+  STATUS_SEVA_KUTIR,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
   TYPE_GUEST_LUNCH
@@ -24,13 +25,10 @@ import {
   Transactions,
   UtsavDb
 } from '../models/associations.js';
-import { validateCard, validateCards } from './card.helper.js';
+import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  cancelTransaction,
-  cancelTransactions
-} from './transactions.helper.js';
+import { cancelTransactions } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
@@ -302,6 +300,7 @@ export async function validateFood(
   if (
     !(
       card.res_status === STATUS_RESIDENT ||
+      card.res_status === STATUS_SEVA_KUTIR ||
       (await checkRoomBookingProgress(
         start_date,
         end_date,

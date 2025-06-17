@@ -93,18 +93,34 @@ export const unifiedBooking = async (req, res) => {
     }
   }
 
-  const order = await generateOrderId(amount);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);
-  await updateRazorpayTransactions(bookingIds, [], order.id, t);
+  var order = null;
+  if (req.user.country == 'India' && amount > 0) {
+    order = await generateOrderId(amount);
+    const bookingIds = retrieveBookingIds(userBookingIdMap);
+    await updateRazorpayTransactions(bookingIds, [], order.id, t);
+  }
 
   await t.commit();
   //Sending email to logged in user for self or other mumkshus
-  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
+  sendUnifiedEmailForBookedBy(
+    userBookingIdMap,
+    req.user,
+    SUBJECT_BOOKING_PENDING,
+    BOOKING_STATUS_PENDING,
+    WELCOME_MESSAGE_PENDING
+  );
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(cardno, bookings, req.user,SUBJECT_BOOKING_PENDING,BOOKING_STATUS_PENDING,WELCOME_MESSAGE_PENDING);
+      sendUnifiedEmail(
+        cardno,
+        bookings,
+        req.user,
+        SUBJECT_BOOKING_PENDING,
+        BOOKING_STATUS_PENDING,
+        WELCOME_MESSAGE_PENDING
+      );
     }
   }
 
