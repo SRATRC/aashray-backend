@@ -50,13 +50,19 @@ export const issuePlate = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  // Determine current meal period
-  let currentMeal = null;
-  for (const meal of ['breakfast', 'lunch', 'dinner']) {
-    if (currentTime.isSameOrBefore(mealTimes[meal])) {
-      currentMeal = meal;
-      break;
+  // Use meal from request body if provided, otherwise determine from time
+  let currentMeal = req.body.meal;
+
+  if (!currentMeal) {
+    // Determine current meal period from time
+    for (const meal of ['breakfast', 'lunch', 'dinner']) {
+      if (currentTime.isSameOrBefore(mealTimes[meal])) {
+        currentMeal = meal;
+        break;
+      }
     }
+  } else if (!['breakfast', 'lunch', 'dinner'].includes(currentMeal)) {
+    throw new ApiError(400, 'Invalid meal type provided');
   }
 
   if (!currentMeal) {
