@@ -36,7 +36,7 @@ export const fetchMaintenanceReport = async (req, res) => {
     ],
     where: { 
       department,
-      status: [STATUS_OPEN, STATUS_INPROGRESS]
+      status: [STATUS_OPEN, STATUS_INPROGRESS, STATUS_CLOSED]
     },
     order: [['createdAt', 'ASC']]
   });
