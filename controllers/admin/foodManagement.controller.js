@@ -372,6 +372,29 @@ export const foodReport = async (req, res) => {
   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
 };
 
+// export const foodReportDetails = async (req, res) => {
+//   const { meal, is_issued, date } = req.query;
+
+//   const bookings = await FoodDb.findAll({
+//     attributes: ['id', 'date'],
+//     include: [
+//       {
+//         model: CardDb,
+//         attributes: ['cardno', 'issuedto', 'mobno'],
+//         required: true
+//       }
+//     ],
+//     where: {
+//       date,
+//       [meal]: true,
+//       [meal + '_plate_issued']: is_issued
+//     }
+//     // order: [['CardDb.issuedto', 'ASC']]
+//   });
+
+//   return res.status(200).send({ data: bookings });
+// };
+
 export const foodReportDetails = async (req, res) => {
   const { meal, is_issued, date } = req.query;
 
@@ -388,8 +411,8 @@ export const foodReportDetails = async (req, res) => {
       date,
       [meal]: true,
       [meal + '_plate_issued']: is_issued
-    }
-    // order: [['CardDb.issuedto', 'ASC']]
+    },
+    order: [[CardDb, 'issuedto', 'ASC']] // 👈 sort by issuedto A–Z
   });
 
   return res.status(200).send({ data: bookings });
