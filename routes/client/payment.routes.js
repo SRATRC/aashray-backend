@@ -1,6 +1,7 @@
 import {
   verifyPayment,
-  createOrderIdForPendingPayments
+  createOrderIdForPendingPayments,
+  createOrderIdForPendingPaymentsV2
 } from '../../controllers/client/payment.controller.js';
 import { validateCard } from '../../middleware/validate.js';
 import express from 'express';
@@ -10,5 +11,10 @@ const router = express.Router();
 
 router.post('/verifyPayment', CatchAsync(verifyPayment));
 router.post('/pay', validateCard, CatchAsync(createOrderIdForPendingPayments));
+router.post(
+  '/payv2',
+  validateCard,
+  CatchAsync(createOrderIdForPendingPaymentsV2)
+);
 
 export default router;
