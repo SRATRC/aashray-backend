@@ -148,7 +148,7 @@ export const bookFood = async (req, res) => {
 
   if (card.res_status == STATUS_GUEST) {
     const guestGroup = createGroupFoodRequestForGuest(
-      cardno,
+      card.cardno,
       breakfast,
       lunch,
       dinner,
@@ -168,7 +168,7 @@ export const bookFood = async (req, res) => {
     );
   } else {
     const mumukshuGroup = createGroupFoodRequest(
-      cardno,
+      card.cardno,
       breakfast,
       lunch,
       dinner,
