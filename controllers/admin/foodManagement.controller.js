@@ -380,6 +380,7 @@ export const foodReportDetails = async (req, res) => {
     ],
     where: {
       date,
+      [meal]: true,
       [meal + '_plate_issued']: is_issued
     }
     // order: [['CardDb.issuedto', 'ASC']]
