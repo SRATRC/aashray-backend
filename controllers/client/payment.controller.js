@@ -9,7 +9,8 @@ import {
   STATUS_PAYMENT_CAPTURED,
   STATUS_PAYMENT_FAILED,
   STATUS_PAYMENT_AUTHORIZED,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  TYPE_FOOD
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
