@@ -32,7 +32,7 @@ router.post('/setrep', upload.single('file'), CatchAsync(uploadRazorpaySettlemen
 router.post('/updateset', upload.single('file'), CatchAsync(updateSettlementFieldsFromExcel));
 router.get('/fetchset', CatchAsync(fetchAllSettlements));
 router.get('/fetchTransactions/:settlementId', catchAsync(fetchTransactionsBySettlementId));
-router.get('/fetchTransactions/payment/:razorpay_payment_id', catchAsync(fetchTransactionsByPaymentId));
+router.get('/fetchTransactions/payment/:razorpay_order_id', catchAsync(fetchTransactionsByPaymentId));
 router.get('/credits', catchAsync(fetchCredits));
 router.get('/fetchcreditstransactions', catchAsync(fetchCreditTransactions));
 

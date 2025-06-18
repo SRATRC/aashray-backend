@@ -10,6 +10,7 @@ import Sequelize, { QueryTypes } from 'sequelize';
 import database from '../../config/database.js';
 import XLSX from 'xlsx';
 import RazorpaySettlement from '../../models/razorpay_settlement.model.js'; // adjust path if needed
+import RazorpaySettlementRecon from '../../models/razorpay_settlement_recon.model.js'; // adjust path if needed
 import Transactions from '../../models/transactions.model.js'; // adjust path if needed
 
 // 📄 1. Fetch Completed Transactions
@@ -290,20 +291,44 @@ export const fetchAllCreditTransactions = async (req, res) => {
 };
 
 // 📥 2. Upload Excel and Insert into razorpay_settlement
+import moment from 'moment';
+
 export const uploadRazorpaySettlementExcel = async (req, res) => {
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
 
-    const formattedRows = sheet.map(row => ({
-      id: String(row.id),
-      amount: parseFloat(row.amount),
-      status: row.status,
-      fees: parseFloat(row.fees),
-      tax: parseFloat(row.tax),
-      utr: row.utr,
-      cerated_at: String(row.cerated_at)
-    }));
+    const formattedRows = [];
+
+    for (const row of sheet) {
+      const rawDate = row.created_at; // ✅ FIXED: Use correct column from Excel
+
+      if (!rawDate) {
+        console.warn(`Missing 'created_at' in row with ID ${row.id}`);
+        continue;
+      }
+
+      const parsedDate = moment(rawDate, 'DD/MM/YYYY HH:mm:ss', true);
+
+      if (!parsedDate.isValid()) {
+        console.warn(`Invalid date format in row with ID ${row.id}: ${rawDate}`);
+        continue;
+      }
+
+      formattedRows.push({
+        id: String(row.id),
+        amount: parseFloat(row.amount),
+        status: row.status,
+        fees: parseFloat(row.fees),
+        tax: parseFloat(row.tax),
+        utr: row.utr,
+        cerated_at: parsedDate.toDate() // ✅ your DB expects this name
+      });
+    }
+
+    if (formattedRows.length === 0) {
+      return res.status(400).json({ error: 'No valid rows found with correct date format.' });
+    }
 
     const incomingIds = formattedRows.map(row => row.id);
 
@@ -327,69 +352,11 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
       message: `${uniqueRows.length} new record(s) inserted. ${formattedRows.length - uniqueRows.length} duplicate(s) ignored.`
     });
   } catch (err) {
-  console.error('Error processing Excel upload:', err);
-  res.status(500).json({ error: 'Failed to process and store Excel data: ' + err.message });
-}
-
+    console.error('Error processing Excel upload:', err);
+    res.status(500).json({ error: 'Failed to process and store Excel data: ' + err.message });
+  }
 };
 
-// export const updateSettlementFieldsFromExcel = async (req, res) => {
-//   try {
-//     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-//     const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
-
-//     let updateCount = 0;
-//     let skippedCount = 0;
-//     let duplicateCount = 0;
-
-//     for (const row of sheet) {
-//       const paymentId = row.entity_id;
-//       const settlementId = row['settlement_id'];
-
-//       if (!paymentId) {
-//         skippedCount++;
-//         continue;
-//       }
-
-//       // ✅ Skip if settlement ID already exists
-//       if (settlementId) {
-//         const exists = await database.models.Transactions.findOne({
-//           where: { razorpay_settlement_id: settlementId }
-//         });
-
-//         if (exists) {
-//           duplicateCount++;
-//           continue;
-//         }
-//       }
-
-//       const [updated] = await database.models.Transactions.update(
-//         {
-//           razorpay_fee: parseFloat(row['fee (exclusive tax)']),
-//           razorpay_tax: parseFloat(row['tax']),
-//           razorpay_credit_amt: parseFloat(row['credit']),
-//           payment_method: row['payment_method'],
-//           razorpay_settlement_id: settlementId,
-//           razorpay_settled_at: String(row['settled_at']),
-//           settlement_utr: row['settlement_utr']
-//         },
-//         {
-//           where: { razorpay_payment_id: paymentId }
-//         }
-//       );
-
-//       updated ? updateCount++ : skippedCount++;
-//     }
-
-//     return res.status(200).json({
-//       message: `${updateCount} updated, ${skippedCount} skipped (missing/unmatched payment IDs), ${duplicateCount} skipped (duplicate settlement IDs).`
-//     });
-
-//   } catch (err) {
-//     console.error('Error updating settlements from Excel:', err);
-//     res.status(500).json({ error: 'Failed to process and update Excel data: ' + err.message });
-//   }
-// };
 
 function safeParseFloat(val) {
   if (val === null || val === undefined) return 0;
@@ -405,22 +372,6 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
 
-    // Extract all settlement_ids to check duplicates
-    const settlementIds = sheet
-      .map(row => row['settlement_id'])
-      .filter(id => id); // non-empty
-
-    const existingSettlements = await database.models.Transactions.findAll({
-      where: { razorpay_settlement_id: settlementIds },
-      attributes: ['razorpay_settlement_id'],
-      raw: true
-    });
-    const existingSettlementSet = new Set(existingSettlements.map(r => r.razorpay_settlement_id));
-
-    let updateCount = 0;
-    let skippedCount = 0;
-    let duplicateCount = 0;
-
     const safeParseFloat = (val) => {
       if (val == null || val === '') return 0;
       const cleaned = String(val).replace(/[^0-9.-]/g, '').trim();
@@ -428,43 +379,46 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
       return isNaN(num) ? 0 : num;
     };
 
+    let upserted = 0;
+    let skipped = 0;
+
     for (const row of sheet) {
+      const orderId = row['order_id'];
       const paymentId = row['entity_id'];
-      if (!paymentId) {
-        skippedCount++;
+
+      if (!orderId || !paymentId) {
+        skipped++;
         continue;
       }
 
-      const settlementId = row['settlement_id'];
-      if (settlementId && existingSettlementSet.has(settlementId)) {
-        duplicateCount++;
+      const settledAtRaw = row['settled_at'];
+      const settledAt = moment(settledAtRaw, ['DD/MM/YYYY HH:mm:ss', moment.ISO_8601], true);
+
+      if (!settledAt.isValid()) {
+        console.warn(`Invalid date in row with order_id ${orderId}, skipping.`);
+        skipped++;
         continue;
       }
 
-      // Prepare update data, selecting only needed columns:
-      const updateData = {
+      await database.models.RazorpaySettlementRecon.upsert({
+        order_id: orderId,
+        payment_id: paymentId,
         amount: safeParseFloat(row['amount']),
-        razorpay_fee: safeParseFloat(row['fee (exclusive tax)']),
-        razorpay_tax: safeParseFloat(row['tax']),
-        razorpay_credit_amt: safeParseFloat(row['credit']),
-        payment_notes: row['payment_notes'] || null,
-        order_id: row['order_id'] || null,
-        razorpay_settlement_id: settlementId || null,
-        razorpay_settled_at: row['settled_at'] ? new Date(row['settled_at']) : null,
+        fees: safeParseFloat(row['fee (exclusive tax)']),
+        tax: safeParseFloat(row['tax']),
+        credit_amount: safeParseFloat(row['credit']),
+        payment_notes: row['order_notes'] || null,
+        settlement_id: row['settlement_id'] || null,
+        settled_at: settledAt.toDate(),
         settlement_utr: row['settlement_utr'] || null,
         settled_by: row['settled_by'] || null
-      };
+      });
 
-      const [updated] = await database.models.RazorpaySettlementRecon.update(
-        updateData,
-        { where: { razorpay_payment_id: paymentId } }
-      );
-
-      updated ? updateCount++ : skippedCount++;
+      upserted++;
     }
 
     return res.status(200).json({
-      message: `${updateCount} updated, ${skippedCount} skipped (missing/unmatched payment IDs), ${duplicateCount} skipped (duplicate settlement IDs).`
+      message: `${upserted} record(s) inserted or updated. ${skipped} skipped (invalid or missing fields).`
     });
   } catch (err) {
     console.error('Error updating settlements from Excel:', err);
@@ -472,16 +426,7 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
   }
 };
 
-// GET /api/v1/settlements
-// export const fetchAllSettlements = async (req, res) => {
-//   try {
-//     const settlements = await RazorpaySettlement.findAll();
-//     res.status(200).json(settlements);
-//   } catch (err) {
-//     console.error('Error fetching settlements:', err); // Make sure this line exists
-//     res.status(500).json({ error: 'Failed to fetch settlements' });
-//   }
-// };
+
 
 import { Op } from 'sequelize';
 
@@ -496,17 +441,55 @@ export const fetchAllSettlements = async (req, res) => {
       };
     }
 
+    // Step 1: Fetch settlements
     const settlements = await RazorpaySettlement.findAll({
       where: whereClause,
       order: [['cerated_at', 'DESC']],
+      raw: true,
     });
 
-    res.status(200).json(settlements);
+    if (!settlements.length) {
+      return res.status(200).json([]);
+    }
+
+    const settlementIds = settlements.map(s => s.id);
+
+    // Step 2: Fetch total fees & tax from recon table grouped by settlement_id
+    const reconTotals = await RazorpaySettlementRecon.findAll({
+      attributes: [
+        'settlement_id',
+        [fn('SUM', col('fees')), 'totalFees'],
+        [fn('SUM', col('tax')), 'totalTax'],
+      ],
+      where: {
+        settlement_id: { [Op.in]: settlementIds }
+      },
+      group: ['settlement_id'],
+      raw: true
+    });
+
+    const reconMap = {};
+    reconTotals.forEach(r => {
+      reconMap[r.settlement_id] = {
+        totalFees: parseFloat(r.totalFees) || 0,
+        totalTax: parseFloat(r.totalTax) || 0
+      };
+    });
+
+    // Step 3: Merge recon data into settlements
+    const enrichedSettlements = settlements.map(s => ({
+      ...s,
+      fees: reconMap[s.id]?.totalFees || 0,
+      tax: reconMap[s.id]?.totalTax || 0
+    }));
+
+    res.status(200).json(enrichedSettlements);
   } catch (err) {
     console.error('Error fetching settlements:', err);
     res.status(500).json({ error: 'Failed to fetch settlements' });
   }
 };
+
 
 import { fn, col } from 'sequelize';
 
@@ -514,17 +497,48 @@ export const fetchTransactionsBySettlementId = async (req, res) => {
   const { settlementId } = req.params;
 
   try {
-    const transactions = await Transactions.findAll({
-      where: { razorpay_settlement_id: settlementId },
-      attributes: [
-        'razorpay_payment_id',
-        [fn('SUM', col('amount')), 'totalAmount'],
-        [fn('COUNT', col('razorpay_payment_id')), 'transactionCount']
-      ],
-      group: ['razorpay_payment_id']
-    });
+    const transactions = await database.query(
+      `
+      -- 1. Matched transactions + recon
+      SELECT 
+        t.razorpay_order_id,
+        SUM(t.amount) AS totalAmount,
+        COUNT(t.razorpay_order_id) AS transactionCount,
+        ROUND(SUM(r.fees), 2) AS totalFees,
+        ROUND(SUM(r.tax), 2) AS totalTax,
+        ROUND(SUM(r.credit_amount), 2) AS totalCreditAmount,
+        'Aashray App Transaction' AS source
+      FROM transactions t
+      JOIN razorpay_settlement_recon r 
+        ON t.razorpay_order_id = r.order_id
+      WHERE r.settlement_id = :settlementId
+      GROUP BY t.razorpay_order_id
 
-    return res.json({ data: transactions ?? [] });
+      UNION
+
+      -- 2. Recon-only (not in transactions)
+      SELECT 
+        r.order_id AS razorpay_order_id,
+        NULL AS totalAmount,
+        0 AS transactionCount,
+        ROUND(SUM(r.fees), 2) AS totalFees,
+        ROUND(SUM(r.tax), 2) AS totalTax,
+        ROUND(SUM(r.credit_amount), 2) AS totalCreditAmount,
+        'Satshrut Transaction' AS source
+      FROM razorpay_settlement_recon r
+      WHERE r.settlement_id = :settlementId
+        AND r.order_id NOT IN (
+          SELECT DISTINCT razorpay_order_id FROM transactions WHERE razorpay_order_id IS NOT NULL
+        )
+      GROUP BY r.order_id
+      `,
+      {
+        type: QueryTypes.SELECT,
+        replacements: { settlementId }
+      }
+    );
+
+    res.json({ data: transactions || [] });
   } catch (err) {
     console.error('Error fetching transactions:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -533,7 +547,7 @@ export const fetchTransactionsBySettlementId = async (req, res) => {
 
 
 export const fetchTransactionsByPaymentId = async (req, res) => {
-  const { razorpay_payment_id } = req.params;
+  const { razorpay_order_id } = req.params;
 
   try {
     const results = await database.query(
@@ -549,7 +563,6 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         t.amount,
         t.status,
         t.razorpay_order_id,
-        t.razorpay_payment_id,
         COALESCE(cb.cardno, c.cardno) AS bookedBy_cardno,
         COALESCE(cb.issuedto, c.issuedto) AS bookedBy_issuedto,
         COALESCE(cb.address, c.address) AS bookedBy_address,
@@ -567,14 +580,14 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
       LEFT JOIN travel_db tb ON t.bookingid = tb.bookingid AND t.category = 'travel'
       LEFT JOIN card_db cb ON cb.cardno = COALESCE(sb.bookedBy, rb.bookedBy, tb.bookedBy)
       WHERE t.status IN (:status)
-        AND t.razorpay_payment_id = :razorpay_payment_id
+        AND t.razorpay_order_id = :razorpay_order_id
       `,
       {
         type: QueryTypes.SELECT,
         raw: true,
         replacements: {
           status: ['completed'], // or STATUS_PAYMENT_COMPLETED
-          razorpay_payment_id
+          razorpay_order_id
         }
       }
     );
