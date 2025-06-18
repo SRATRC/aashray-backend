@@ -16,7 +16,7 @@ const sequelize = new Sequelize(
         ca: private_key
       }
     },
-    pool: { maxConnections: 5, maxIdleTime: 30 },
+    pool: { max: 5, idle: 30000 },
     language: 'en'
   }
 );
