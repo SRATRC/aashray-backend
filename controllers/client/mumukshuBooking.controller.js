@@ -96,12 +96,9 @@ export const mumukshuBooking = async (req, res) => {
     }
   }
 
-  var order = null;
-  if (req.user.country == 'India' && amount > 0) {
-    order = await generateOrderId(amount);
-    const bookingIds = retrieveBookingIds(userBookingIdMap);
-    await updateRazorpayTransactions(bookingIds, [], order.id, t);
-  }
+  const order = await generateOrderId(amount);
+  const bookingIds = retrieveBookingIds(userBookingIdMap);
+  await updateRazorpayTransactions(bookingIds, [], order.id, t);
   await t.commit();
 
   //Sending email to logged in user for self or other mumkshus
@@ -131,11 +128,9 @@ export const mumukshuBooking = async (req, res) => {
       ? MSG_BOOKING_WAITING
       : MSG_BOOKING_SUCCESSFUL;
 
-  return res.status(200).send({
-    message: message,
-    order,
-    waitingBookingCountMap
-  });
+  return res
+    .status(200)
+    .send({ message: message, order, waitingBookingCountMap });
 };
 
 export const validateBooking = async (req, res) => {
