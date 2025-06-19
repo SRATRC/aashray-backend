@@ -350,7 +350,6 @@ export async function sendUnifiedEmail(
     });
   }
 
-  //GetData for adhyan
   if (wasAdhyanBooked) {
     let includeOptions = [];
     includeOptions.push({
@@ -654,13 +653,19 @@ export async function createCardIds(count) {
   return newIds;
 }
 
+// Validate that at least one of the selected dates intersects the Utsav period.
+// Completely outside Utsav bookings are now permitted, so we only restrict a booking
+// if it ends before it even starts or starts after it ends (i.e. an invalid range).
 export function validateBookingDatesBetweenUtsav(start_date, end_date, utsav) {
-  if (utsav) {
-    if (
-      new Date(start_date) > new Date(utsav.end_date) ||
-      new Date(end_date) < new Date(utsav.start_date)
-    ) {
-      throw new ApiError(400, ERR_DATES_NOT_BETWEEN_UTSAV);
-    }
+  if (!utsav) return;
+
+  const start = new Date(start_date);
+  const end = new Date(end_date);
+  const utsavStart = new Date(utsav.start_date);
+  const utsavEnd = new Date(utsav.end_date);
+
+  if (start > end) {
+    throw new ApiError(400, ERR_DATES_NOT_BETWEEN_UTSAV);
   }
+  // No further restrictions – bookings completely outside the Utsav period are allowed.
 }
