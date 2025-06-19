@@ -19,7 +19,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
-import { getBookingType } from './booking.helper.js';
+import { getBookingType , ifMigrated} from './booking.helper.js';
 import { validateCard } from './card.helper.js';
 
 export async function createPendingTransaction(
@@ -99,12 +99,14 @@ export async function cancelTransactions(user, transactions, t, admin = false) {
   }
 }
 
+
 export async function cancelTransaction(user, card, transaction, t, admin = false) {
   console.log('>> Cancel Transaction: Current status =', transaction.status);
 
   if (!card) {
     card = await validateCard(transaction.cardno);
   }
+
 
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
   var description = transaction.description;
@@ -124,7 +126,7 @@ export async function cancelTransaction(user, card, transaction, t, admin = fals
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
     case STATUS_PAYMENT_FAILED:
-      if (credits > 0 && bookingType != TYPE_ADHYAYAN) {
+      if (credits > 0 && bookingType != TYPE_ADHYAYAN && !ifMigrated(transaction)) {
         await addCredit(user, card, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;
