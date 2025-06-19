@@ -1,6 +1,9 @@
 import express from 'express';
 const router = express.Router();
-import { unifiedBooking, validateBooking } from '../../controllers/client/unifiedBooking.controller.js';
+import {
+  unifiedBooking,
+  validateBooking
+} from '../../controllers/client/unifiedBooking.controller.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
 

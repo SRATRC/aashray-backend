@@ -227,7 +227,13 @@ export function retrieveBookingIds(userBookingIdMap) {
     .flat();
 }
 
-export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy,subject,bookingStatus,welcomeMessage) {
+export async function sendUnifiedEmailForBookedBy(
+  userBookingIdMap,
+  bookedBy,
+  subject,
+  bookingStatus,
+  welcomeMessage
+) {
   const flattenedMap = {};
   let isSelfBooking = true;
   // First, collect all booking IDs by type
@@ -256,7 +262,7 @@ export async function sendUnifiedEmailForBookedBy(userBookingIdMap, bookedBy,sub
       bookedBy,
       subject,
       bookingStatus,
-      welcomeMessage  
+      welcomeMessage
     );
   }
 }
@@ -269,17 +275,16 @@ export async function sendUnifiedEmail(
   bookingStatus = 'Confirmed',
   welcomeMessage = 'We are pleased to inform you that your bookings have been confirmed.',
   template = 'unifiedBookingEmail'
-) 
-
-{
- 
+) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
   let wasRoomBooked = bookingIds[TYPE_ROOM] != null;
-  let wasFlatBooked = Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
+  let wasFlatBooked =
+    Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
-  let showTravelConfirmationDetail = (bookingStatus == 'Confirmed' && wasRajprvasBooked) ;
-  
+  let showTravelConfirmationDetail =
+    bookingStatus == 'Confirmed' && wasRajprvasBooked;
+
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
@@ -481,9 +486,10 @@ export async function sendUnifiedEmail(
     });
   }
 
-  const country = user && user.country ? user.country : bookedBy && bookedBy.country;
+  const country =
+    user && user.country ? user.country : bookedBy && bookedBy.country;
   let showNRIRelatedDetails = false;
-  if(country && country != 'India'){
+  if (country && country != 'India') {
     showNRIRelatedDetails = true;
   }
 
@@ -649,10 +655,12 @@ export async function createCardIds(count) {
 }
 
 export function validateBookingDatesBetweenUtsav(start_date, end_date, utsav) {
-  if(utsav) {
-    if(new Date(start_date) > new Date(utsav.end_date) 
-      || new Date(end_date) < new Date(utsav.start_date)){
+  if (utsav) {
+    if (
+      new Date(start_date) > new Date(utsav.end_date) ||
+      new Date(end_date) < new Date(utsav.start_date)
+    ) {
       throw new ApiError(400, ERR_DATES_NOT_BETWEEN_UTSAV);
-    }  
+    }
   }
 }
