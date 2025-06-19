@@ -6,9 +6,9 @@ import database from '../../config/database.js';
 import moment from 'moment';
 
 const mealTimes = {
-  breakfast: '7:30 AM - 9:00 AM',
-  lunch: '12:00 PM - 2:00 PM',
-  dinner: '7:00 PM - 9:00 PM'
+  breakfast: '7:45 AM - 8:45 AM',
+  lunch: '12:00 PM - 1:00 PM',
+  dinner: '5:45 PM - 6:45 PM'
 };
 
 export const FetchFoodBookings = async (req, res) => {

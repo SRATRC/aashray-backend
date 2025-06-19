@@ -9,7 +9,8 @@ import {
   STATUS_PAYMENT_CAPTURED,
   STATUS_PAYMENT_FAILED,
   STATUS_PAYMENT_AUTHORIZED,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  TYPE_FOOD
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -138,9 +139,11 @@ export const verifyPayment = async (req, res) => {
     message = 'Payment successful.';
   } else {
     message = `No pending bookings found for the given order id: ${razorpay_order_id}`;
-    logger.error(`No pending bookings found for the given order id: ${JSON.stringify(
-      req.body
-    )}`);
+    logger.error(
+      `No pending bookings found for the given order id: ${JSON.stringify(
+        req.body
+      )}`
+    );
   }
   res.status(200).json({ message, status: 'ok' });
 };
@@ -150,7 +153,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
 
   const t = await database.transaction();
 
-  const totalAmount = await Transactions.sum('amount', {
+  const transactions = await Transactions.findAll({
     where: {
       bookingid: bookingids,
       cardno: req.user.cardno,
@@ -162,9 +165,70 @@ export const createOrderIdForPendingPayments = async (req, res) => {
     }
   });
 
+  const hasDisallowedCategory = transactions.some((transaction) => {
+    const bookingType = getBookingType(transaction);
+    return TYPE_FOOD == bookingType;
+  });
+
+  if (hasDisallowedCategory) {
+    throw new ApiError(
+      400,
+      'Payment is not allowed for breakfast, lunch, or dinner bookings'
+    );
+  }
+
+  const totalAmount = transactions.reduce(
+    (sum, transaction) => sum + transaction.amount,
+    0
+  );
+
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
     await updateRazorpayTransactions(bookingids, [], order.id, t);
+    await t.commit();
+
+    return res.status(200).send({ message: 'payment successful', data: order });
+  } else {
+    throw new ApiError(404, 'nothing to pay for');
+  }
+};
+
+export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
+  const { data } = req.body;
+  const t = await database.transaction();
+
+  const bookingCategoryMap = data.reduce((map, item) => {
+    map[item.bookingid] = item.category;
+    return map;
+  }, {});
+
+  const transactions = await Transactions.findAll({
+    where: {
+      bookingid: Object.keys(bookingCategoryMap),
+      cardno: req.user.cardno,
+      status: [
+        STATUS_PAYMENT_PENDING,
+        STATUS_CASH_PENDING,
+        STATUS_PAYMENT_FAILED
+      ]
+    }
+  });
+
+  const totalAmount = transactions.reduce((sum, transaction) => {
+    const category = bookingCategoryMap[transaction.bookingid];
+    if (category === getBookingType(transaction)) {
+      return sum + transaction.amount;
+    }
+    return sum;
+  }, 0);
+
+  if (totalAmount > 0) {
+    const order = await generateOrderId(totalAmount);
+    const validBookingIds = transactions
+      .filter((t) => bookingCategoryMap[t.bookingid] === getBookingType(t))
+      .map((t) => t.bookingid);
+
+    await updateRazorpayTransactions(validBookingIds, [], order.id, t);
     await t.commit();
 
     return res.status(200).send({ message: 'payment successful', data: order });

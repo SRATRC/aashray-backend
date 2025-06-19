@@ -31,6 +31,7 @@ export async function createPendingTransaction(
   t,
   cashAllowed = false
 ) {
+  if (card.country != 'India') cashAllowed = true;
   const transaction = await Transactions.create(
     {
       cardno: card.cardno,
@@ -99,8 +100,13 @@ export async function cancelTransactions(user, transactions, t, admin = false) {
   }
 }
 
-
-export async function cancelTransaction(user, card, transaction, t, admin = false) {
+export async function cancelTransaction(
+  user,
+  card,
+  transaction,
+  t,
+  admin = false
+) {
   console.log('>> Cancel Transaction: Current status =', transaction.status);
 
   if (!card) {

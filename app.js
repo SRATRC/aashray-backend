@@ -37,7 +37,7 @@ import gateManagementRoutes from './routes/admin/gateManagement.routes.js';
 import roomManagementRoutes from './routes/admin/roomManagement.routes.js';
 import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 import accountsManagementRoutes from './routes/admin/accountsManagement.routes.js';
-import maintenanceManagementRoutes from './routes/admin/maintenanceManagementRoutes.js';
+import maintenanceManagementRoutes from './routes/admin/maintenanceManagement.routes.js';
 import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
 import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
 

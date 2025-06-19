@@ -1,14 +1,18 @@
 import './config/environment.js';
 import moment from 'moment';
-import { adminCancelTransaction, cancelTransactions, getPendingTransactions } from './helpers/transactions.helper.js';
+import {
+  adminCancelTransaction,
+  cancelTransactions,
+  getPendingTransactions
+} from './helpers/transactions.helper.js';
 import database from './config/database.js';
 import cron from 'node-cron';
 import logger from './config/logger.js';
-import { 
+import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_PENDING,
   STATUS_PROCEED_FOR_PAYMENT,
-  TYPE_FOOD,
+  TYPE_FOOD
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import ShibirBookingDb from './models/shibir_booking_db.model.js';
@@ -21,21 +25,28 @@ import { Sequelize } from 'sequelize';
 import Transactions from './models/transactions.model.js';
 import ShibirDb from './models/shibir_db.model.js';
 import { sendCancellationEmail } from './helpers/mailer.helper.js';
-import { getBooking, getBookingType, getBookingTypeFromBooking } from './helpers/booking.helper.js';
+import {
+  getBooking,
+  getBookingType,
+  getBookingTypeFromBooking
+} from './helpers/booking.helper.js';
 import UtsavDb from './models/utsav_db.model.js';
 import { validateCard } from './helpers/card.helper.js';
 
-const MAX_APP_PAYMENT_DURATION = 24*60; // 24 hrs
+const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
+
+let isRunning = false; // Track task status
 
 // Schedule the cron job to run every 10 minutes
-const job = cron.schedule('*/1 * * * *', async () => {
+const job = cron.schedule('*/30 * * * *', async () => {
   logger.info('Cron job started');
+
+  isRunning = true;
 
   await database.authenticate();
 
-
   const systemUser = AdminUsers.findOne({
-    where: { username: "admin" } 
+    where: { username: 'admin' }
   });
 
   const userBookingIds = {};
@@ -44,8 +55,8 @@ const job = cron.schedule('*/1 * * * *', async () => {
 
   try {
     const t = await database.transaction();
-
     await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
+
     await getUnpaidPastBookingsAndTransactions(bookings, transactions);
 
     await cancelBookings(systemUser, bookings, userBookingIds, t);
@@ -57,26 +68,48 @@ const job = cron.schedule('*/1 * * * *', async () => {
       const bookingIds = userBookingIds[cardno];
       await sendCancellationEmail(cardno, bookingIds, null);
     }
-
   } catch (error) {
     logger.error('Cron job error:', error);
     await t.rollback();
+  } finally {
+    isRunning = false;
   }
 
   logger.info('Cron job finished.');
 });
 
-job.stop();
 job.start();
+
+// Graceful shutdown handler
+const gracefulShutdown = async () => {
+  console.log('Gracefully shutting down cron service...');
+
+  // Stop future jobs from being triggered
+  job.stop();
+
+  // Wait for the current task to finish if it's running
+  const waitInterval = setInterval(() => {
+    if (!isRunning) {
+      console.log('All tasks completed. Exiting...');
+      clearInterval(waitInterval);
+      process.exit(0);
+    } else {
+      console.log('Waiting for current task to finish...');
+    }
+  }, 10000);
+};
+
+process.on('SIGINT', gracefulShutdown); // e.g., Ctrl+C
+process.on('SIGTERM', gracefulShutdown); // PM2 stop/reload
 
 async function cancelMeals(systemUser, transactions, t) {
   for (const transaction of transactions) {
     const bookingType = getBookingType(transaction);
     if (bookingType == TYPE_FOOD) {
       await cancelMeal(
-        systemUser, 
-        transaction.bookingid, 
-        transaction.category, 
+        systemUser,
+        transaction.bookingid,
+        transaction.category,
         t
       );
     }
@@ -84,13 +117,15 @@ async function cancelMeals(systemUser, transactions, t) {
 }
 
 async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
-  const cancelTimeFilter = moment.utc().subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
+  const cancelTimeFilter = moment
+    .utc()
+    .subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
   const pendingTransactions = await getPendingTransactions(cancelTimeFilter);
 
   for (const transaction of pendingTransactions) {
     const bookingType = getBookingType(transaction);
     // TODO: optimize, get all bookings at once
-    
+
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
       const booking = await getBooking(bookingType, transaction.bookingid);
@@ -102,7 +137,7 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
 
 async function cancelBookings(systemUser, bookings, userBookingIds, t) {
   for (const booking of bookings) {
-    logger.info("Cancelling Booking " + JSON.stringify(booking.bookingid));
+    logger.info('Cancelling Booking ' + JSON.stringify(booking.bookingid));
     await booking.update(
       {
         status: STATUS_ADMIN_CANCELLED,
@@ -130,7 +165,7 @@ async function getUnpaidPastBookingsAndTransactions(bookings, transactions) {
   const pastBookings = await getUnpaidPastBookings();
 
   const pastTransactions = await Transactions.findAll({
-    where: { bookingid: pastBookings.map(i => i.bookingid) }
+    where: { bookingid: pastBookings.map((i) => i.bookingid) }
   });
 
   bookings.push(...pastBookings);
@@ -143,14 +178,14 @@ async function getUnpaidPastBookings() {
   const roomBookings = await RoomBooking.findAll({
     where: {
       status: STATUS_PAYMENT_PENDING,
-      checkin: {[Sequelize.Op.lt]: today }
+      checkin: { [Sequelize.Op.lt]: today }
     }
   });
-  
+
   const flatBookings = await FlatBooking.findAll({
     where: {
       status: STATUS_PAYMENT_PENDING,
-      checkin: {[Sequelize.Op.lt]: today }
+      checkin: { [Sequelize.Op.lt]: today }
     }
   });
 
@@ -160,7 +195,7 @@ async function getUnpaidPastBookings() {
         model: ShibirDb,
         required: true,
         where: {
-          start_date: {[Sequelize.Op.lt]: today }
+          start_date: { [Sequelize.Op.lt]: today }
         }
       }
     ],
@@ -172,7 +207,7 @@ async function getUnpaidPastBookings() {
   const travelBookings = await TravelDb.findAll({
     where: {
       status: STATUS_PROCEED_FOR_PAYMENT,
-      date: {[Sequelize.Op.lt]: today }
+      date: { [Sequelize.Op.lt]: today }
     }
   });
 
@@ -182,7 +217,7 @@ async function getUnpaidPastBookings() {
         model: UtsavDb,
         required: true,
         where: {
-          start_date: {[Sequelize.Op.lt]: today }
+          start_date: { [Sequelize.Op.lt]: today }
         }
       }
     ],

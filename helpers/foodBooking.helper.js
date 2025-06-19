@@ -7,6 +7,7 @@ import {
   STATUS_GUEST,
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
+  STATUS_SEVA_KUTIR,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
   TYPE_GUEST_LUNCH
@@ -24,10 +25,10 @@ import {
   Transactions,
   UtsavDb
 } from '../models/associations.js';
-import { validateCard, validateCards } from './card.helper.js';
+import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { cancelTransaction, cancelTransactions } from './transactions.helper.js';
+import { cancelTransactions } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
@@ -61,8 +62,9 @@ export async function bookFoodForMumukshus(
   mumukshuGroup,
   primary_booking,
   addons,
-  updatedBy,
-  t
+  bookedBy,
+  t,
+  updatedBy
 ) {
   validateDate(start_date, end_date);
 
@@ -94,7 +96,7 @@ export async function bookFoodForMumukshus(
               dinner: booking.dinner || dinner,
               hightea: high_tea,
               spicy,
-              updatedBy
+              updatedBy: updatedBy ? updatedBy : bookedBy
             },
             { transaction: t }
           );
@@ -103,14 +105,14 @@ export async function bookFoodForMumukshus(
             id: uuidv4(),
             cardno: mumukshu,
             date,
-            bookedBy: updatedBy !== mumukshu ? updatedBy : null,
+            bookedBy: bookedBy !== mumukshu ? bookedBy : null,
             breakfast,
             lunch,
             dinner,
             spicy,
             hightea: high_tea,
             plateissued: 0,
-            updatedBy
+            updatedBy: updatedBy ? updatedBy : bookedBy
           });
         }
       }
@@ -148,7 +150,6 @@ export async function bookFoodForGuests(
       type: TYPE_GUEST_DINNER
     }
   ];
-  
 
   validateDate(start_date, end_date);
 
@@ -164,7 +165,7 @@ export async function bookFoodForGuests(
 
   let allDates = [];
 
-  if(utsaveId){
+  if (utsaveId) {
     const utsav = await UtsavDb.findOne({
       where: { id: utsaveId }
     });
@@ -182,11 +183,10 @@ export async function bookFoodForGuests(
       afterEventDates.shift(); // Remove the event end date
       allDates = [...allDates, ...afterEventDates];
     }
-    
   } else {
     allDates = getDates(start_date, end_date);
   }
-  
+
   const bookings = await getFoodBookings(allDates, guests);
 
   var bookingsToCreate = [];
@@ -219,7 +219,9 @@ export async function bookFoodForGuests(
                 bookingid: booking.dataValues.id,
                 category: meal.type,
                 amount: meal.price,
-                status: cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING,
+                status: cashAllowed
+                  ? STATUS_CASH_PENDING
+                  : STATUS_PAYMENT_PENDING,
                 updatedBy
               });
             }
@@ -264,7 +266,9 @@ export async function bookFoodForGuests(
                 bookingid: bookingId,
                 category: meal.type,
                 amount: meal.price,
-                status: cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING,
+                status: cashAllowed
+                  ? STATUS_CASH_PENDING
+                  : STATUS_PAYMENT_PENDING,
                 updatedBy
               });
             }
@@ -278,7 +282,9 @@ export async function bookFoodForGuests(
   }
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
-  const transactions = await Transactions.bulkCreate(transactionsToCreate, { transaction: t });
+  const transactions = await Transactions.bulkCreate(transactionsToCreate, {
+    transaction: t
+  });
   const transactionIds = transactions.map((item) => item.id);
 
   return { amount, userBookingIds, transactionIds };
@@ -294,6 +300,7 @@ export async function validateFood(
   if (
     !(
       card.res_status === STATUS_RESIDENT ||
+      card.res_status === STATUS_SEVA_KUTIR ||
       (await checkRoomBookingProgress(
         start_date,
         end_date,
@@ -366,13 +373,10 @@ export async function cancelMeal(user, bookingId, mealType, t) {
   updateFields.updatedBy = user.username;
 
   // Update the meal booking
-  await FoodDb.update(
-    updateFields, 
-    {
-      where: { id: bookingId },
-      transaction: t
-    }
-  );
+  await FoodDb.update(updateFields, {
+    where: { id: bookingId },
+    transaction: t
+  });
 }
 
 export async function cancelFood(user, cardno, food_data, t, admin = false) {
@@ -428,8 +432,6 @@ export async function bookFoodForMumukshusDuringUtsav(
   t
 ) {
   validateDate(start_date, end_date);
-
-  
 
   const utsav = await UtsavDb.findOne({
     where: { id: primary_booking.details.utsavid }
