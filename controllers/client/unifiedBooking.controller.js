@@ -93,9 +93,12 @@ export const unifiedBooking = async (req, res) => {
     }
   }
 
-  const order = await generateOrderId(amount);
-  const bookingIds = retrieveBookingIds(userBookingIdMap);
-  await updateRazorpayTransactions(bookingIds, [], order.id, t);
+  var order = null;
+  if (req.user.country == 'India' && amount > 0) {
+    order = await generateOrderId(amount);
+    const bookingIds = retrieveBookingIds(userBookingIdMap);
+    await updateRazorpayTransactions(bookingIds, [], order.id, t);
+  }
 
   await t.commit();
   //Sending email to logged in user for self or other mumkshus
@@ -127,7 +130,7 @@ export const unifiedBooking = async (req, res) => {
   }
   return res.status(200).send({
     message: message,
-    data: order,
+    data: order ? order : { amount: 0 },
     waitingBookingCountMap: waitingBookingCountMap
   });
 };

@@ -84,6 +84,15 @@ export async function getBooking(bookingType, bookingid) {
   return booking;
 }
 
+export function ifMigrated(transaction) {
+  let bookingid = transaction.bookingid;
+  let description = transaction.description;
+  if(bookingid.length < 36 || (description && description.includes('came from datachef migration'))) {
+    return true;
+  }
+  return false;
+}
+
 export function getBookingType(transaction) {
   const bookingType = bookingTypeMap[transaction.category];
   if (!bookingType) {

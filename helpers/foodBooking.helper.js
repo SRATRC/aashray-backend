@@ -3,6 +3,8 @@ import {
   DINNER_PRICE,
   ERR_ROOM_MUST_BE_BOOKED,
   LUNCH_PRICE,
+  ROLE_FOOD_ADMIN,
+  ROLE_SUPER_ADMIN,
   STATUS_CASH_PENDING,
   STATUS_GUEST,
   STATUS_PAYMENT_PENDING,
@@ -64,14 +66,22 @@ export async function bookFoodForMumukshus(
   addons,
   bookedBy,
   t,
-  updatedBy
+  updatedBy,
+  userRoles = []
 ) {
   validateDate(start_date, end_date);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cards = await validateCards(mumukshus);
   for (const card of cards) {
-    await validateFood(start_date, end_date, primary_booking, addons, card);
+    await validateFood(
+      start_date,
+      end_date,
+      primary_booking,
+      addons,
+      card,
+      userRoles
+    );
   }
 
   const allDates = getDates(start_date, end_date);
@@ -295,12 +305,16 @@ export async function validateFood(
   end_date,
   primary_booking,
   addons,
-  card
+  card,
+  userRoles = []
 ) {
   if (
     !(
       card.res_status === STATUS_RESIDENT ||
       card.res_status === STATUS_SEVA_KUTIR ||
+      [ROLE_FOOD_ADMIN, ROLE_SUPER_ADMIN].some((role) =>
+        userRoles.includes(role)
+      ) ||
       (await checkRoomBookingProgress(
         start_date,
         end_date,
@@ -429,7 +443,8 @@ export async function bookFoodForMumukshusDuringUtsav(
   primary_booking,
   addons,
   updatedBy,
-  t
+  t,
+  userRoles = []
 ) {
   validateDate(start_date, end_date);
 
@@ -445,7 +460,14 @@ export async function bookFoodForMumukshusDuringUtsav(
   const cards = await validateCards(mumukshus);
 
   for (const card of cards) {
-    await validateFood(start_date, end_date, primary_booking, addons, card);
+    await validateFood(
+      start_date,
+      end_date,
+      primary_booking,
+      addons,
+      card,
+      userRoles
+    );
   }
 
   let bookingsToCreate = [];
