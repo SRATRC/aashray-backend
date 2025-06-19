@@ -69,7 +69,7 @@ export const createAdhyayan = async (req, res) => {
   res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
 };
 
-export const fetchAllAdhyayan = async (req, res) => {
+export const fetchRCAdhyayan = async (req, res) => {
   const shibirs = await database.query(
     `SELECT 
       shibir_db.id,
@@ -81,6 +81,7 @@ export const fetchAllAdhyayan = async (req, res) => {
       shibir_db.location,
       shibir_db.total_seats,
       shibir_db.available_seats,
+      COUNT(CASE WHEN shibir_booking_db.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
       shibir_db.food_allowed,
@@ -93,6 +94,157 @@ export const fetchAllAdhyayan = async (req, res) => {
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
       shibir_db.start_date > CURRENT_DATE
+      AND shibir_db.location = 'Research Centre'
+    GROUP BY 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    ORDER BY 
+      shibir_db.start_date ASC;`,
+    {
+      type: QueryTypes.SELECT
+    }
+  );
+
+  return res.status(200).send({ message: 'Fetched Results', data: shibirs });
+};
+
+export const fetchKolAdhyayan = async (req, res) => {
+  const shibirs = await database.query(
+    `SELECT 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      COUNT(CASE WHEN shibir_booking_db.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    FROM 
+      shibir_db
+    LEFT JOIN 
+      shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+    WHERE 
+      shibir_db.start_date > CURRENT_DATE
+      AND shibir_db.location = 'Kolkata'
+    GROUP BY 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    ORDER BY 
+      shibir_db.start_date ASC;`,
+    {
+      type: QueryTypes.SELECT
+    }
+  );
+
+  return res.status(200).send({ message: 'Fetched Results', data: shibirs });
+};
+
+export const fetchDhuleAdhyayan = async (req, res) => {
+  const shibirs = await database.query(
+    `SELECT 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      COUNT(CASE WHEN shibir_booking_db.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    FROM 
+      shibir_db
+    LEFT JOIN 
+      shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+    WHERE 
+      shibir_db.start_date > CURRENT_DATE
+      AND shibir_db.location = 'Dhule'
+    GROUP BY 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    ORDER BY 
+      shibir_db.start_date ASC;`,
+    {
+      type: QueryTypes.SELECT
+    }
+  );
+
+  return res.status(200).send({ message: 'Fetched Results', data: shibirs });
+};
+
+export const fetchRajAdhyayan = async (req, res) => {
+  const shibirs = await database.query(
+    `SELECT 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      COUNT(CASE WHEN shibir_booking_db.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    FROM 
+      shibir_db
+    LEFT JOIN 
+      shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+    WHERE 
+      shibir_db.start_date >= CURRENT_DATE
+      AND shibir_db.location = 'Rajnandgaon'
     GROUP BY 
       shibir_db.id,
       shibir_db.name,

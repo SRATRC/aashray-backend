@@ -62,7 +62,7 @@ export async function validateAdhyayans(...shibirIds) {
   const shibirs = await ShibirDb.findAll({
     where: {
       id: shibirIds,
-      start_date: { [Sequelize.Op.gt]: moment().format('YYYY-MM-DD') }
+      start_date: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') }
     }
   });
 
