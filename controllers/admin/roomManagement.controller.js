@@ -8,14 +8,12 @@ import {
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
-  STATUS_MUMUKSHU,
   ROOM_STATUS_PENDING_CHECKIN,
   ROOM_STATUS_CHECKEDIN,
   ROOM_STATUS_CHECKEDOUT,
   ROOM_BLOCKED,
   ROOM_STATUS_AVAILABLE,
   STATUS_INACTIVE,
-  STATUS_WAITING,
   STATUS_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
   ERR_ROOM_ALREADY_BOOKED,
@@ -29,9 +27,7 @@ import {
   TYPE_FLAT,
   STATUS_CASH_COMPLETED,
   MSG_CANCEL_SUCCESSFUL,
-  STATUS_PAYMENT_PENDING,
-  ERR_FLAT_ALREADY_BOOKED,
-  ERR_FLAT_FAILED_TO_BOOK
+  ERR_FLAT_ALREADY_BOOKED
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -49,14 +45,11 @@ import {
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import getDates from '../../utils/getDates.js';
-import Sequelize, { where } from 'sequelize';
+import Sequelize from 'sequelize';
 import moment from 'moment';
-import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import {
-  adjustAmount
-} from '../../helpers/transactions.helper.js';
+import { adjustAmount } from '../../helpers/transactions.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 
 export const manualCheckin = async (req, res) => {
@@ -386,32 +379,31 @@ export const flatBooking = async (req, res) => {
     req.body.checkout_date
   );
 
-    const t = await database.transaction();
+  const t = await database.transaction();
   req.transaction = t;
 
   const booking = await createFlatBooking(
-    card.cardno, 
-    req.body.checkin_date, 
-    req.body.checkout_date, 
-    nights, 
-    req.body.flat_no, 
-    card, 
+    card.cardno,
+    req.body.checkin_date,
+    req.body.checkout_date,
+    nights,
+    req.body.flat_no,
+    card,
     t,
     true
   );
 
-    await t.commit();
+  await t.commit();
   if (booking.bookingId != null) {
     let bookingIds = {};
     bookingIds[TYPE_FLAT] = [booking.bookingId];
     sendUnifiedEmail(card.cardno, bookingIds, card);
   }
-  
+
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
-  
   const bookings = await RoomBooking.findAll({
     order: [['checkin', 'ASC']]
   });
@@ -420,7 +412,6 @@ export const fetchAllRoomBookings = async (req, res) => {
 };
 
 export const fetchAllFlatBookings = async (req, res) => {
-  
   const bookings = await FlatBooking.findAll({
     order: [['checkin', 'ASC']]
   });
@@ -429,7 +420,6 @@ export const fetchAllFlatBookings = async (req, res) => {
 };
 
 export const fetchRoomBookingsByCard = async (req, res) => {
-  
   const bookings = await RoomBooking.findAll({
     where: {
       cardno: req.params.cardno
@@ -441,7 +431,6 @@ export const fetchRoomBookingsByCard = async (req, res) => {
 };
 
 export const fetchFlatBookingsByCard = async (req, res) => {
-  
   const bookings = await FlatBooking.findAll({
     where: {
       cardno: req.params.cardno
@@ -503,14 +492,13 @@ export const updateFlatBooking = async (req, res) => {
 };
 
 export const roomList = async (req, res) => {
-  
   const result = await RoomDb.findAll({
     attributes: ['roomno', 'roomtype', 'gender', 'roomstatus'],
     where: {
       roomno: {
         [Sequelize.Op.notIn]: ['NA', 'WL']
       }
-    },
+    }
   });
 
   return res.status(200).send({ message: 'Success', data: result });
@@ -518,9 +506,7 @@ export const roomList = async (req, res) => {
 
 export const flatList = async (req, res) => {
   const flats = await FlatDb.findAll({
-    attributes: [
-      [Sequelize.fn('DISTINCT', Sequelize.col('flatno')), 'flatno']
-    ]
+    attributes: [[Sequelize.fn('DISTINCT', Sequelize.col('flatno')), 'flatno']]
   });
   return res.status(200).send({ message: 'Success', data: flats });
 };
@@ -704,7 +690,6 @@ export const unblockRC = async (req, res) => {
 };
 
 export const occupancyReport = async (req, res) => {
-  
   const result = await RoomBooking.findAll({
     attributes: [
       'bookingid',
@@ -724,8 +709,7 @@ export const occupancyReport = async (req, res) => {
     ],
     where: {
       status: ROOM_STATUS_CHECKEDIN
-    },
-    
+    }
   });
 
   return res.status(200).send({ message: 'Success', data: result });
@@ -743,8 +727,8 @@ export const ReservationReport = async (req, res) => {
     page,
     pageSize,
     statuses
-  )
-  
+  );
+
   return res
     .status(200)
     .send({ message: 'Fetched room reservation report', data: reservations });
@@ -850,14 +834,7 @@ export const dayWiseGuestCountReport = async (req, res) => {
     .send({ message: 'Fetched daywise report', data: data });
 };
 
-async function roomBookingReport(
-  startDate,
-  endDate,
-  page,
-  pageSize,
-  statuses
-) {
-  
+async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
   const data = await RoomBooking.findAll({
     include: [
       {
@@ -883,8 +860,7 @@ async function roomBookingReport(
         { checkout: { [Sequelize.Op.between]: [startDate, endDate] } }
       ]
     },
-    order: [['checkin', 'ASC']],
-    
+    order: [['checkin', 'ASC']]
   });
 
   return data;

@@ -250,6 +250,42 @@ export async function createRoomBooking(
   cashAllowed = false
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
+
+  // If this is a single-night booking that begins on the Utsav end date
+  // OR ends on the Utsav start date,
+  // we should mark the booking as WAITING instead of creating a normal booking.
+  // This handles the scenario: check-in = utsav.end_date, check-out = utsav.end_date + 1 day.
+  const isSingleNight = nights === 1;
+  if (isSingleNight) {
+    // Find an Utsav whose end_date is the same as the check-in date.
+    const utsavEndingToday = await UtsavDb.findOne({
+      where: { end_date: checkin }
+    });
+    const utsavStartingTomorrow = await UtsavDb.findOne({
+      where: { start_date: checkout }
+    });
+    if (utsavEndingToday || utsavStartingTomorrow) {
+      const bookedBy = user.cardno !== cardno ? user.cardno : null;
+      let bookingId = uuidv4();
+      await RoomBooking.create(
+        {
+          bookingid: bookingId,
+          roomno: 'NA',
+          status: STATUS_WAITING,
+          cardno,
+          bookedBy,
+          checkin,
+          checkout,
+          nights,
+          roomtype,
+          gender,
+          updatedBy: user.cardno
+        },
+        { transaction: t }
+      );
+      return { t, discountedAmount: 0, bookingId };
+    }
+  }
   const roomno = await findRoom(checkin, checkout, roomtype, gender);
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
 

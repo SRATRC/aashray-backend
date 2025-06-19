@@ -1,4 +1,5 @@
 import { UtsavDb, UtsavPackagesDb } from '../../models/associations.js';
+import BlockDates from '../../models/block_dates.model.js';
 import {
   validateUtsavBooking,
   reserveUtsavSeat,
@@ -15,18 +16,17 @@ import {
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
   STATUS_ADMIN_CANCELLED,
-  STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
   TYPE_UTSAV,
   STATUS_CREDITED,
   STATUS_CANCELLED
 } from '../../config/constants.js';
+import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
-import { validateCard } from '../../helpers/card.helper.js';
 
 export const createUtsav = async (req, res) => {
   const { name, start_date, end_date, total_seats, location } = req.body;
@@ -42,17 +42,35 @@ export const createUtsav = async (req, res) => {
 
   const month = moment(start_date).format('MMMM');
 
-  const utsavDetails = await UtsavDb.create({
-    name,
-    start_date,
-    end_date,
-    month,
-    total_seats,
-    location: 'Research Centre',
-    available_seats: total_seats,
-    status: 'open',
-    updatedBy: req.user.username
-  });
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const utsavDetails = await UtsavDb.create(
+    {
+      name,
+      start_date,
+      end_date,
+      month,
+      total_seats,
+      location: location || 'Research Centre',
+      available_seats: total_seats,
+      status: 'open',
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  await BlockDates.create(
+    {
+      checkin: start_date,
+      checkout: moment(end_date).add(1, 'day').format('YYYY-MM-DD'),
+      comments: name,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
 
   return res.status(200).send({ message: 'Created Utsav', data: utsavDetails });
 };
@@ -134,9 +152,16 @@ export const fetchUtsavBookings = async (req, res) => {
   let statusToBeIncluded = [STATUS_CONFIRMED];
   if (status === 'waiting') {
     statusToBeIncluded = [STATUS_WAITING];
+  } else if (status === 'confirmed') {
+    statusToBeIncluded = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED];
   } else if (status === 'pending') {
     statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
+  } else if (status === 'cancelled') {
+    statusToBeIncluded = [STATUS_CANCELLED];
+  } else if (status === 'admin cancelled') {
+    statusToBeIncluded = [STATUS_ADMIN_CANCELLED];
   }
+
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
   const offset = (page - 1) * pageSize;
@@ -145,7 +170,7 @@ export const fetchUtsavBookings = async (req, res) => {
 
   const utsavData = await database.query(
     `SELECT 
-        t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other,
+        t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
         t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t3.location,
         t3.name AS utsav_name
      FROM utsav_booking AS t1
@@ -181,8 +206,11 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.total_seats,
       utsav_db.location,
       utsav_db.available_seats,
+      COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
-      COUNT(CASE WHEN utsav_booking.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count  
+      COUNT(CASE WHEN utsav_booking.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+      COUNT(CASE WHEN utsav_booking.status = '${STATUS_CANCELLED}' THEN 1 END) AS selfcancel_count,  
+      COUNT(CASE WHEN utsav_booking.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admincancel_count
     FROM 
       utsav_db
     LEFT JOIN 
@@ -210,78 +238,6 @@ export const fetchAllUtsav = async (req, res) => {
     .send({ message: 'Fetched Utsav Records', data: utsavs });
 };
 
-export const utsavWaitlist = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
-
-  const data = await database.query(
-    `SELECT 
-      b.bookingid, 
-      b.utsavid, 
-      b.bookedby, 
-      b.status, 
-      u.id AS utsav_id, 
-      u.name, 
-      u.start_date, 
-      u.end_date, 
-      c.cardno, 
-      c.issuedto, 
-      c.mobno, 
-      c.center, 
-      c.res_status,
-      u.location
-    FROM utsav_booking AS b
-    LEFT JOIN utsav_db AS u 
-      ON b.utsavid = u.id 
-      AND u.start_date >= :date
-    LEFT JOIN card_db AS c 
-      ON b.cardno = c.cardno 
-    WHERE b.status = :status`,
-    {
-      replacements: { date: today, status: STATUS_WAITING },
-      raw: true,
-      type: QueryTypes.SELECT
-    }
-  );
-
-  res.status(200).send({ message: 'Fetched Utsav Waitlist', data });
-};
-
-export const utsavPendinglist = async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
-
-  const data = await database.query(
-    `SELECT 
-      b.bookingid, 
-      b.utsavid, 
-      b.bookedby, 
-      b.status, 
-      u.id AS utsav_id, 
-      u.name, 
-      u.start_date, 
-      u.end_date, 
-      c.cardno, 
-      c.issuedto, 
-      c.mobno, 
-      c.center, 
-      c.res_status,
-      u.location
-    FROM utsav_booking AS b
-    LEFT JOIN utsav_db AS u 
-      ON b.utsavid = u.id 
-      AND u.start_date >= :date
-    LEFT JOIN card_db AS c 
-      ON b.cardno = c.cardno 
-    WHERE b.status = :status`,
-    {
-      replacements: { date: today, status: STATUS_PAYMENT_PENDING },
-      raw: true,
-      type: QueryTypes.SELECT
-    }
-  );
-
-  res.status(200).send({ message: 'Fetched Utsav Waitlist', data });
-};
-
 export const activateUtsav = async (req, res) => {
   const itemUpdated = await UtsavDb.update(
     {
@@ -302,7 +258,7 @@ export const activateUtsav = async (req, res) => {
 };
 
 export const utsavStatusUpdate = async (req, res) => {
-  const { utsav_id, bookingid, status,  description } = req.body;
+  const { utsav_id, bookingid, status, description } = req.body;
 
   let newBookingStatus = status;
   console.log('Received status:', status);
@@ -358,7 +314,6 @@ export const utsavStatusUpdate = async (req, res) => {
       if (transaction.status === STATUS_PAYMENT_PENDING) {
         await transaction.update(
           {
-            
             description: description,
             updatedBy: req.user.username
           },
@@ -483,7 +438,9 @@ export const utsavStatusUpdate = async (req, res) => {
 
       if (
         transaction &&
-        ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(transaction.status)
+        ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(
+          transaction.status
+        )
       ) {
         await adminCancelTransaction(req.user, null, transaction, t);
         console.log('>> Cancelling transaction...');
