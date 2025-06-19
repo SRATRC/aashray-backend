@@ -170,14 +170,16 @@ export const fetchUtsavBookings = async (req, res) => {
 
   const utsavData = await database.query(
     `SELECT 
-        t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
-        t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t3.location,
-        t3.name AS utsav_name
-     FROM utsav_booking AS t1
-     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
-     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
-     WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
-     LIMIT :pageSize OFFSET :offset;`,
+  t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
+  t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t2.dob,
+  TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
+  t3.location, t3.name AS utsav_name
+FROM utsav_booking AS t1
+LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
+LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
+WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
+LIMIT :pageSize OFFSET :offset;
+`,
     {
       replacements: {
         utsavid,
