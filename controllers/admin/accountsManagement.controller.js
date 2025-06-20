@@ -126,10 +126,7 @@ export const fetchPendingTransactions = async (req, res) => {
 
   let dateFilter = '';
   let replacements = {
-    status: [
-      STATUS_CASH_PENDING,
-      STATUS_PAYMENT_PENDING
-    ]
+    status: [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING]
   };
 
   if (startDate && endDate) {
@@ -140,37 +137,63 @@ export const fetchPendingTransactions = async (req, res) => {
 
   const transactions = await database.query(
     `
-      SELECT
-        t.bookingid,
-        t.category,
-        CASE 
-            WHEN t.category = 'room' THEN rb.nights
-            WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food') THEN 1
-            ELSE NULL
-        END AS quantity,
-        t.amount,
-        t.discount,
-        t.status,
-        t.razorpay_order_id,
-        COALESCE(cb.cardno, c.cardno) AS bookedBy_cardno,
-        COALESCE(cb.issuedto, c.issuedto) AS bookedBy_issuedto,
-        COALESCE(cb.address, c.address) AS bookedBy_address,
-        COALESCE(cb.email, c.email) AS bookedBy_email,
-        COALESCE(cb.mobno, c.mobno) AS bookedBy_mobno,
-        c.cardno AS bookedFor_cardno,
-        c.issuedto AS bookedFor_issuedto,
-        c.address AS bookedFor_address,
-        c.email AS bookedFor_email,
-        c.mobno AS bookedFor_mobno
-      FROM transactions t
-      JOIN card_db c ON c.cardno = t.cardno
-      LEFT JOIN shibir_booking_db sb ON t.bookingid = sb.bookingid AND t.category = 'adhyayan'
-      LEFT JOIN room_booking rb ON t.bookingid = rb.bookingid AND t.category = 'room'
-      LEFT JOIN travel_db tb ON t.bookingid = tb.bookingid AND t.category = 'travel'
-      LEFT JOIN utsav_booking ub ON t.bookingid = ub.bookingid AND t.category = 'utsav'
-      LEFT JOIN card_db cb ON cb.cardno = COALESCE(sb.bookedBy, rb.bookedBy, tb.bookedBy, ub.bookedBy)
-      WHERE t.status IN ('pending')
-      ${dateFilter}
+    SELECT
+      t.bookingid,
+      t.category,
+      CASE 
+        WHEN t.category = 'room' THEN rb.nights
+        WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food') THEN 1
+        ELSE NULL
+      END AS quantity,
+      t.amount,
+      t.discount,
+      t.status,
+      t.razorpay_order_id,
+
+      -- BookedBy (payer)
+      bookedby_card.cardno AS bookedBy_cardno,
+      bookedby_card.issuedto AS bookedBy_issuedto,
+      bookedby_card.address AS bookedBy_address,
+      bookedby_card.email AS bookedBy_email,
+      bookedby_card.mobno AS bookedBy_mobno,
+
+      -- BookedFor (actual registrant)
+      COALESCE(
+        shibir_card.cardno, utsav_card.cardno, room_card.cardno, travel_card.cardno, food_card.cardno
+      ) AS bookedFor_cardno,
+      COALESCE(
+        shibir_card.issuedto, utsav_card.issuedto, room_card.issuedto, travel_card.issuedto, food_card.issuedto
+      ) AS bookedFor_issuedto,
+      COALESCE(
+        shibir_card.address, utsav_card.address, room_card.address, travel_card.address, food_card.address
+      ) AS bookedFor_address,
+      COALESCE(
+        shibir_card.email, utsav_card.email, room_card.email, travel_card.email, food_card.email
+      ) AS bookedFor_email,
+      COALESCE(
+        shibir_card.mobno, utsav_card.mobno, room_card.mobno, travel_card.mobno, food_card.mobno
+      ) AS bookedFor_mobno
+
+    FROM transactions t
+
+    -- BookedBy
+    JOIN card_db bookedby_card ON bookedby_card.cardno = t.cardno
+
+    -- Booking joins
+    LEFT JOIN shibir_booking_db sb ON sb.bookingid = t.bookingid AND t.category = 'adhyayan'
+    LEFT JOIN room_booking rb ON rb.bookingid = t.bookingid AND t.category = 'room'
+    LEFT JOIN travel_db tb ON tb.bookingid = t.bookingid AND t.category = 'travel'
+    LEFT JOIN utsav_booking ub ON ub.bookingid = t.bookingid AND t.category = 'utsav'
+
+    -- BookedFor joins
+    LEFT JOIN card_db shibir_card ON shibir_card.cardno = sb.cardno AND t.category = 'adhyayan'
+    LEFT JOIN card_db utsav_card ON utsav_card.cardno = ub.cardno AND t.category = 'utsav'
+    LEFT JOIN card_db room_card ON room_card.cardno = rb.cardno AND t.category = 'room'
+    LEFT JOIN card_db travel_card ON travel_card.cardno = tb.cardno AND t.category = 'travel'
+    LEFT JOIN card_db food_card ON food_card.cardno = t.cardno AND t.category = 'food'
+
+    WHERE t.status IN (:status)
+    ${dateFilter}
     `,
     {
       type: QueryTypes.SELECT,
@@ -191,9 +214,7 @@ export const fetchAllCreditTransactions = async (req, res) => {
 
   let dateFilter = '';
   let replacements = {
-    status: [
-      STATUS_CREDITED
-    ]
+    status: [STATUS_CREDITED]
   };
 
   if (startDate && endDate) {
@@ -204,37 +225,63 @@ export const fetchAllCreditTransactions = async (req, res) => {
 
   const transactions = await database.query(
     `
-      SELECT
-        t.bookingid,
-        t.category,
-        CASE 
-            WHEN t.category = 'room' THEN rb.nights
-            WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food') THEN 1
-            ELSE NULL
-        END AS quantity,
-        t.amount,
-        t.discount,
-        t.status,
-        t.razorpay_order_id,
-        COALESCE(cb.cardno, c.cardno) AS bookedBy_cardno,
-        COALESCE(cb.issuedto, c.issuedto) AS bookedBy_issuedto,
-        COALESCE(cb.address, c.address) AS bookedBy_address,
-        COALESCE(cb.email, c.email) AS bookedBy_email,
-        COALESCE(cb.mobno, c.mobno) AS bookedBy_mobno,
-        c.cardno AS bookedFor_cardno,
-        c.issuedto AS bookedFor_issuedto,
-        c.address AS bookedFor_address,
-        c.email AS bookedFor_email,
-        c.mobno AS bookedFor_mobno
-      FROM transactions t
-      JOIN card_db c ON c.cardno = t.cardno
-      LEFT JOIN shibir_booking_db sb ON t.bookingid = sb.bookingid AND t.category = 'adhyayan'
-      LEFT JOIN room_booking rb ON t.bookingid = rb.bookingid AND t.category = 'room'
-      LEFT JOIN travel_db tb ON t.bookingid = tb.bookingid AND t.category = 'travel'
-      LEFT JOIN utsav_booking ub ON t.bookingid = ub.bookingid AND t.category = 'utsav'
-      LEFT JOIN card_db cb ON cb.cardno = COALESCE(sb.bookedBy, rb.bookedBy, tb.bookedBy, ub.bookedBy)
-      WHERE t.status IN ('credited')
-      ${dateFilter}
+    SELECT
+      t.bookingid,
+      t.category,
+      CASE 
+        WHEN t.category = 'room' THEN rb.nights
+        WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food') THEN 1
+        ELSE NULL
+      END AS quantity,
+      t.amount,
+      t.discount,
+      t.status,
+      t.razorpay_order_id,
+
+      -- BookedBy details
+      bookedby_card.cardno AS bookedBy_cardno,
+      bookedby_card.issuedto AS bookedBy_issuedto,
+      bookedby_card.address AS bookedBy_address,
+      bookedby_card.email AS bookedBy_email,
+      bookedby_card.mobno AS bookedBy_mobno,
+
+      -- BookedFor details
+      COALESCE(
+        shibir_card.cardno, utsav_card.cardno, room_card.cardno, travel_card.cardno, food_card.cardno
+      ) AS bookedFor_cardno,
+      COALESCE(
+        shibir_card.issuedto, utsav_card.issuedto, room_card.issuedto, travel_card.issuedto, food_card.issuedto
+      ) AS bookedFor_issuedto,
+      COALESCE(
+        shibir_card.address, utsav_card.address, room_card.address, travel_card.address, food_card.address
+      ) AS bookedFor_address,
+      COALESCE(
+        shibir_card.email, utsav_card.email, room_card.email, travel_card.email, food_card.email
+      ) AS bookedFor_email,
+      COALESCE(
+        shibir_card.mobno, utsav_card.mobno, room_card.mobno, travel_card.mobno, food_card.mobno
+      ) AS bookedFor_mobno
+
+    FROM transactions t
+
+    -- BookedBy (payer)
+    JOIN card_db bookedby_card ON bookedby_card.cardno = t.cardno
+
+    -- Booking joins
+    LEFT JOIN shibir_booking_db sb ON t.bookingid = sb.bookingid AND t.category = 'adhyayan'
+    LEFT JOIN room_booking rb ON t.bookingid = rb.bookingid AND t.category = 'room'
+    LEFT JOIN travel_db tb ON t.bookingid = tb.bookingid AND t.category = 'travel'
+    LEFT JOIN utsav_booking ub ON t.bookingid = ub.bookingid AND t.category = 'utsav'
+
+    -- BookedFor (actual participant)
+    LEFT JOIN card_db shibir_card ON shibir_card.cardno = sb.cardno AND t.category = 'adhyayan'
+    LEFT JOIN card_db utsav_card ON utsav_card.cardno = ub.cardno AND t.category = 'utsav'
+    LEFT JOIN card_db room_card ON room_card.cardno = rb.cardno AND t.category = 'room'
+    LEFT JOIN card_db travel_card ON travel_card.cardno = tb.cardno AND t.category = 'travel'
+    LEFT JOIN card_db food_card ON food_card.cardno = t.cardno AND t.category = 'food'
+
+    WHERE t.status IN (:status)
+    ${dateFilter}
     `,
     {
       type: QueryTypes.SELECT,
@@ -516,28 +563,55 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         t.category,
         CASE 
           WHEN t.category = 'room' THEN rb.nights
-          WHEN t.category IN ('travel', 'utsav', 'adhyayan') THEN 1
+          WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food') THEN 1
           ELSE NULL
         END AS quantity,
         t.amount,
         t.status,
         t.razorpay_order_id,
-        COALESCE(cb.cardno, c.cardno) AS bookedBy_cardno,
-        COALESCE(cb.issuedto, c.issuedto) AS bookedBy_issuedto,
-        COALESCE(cb.address, c.address) AS bookedBy_address,
-        COALESCE(cb.email, c.email) AS bookedBy_email,
-        COALESCE(cb.mobno, c.mobno) AS bookedBy_mobno,
-        c.cardno AS bookedFor_cardno,
-        c.issuedto AS bookedFor_issuedto,
-        c.address AS bookedFor_address,
-        c.email AS bookedFor_email,
-        c.mobno AS bookedFor_mobno
+
+        -- BookedBy from transactions.cardno
+        bookedby_card.cardno AS bookedBy_cardno,
+        bookedby_card.issuedto AS bookedBy_issuedto,
+        bookedby_card.address AS bookedBy_address,
+        bookedby_card.email AS bookedBy_email,
+        bookedby_card.mobno AS bookedBy_mobno,
+
+        -- BookedFor from booking table's cardno
+        COALESCE(
+          shibir_card.cardno, utsav_card.cardno, room_card.cardno, travel_card.cardno, food_card.cardno
+        ) AS bookedFor_cardno,
+        COALESCE(
+          shibir_card.issuedto, utsav_card.issuedto, room_card.issuedto, travel_card.issuedto, food_card.issuedto
+        ) AS bookedFor_issuedto,
+        COALESCE(
+          shibir_card.address, utsav_card.address, room_card.address, travel_card.address, food_card.address
+        ) AS bookedFor_address,
+        COALESCE(
+          shibir_card.email, utsav_card.email, room_card.email, travel_card.email, food_card.email
+        ) AS bookedFor_email,
+        COALESCE(
+          shibir_card.mobno, utsav_card.mobno, room_card.mobno, travel_card.mobno, food_card.mobno
+        ) AS bookedFor_mobno
+
       FROM transactions t
-      JOIN card_db c ON c.cardno = t.cardno
+
+      -- BookedBy
+      JOIN card_db bookedby_card ON bookedby_card.cardno = t.cardno
+
+      -- Booking table joins
       LEFT JOIN shibir_booking_db sb ON t.bookingid = sb.bookingid AND t.category = 'adhyayan'
       LEFT JOIN room_booking rb ON t.bookingid = rb.bookingid AND t.category = 'room'
       LEFT JOIN travel_db tb ON t.bookingid = tb.bookingid AND t.category = 'travel'
-      LEFT JOIN card_db cb ON cb.cardno = COALESCE(sb.bookedBy, rb.bookedBy, tb.bookedBy)
+      LEFT JOIN utsav_booking ub ON t.bookingid = ub.bookingid AND t.category = 'utsav'
+
+      -- BookedFor joins
+      LEFT JOIN card_db shibir_card ON shibir_card.cardno = sb.cardno AND t.category = 'adhyayan'
+      LEFT JOIN card_db utsav_card ON utsav_card.cardno = ub.cardno AND t.category = 'utsav'
+      LEFT JOIN card_db room_card ON room_card.cardno = rb.cardno AND t.category = 'room'
+      LEFT JOIN card_db travel_card ON travel_card.cardno = tb.cardno AND t.category = 'travel'
+      LEFT JOIN card_db food_card ON food_card.cardno = t.cardno AND t.category = 'food'
+
       WHERE t.status IN (:status)
         AND t.razorpay_order_id = :razorpay_order_id
       `,
@@ -545,7 +619,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         type: QueryTypes.SELECT,
         raw: true,
         replacements: {
-          status: ['completed'], // or STATUS_PAYMENT_COMPLETED
+          status: ['completed'],
           razorpay_order_id
         }
       }
