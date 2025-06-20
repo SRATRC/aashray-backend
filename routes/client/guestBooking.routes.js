@@ -16,8 +16,8 @@ router.use(validateCard);
 router.get('/', CatchAsync(fetchGuests));
 router.post('/', CatchAsync(createGuests));
 router.post('/booking', CheckDatesBlocked, CatchAsync(guestBooking));
-router.post('/flat', CheckDatesBlocked, CatchAsync(guestBookingFlat));
 router.post('/validate', CheckDatesBlocked, CatchAsync(validateBooking));
+router.post('/flat', CatchAsync(guestBookingFlat));
 router.get('/check/:mobno', CatchAsync(checkGuests));
 
 export default router;
