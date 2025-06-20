@@ -29,7 +29,9 @@ import {
   MSG_CANCEL_SUCCESSFUL,
   ERR_FLAT_ALREADY_BOOKED,
   STATUS_CASH_PENDING,
-  STATUS_PAYMENT_PENDING
+  STATUS_PAYMENT_PENDING,
+  NAC_ROOM_PRICE,
+  AC_ROOM_PRICE
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -46,13 +48,146 @@ import {
   findAllRooms,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
+import { adjustAmount } from '../../helpers/transactions.helper.js';
+import { validateCard } from '../../helpers/card.helper.js';
 import getDates from '../../utils/getDates.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import { adjustAmount } from '../../helpers/transactions.helper.js';
-import { validateCard } from '../../helpers/card.helper.js';
+
+const CHECKOUT_DEADLINE = '11:00:00';
+const LATE_CHECKOUT_HALF = '15:00:00';
+
+const calcLateCheckoutFee = (roomType, isHalfDay) => {
+  if (roomType === 'nac') {
+    return isHalfDay ? NAC_ROOM_PRICE / 2 : NAC_ROOM_PRICE;
+  }
+  return isHalfDay ? AC_ROOM_PRICE / 2 : AC_ROOM_PRICE;
+};
+
+const handleSameDayCheckout = async ({
+  booking,
+  checkoutTime,
+  dbTransaction,
+  user
+}) => {
+  // On-time checkout ⇒ simply mark as checked-out.
+  if (checkoutTime <= CHECKOUT_DEADLINE) {
+    await booking.update(
+      { status: ROOM_STATUS_CHECKEDOUT, updatedBy: user.username },
+      { transaction: dbTransaction }
+    );
+    return;
+  }
+
+  // Late checkout ⇒ add fee (half-day if before 3 PM, full-day otherwise).
+  const isHalfDay = checkoutTime <= LATE_CHECKOUT_HALF;
+  await Transactions.create(
+    {
+      cardno: booking.cardno,
+      bookingid: booking.bookingid,
+      category: TYPE_ROOM,
+      amount: calcLateCheckoutFee(
+        booking.roomtype || booking.roomType,
+        isHalfDay
+      ),
+      status: STATUS_CASH_PENDING,
+      description: 'Late checkout fee',
+      updatedBy: user.username
+    },
+    { transaction: dbTransaction }
+  );
+
+  await booking.update(
+    { status: ROOM_STATUS_CHECKEDOUT, updatedBy: user.username },
+    { transaction: dbTransaction }
+  );
+};
+
+/**
+ * Overstay checkout handler (guest stayed beyond original checkout date).
+ */
+const handleOverstayCheckout = async ({
+  booking,
+  today,
+  dbTransaction,
+  user
+}) => {
+  const totalNights = await calculateNights(booking.checkin, today);
+  const newNights = totalNights - booking.nights;
+  const guest = await validateCard(booking.cardno);
+
+  const { bookingId } = await createRoomBooking(
+    booking.cardno,
+    booking.checkout,
+    today,
+    newNights,
+    booking.roomtype,
+    booking.gender,
+    booking.floor_pref,
+    guest,
+    dbTransaction,
+    true
+  );
+
+  // Mark original booking as checked-out.
+  await booking.update(
+    { status: ROOM_STATUS_CHECKEDOUT, updatedBy: user.username },
+    { transaction: dbTransaction }
+  );
+
+  // Also mark the auto-created extension booking as checked-out.
+  await RoomBooking.update(
+    { status: ROOM_STATUS_CHECKEDOUT, updatedBy: user.username },
+    { where: { bookingid: bookingId }, transaction: dbTransaction }
+  );
+};
+
+/**
+ * Early checkout handler (guest leaves before planned checkout date).
+ */
+const handleEarlyCheckout = async ({
+  booking,
+  transaction,
+  today,
+  dbTransaction,
+  user
+}) => {
+  const nights = await calculateNights(booking.checkin, today);
+  const card = await validateCard(transaction.cardno);
+
+  const newAmount = roomCharge(booking.roomtype) * nights;
+  const originalAmount = transaction.amount + transaction.discount;
+
+  if (newAmount > originalAmount) {
+    throw new ApiError(
+      404,
+      'New amount is more than previously paid. This does not seem right.'
+    );
+  }
+
+  if (newAmount < originalAmount) {
+    await adjustAmount(
+      card,
+      booking,
+      transaction,
+      newAmount,
+      transaction.cardno,
+      dbTransaction
+    );
+  }
+
+  await booking.update(
+    {
+      nights,
+      checkout: today,
+      status: ROOM_STATUS_CHECKEDOUT,
+      updatedBy: user.username
+    },
+    { transaction: dbTransaction }
+  );
+};
 
 export const manualCheckin = async (req, res) => {
   const t = await database.transaction();
@@ -88,13 +223,7 @@ export const manualCheckin = async (req, res) => {
     transaction &&
     [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
   ) {
-    await transaction.update(
-      {
-        status: STATUS_CASH_COMPLETED,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
+    throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
   await booking.update(
@@ -112,8 +241,8 @@ export const manualCheckin = async (req, res) => {
 };
 
 export const manualCheckout = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
+  const dbTransaction = await database.transaction();
+  req.transaction = dbTransaction;
 
   const booking = await RoomBooking.findOne({
     where: {
@@ -126,62 +255,38 @@ export const manualCheckout = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  var transaction = await Transactions.findOne({
+  const transaction = await Transactions.findOne({
     where: { bookingid: booking.bookingid }
   });
 
-  if (!transaction) {
-    throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
-  }
-
   const today = moment().format('YYYY-MM-DD');
+  const checkoutTime = moment().format('HH:mm:ss');
 
-  if (today > booking.checkout) {
-    throw new ApiError(
-      404,
-      `Original check-out date was ${booking.checkout}. Please create ` +
-        `a new booking for the guest for the remaining days and collect the difference.`
-    );
+  if (today === booking.checkout) {
+    await handleSameDayCheckout({
+      booking,
+      checkoutTime,
+      dbTransaction,
+      user: req.user
+    });
+  } else if (today > booking.checkout) {
+    await handleOverstayCheckout({
+      booking,
+      today,
+      dbTransaction,
+      user: req.user
+    });
+  } else {
+    await handleEarlyCheckout({
+      booking,
+      transaction,
+      today,
+      dbTransaction,
+      user: req.user
+    });
   }
 
-  const nights = await calculateNights(booking.checkin, today);
-  const card = await validateCard(transaction.cardno);
-
-  // early checkout
-  if (today < booking.checkout) {
-    const newAmount = roomCharge(booking.roomtype) * nights;
-    const originalAmount = transaction.amount + transaction.discount;
-
-    if (newAmount > originalAmount) {
-      throw new ApiError(
-        404,
-        `New amount is more than previously paid. This does not seem right.`
-      );
-    }
-
-    if (newAmount < originalAmount) {
-      await adjustAmount(
-        card,
-        booking,
-        transaction,
-        newAmount,
-        transaction.cardno,
-        t
-      );
-    }
-  }
-
-  await booking.update(
-    {
-      nights,
-      checkout: today,
-      status: ROOM_STATUS_CHECKEDOUT,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-
-  await t.commit();
+  await dbTransaction.commit();
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
