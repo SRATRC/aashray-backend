@@ -21,7 +21,7 @@ import {
   WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
-  bookRoomDuringUtsavForMumukshus,
+  
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
   findRoom,
@@ -39,7 +39,7 @@ import {
 } from '../../helpers/travelBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  bookFoodForMumukshusDuringUtsav,
+  
   validateFood
 } from '../../helpers/foodBooking.helper.js';
 import {
@@ -311,53 +311,29 @@ async function validate(body, user, data, response) {
 
 async function bookRoom(body, data, t, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
-  let result = {};
-  if (body.primary_booking.booking_type == TYPE_UTSAV) {
-    result = await bookRoomDuringUtsavForMumukshus(
-      body.primary_booking.details.utsavid,
+  const result = await bookRoomForMumukshus(
       checkin_date,
       checkout_date,
       mumukshuGroup,
       t,
       user
     );
-  } else {
-    result = await bookRoomForMumukshus(
-      checkin_date,
-      checkout_date,
-      mumukshuGroup,
-      t,
-      user
-    );
-  }
-
   return result;
 }
 
 async function bookFood(body, data, t, user) {
   const { start_date, end_date, mumukshuGroup } = data.details;
 
-  if (body.primary_booking.booking_type == TYPE_UTSAV) {
-    await bookFoodForMumukshusDuringUtsav(
-      start_date,
-      end_date,
-      mumukshuGroup,
-      body.primary_booking,
-      body.addons,
-      user.cardno,
-      t
-    );
-  } else {
-    await bookFoodForMumukshus(
-      start_date,
-      end_date,
-      mumukshuGroup,
-      body.primary_booking,
-      body.addons,
-      user.cardno,
-      t
-    );
-  }
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    user.cardno,
+    t
+  );
+
   return t;
 }
 

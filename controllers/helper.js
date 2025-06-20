@@ -489,14 +489,22 @@ export async function sendUnifiedEmail(
 
   const country =
     user && user.country ? user.country : bookedBy && bookedBy.country;
-  if (country && country != 'India' && bookingStatus == BOOKING_STATUS_PENDING) {
-    welcomeMessage = 'Your bookings are temporarily reserved.NRI payments for bookings are accepted at the Research Center upon arrival.';
+  if (
+    country &&
+    country != 'India' &&
+    bookingStatus == BOOKING_STATUS_PENDING
+  ) {
+    welcomeMessage =
+      'Your bookings are temporarily reserved.NRI payments for bookings are accepted at the Research Center upon arrival.';
   }
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
     user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
-    const cc = (wasRajprvasBooked && process.env.NODE_ENV == 'prod') ? RAJ_PRAVAS_EMAIL : null;
+  const cc =
+    wasRajprvasBooked && process.env.NODE_ENV == 'prod'
+      ? RAJ_PRAVAS_EMAIL
+      : null;
 
   if (email) {
     sendMail({
