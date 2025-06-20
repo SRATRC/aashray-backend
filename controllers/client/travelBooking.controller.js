@@ -12,6 +12,7 @@ import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
 import { STATUS_AWAITING_CONFIRMATION } from '../../config/constants.js';
+import moment from 'moment';
 
 export const FetchUpcoming = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -83,7 +84,7 @@ export const CancelTravel = async (req, res) => {
     context: {
       name: req.user.issuedto,
       bookingid: bookingid,
-      date: booking.date,
+      date: moment(booking.date).format('Do MMMM, YYYY'),
       pickup: booking.pickup_point,
       drop: booking.drop_point
     }

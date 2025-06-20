@@ -21,7 +21,9 @@ import {
   TYPE_UTSAV,
   STATUS_GUEST,
   STATUS_ACTIVE,
-  ERR_DATES_NOT_BETWEEN_UTSAV
+  ERR_DATES_NOT_BETWEEN_UTSAV,
+  RAJ_PRAVAS_EMAIL,
+  BOOKING_STATUS_PENDING
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -482,17 +484,19 @@ export async function sendUnifiedEmail(
   }
 
   const country = user && user.country ? user.country : bookedBy && bookedBy.country;
-  let showNRIRelatedDetails = false;
-  if(country && country != 'India'){
-    showNRIRelatedDetails = true;
+  if(country && country != 'India' && bookingStatus == BOOKING_STATUS_PENDING){
+    welcomeMessage = 'Your bookings are temporarily reserved.NRI payments for bookings are accepted at the Research Center upon arrival.';
   }
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
     user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
+    const cc = (wasRajprvasBooked && process.env.NODE_ENV == 'prod') ? RAJ_PRAVAS_EMAIL : null;
+
   if (email) {
     sendMail({
       email: email,
+      cc: cc,
       subject,
       template,
       context: {
@@ -509,8 +513,7 @@ export async function sendUnifiedEmail(
         utsavBookingDetails,
         bookingStatus,
         welcomeMessage,
-        showTravelConfirmationDetail,
-        showNRIRelatedDetails
+        showTravelConfirmationDetail
       }
     });
   }
