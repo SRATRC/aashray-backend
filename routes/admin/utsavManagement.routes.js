@@ -17,12 +17,14 @@ import {
 } from '../../controllers/admin/utsavManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
-  ROLE_UTSAV_ADMIN
+  ROLE_UTSAV_ADMIN,
+  ROLE_PRA_ACCOUNTS_ADMIN,
+  ROLE_ACCOUNTS_ADMIN
   } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
-router.use(authorizeRoles(ROLE_UTSAV_ADMIN, ROLE_SUPER_ADMIN));
+router.use(authorizeRoles(ROLE_UTSAV_ADMIN, ROLE_SUPER_ADMIN, ROLE_PRA_ACCOUNTS_ADMIN, ROLE_ACCOUNTS_ADMIN));
 
 router.post('/create', CatchAsync(createUtsav));
 router.post('/package', CatchAsync(addUtsavPackage));

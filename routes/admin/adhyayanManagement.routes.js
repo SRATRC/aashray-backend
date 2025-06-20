@@ -22,12 +22,14 @@ import {
   ROLE_OFFICE_ADMIN,
   ROLE_KOL_ADHYAYAN_ADMIN,
   ROLE_RAJ_ADHYAYAN_ADMIN,
-  ROLE_DHU_ADHYAYAN_ADMIN
+  ROLE_DHU_ADHYAYAN_ADMIN,
+  ROLE_ACCOUNTS_ADMIN, 
+  ROLE_PRA_ACCOUNTS_ADMIN
 } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
-router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN, ROLE_DHU_ADHYAYAN_ADMIN, ROLE_RAJ_ADHYAYAN_ADMIN, ROLE_KOL_ADHYAYAN_ADMIN));
+router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN, ROLE_DHU_ADHYAYAN_ADMIN, ROLE_RAJ_ADHYAYAN_ADMIN, ROLE_KOL_ADHYAYAN_ADMIN, ROLE_ACCOUNTS_ADMIN, ROLE_PRA_ACCOUNTS_ADMIN));
 
 router.post('/create', CatchAsync(createAdhyayan));
 router.get('/fetchRCadhyayan', CatchAsync(fetchRCAdhyayan));
