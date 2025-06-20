@@ -223,13 +223,7 @@ export const manualCheckin = async (req, res) => {
     transaction &&
     [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
   ) {
-    await transaction.update(
-      {
-        status: STATUS_CASH_COMPLETED,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
+    throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
   await booking.update(
