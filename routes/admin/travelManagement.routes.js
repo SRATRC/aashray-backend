@@ -8,11 +8,11 @@ import {
   fetchBookingForDriver
 } from '../../controllers/admin/travelManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
-import { ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN } from '../../config/constants.js';
+import { ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN, ROLE_DRI_TRAVEL_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
-router.use(authorizeRoles(ROLE_TRAVEL_ADMIN, ROLE_SUPER_ADMIN));
+router.use(authorizeRoles(ROLE_TRAVEL_ADMIN, ROLE_SUPER_ADMIN, ROLE_DRI_TRAVEL_ADMIN));
 
 router.get('/upcoming', CatchAsync(fetchUpcomingBookings));
 router.get('/summary', CatchAsync(fectchSummary));

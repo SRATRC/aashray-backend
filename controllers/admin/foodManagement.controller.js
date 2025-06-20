@@ -176,6 +176,8 @@ export const bookFood = async (req, res) => {
       hightea
     );
 
+    console.log(JSON.stringify(req.roles));
+
     await bookFoodForMumukshus(
       start_date,
       end_date,
@@ -184,7 +186,8 @@ export const bookFood = async (req, res) => {
       null,
       null,
       t,
-      req.user.username
+      req.user.username,
+      req.roles
     );
   }
 

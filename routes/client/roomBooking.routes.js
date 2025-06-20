@@ -5,8 +5,8 @@ import {
   CancelBooking,
   FlatBookingMumukshu
 } from '../../controllers/client/roomBooking.controller.js';
+import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
-import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
 
 router.use(validateCard);
 
