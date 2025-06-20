@@ -3,13 +3,14 @@ import {
   ERR_CARD_NOT_FOUND,
   ERR_CARD_NOT_PROVIDED,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  TYPE_UTSAV
 } from '../config/constants.js';
 import { getBlockedDates } from '../controllers/helper.js';
+import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/CatchAsync.js';
 import moment from 'moment';
-import { Sequelize } from 'sequelize';
 
 export const validateCard = catchAsync(async (req, res, next) => {
   const cardno = req.params.cardno || req.body.cardno || req.query.cardno;
@@ -62,7 +63,7 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
   if (blockedDates.length > 0) {
     const isUtsavBooking =
       req.body.primary_booking &&
-      req.body.primary_booking.booking_type === 'UTSAV';
+      req.body.primary_booking.booking_type === TYPE_UTSAV;
 
     const hasUtsavBooking = await hasOverlappingUtsavBooking(
       req.user.cardno,

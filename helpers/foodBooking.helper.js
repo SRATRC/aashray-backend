@@ -436,7 +436,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
   await cancelTransactions(user, transactions, t, admin);
 }
 
-export async function bookFoodForMumukshusDuringUtsav(
+async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   start_date,
   end_date,
   mumukshuGroup,
