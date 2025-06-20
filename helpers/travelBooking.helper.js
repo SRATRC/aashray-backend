@@ -70,17 +70,14 @@ export async function updateWaitingTravelBooking(date) {
       }
     });
 
-    const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
-
     sendMail({
       email: user.email,
-      cc,
       subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
       template: 'rajPravasStatusUpdate',
       context: {
         name: user.issuedto,
         bookingid: travelBookingsFordate.bookingid,
-        date: travelBookingsFordate.date,
+        date: moment(travelBookingsFordate.date).format('Do MMMM, YYYY'),
         pickup: travelBookingsFordate.pickup_point,
         drop: travelBookingsFordate.drop_point,
         status: STATUS_AWAITING_CONFIRMATION

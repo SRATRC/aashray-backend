@@ -27,7 +27,9 @@ import {
   TYPE_FLAT,
   STATUS_CASH_COMPLETED,
   MSG_CANCEL_SUCCESSFUL,
-  ERR_FLAT_ALREADY_BOOKED
+  ERR_FLAT_ALREADY_BOOKED,
+  STATUS_CASH_PENDING,
+  STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -82,17 +84,18 @@ export const manualCheckin = async (req, res) => {
     where: { bookingid: booking.bookingid }
   });
 
-  if (!transaction) {
-    throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
+  if (
+    transaction &&
+    [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
+  ) {
+    await transaction.update(
+      {
+        status: STATUS_CASH_COMPLETED,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
   }
-
-  await transaction.update(
-    {
-      status: STATUS_CASH_COMPLETED,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
 
   await booking.update(
     {

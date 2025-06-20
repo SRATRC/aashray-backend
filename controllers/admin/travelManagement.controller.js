@@ -3,6 +3,7 @@ import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
+import moment from 'moment';
 import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
@@ -379,17 +380,17 @@ export const updateBookingStatus = async (req, res) => {
   );
 
   const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
-  const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
-
+  if(newBookingStatus == STATUS_ADMIN_CANCELLED){
+    newBookingStatus="Cancelled because of wrong form filled"
+  }
   sendMail({
     email: card.email,
-    cc,
     subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
     template: 'rajPravasStatusUpdate',
     context: {
       name: card.issuedto,
       bookingid: booking.bookingid,
-      date: booking.date,
+      date: moment(booking.date).format('Do MMMM, YYYY'),
       pickup: booking.pickup_point,
       drop: booking.drop_point,
       status: newBookingStatus
