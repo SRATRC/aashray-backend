@@ -178,7 +178,6 @@ FROM utsav_booking AS t1
 LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
 LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
 WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
-LIMIT :pageSize OFFSET :offset;
 `,
     {
       replacements: {
