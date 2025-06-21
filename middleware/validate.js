@@ -98,7 +98,8 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
       dateRanges.push({
         checkin,
         checkout,
-        isUtsav: booking_type === TYPE_UTSAV
+        isUtsav: booking_type === TYPE_UTSAV,
+        isTravel: booking_type === TYPE_TRAVEL
       });
     }
   }
@@ -107,7 +108,7 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
 
   // 3. Validate every extracted date range against blocked dates
   const conflictingBlocks = [];
-  for (const { checkin, checkout, isUtsav } of dateRanges) {
+  for (const { checkin, checkout, isUtsav, isTravel } of dateRanges) {
     const blockedDates = await getBlockedDates(checkin, checkout);
     if (blockedDates.length === 0) continue;
 
@@ -117,7 +118,7 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
       checkout
     );
 
-    const allowBoundaryTouch = isUtsav || hasUtsavBooking;
+    const allowBoundaryTouch = isUtsav || isTravel || hasUtsavBooking;
     if (allowBoundaryTouch) {
       const hasOverlapBeyondBoundary = blockedDates.some((block) => {
         const touchesOnlyBoundary =
