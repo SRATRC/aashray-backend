@@ -309,8 +309,7 @@ export const fetchAdhyayanBookings = async (req, res) => {
     ON t1.shibir_id = t3.id 
     WHERE 
     t1.shibir_id = :shibirId And
-    t1.status in  (:status)
-    LIMIT :pageSize OFFSET :page;`,
+    t1.status in  (:status);`,
     {
       replacements: {
         shibirId: shibir_id,
