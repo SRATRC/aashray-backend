@@ -21,7 +21,6 @@ import {
   WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
-  
   bookRoomForMumukshus,
   checkRoomAlreadyBooked,
   findRoom,
@@ -39,7 +38,6 @@ import {
 } from '../../helpers/travelBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  
   validateFood
 } from '../../helpers/foodBooking.helper.js';
 import {
@@ -312,12 +310,12 @@ async function validate(body, user, data, response) {
 async function bookRoom(body, data, t, user) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   const result = await bookRoomForMumukshus(
-      checkin_date,
-      checkout_date,
-      mumukshuGroup,
-      t,
-      user
-    );
+    checkin_date,
+    checkout_date,
+    mumukshuGroup,
+    t,
+    user
+  );
   return result;
 }
 
@@ -339,25 +337,19 @@ async function bookFood(body, data, t, user) {
 
 async function bookAdhyayan(data, t, user) {
   const { shibir_ids, mumukshus } = data.details;
-
   const result = await bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user);
-
   return result;
 }
 
 async function bookTravel(data, t, user) {
   const { date, mumukshuGroup } = data.details;
-
   const result = await bookTravelForMumukshus(date, mumukshuGroup, t, user);
-
   return result;
 }
 
 async function bookUtsav(data, t, user) {
   const { utsavid, mumukshus } = data.details;
-
   const result = await bookUtsavForMumukshus(utsavid, mumukshus, t, user);
-
   return result;
 }
 

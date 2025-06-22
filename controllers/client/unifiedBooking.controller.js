@@ -17,7 +17,6 @@ import {
   WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
-  
   bookRoomForMumukshus,
   findRoom,
   roomCharge,
@@ -30,7 +29,6 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  
   createGroupFoodRequest,
   validateFood
 } from '../../helpers/foodBooking.helper.js';
@@ -339,7 +337,7 @@ async function bookTravel(user, data, t) {
     pickup_point,
     drop_point,
     luggage,
-    comments,
+    special_request,
     type,
     arrival_time = null,
     total_people = 1,
@@ -354,7 +352,7 @@ async function bookTravel(user, data, t) {
         pickup_point,
         drop_point,
         luggage,
-        comments,
+        comments: special_request,
         type,
         arrival_time,
         total_people,
