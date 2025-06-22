@@ -34,7 +34,10 @@ const sendMail = async (options) => {
       cc: options.cc || '',
       subject: options.subject,
       template: options.template,
-      context: options.context
+      context: options.context,
+      headers: {
+        'X-SES-CONFIGURATION-SET': 'aashray-config-set'
+      }
     },
     (error, info) => {
       if (error) {
