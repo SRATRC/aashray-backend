@@ -13,7 +13,8 @@ import {
   TYPE_ROOM,
   TYPE_FLAT,
   ROOM_STATUS_PENDING_CHECKIN,
-  STATUS_PAYMENT_FAILED
+  STATUS_PAYMENT_FAILED,
+  TYPE_UTSAV
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
@@ -132,7 +133,7 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
     case STATUS_PAYMENT_FAILED:
-      if (credits > 0 && bookingType != TYPE_ADHYAYAN && !ifMigrated(transaction)) {
+      if (credits > 0 && bookingType != TYPE_ADHYAYAN && bookingType != TYPE_UTSAV && !ifMigrated(transaction)) {
         await addCredit(user, card, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;

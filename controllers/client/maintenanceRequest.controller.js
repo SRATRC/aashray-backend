@@ -5,7 +5,8 @@ import {
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_CHECKEDIN,
-  STATUS_RESIDENT
+  STATUS_RESIDENT,
+  STATUS_SEVA_KUTIR
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
@@ -17,7 +18,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  if (req.user.res_status != STATUS_RESIDENT) {
+  if ([STATUS_RESIDENT, STATUS_SEVA_KUTIR].includes(req.user.res_status)) {
     const isCheckedin = await RoomBooking.findOne({
       where: {
         cardno: req.user.cardno,
