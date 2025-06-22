@@ -501,10 +501,16 @@ export async function sendUnifiedEmail(
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
     user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
+
+
   const cc =
-    wasRajprvasBooked && process.env.NODE_ENV == 'prod'
+    wasRajprvasBooked && ['prod'].includes(process.env.NODE_ENV) 
       ? RAJ_PRAVAS_EMAIL
       : null;
+
+  if(cc){
+  console.log('sending cc email to', cc);
+  }
 
   if (email) {
     sendMail({
