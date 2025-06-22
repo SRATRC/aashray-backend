@@ -17,7 +17,7 @@ import {
   WELCOME_MESSAGE_PENDING
 } from '../../config/constants.js';
 import {
-  bookRoomDuringUtsavForMumukshus,
+  
   bookRoomForMumukshus,
   findRoom,
   roomCharge,
@@ -30,7 +30,7 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  bookFoodForMumukshusDuringUtsav,
+  
   createGroupFoodRequest,
   validateFood
 } from '../../helpers/foodBooking.helper.js';
@@ -288,40 +288,21 @@ async function validate(body, user, data, response, utsav) {
 }
 
 async function bookRoom(user, body, data, t) {
-  let { checkin_date, checkout_date, floor_pref, room_type } = data.details;
+  const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
-  let result = {};
-  if (body.primary_booking.booking_type == TYPE_UTSAV) {
-    result = await bookRoomDuringUtsavForMumukshus(
-      body.primary_booking.details.utsavid,
-      checkin_date,
-      checkout_date,
-      [
-        {
-          mumukshus: [user.cardno],
-          roomType: room_type,
-          floorType: floor_pref,
-          packageid: body.primary_booking.details.packageid
-        }
-      ],
-      t,
-      user
-    );
-  } else {
-    result = await bookRoomForMumukshus(
-      checkin_date,
-      checkout_date,
-      [
-        {
-          mumukshus: [user.cardno],
-          roomType: room_type,
-          floorType: floor_pref
-        }
-      ],
-      t,
-      user
-    );
-  }
+  const result = await bookRoomForMumukshus(
+    checkin_date,
+    checkout_date,
+    [
+      {
+        mumukshus: [user.cardno],
+        roomType: room_type,
+        floorType: floor_pref
+      }
+    ],
+    t,
+    user
+  );
 
   return result;
 }
@@ -330,45 +311,24 @@ async function bookFood(body, user, data, t) {
   const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
 
-  if (body.primary_booking.booking_type == TYPE_UTSAV) {
-    const mumukshuGroup = createGroupFoodRequest(
-      user.cardno,
-      breakfast,
-      lunch,
-      dinner,
-      spicy,
-      high_tea
-    );
+  const mumukshuGroup = createGroupFoodRequest(
+    user.cardno,
+    breakfast,
+    lunch,
+    dinner,
+    spicy,
+    high_tea
+  );
 
-    await bookFoodForMumukshusDuringUtsav(
-      start_date,
-      end_date,
-      mumukshuGroup,
-      body.primary_booking,
-      body.addons,
-      user.cardno,
-      t
-    );
-  } else {
-    const mumukshuGroup = createGroupFoodRequest(
-      user.cardno,
-      breakfast,
-      lunch,
-      dinner,
-      spicy,
-      high_tea
-    );
-
-    await bookFoodForMumukshus(
-      start_date,
-      end_date,
-      mumukshuGroup,
-      body.primary_booking,
-      body.addons,
-      user.cardno,
-      t
-    );
-  }
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    user.cardno,
+    t
+  );
 
   return t;
 }

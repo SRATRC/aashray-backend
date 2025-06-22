@@ -1,4 +1,9 @@
-import { GateRecord, CardDb, FlatBooking } from '../../models/associations.js';
+import {
+  GateRecord,
+  CardDb,
+  FlatBooking,
+  RoomBooking
+} from '../../models/associations.js';
 import {
   STATUS_MUMUKSHU,
   STATUS_ONPREM,
@@ -6,11 +11,13 @@ import {
   STATUS_SEVA_KUTIR,
   STATUS_OFFPREM,
   ROOM_STATUS_CHECKEDIN,
-  ROOM_STATUS_CHECKEDOUT
+  ROOM_STATUS_CHECKEDOUT,
+  ROOM_STATUS_PENDING_CHECKIN
 } from '../../config/constants.js';
-import Sequelize, { QueryTypes } from 'sequelize';
-import moment from 'moment';
+import logger from '../../config/logger.js';
 import database from '../../config/database.js';
+import Sequelize from 'sequelize';
+import moment from 'moment';
 
 export const fetchTotal = async (req, res) => {
   const result = await CardDb.findAll({
@@ -64,23 +71,20 @@ export const gateEntry = async (req, res) => {
 
   const { cardno } = req.body;
 
-  // Check if user exists based on the cardno
   const user = await CardDb.findOne({
     where: { cardno }
   });
 
-  // If user not found, return a 404 error
   if (!user) {
     return res.status(404).send({ message: 'User not found.' });
   }
 
-  // Update the user status (assuming the card exists)
-  await user.update(
-    { status: STATUS_ONPREM, updatedBy: req.user.username },
-    { transaction: t }
-  );
+  if (user.status == STATUS_OFFPREM)
+    await user.update(
+      { status: STATUS_ONPREM, updatedBy: req.user.username },
+      { transaction: t }
+    );
 
-  // Create a GateRecord entry for the check-in
   await GateRecord.create(
     {
       cardno,
@@ -90,7 +94,38 @@ export const gateEntry = async (req, res) => {
     { transaction: t }
   );
 
-  // Commit the transaction
+  res.on('finish', async () => {
+    try {
+      const flatBooking = await FlatBooking.findOne({
+        where: {
+          cardno,
+          status: ROOM_STATUS_PENDING_CHECKIN,
+          checkin: { [Sequelize.Op.eq]: moment().format('YYYY-MM-DD') }
+        }
+      });
+
+      if (flatBooking) {
+        flatBooking.status = ROOM_STATUS_CHECKEDIN;
+        await flatBooking.save();
+      }
+
+      const roomBooking = await RoomBooking.findOne({
+        where: {
+          cardno,
+          status: ROOM_STATUS_PENDING_CHECKIN,
+          checkin: { [Sequelize.Op.eq]: moment().format('YYYY-MM-DD') }
+        }
+      });
+
+      if (roomBooking) {
+        roomBooking.status = ROOM_STATUS_CHECKEDIN;
+        await roomBooking.save();
+      }
+    } catch (error) {
+      logger.error(error);
+    }
+  });
+
   await t.commit();
   return res.status(200).send({ message: 'Success' });
 };
@@ -137,7 +172,8 @@ export const gateExit = async (req, res) => {
 };
 
 export const gateRecord = async (req, res) => {
-  const result = await database.query(`
+  const result = await database.query(
+    `
   SELECT 
     gr.*, 
     cd.issuedto, 
@@ -148,9 +184,11 @@ export const gateRecord = async (req, res) => {
     card_db AS cd 
   ON 
     gr.cardno = cd.cardno
-`, {
-  type: Sequelize.QueryTypes.SELECT
-});
+`,
+    {
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
 
   return res.status(200).send({ message: 'Success', data: result });
 };
