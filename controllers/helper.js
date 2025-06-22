@@ -504,7 +504,7 @@ export async function sendUnifiedEmail(
 
 
   const cc =
-    wasRajprvasBooked && ['prod'].includes(process.env.NODE_ENV) 
+    wasRajprvasBooked  
       ? RAJ_PRAVAS_EMAIL
       : null;
 
