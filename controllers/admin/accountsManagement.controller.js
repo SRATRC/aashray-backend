@@ -60,6 +60,9 @@ export const fetchCompletedTransactions = async (req, res) => {
       t.status,
       t.razorpay_order_id,
 
+      CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
+      CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
+
       -- BookedBy (from transactions.cardno)
       bookedby_card.cardno AS bookedBy_cardno,
       bookedby_card.issuedto AS bookedBy_issuedto,
@@ -150,6 +153,9 @@ export const fetchPendingTransactions = async (req, res) => {
       t.status,
       t.razorpay_order_id,
 
+      CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
+      CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
+
       -- BookedBy (payer)
       bookedby_card.cardno AS bookedBy_cardno,
       bookedby_card.issuedto AS bookedBy_issuedto,
@@ -237,6 +243,9 @@ export const fetchAllCreditTransactions = async (req, res) => {
       t.discount,
       t.status,
       t.razorpay_order_id,
+
+      CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
+      CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
 
       -- BookedBy details
       bookedby_card.cardno AS bookedBy_cardno,
@@ -570,6 +579,12 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         t.status,
         t.razorpay_order_id,
 
+        CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
+        CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
+
+        COALESCE(rs.cerated_at, '-') AS settlementDate,
+        rs.id AS settlement_id,
+
         -- BookedBy from transactions.cardno
         bookedby_card.cardno AS bookedBy_cardno,
         bookedby_card.issuedto AS bookedBy_issuedto,
@@ -612,6 +627,10 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
       LEFT JOIN card_db travel_card ON travel_card.cardno = tb.cardno AND t.category = 'travel'
       LEFT JOIN card_db food_card ON food_card.cardno = t.cardno AND t.category = 'food'
 
+      -- Settlement recon + settlement join
+      LEFT JOIN razorpay_settlement_recon rsr ON rsr.order_id = t.razorpay_order_id
+      LEFT JOIN razorpay_settlement rs ON rs.id = rsr.settlement_id
+
       WHERE t.status IN (:status)
         AND t.razorpay_order_id = :razorpay_order_id
       `,
@@ -619,7 +638,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         type: QueryTypes.SELECT,
         raw: true,
         replacements: {
-          status: ['completed'],
+          status: ['completed', 'cash completed'],
           razorpay_order_id
         }
       }
