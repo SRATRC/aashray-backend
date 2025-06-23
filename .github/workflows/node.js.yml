@@ -38,7 +38,7 @@ jobs:
 
     - name: Set environment file
       run: |
-        touch .env.dev
+        touch .env.prod
         echo "${{ secrets.PROD_ENV_FILE }}" > .env.prod
 
     - name: runs all pending Sequelize migrations
@@ -48,6 +48,7 @@ jobs:
     - name: Reload PM2 process to avoid downtime   
       run: |
         sudo pm2 reload BackendAPI --update-env
+        sudo pm2 reload CronJob --update-env
 
     - name: Status PM2 process    
       run: |
@@ -55,5 +56,6 @@ jobs:
 
     - name: Show PM2 process    
       run: |
-        sudo pm2 show BackendAPI        
+        sudo pm2 show BackendAPI
+        sudo pm2 show CronJob
     
