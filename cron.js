@@ -189,48 +189,8 @@ async function getUnpaidPastBookings() {
     }
   });
 
-  const adhyayanBookings = await ShibirBookingDb.findAll({
-    include: [
-      {
-        model: ShibirDb,
-        required: true,
-        where: {
-          start_date: { [Sequelize.Op.lt]: today }
-        }
-      }
-    ],
-    where: {
-      status: STATUS_PAYMENT_PENDING
-    }
-  });
-
-  const travelBookings = await TravelDb.findAll({
-    where: {
-      status: STATUS_PROCEED_FOR_PAYMENT,
-      date: { [Sequelize.Op.lt]: today }
-    }
-  });
-
-  const utsavBookings = await UtsavBooking.findAll({
-    include: [
-      {
-        model: UtsavDb,
-        required: true,
-        where: {
-          start_date: { [Sequelize.Op.lt]: today }
-        }
-      }
-    ],
-    where: {
-      status: STATUS_PAYMENT_PENDING
-    }
-  });
-
   return [
     ...roomBookings,
-    ...flatBookings,
-    ...adhyayanBookings,
-    ...travelBookings,
-    ...utsavBookings
+    ...flatBookings
   ];
 }
