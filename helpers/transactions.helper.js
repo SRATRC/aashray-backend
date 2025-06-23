@@ -361,8 +361,8 @@ export async function getPendingTransactions(timeFilter) {
       // only get transactions with status STATUS_PAYMENT_PENDING
       // STATUS_CASH_PENDING is reserved for transactions created from
       // admin
-      status: [STATUS_PAYMENT_PENDING],
-      updatedAt: {
+      status: [STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED],
+      createdAt: {
         [Sequelize.Op.lte]: timeFilter
       }
     }
