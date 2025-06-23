@@ -21,7 +21,7 @@ export const fetchCompletedTransactions = async (req, res) => {
   let adhyayanFilter = '';
   let utsavFilter = '';
   let replacements = {
-    status: ['completed', 'cash completed']
+    status: ['completed', 'cash completed', 'credited']
   };
 
   if (startDate && endDate) {
@@ -638,7 +638,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         type: QueryTypes.SELECT,
         raw: true,
         replacements: {
-          status: ['completed', 'cash completed'],
+          status: ['completed', 'cash completed', 'credited'],
           razorpay_order_id
         }
       }
