@@ -18,7 +18,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  if ([STATUS_RESIDENT, STATUS_SEVA_KUTIR].includes(req.user.res_status)) {
+  if (![STATUS_RESIDENT, STATUS_SEVA_KUTIR].includes(req.user.res_status)) {
     const isCheckedin = await RoomBooking.findOne({
       where: {
         cardno: req.user.cardno,
