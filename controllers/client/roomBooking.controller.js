@@ -65,7 +65,10 @@ FROM
           'flat' AS roomtype,
           t4.status,
           NULL AS gender
-   FROM flat_booking t4)
+   FROM flat_booking t4
+   WHERE t4.cardno = :cardno
+    OR t4.bookedBy = :cardno
+   )
    AS combined
    LEFT JOIN transactions t2 ON combined.bookingid = t2.bookingid
    AND t2.category IN (:category)
