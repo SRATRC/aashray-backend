@@ -40,42 +40,15 @@ let isRunning = false; // Track task status
 // Schedule the cron job to run every 10 minutes
 const job = cron.schedule('*/30 * * * *', async () => {
   logger.info('Cron job started');
-
   isRunning = true;
 
-  await database.authenticate();
-
-  const systemUser = AdminUsers.findOne({
-    where: { username: 'admin' }
-  });
-
-  const userBookingIds = {};
-  const transactions = [];
-  const bookings = [];
-
-  try {
-    const t = await database.transaction();
-    await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
-
-    await getUnpaidPastBookingsAndTransactions(bookings, transactions);
-
-    await cancelBookings(systemUser, bookings, userBookingIds, t);
-    await cancelTransactions(systemUser, transactions, t, true);
-    await cancelMeals(systemUser, transactions, t);
-    await t.commit();
-
-    for (const cardno in userBookingIds) {
-      const bookingIds = userBookingIds[cardno];
-      await sendCancellationEmail(cardno, bookingIds, null);
-    }
-  } catch (error) {
-    logger.error('Cron job error:', error);
-    await t.rollback();
-  } finally {
+  runJob().then(() => {
+    logger.info('Cron job finished.');
+  }).catch((error) => {
+    logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
+  }).finally(() => {
     isRunning = false;
-  }
-
-  logger.info('Cron job finished.');
+  });  
 });
 
 job.start();
@@ -113,6 +86,33 @@ async function cancelMeals(systemUser, transactions, t) {
         t
       );
     }
+  }
+}
+
+async function runJob() {
+  const userBookingIds = {};
+  const transactions = [];
+  const bookings = [];
+
+  await database.authenticate();
+
+  const systemUser = await AdminUsers.findOne({
+    where: { username: 'admin' }
+  });
+
+  const t = await database.transaction();
+  await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
+
+  await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+
+  await cancelBookings(systemUser, bookings, userBookingIds, t);
+  await cancelTransactions(systemUser, transactions, t, true);
+  await cancelMeals(systemUser, transactions, t);
+  await t.commit();
+
+  for (const cardno in userBookingIds) {
+    const bookingIds = userBookingIds[cardno];
+    await sendCancellationEmail(cardno, bookingIds, null);
   }
 }
 
