@@ -13,7 +13,7 @@
             <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
         </div>
         <div class="content" >
-            <h1>Bookings {{bookingStatus}}</h1>
+            <h1>Bookings <span style="color: blue;">{{bookingStatus}}</span></h1>
             <p class="intro">Dear {{name}},</p> <p class="intro"> {{welcomeMessage}} Here are the details of your bookings:</p>
            
          {{#if showUtsavDetail}}
@@ -38,7 +38,7 @@
                             <td>{{startdate}}</td>
                             <td>{{enddate}}</td>
                             <td>{{package}}</td>
-                            <td>{{status}}</td>
+                            <td><b><span style="color: blue;">{{status}}</span></b></td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -65,7 +65,7 @@
                             <td>{{name}}</td>
                             <td>{{checkin}}</td>
                             <td>{{checkout}}</td>
-                            <td>{{status}}</td>
+                            <td><span style="color: blue;">{{status}}</span></td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -95,7 +95,7 @@
                             <td>{{flatno}}</td>
                             <td>{{checkin}}</td>
                             <td>{{checkout}}</td>
-                            <td>{{status}}</td>
+                            <td><span style="color: blue;">{{status}}</span></td>
                         </tr>
                         {{/each}}
                      </tbody>
@@ -127,7 +127,7 @@
                             <td>{{speaker}}</td>
                             <td>{{startdate}}</td>
                             <td>{{enddate}}</td>
-                            <td>{{status}}</td>
+                            <td><span style="color: blue;">{{status}}</span></td>
                         </tr>
                     {{/each}}
                    </tbody>
@@ -161,16 +161,14 @@
                             <td>{{date}}</td>
                             <td>{{pickuppoint}}</td>
                             <td>{{dropoffpoint}}</td>
-                            <td>{{status}}</td>
+                            <td><b><span style="color: blue;">{{status}}</span></b></td>
                         </tr>
                     {{/each}}
                    </tbody>
                 </table>
             </div>
-            {{/if}}
-
-            {{#if showTravelConfirmationDetail}}
-              {{> _rajPravasConfirmation}}
+            
+            {{> _rajPravasConfirmation}}
             {{/if}}
 
             <div class="details">
