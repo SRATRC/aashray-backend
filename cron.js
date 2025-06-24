@@ -39,41 +39,26 @@ let isRunning = false; // Track task status
 
 // Schedule the cron job to run every 10 minutes
 const job = cron.schedule('*/10 * * * *', async () => {
-  logger.info('Cron job started');
+  logger.info('Cron job started.');
   isRunning = true;
 
-  runJob().then(() => {
+  await database.authenticate();
+
+  const systemUser = await AdminUsers.findOne({
+    where: { username: 'admin' }
+  });
+
+  const t = await database.transaction();
+
+  runJob(systemUser, t).then(() => {
     logger.info('Cron job finished.');
   }).catch((error) => {
     logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
+    t.rollback();
   }).finally(() => {
-    isRunning = false;
+    isRunning = false;    
   });  
 });
-
-job.start();
-
-// Graceful shutdown handler
-const gracefulShutdown = async () => {
-  console.log('Gracefully shutting down cron service...');
-
-  // Stop future jobs from being triggered
-  job.stop();
-
-  // Wait for the current task to finish if it's running
-  const waitInterval = setInterval(() => {
-    if (!isRunning) {
-      console.log('All tasks completed. Exiting...');
-      clearInterval(waitInterval);
-      process.exit(0);
-    } else {
-      console.log('Waiting for current task to finish...');
-    }
-  }, 10000);
-};
-
-process.on('SIGINT', gracefulShutdown); // e.g., Ctrl+C
-process.on('SIGTERM', gracefulShutdown); // PM2 stop/reload
 
 async function cancelMeals(systemUser, transactions, t) {
   for (const transaction of transactions) {
@@ -89,21 +74,16 @@ async function cancelMeals(systemUser, transactions, t) {
   }
 }
 
-async function runJob() {
+async function runJob(systemUser, t) {
   const userBookingIds = {};
   const transactions = [];
   const bookings = [];
 
-  await database.authenticate();
-
-  const systemUser = await AdminUsers.findOne({
-    where: { username: 'admin' }
-  });
-
-  const t = await database.transaction();
   await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
-
   await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+
+  logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings.map(x => x.bookingid))}`);
+  logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions.map(x => x.id))}`);
 
   await cancelBookings(systemUser, bookings, userBookingIds, t);
   await cancelTransactions(systemUser, transactions, t, true);
@@ -129,9 +109,6 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
       const booking = await getBooking(bookingType, transaction.bookingid);
-      if (!booking) {
-        logger.info(`Cron booking not found for transaction: ${transaction.bookingid}`);
-      }
       bookings.push(booking);
     }
     transactions.push(transaction);
@@ -140,7 +117,6 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
 
 async function cancelBookings(systemUser, bookings, userBookingIds, t) {
   for (const booking of bookings) {
-    logger.info('Cancelling Booking ' + JSON.stringify(booking.bookingid));
     await booking.update(
       {
         status: STATUS_ADMIN_CANCELLED,
@@ -197,3 +173,33 @@ async function getUnpaidPastBookings() {
     ...flatBookings
   ];
 }
+
+
+/* ==============================
+ * Job start and shutdown handler
+ * ==============================
+ */
+
+job.start();
+
+// Graceful shutdown handler
+const gracefulShutdown = async () => {
+  console.log('Gracefully shutting down cron service...');
+
+  // Stop future jobs from being triggered
+  job.stop();
+
+  // Wait for the current task to finish if it's running
+  const waitInterval = setInterval(() => {
+    if (!isRunning) {
+      console.log('All tasks completed. Exiting...');
+      clearInterval(waitInterval);
+      process.exit(0);
+    } else {
+      console.log('Waiting for current task to finish...');
+    }
+  }, 10000);
+};
+
+process.on('SIGINT', gracefulShutdown); // e.g., Ctrl+C
+process.on('SIGTERM', gracefulShutdown); // PM2 stop/reload
