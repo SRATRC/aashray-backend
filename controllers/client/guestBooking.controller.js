@@ -343,6 +343,21 @@ async function checkRoomAvailability(data, user, utsav) {
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
+  // ---------------------------------------------------------------------------
+  //  Handle special case: a single-night stay that either
+  //  1. starts on an Utsav end_date, or
+  //  2. ends on an Utsav start_date.
+  //  Such bookings should remain in WAITING state irrespective of room
+  //  availability.
+  // ---------------------------------------------------------------------------
+  const isSingleNight = nights === 1;
+  let utsavEndingToday = null;
+  let utsavStartingTomorrow = null;
+  if (isSingleNight) {
+    utsavEndingToday = await UtsavDb.findOne({ where: { end_date: checkin_date } });
+    utsavStartingTomorrow = await UtsavDb.findOne({ where: { start_date: checkout_date } });
+  }
+
   const totalGuests = guestGroup.flatMap((group) => group.guests);
   const guest_db = await CardDb.findAll({
     attributes: ['cardno', 'issuedto', 'gender'],
@@ -379,9 +394,20 @@ async function checkRoomAvailability(data, user, utsav) {
           ))
         );
       } else {
-        var status = STATUS_WAITING;
-        var charge = 0;
-        var availableCredits = 0;
+        // Apply the single-night Utsav boundary rule first
+        if (isSingleNight && (utsavEndingToday || utsavStartingTomorrow)) {
+          roomDetails.push({
+            guestId: guest,
+            status: STATUS_WAITING,
+            charge: 0,
+            availableCredits: 0
+          });
+          continue;
+        }
+
+        let status = STATUS_WAITING;
+        let charge = 0;
+        let availableCredits = 0;
 
         if (nights > 0) {
           const room = await findRoom(

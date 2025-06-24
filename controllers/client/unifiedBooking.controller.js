@@ -175,7 +175,7 @@ async function book(
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(user, body, data, t);
+      const roomResult = await bookRoom(user, data, t);
       amount += roomResult.amount;
 
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
@@ -285,7 +285,7 @@ async function validate(body, user, data, response, utsav) {
   return response;
 }
 
-async function bookRoom(user, body, data, t) {
+async function bookRoom(user, data, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
   const result = await bookRoomForMumukshus(
@@ -410,49 +410,71 @@ async function checkRoomAvailability(user, data, utsav) {
 
   const gender = floor_pref ? floor_pref + user.gender : user.gender;
 
-  if (utsav) {
-    return checkRoomAvailabilityDuringUtsav(
+  const nights = await calculateNights(checkin_date, checkout_date);
+
+  let status = STATUS_WAITING;
+  let charge = 0;
+  let availableCredits = 0;
+
+  // ---------------------------------------------------------------------------
+  //  Handle special case: a single-night stay that either
+  //  1. starts on an Utsav end_date, or
+  //  2. ends on an Utsav start_date.
+  //  Such bookings should remain in WAITING state irrespective of room
+  //  availability. This mirrors the logic used in createRoomBooking().
+  // ---------------------------------------------------------------------------
+  const isSingleNight = nights === 1;
+  if (isSingleNight) {
+    const utsavEndingToday = await UtsavDb.findOne({
+      where: { end_date: checkin_date }
+    });
+    const utsavStartingTomorrow = await UtsavDb.findOne({
+      where: { start_date: checkout_date }
+    });
+
+    if (utsavEndingToday || utsavStartingTomorrow) {
+      return [
+        {
+          mumukshu: user.cardno,
+          status: STATUS_WAITING,
+          charge: 0,
+          availableCredits: 0,
+          dates: `${checkin_date} to ${checkout_date}`
+        }
+      ];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Normal availability check
+  // ---------------------------------------------------------------------------
+  if (nights > 0) {
+    const roomno = await findRoom(
       checkin_date,
       checkout_date,
       room_type,
-      gender,
-      utsav,
-      user.cardno,
-      user
+      gender
     );
-  } else {
-    const nights = await calculateNights(checkin_date, checkout_date);
 
-    var status = STATUS_WAITING;
-    var charge = 0;
-    var availableCredits = 0;
-
-    if (nights > 0) {
-      const roomno = await findRoom(
-        checkin_date,
-        checkout_date,
-        room_type,
-        gender
-      );
-      if (roomno) {
-        status = STATUS_AVAILABLE;
-        charge = roomCharge(room_type) * nights;
-        availableCredits = usableCredits(user, TYPE_ROOM, charge);
-      }
-    } else {
+    if (roomno) {
       status = STATUS_AVAILABLE;
+      charge = roomCharge(room_type) * nights;
+      availableCredits = usableCredits(user, TYPE_ROOM, charge);
     }
-
-    return [
-      {
-        mumukshu: user.cardno,
-        status: status,
-        charge: charge,
-        availableCredits: availableCredits,
-        dates: checkin_date + ' to ' + checkout_date
-      }
-    ];
+  } else {
+    // A same-day check-in/out (nights === 0) is always considered available.
+    status = STATUS_AVAILABLE;
   }
+
+  return [
+    {
+      mumukshu: user.cardno,
+      status,
+      charge,
+      availableCredits,
+      dates: `${checkin_date} to ${checkout_date}`
+    }
+  ];
 }
 
 async function checkFoodAvailability(user, body, data, utsav) {

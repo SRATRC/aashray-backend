@@ -146,6 +146,7 @@ const handleOverstayCheckout = async ({
 
 /**
  * Early checkout handler (guest leaves before planned checkout date).
+ * TODO: should also use the checkout time to calculate charges
  */
 const handleEarlyCheckout = async ({
   booking,
