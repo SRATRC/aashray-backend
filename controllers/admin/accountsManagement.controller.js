@@ -518,6 +518,7 @@ export const fetchTransactionsBySettlementId = async (req, res) => {
       SELECT 
         t.razorpay_order_id,
         SUM(t.amount) AS totalAmount,
+        SUM(t.discount) AS totalDiscount, -- ✅ Added
         COUNT(t.razorpay_order_id) AS transactionCount,
         ROUND(SUM(r.fees), 2) AS totalFees,
         ROUND(SUM(r.tax), 2) AS totalTax,
@@ -535,6 +536,7 @@ export const fetchTransactionsBySettlementId = async (req, res) => {
       SELECT 
         r.order_id AS razorpay_order_id,
         NULL AS totalAmount,
+        NULL AS totalDiscount, -- ✅ Added
         0 AS transactionCount,
         ROUND(SUM(r.fees), 2) AS totalFees,
         ROUND(SUM(r.tax), 2) AS totalTax,
@@ -576,6 +578,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
           ELSE NULL
         END AS quantity,
         t.amount,
+        t.discount,
         t.status,
         t.razorpay_order_id,
 
