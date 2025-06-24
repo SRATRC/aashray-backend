@@ -320,7 +320,10 @@ async function bookRoom(body, data, t, user) {
 }
 
 async function bookFood(body, data, t, user) {
-  const { start_date, end_date, mumukshuGroup } = data.details;
+  let { start_date, end_date, mumukshuGroup } = data.details;
+  if (!end_date) {
+    end_date = start_date;
+  }
 
   await bookFoodForMumukshus(
     start_date,
@@ -427,7 +430,11 @@ async function checkRoomAvailability(data, user, utsav) {
 }
 
 async function checkFoodAvailability(body, data, utsav) {
-  const { start_date, end_date, mumukshuGroup } = data.details;
+  let { start_date, end_date, mumukshuGroup } = data.details;
+  if (!end_date) {
+    end_date = start_date;
+  }
+
   validateDate(start_date, end_date);
 
   validateBookingDatesBetweenUtsav(start_date, end_date, utsav);

@@ -306,8 +306,12 @@ async function bookRoom(user, body, data, t) {
 }
 
 async function bookFood(body, user, data, t) {
-  const { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
+  let { start_date, end_date, breakfast, lunch, dinner, spicy, high_tea } =
     data.details;
+
+  if (!end_date) {
+    end_date = start_date;
+  }
 
   const mumukshuGroup = createGroupFoodRequest(
     user.cardno,
@@ -456,7 +460,11 @@ async function checkRoomAvailability(user, data, utsav) {
 }
 
 async function checkFoodAvailability(user, body, data, utsav) {
-  const { start_date, end_date } = data.details;
+  let { start_date, end_date } = data.details;
+
+  if (!end_date) {
+    end_date = start_date;
+  }
 
   validateDate(start_date, end_date);
   validateBookingDatesBetweenUtsav(start_date, end_date, utsav);

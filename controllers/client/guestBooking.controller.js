@@ -467,7 +467,7 @@ async function bookRoom(data, t, user) {
           checkout_date,
           nights,
           roomType,
-          guest_details.find(item => item.cardno == guest)?.gender,
+          guest_details.find((item) => item.cardno == guest)?.gender,
           floorType,
           user,
           t
@@ -481,7 +481,10 @@ async function bookRoom(data, t, user) {
 }
 
 async function checkFoodAvailability(data, user, utsav) {
-  const { start_date, end_date, guestGroup } = data.details;
+  let { start_date, end_date, guestGroup } = data.details;
+  if (!end_date) {
+    end_date = start_date;
+  }
 
   validateDate(start_date, end_date);
   validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
@@ -548,7 +551,11 @@ async function checkFoodAvailability(data, user, utsav) {
 }
 
 async function bookFood(primary_booking, data, t, user) {
-  const { start_date, end_date, guestGroup } = data.details;
+  let { start_date, end_date, guestGroup } = data.details;
+  if (!end_date) {
+    end_date = start_date;
+  }
+
   const utsavid =
     primary_booking.booking_type == TYPE_UTSAV
       ? primary_booking.details.utsavid
