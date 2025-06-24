@@ -129,7 +129,9 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
       const booking = await getBooking(bookingType, transaction.bookingid);
-      logger.info(`Found booking ${booking} for transaction: ${transaction.bookingid} `);
+      if (!booking) {
+        logger.info(`Cron booking not found for transaction: ${transaction.bookingid}`);
+      }
       bookings.push(booking);
     }
     transactions.push(transaction);
