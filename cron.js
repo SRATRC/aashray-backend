@@ -103,7 +103,7 @@ async function runJob() {
   const t = await database.transaction();
   await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
 
-  // await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+  await getUnpaidPastBookingsAndTransactions(bookings, transactions);
 
   await cancelBookings(systemUser, bookings, userBookingIds, t);
   await cancelTransactions(systemUser, transactions, t, true);
@@ -129,6 +129,7 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
       const booking = await getBooking(bookingType, transaction.bookingid);
+      logger.info(`Found booking ${booking} for transaction: ${transaction.bookingid} `);
       bookings.push(booking);
     }
     transactions.push(transaction);
