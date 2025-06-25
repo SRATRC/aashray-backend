@@ -493,7 +493,7 @@ export async function sendUnifiedEmail(
     bookingStatus == BOOKING_STATUS_PENDING
   ) {
     welcomeMessage =
-      'Your bookings are temporarily reserved.NRIs can make payments for bookings at the Research Center upon arrival.';
+      'Your bookings are temporarily reserved. NRIs can make payments for bookings at the Research Center upon arrival.';
   }
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
