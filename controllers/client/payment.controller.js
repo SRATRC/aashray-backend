@@ -131,19 +131,13 @@ export const verifyPayment = async (req, res) => {
 
     await t.commit();
 
-    logger.info(`userBookingIdMap: ${JSON.stringify(userBookingIdMap)}`);
     for (const cardno in userBookingIdMap) {
       const bookings = userBookingIdMap[cardno];
       await sendUnifiedEmail(cardno, bookings, bookedBy);
     }
-    message = 'Payment successful.';
+    message = `Payment successful for order id: ${razorpay_order_id}`;
   } else {
-    message = `No pending bookings found for the given order id: ${razorpay_order_id}`;
-    logger.error(
-      `No pending bookings found for the given order id: ${JSON.stringify(
-        req.body
-      )}`
-    );
+    message = `No pending bookings found for order id: ${razorpay_order_id}`;
   }
   res.status(200).json({ message, status: 'ok' });
 };
