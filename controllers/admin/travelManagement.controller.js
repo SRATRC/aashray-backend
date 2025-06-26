@@ -187,184 +187,114 @@ import { QueryTypes } from 'sequelize'; // Make sure you import this if you're u
 
 export const fetchBookingForDriver = async (req, res) => {
   try {
+    // --- Get current IST time ---
+    const now = new Date();
+    const istNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+
+    // --- Decide date to fetch based on 8PM IST cutoff ---
+    const fetchDate =
+      istNow.getHours() < 20
+        ? istNow.toISOString().split('T')[0]
+        : new Date(istNow.getTime() + 86400000).toISOString().split('T')[0];
+
     const data = await database.query(
       `
       SELECT
-  t1.date,
-  t3.issuedto AS Mumukshu_Name,
-  t3.mobno AS Mobile_Number,
+        t1.date,
+        t3.issuedto AS Mumukshu_Name,
+        t3.mobno AS Mobile_Number,
 
-  CASE
-    WHEN t1.pickup_point IN (
-  'dadar',
-  'Dadar (Swami Narayan Temple)',
-  'Dadar (Swaminarayan Temple)',
-  'Amar Mahal',
-  'Airoli',
-  'Borivali',
-  'Vile Parle (Sahara Star)',
-  'Airport Terminal 1',
-  'Airport Terminal 2',
-  'Railway Station (Bandra Terminus)',
-  'Railway Station (Kurla Terminus)',
-  'Railway station (LTT - Kurla)',
-  'Railway Station (CSMT)',
-  'Railway Station (Mumbai Central)',
-  'mullund',
-  'Mulund',
-  'AIRPORT T1',
-  'AIRPORT T2',
-  'OTHER',
-  'RAILWAY STATION (LTT - KURLA)',
-  'VILE PARLE (SAHARA STAR HOTEL)',
-  'Full Car Booking',
-  'Dadar (Pritam Hotel)',
-  'Railway station (Mumbai Central)'
-    ) THEN 'Mumbai to Research Centre'
+        CASE
+          WHEN t1.pickup_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
+            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
+            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+          ) THEN 'Mumbai to Research Centre'
 
-    WHEN t1.drop_point IN (
-  'dadar',
-  'Dadar (Swami Narayan Temple)',
-  'Dadar (Swaminarayan Temple)',
-  'Amar Mahal',
-  'Airoli',
-  'Borivali',
-  'Vile Parle (Sahara Star)',
-  'Airport Terminal 1',
-  'Airport Terminal 2',
-  'Railway Station (Bandra Terminus)',
-  'Railway Station (Kurla Terminus)',
-  'Railway station (LTT - Kurla)',
-  'Railway Station (CSMT)',
-  'Railway Station (Mumbai Central)',
-  'mullund',
-  'Mulund',
-  'AIRPORT T1',
-  'AIRPORT T2',
-  'OTHER',
-  'RAILWAY STATION (LTT - KURLA)',
-  'VILE PARLE (SAHARA STAR HOTEL)',
-  'Full Car Booking',
-  'Dadar (Pritam Hotel)',
-  'Railway station (Mumbai Central)'
-    ) THEN 'Research Centre to Mumbai'
+          WHEN t1.drop_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
+            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
+            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+          ) THEN 'Research Centre to Mumbai'
 
-    ELSE 'Unknown'
-  END AS Travelling_From,
+          ELSE 'Unknown'
+        END AS Travelling_From,
 
-  CASE
-    WHEN
-      -- From Mumbai to RC → show pickup
-      (
-        t1.pickup_point IN (
-  'dadar',
-  'Dadar (Swami Narayan Temple)',
-  'Dadar (Swaminarayan Temple)',
-  'Amar Mahal',
-  'Airoli',
-  'Borivali',
-  'Vile Parle (Sahara Star)',
-  'Airport Terminal 1',
-  'Airport Terminal 2',
-  'Railway Station (Bandra Terminus)',
-  'Railway Station (Kurla Terminus)',
-  'Railway station (LTT - Kurla)',
-  'Railway Station (CSMT)',
-  'Railway Station (Mumbai Central)',
-  'mullund',
-  'Mulund',
-  'AIRPORT T1',
-  'AIRPORT T2',
-  'OTHER',
-  'RAILWAY STATION (LTT - KURLA)',
-  'VILE PARLE (SAHARA STAR HOTEL)',
-  'Full Car Booking',
-  'Dadar (Pritam Hotel)',
-  'Railway station (Mumbai Central)'
-        )
-      )
-    THEN
-      CASE
-        WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple), 'Dadar (Pritam Hotel)')
-          THEN 'Dadar (Swami Narayan Temple)'
-        WHEN LOWER(t1.pickup_point) = 'amar mahal'
-          THEN 'Amar Mahal'
-        WHEN LOWER(t1.pickup_point) = 'airoli'
-          THEN 'Airoli'
-        ELSE t1.pickup_point
-      END
+        CASE
+          WHEN t1.pickup_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
+            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
+            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+          )
+          THEN
+            CASE
+              WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
+                THEN 'Dadar (Swami Narayan Temple)'
+              WHEN LOWER(t1.pickup_point) = 'amar mahal'
+                THEN 'Amar Mahal'
+              WHEN LOWER(t1.pickup_point) = 'airoli'
+                THEN 'Airoli'
+              ELSE t1.pickup_point
+            END
 
-    WHEN
-      -- From RC to Mumbai → show drop
-      (
-        t1.drop_point IN (
-  'dadar',
-  'Dadar (Swami Narayan Temple)',
-  'Dadar (Swaminarayan Temple)',
-  'Amar Mahal',
-  'Airoli',
-  'Borivali',
-  'Vile Parle (Sahara Star)',
-  'Airport Terminal 1',
-  'Airport Terminal 2',
-  'Railway Station (Bandra Terminus)',
-  'Railway Station (Kurla Terminus)',
-  'Railway station (LTT - Kurla)',
-  'Railway Station (CSMT)',
-  'Railway Station (Mumbai Central)',
-  'mullund',
-  'Mulund',
-  'AIRPORT T1',
-  'AIRPORT T2',
-  'OTHER',
-  'RAILWAY STATION (LTT - KURLA)',
-  'VILE PARLE (SAHARA STAR HOTEL)',
-  'Full Car Booking',
-  'Dadar (Pritam Hotel)',
-  'Railway station (Mumbai Central)'
-        )
-      )
-    THEN
-      CASE
-        WHEN LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)','Dadar (Pritam Hotel)')
-          THEN 'Dadar (Swami Narayan Temple)'
-        WHEN LOWER(t1.drop_point) = 'amar mahal'
-          THEN 'Amar Mahal'
-        WHEN LOWER(t1.drop_point) = 'airoli'
-          THEN 'Airoli'
-        ELSE t1.drop_point
-      END
+          WHEN t1.drop_point IN (
+            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
+            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
+            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+          )
+          THEN
+            CASE
+              WHEN LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
+                THEN 'Dadar (Swami Narayan Temple)'
+              WHEN LOWER(t1.drop_point) = 'amar mahal'
+                THEN 'Amar Mahal'
+              WHEN LOWER(t1.drop_point) = 'airoli'
+                THEN 'Airoli'
+              ELSE t1.drop_point
+            END
 
-    ELSE COALESCE(t1.pickup_point, t1.drop_point)
-  END AS \`Pickup/Dropoff_Point\`
+          ELSE COALESCE(t1.pickup_point, t1.drop_point)
+        END AS \`Pickup/Dropoff_Point\`
 
-FROM travel_db t1
-LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-WHERE t1.status IN ('confirmed', 'awaiting confirmation')
-  AND t1.date = CASE
-    WHEN CURTIME() < '20:00:00' THEN CURDATE()
-    ELSE CURDATE() + INTERVAL 1 DAY
-  END
+      FROM travel_db t1
+      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+      WHERE t1.status IN ('confirmed', 'awaiting confirmation')
+        AND t1.date = :fetchDate
 
-ORDER BY
-  Travelling_From ASC,
-  CASE
-    WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)','Dadar (Pritam Hotel)')
-         OR LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)','Dadar (Pritam Hotel)')
-      THEN 1
-    WHEN LOWER(t1.pickup_point) = 'amar mahal' OR LOWER(t1.drop_point) = 'amar mahal'
-      THEN 2
-    WHEN LOWER(t1.pickup_point) = 'airoli' OR LOWER(t1.drop_point) = 'airoli'
-      THEN 3
-    ELSE 4
-  END,
-  \`Pickup/Dropoff_Point\`;
-
-`,
-      { type: QueryTypes.SELECT }
+      ORDER BY
+        Travelling_From ASC,
+        CASE
+          WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
+               OR LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
+            THEN 1
+          WHEN LOWER(t1.pickup_point) = 'amar mahal' OR LOWER(t1.drop_point) = 'amar mahal'
+            THEN 2
+          WHEN LOWER(t1.pickup_point) = 'airoli' OR LOWER(t1.drop_point) = 'airoli'
+            THEN 3
+          ELSE 4
+        END,
+        \`Pickup/Dropoff_Point\`
+      ;
+      `,
+      {
+        type: QueryTypes.SELECT,
+        replacements: { fetchDate },
+      }
     );
 
-    console.log("Fetched travel data for driver:", data);
+    console.log("Fetched travel data for driver for date:", fetchDate);
     return res.status(200).send({ message: 'Fetched data', data });
   } catch (error) {
     console.error("Error fetching data for driver:", error);
