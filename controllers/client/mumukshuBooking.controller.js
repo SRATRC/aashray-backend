@@ -18,7 +18,8 @@ import {
   STATUS_AWAITING_CONFIRMATION,
   SUBJECT_BOOKING_PENDING,
   BOOKING_STATUS_PENDING,
-  WELCOME_MESSAGE_PENDING
+  WELCOME_MESSAGE_PENDING,
+  STATUS_SEVA_KUTIR
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
@@ -163,14 +164,21 @@ export const checkMumukshuOrGuest = async (req, res) => {
   const { mobno } = req.query;
   const cardDb = await CardDb.findOne({
     where: {
-      mobno: mobno,
-      res_status: [STATUS_RESIDENT, STATUS_MUMUKSHU, STATUS_GUEST]
+      mobno: mobno
     },
-    attributes: ['cardno', 'issuedto', 'mobno', 'gender']
+    attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'res_status']
   });
 
   if (!cardDb) {
     throw new ApiError(404, ERR_CARD_NOT_FOUND);
+  }
+
+  if (
+    ![STATUS_RESIDENT, STATUS_MUMUKSHU, STATUS_SEVA_KUTIR].includes(
+      cardDb.res_status
+    )
+  ) {
+    throw new ApiError(401, 'User is not a mumukshu');
   }
 
   return res.status(200).send({ data: cardDb });
