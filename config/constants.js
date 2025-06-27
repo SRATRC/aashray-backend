@@ -66,7 +66,7 @@ export const ROOM_BLOCKED = 'blocked';
 
 // TRAVEL
 export const TRAVEL_DETAIL = 'Travel Booking';
-export const TRAVEL_TYPE_SINGLE = 'single';
+export const TRAVEL_TYPE_REGULAR = 'regular';
 export const TRAVEL_TYPE_FULL = 'full';
 
 // ADMIN ROLES

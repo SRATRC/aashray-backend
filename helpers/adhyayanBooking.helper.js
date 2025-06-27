@@ -9,7 +9,7 @@ import {
   STATUS_WAITING,
   TYPE_ADHYAYAN
 } from '../config/constants.js';
-import { ShibirBookingDb, ShibirDb } from '../models/associations.js';
+import { ShibirBookingDb, ShibirDb, UtsavDb } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCard, validateCards } from './card.helper.js';
@@ -41,17 +41,31 @@ export async function checkAdhyayanAlreadyBooked(shibirIds, ...users) {
   }
 }
 
-export async function checkAdhyayanParamGyanSabha(date) {
+export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
   const adhyayan = await ShibirDb.findOne({
     attributes: ['name', 'speaker'],
     where: {
       name: 'Param Gyaan Sabha',
-      start_date: date,
-      status: STATUS_OPEN
+      start_date: date
     }
   });
 
   if (adhyayan) {
+    return true;
+  }
+
+  const utsav = await UtsavDb.findOne({
+    where: {
+      [Sequelize.Op.or]: [
+        { start_date: date },
+        { end_date: date },
+        Sequelize.literal(`DATE_ADD(start_date, INTERVAL -1 DAY) = '${date}'`),
+        Sequelize.literal(`DATE_ADD(end_date, INTERVAL 1 DAY) = '${date}'`)
+      ]
+    }
+  });
+
+  if (utsav) {
     return true;
   }
 
