@@ -338,8 +338,7 @@ export const updateBookingStatus = async (req, res) => {
           TYPE_TRAVEL,
           charges,
           req.user.username,
-          t,
-          true
+          t
         );
       }
 
