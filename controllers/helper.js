@@ -284,9 +284,7 @@ export async function sendUnifiedEmail(
   let wasFlatBooked =
     Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
-  let showTravelConfirmationDetail =
-    bookingStatus == 'Confirmed' && wasRajprvasBooked;
-
+  
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
@@ -495,27 +493,16 @@ export async function sendUnifiedEmail(
     bookingStatus == BOOKING_STATUS_PENDING
   ) {
     welcomeMessage =
-      'Your bookings are temporarily reserved.NRI payments for bookings are accepted at the Research Center upon arrival.';
+      'Your bookings are temporarily reserved. NRIs can make payments for bookings at the Research Center upon arrival.';
   }
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
     user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
-
-
-  const cc =
-    wasRajprvasBooked  
-      ? RAJ_PRAVAS_EMAIL
-      : null;
-
-  if(cc){
-  console.log('sending cc email to', cc);
-  }
-
+  
   if (email) {
     sendMail({
       email: email,
-      cc: cc,
       subject,
       template,
       context: {
@@ -531,11 +518,26 @@ export async function sendUnifiedEmail(
         flatBookingDetails,
         utsavBookingDetails,
         bookingStatus,
-        welcomeMessage,
-        showTravelConfirmationDetail
+        welcomeMessage
       }
     });
   }
+  //sending email to rajpras only in prod
+  if(wasRajprvasBooked && cardno != null && ['prod'].includes(process.env.NODE_ENV)){
+    sendMail({
+      email: RAJ_PRAVAS_EMAIL,
+      subject: "Vitraag Vigyaan Aashray: "+name,
+      template: template,
+      context: {
+        showTravelDetail: wasRajprvasBooked,
+        name: name,
+        travelBookingDetails,
+        bookingStatus,
+        welcomeMessage
+      }
+    });
+    
+    }
 }
 
 export async function createGuestsHelper(cardno, guests, t) {

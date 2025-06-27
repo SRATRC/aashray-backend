@@ -8,11 +8,11 @@ import {
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
-  TRAVEL_TYPE_SINGLE
+  TRAVEL_TYPE_REGULAR
 } from '../config/constants.js';
 import { CardDb, TravelDb } from '../models/associations.js';
 import { validateCards } from './card.helper.js';
-import { checkAdhyayanParamGyanSabha } from './adhyayanBooking.helper.js';
+import { checkAdhyayanParamGyanSabhaOrUtsav } from './adhyayanBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
@@ -34,8 +34,10 @@ export async function checkTravelAlreadyBooked(date, ...mumukshus) {
 }
 
 async function getTravelBookingStatus(type, date, travelBookingsFordate) {
-  if (type == TRAVEL_TYPE_SINGLE && travelBookingsFordate > 4) {
-    if (await checkAdhyayanParamGyanSabha(date)) {
+  //if regular travel and more than 5 bookings for the date, then waiting.
+  // But if it is a gyan sabha or utsav, then return awaiting confirmation.
+  if (type == TRAVEL_TYPE_REGULAR && travelBookingsFordate > 4) {
+    if (await checkAdhyayanParamGyanSabhaOrUtsav(date)) {
       return STATUS_AWAITING_CONFIRMATION;
     }
     return STATUS_WAITING;
@@ -99,7 +101,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
 
   const bookings = await TravelDb.findAll({
     where: {
-      type: TRAVEL_TYPE_SINGLE,
+      type: TRAVEL_TYPE_REGULAR,
       status: {
         [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED, STATUS_CANCELLED]
       },
