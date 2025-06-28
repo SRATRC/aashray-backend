@@ -462,7 +462,7 @@ export const flatBooking = async (req, res) => {
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
   const card = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'gender', 'mobno', 'email', 'credits'],
+    attributes: ['id', 'cardno', 'issuedto', 'gender', 'mobno', 'email', 'credits'],
     where: {
       mobno: req.params.mobno
     }
