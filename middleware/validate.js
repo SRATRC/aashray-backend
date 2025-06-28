@@ -121,33 +121,12 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
       checkout
     );
 
-    let allowBoundaryTouch = false;
-
-    // Allow boundary touch for Utsav and Room bookings unconditionally.
-    if (isUtsav) {
-      allowBoundaryTouch = true;
-    } else if (isTravel) {
-      // For travel bookings we still need either an existing Utsav booking
-      // or an Utsav range within the current request to allow boundary touch.
-      const overlapsRequestUtsav = utsavRanges.some(
-        (ur) =>
-          moment(checkin).isSameOrAfter(ur.checkin) &&
-          moment(checkin).isSameOrBefore(ur.checkout)
-      );
-      allowBoundaryTouch = hasUtsavBooking || overlapsRequestUtsav;
-    } else {
-      // Room bookings (or any other non-Utsav / non-Travel booking) can now
-      // touch the boundary of blocked or Utsav dates without additional checks.
-      allowBoundaryTouch = true;
-    }
-    if (allowBoundaryTouch) {
-      const hasOverlapBeyondBoundary = blockedDates.some((block) => {
-        const touchesOnlyBoundary =
-          checkout === block.checkin || checkin === block.checkout;
-        return !touchesOnlyBoundary;
-      });
-      if (!hasOverlapBeyondBoundary) continue;
-    }
+    const hasOverlapBeyondBoundary = blockedDates.some((block) => {
+      const touchesOnlyBoundary =
+        checkout === block.checkin || checkin === block.checkout;
+      return !touchesOnlyBoundary;
+    });
+    if (!hasOverlapBeyondBoundary) continue;
 
     // Aggregate blocking information
     conflictingBlocks.push(
