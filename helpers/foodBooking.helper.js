@@ -323,7 +323,13 @@ export async function validateFood(
       )) ||
       (await checkRoomAlreadyBooked(start_date, end_date, card.cardno)) ||
       (await checkFlatAlreadyBooked(start_date, end_date, card.cardno)) ||
-      (await checkSpecialAllowance(start_date, end_date, card.cardno))
+      (await checkSpecialAllowance(
+        start_date,
+        end_date,
+        primary_booking,
+        addons,
+        card.cardno
+      ))
     )
   ) {
     throw new ApiError(400, ERR_ROOM_MUST_BE_BOOKED);
