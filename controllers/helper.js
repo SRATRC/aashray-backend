@@ -131,55 +131,12 @@ export function validateDate(start_date, end_date) {
   }
 }
 
-export async function checkSpecialAllowance(
-  start_date,
-  end_date,
-  primary_booking,
-  addons,
-  cardno
-) {
-  let adhyayanRequests = [];
-  if (primary_booking && primary_booking.booking_type === TYPE_ADHYAYAN) {
-    adhyayanRequests.push(primary_booking);
-  }
-  if (addons && addons.length > 0) {
-    adhyayanRequests.push(
-      ...addons.filter((addon) => addon.booking_type === TYPE_ADHYAYAN)
-    );
-  }
-
-  if (adhyayanRequests.length > 0) {
-    const shibirIds = adhyayanRequests.flatMap(
-      (req) => req.details?.shibir_ids || []
-    );
-
-    if (shibirIds.length > 0) {
-      const shibirs = await ShibirDb.findAll({
-        where: {
-          id: shibirIds,
-          food_allowed: 1
-        }
-      });
-
-      const startDate = new Date(start_date);
-      const endDate = new Date(end_date);
-
-      for (const shibir of shibirs) {
-        const shibirStart = new Date(shibir.start_date);
-        const shibirEnd = new Date(shibir.end_date);
-        if (startDate >= shibirStart && endDate <= shibirEnd) {
-          return true;
-        }
-      }
-    }
-  }
-
+export async function checkSpecialAllowance(start_date, end_date, cardno) {
   const adhyayans = await ShibirBookingDb.findAll({
     include: [
       {
         model: ShibirDb,
         where: {
-          food_allowed: 1,
           start_date: {
             [Sequelize.Op.lte]: start_date
           },
@@ -195,8 +152,8 @@ export async function checkSpecialAllowance(
     }
   });
 
-  if (adhyayans && adhyayans.length > 0) {
-    return true;
+  for (var data of adhyayans) {
+    if (data.dataValues.ShibirDb.dataValues.food_allowed == 1) return true;
   }
 
   return false;
@@ -327,7 +284,7 @@ export async function sendUnifiedEmail(
   let wasFlatBooked =
     Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
-
+  
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
@@ -542,7 +499,7 @@ export async function sendUnifiedEmail(
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
     user && user.issuedto ? user.issuedto : bookedBy && bookedBy.issuedto;
-
+  
   if (email) {
     sendMail({
       email: email,
@@ -566,14 +523,10 @@ export async function sendUnifiedEmail(
     });
   }
   //sending email to rajpras only in prod
-  if (
-    wasRajprvasBooked &&
-    cardno != null &&
-    ['prod'].includes(process.env.NODE_ENV)
-  ) {
+  if(wasRajprvasBooked && cardno != null && ['prod'].includes(process.env.NODE_ENV)){
     sendMail({
       email: RAJ_PRAVAS_EMAIL,
-      subject: 'Vitraag Vigyaan Aashray: ' + name,
+      subject: "Vitraag Vigyaan Aashray: "+name,
       template: template,
       context: {
         showTravelDetail: wasRajprvasBooked,
@@ -583,7 +536,8 @@ export async function sendUnifiedEmail(
         welcomeMessage
       }
     });
-  }
+    
+    }
 }
 
 export async function createGuestsHelper(cardno, guests, t) {
