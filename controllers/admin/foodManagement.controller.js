@@ -330,39 +330,59 @@ export const foodReport = async (req, res) => {
   const end_date = req.query.end_date;
 
   const report = await database.query(
-    `SELECT
-      food_db.date,
-      SUM(CASE WHEN breakfast = 1 THEN 1 ELSE 0 END) AS breakfast,
-      SUM(CASE WHEN lunch = 1 THEN 1 ELSE 0 END) AS lunch,
-      SUM(CASE WHEN dinner = 1 THEN 1 ELSE 0 END) as dinner,
-      SUM(CASE WHEN breakfast_plate_issued = 1 THEN 1 ELSE 0 END) as breakfast_plate_issued,
-      SUM(CASE WHEN lunch_plate_issued = 1 THEN 1 ELSE 0 END) AS lunch_plate_issued,
-      SUM(CASE WHEN dinner_plate_issued = 1 THEN 1 ELSE 0 END) AS dinner_plate_issued,
-      SUM(CASE WHEN breakfast = 1 AND breakfast_plate_issued = 0 THEN 1 ELSE 0 END) AS breakfast_noshow,
-      SUM(CASE WHEN lunch = 1 AND lunch_plate_issued = 0 THEN 1 ELSE 0 END) AS lunch_noshow,
-      SUM(CASE WHEN dinner = 1 AND dinner_plate_issued = 0 THEN 1 ELSE 0 END) AS dinner_noshow,
-      SUM(CASE WHEN hightea = 'COFFEE' THEN 1 ELSE 0 END) AS coffee,
-      SUM(CASE WHEN spicy = 0 THEN 1 ELSE 0 END) as non_spicy,
-      COALESCE(breakfast_physical_plates, 0) AS breakfast_physical_plates,
-      COALESCE(lunch_physical_plates, 0) AS lunch_physical_plates,
-      COALESCE(dinner_physical_plates, 0) AS dinner_physical_plates
-    FROM
-      food_db 
-    LEFT JOIN 
-      (
+    `WITH all_dates AS (
+      SELECT DISTINCT date FROM food_db
+      WHERE date >= :start_date AND date <= :end_date
+      UNION
+      SELECT DISTINCT date FROM bulk_food_booking
+      WHERE date >= :start_date AND date <= :end_date
+    )
+    SELECT
+      d.date,
+      -- food_db counts
+      COALESCE(SUM(CASE WHEN f.breakfast = 1 THEN 1 ELSE 0 END), 0) AS breakfast,
+      COALESCE(SUM(CASE WHEN f.lunch = 1 THEN 1 ELSE 0 END), 0) AS lunch,
+      COALESCE(SUM(CASE WHEN f.dinner = 1 THEN 1 ELSE 0 END), 0) AS dinner,
+      COALESCE(SUM(CASE WHEN f.breakfast_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS breakfast_plate_issued,
+      COALESCE(SUM(CASE WHEN f.lunch_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS lunch_plate_issued,
+      COALESCE(SUM(CASE WHEN f.dinner_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS dinner_plate_issued,
+      COALESCE(SUM(CASE WHEN f.breakfast = 1 AND f.breakfast_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS breakfast_noshow,
+      COALESCE(SUM(CASE WHEN f.lunch = 1 AND f.lunch_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS lunch_noshow,
+      COALESCE(SUM(CASE WHEN f.dinner = 1 AND f.dinner_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS dinner_noshow,
+      COALESCE(SUM(CASE WHEN f.hightea = 'COFFEE' THEN 1 ELSE 0 END), 0) AS coffee,
+      COALESCE(SUM(CASE WHEN f.hightea = 'TEA' THEN 1 ELSE 0 END), 0) AS tea,
+      COALESCE(SUM(CASE WHEN f.spicy = 0 THEN 1 ELSE 0 END), 0) AS non_spicy,
+      -- physical plate counts
+      COALESCE(x.breakfast_physical_plates, 0) AS breakfast_physical_plates,
+      COALESCE(x.lunch_physical_plates, 0) AS lunch_physical_plates,
+      COALESCE(x.dinner_physical_plates, 0) AS dinner_physical_plates,
+      -- bulk food guest counts
+      COALESCE(b.breakfast_guest_count, 0) AS breakfast_guest_count,
+      COALESCE(b.lunch_guest_count, 0) AS lunch_guest_count,
+      COALESCE(b.dinner_guest_count, 0) AS dinner_guest_count
+    FROM all_dates d
+    LEFT JOIN food_db f ON f.date = d.date
+    LEFT JOIN (
         SELECT date,
           SUM(CASE WHEN type = 'breakfast' THEN count ELSE 0 END) AS breakfast_physical_plates,
           SUM(CASE WHEN type = 'lunch' THEN count ELSE 0 END) AS lunch_physical_plates,
-          SUM(CASE WHEN type = 'dinner' THEN count ELSE 0 END) AS dinner_physical_plates 
+          SUM(CASE WHEN type = 'dinner' THEN count ELSE 0 END) AS dinner_physical_plates
         FROM food_physical_plate
-        WHERE food_physical_plate.date >= :start_date
-          AND food_physical_plate.date <= :end_date
-        GROUP BY food_physical_plate.date 
-      ) AS x ON food_db.date = x.date
-    WHERE food_db.date >= :start_date
-      AND food_db.date <= :end_date 
-    GROUP BY food_db.date 
-    ORDER BY food_db.date ASC;`,
+        WHERE date >= :start_date AND date <= :end_date
+        GROUP BY date
+    ) AS x ON d.date = x.date
+    LEFT JOIN (
+        SELECT date,
+          SUM(CASE WHEN breakfast = 1 THEN guestCount ELSE 0 END) AS breakfast_guest_count,
+          SUM(CASE WHEN lunch = 1 THEN guestCount ELSE 0 END) AS lunch_guest_count,
+          SUM(CASE WHEN dinner = 1 THEN guestCount ELSE 0 END) AS dinner_guest_count
+        FROM bulk_food_booking
+        WHERE date >= :start_date AND date <= :end_date
+        GROUP BY date
+    ) AS b ON d.date = b.date
+    GROUP BY d.date, x.breakfast_physical_plates, x.lunch_physical_plates, x.dinner_physical_plates,
+             b.breakfast_guest_count, b.lunch_guest_count, b.dinner_guest_count
+    ORDER BY d.date ASC;`,
     {
       replacements: {
         start_date,
