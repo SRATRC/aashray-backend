@@ -88,6 +88,7 @@ export const ROLE_GATE_ADMIN = 'gateAdmin';
 export const ROLE_MAINTENANCE_ADMIN = 'maintenanceAdmin';
 export const ROLE_HOUSEKEEPING_ADMIN = 'housekeepingAdmin';
 export const ROLE_ELECTRICAL_ADMIN = 'electricalAdmin';
+export const ROLE_AVT_ADMIN = 'avtAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

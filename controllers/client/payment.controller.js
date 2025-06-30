@@ -46,7 +46,9 @@ export const verifyPayment = async (req, res) => {
       STATUS_PAYMENT_AUTHORIZED
     ].includes(razorpay_status)
   ) {
-    logger.error(`Razorpay: Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`);
+    logger.error(
+      `Razorpay: Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`
+    );
 
     message = `Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`;
     return res.status(200).json({ message, status: 'ok' });
