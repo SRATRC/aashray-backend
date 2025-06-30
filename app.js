@@ -40,6 +40,7 @@ import accountsManagementRoutes from './routes/admin/accountsManagement.routes.j
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagement.routes.js';
 import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
 import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
+import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -118,6 +119,7 @@ app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
 app.use('/api/v1/admin/bookings', bookingManagementRoutes);
 app.use('/api/v1/admin/utsav', utsavManagementRoutes);
+app.use('/api/v1/admin/avt', avtManagementRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
