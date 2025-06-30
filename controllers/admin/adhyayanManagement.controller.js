@@ -93,7 +93,7 @@ export const fetchRCAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date > CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Research Centre'
     GROUP BY 
       shibir_db.id,
@@ -143,7 +143,7 @@ export const fetchKolAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date > CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Kolkata'
     GROUP BY 
       shibir_db.id,
@@ -193,7 +193,7 @@ export const fetchDhuleAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date > CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Dhule'
     GROUP BY 
       shibir_db.id,
@@ -243,7 +243,7 @@ export const fetchRajAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date >= CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Rajnandgaon'
     GROUP BY 
       shibir_db.id,
