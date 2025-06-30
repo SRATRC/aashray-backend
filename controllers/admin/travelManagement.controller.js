@@ -177,7 +177,6 @@ export const fetchUpcomingBookings = async (req, res) => {
       type: Sequelize.QueryTypes.SELECT
     }
   );
-console.log("Fetched travel data:", data);
 
   return res.status(200).send({ message: 'Fetched data', data });
   
@@ -294,7 +293,6 @@ export const fetchBookingForDriver = async (req, res) => {
       }
     );
 
-    console.log("Fetched travel data for driver for date:", fetchDate);
     return res.status(200).send({ message: 'Fetched data', data });
   } catch (error) {
     console.error("Error fetching data for driver:", error);
