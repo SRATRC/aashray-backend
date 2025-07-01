@@ -6,6 +6,7 @@ import {
 } from '../../models/associations.js';
 import {
   STATUS_MUMUKSHU,
+  STATUS_GUEST,
   STATUS_ONPREM,
   STATUS_RESIDENT,
   STATUS_SEVA_KUTIR,
@@ -37,10 +38,65 @@ export const fetchPR = async (req, res) => {
     where: {
       status: STATUS_ONPREM,
       res_status: STATUS_RESIDENT
+    },
+    attributes: {
+      include: [
+        // Subquery: Last check-in (status = ONPREM)
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
+          )`),
+          'last_checkin'
+        ],
+        // Subquery: Last check-out (status = OFFPREM)
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
+          )`),
+          'last_checkout'
+        ]
+      ]
     }
   });
 
   return res.status(200).send({ message: 'Success', data: total_pr });
+};
+
+export const fetchGuest = async (req, res) => {
+  const total_guest = await CardDb.findAll({
+    where: {
+      status: STATUS_ONPREM,
+      res_status: STATUS_GUEST
+    },
+    attributes: {
+      include: [
+        // Last check-in time
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
+          )`),
+          'last_checkin'
+        ],
+        // Last check-out time
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
+          )`),
+          'last_checkout'
+        ]
+      ]
+    }
+  });
+
+  return res.status(200).send({ message: 'Success', data: total_guest });
 };
 
 export const fetchMumukshu = async (req, res) => {
@@ -48,6 +104,28 @@ export const fetchMumukshu = async (req, res) => {
     where: {
       status: STATUS_ONPREM,
       res_status: STATUS_MUMUKSHU
+    },
+    attributes: {
+      include: [
+        // Last check-in time
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
+          )`),
+          'last_checkin'
+        ],
+        // Last check-out time
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
+          )`),
+          'last_checkout'
+        ]
+      ]
     }
   });
 
@@ -59,6 +137,28 @@ export const fetchSevaKutir = async (req, res) => {
     where: {
       status: STATUS_ONPREM,
       res_status: STATUS_SEVA_KUTIR
+    },
+    attributes: {
+      include: [
+        // Last check-in time (latest ONPREM entry)
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
+          )`),
+          'last_checkin'
+        ],
+        // Last check-out time (latest OFFPREM entry)
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM gate_record AS gr
+            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
+          )`),
+          'last_checkout'
+        ]
+      ]
     }
   });
 
@@ -127,7 +227,12 @@ export const gateEntry = async (req, res) => {
   });
 
   await t.commit();
-  return res.status(200).send({ message: 'Success' });
+  return res.status(200).send({
+  message: 'Success',
+  cardno: user.cardno,
+  issuedto: user.issuedto
+});
+
 };
 
 export const gateExit = async (req, res) => {
@@ -168,22 +273,28 @@ export const gateExit = async (req, res) => {
   }
 
   await t.commit();
-  return res.status(200).send({ message: 'Success' });
+  return res.status(200).send({
+  message: 'Success',
+  cardno: user.cardno,
+  issuedto: user.issuedto
+});
 };
 
 export const gateRecord = async (req, res) => {
   const result = await database.query(
     `
   SELECT 
-    gr.*, 
-    cd.issuedto, 
-    cd.mobno
-  FROM 
-    gate_record AS gr
-  LEFT JOIN 
-    card_db AS cd 
-  ON 
-    gr.cardno = cd.cardno
+  gr.*, 
+  cd.issuedto, 
+  cd.mobno
+FROM 
+  gate_record AS gr
+LEFT JOIN 
+  card_db AS cd 
+ON 
+  gr.cardno = cd.cardno
+ORDER BY 
+  gr.createdAt DESC;
 `,
     {
       type: Sequelize.QueryTypes.SELECT
@@ -191,4 +302,19 @@ export const gateRecord = async (req, res) => {
   );
 
   return res.status(200).send({ message: 'Success', data: result });
+};
+
+
+export const fetchGateHistoryByCard = async (req, res) => {
+  const { cardno } = req.params;
+
+  const history = await GateRecord.findAll({
+    where: { cardno },
+    order: [['createdAt', 'DESC']]
+  });
+
+  return res.status(200).send({
+    message: 'Fetched gate history',
+    data: history
+  });
 };
