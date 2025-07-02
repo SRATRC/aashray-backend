@@ -3,7 +3,10 @@ import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
   MSG_CANCEL_SUCCESSFUL,
-  RAJ_PRAVAS_EMAIL
+  RAJ_PRAVAS_EMAIL,
+  STATUS_PROCEED_FOR_PAYMENT,
+  STATUS_AWAITING_CONFIRMATION,
+  ERR_BOOKING_NOT_FOUND
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
@@ -11,7 +14,6 @@ import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
-import { STATUS_AWAITING_CONFIRMATION } from '../../config/constants.js';
 import moment from 'moment';
 
 export const FetchUpcoming = async (req, res) => {
@@ -63,7 +65,7 @@ export const CancelTravel = async (req, res) => {
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
-      status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED]
+      status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED ,STATUS_PROCEED_FOR_PAYMENT, STATUS_WAITING]
     }
   });
 
@@ -71,6 +73,8 @@ export const CancelTravel = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const bookingStatus = booking.status;
+  
   await userCancelBooking(req.user, booking, t);
   await t.commit();
 
@@ -89,8 +93,11 @@ export const CancelTravel = async (req, res) => {
       drop: booking.drop_point
     }
   });
-  //bring people from the waiting to awaiting confrimation.
-  updateWaitingTravelBooking(booking.date);
 
+  //bring people from the waiting to awaiting confrimation.
+  if(bookingStatus != STATUS_WAITING)
+  {
+    updateWaitingTravelBooking(booking.date);
+  }
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
