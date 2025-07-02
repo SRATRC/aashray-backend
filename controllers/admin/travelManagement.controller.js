@@ -28,12 +28,20 @@ import {
 } from '../../helpers/transactions.helper.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
-
 function getAdditionalConditions(whereClauses, pickupRC, dropRC, replacementMap) {
   let additionalWhereClause = '';
 
-  if (whereClauses && whereClauses.length > 0) {
+  console.log('🔍 getAdditionalConditions called with:', {
+    whereClauses,
+    pickupRC,
+    dropRC,
+    replacementMap
+  });
+
+  if (Array.isArray(whereClauses) && whereClauses.length > 0) {
     additionalWhereClause += ` AND ${whereClauses.join(' AND ')}`;
+  } else if (whereClauses && !Array.isArray(whereClauses)) {
+    console.warn('⚠️ Warning: whereClauses is not an array:', whereClauses);
   }
 
   if (pickupRC === 'true') {
@@ -44,65 +52,141 @@ function getAdditionalConditions(whereClauses, pickupRC, dropRC, replacementMap)
     additionalWhereClause += " AND t1.drop_point = 'RC'";
   }
 
+  console.log('✅ Final additionalWhereClause:', additionalWhereClause);
+
   return additionalWhereClause;
 }
 
-export const fectchSummary = async (req, res) => {
-  const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
+export const fetchSummary = async (req, res) => {
+  console.log('🚀 fetchSummary triggered');
 
-  const normalizedStatuses = statuses
-    ? Array.isArray(statuses) ? statuses : [statuses]
-    : [];
+  try {
+    const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
 
-  const adminCommentFilters = adminComments
-    ? Array.isArray(adminComments) ? adminComments : [adminComments]
-    : [];
+    const normalizedStatuses = Array.isArray(statuses)
+      ? statuses
+      : statuses ? [statuses] : [];
 
-  const replacementMap = {
-    startDate: start_date,
-    endDate: end_date
-  };
+    const adminCommentFilters = Array.isArray(adminComments)
+      ? adminComments
+      : adminComments ? [adminComments] : [];
 
-  const conditions = [];
+    const replacements = {
+      startDate: start_date,
+      endDate: end_date
+    };
 
-  normalizedStatuses.forEach((s, i) => {
-    if (s === 'admin cancelled' && adminCommentFilters.length > 0) {
-      return;
+    const conditions = [];
+
+    normalizedStatuses.forEach((s, i) => {
+      if (s === 'admin cancelled' && adminCommentFilters.length > 0) return;
+      replacements[`status${i}`] = s;
+      conditions.push(`t1.status = :status${i}`);
+    });
+
+    adminCommentFilters.forEach((c, i) => {
+      replacements[`adminComment${i}`] = c;
+      conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
+    });
+
+    // Build WHERE clause
+    let whereClause = '';
+    if (conditions.length > 0) {
+      whereClause += ' AND ' + conditions.join(' AND ');
+    }
+    if (pickupRC === 'true') {
+      whereClause += " AND t1.pickup_point = 'RC'";
+    }
+    if (dropRC === 'true') {
+      whereClause += " AND t1.drop_point = 'RC'";
     }
 
-    replacementMap[`status${i}`] = s;
-    conditions.push(`t1.status = :status${i}`);
-  });
+    const sql = `
+      SELECT
+  CASE
+  WHEN t1.pickup_point IN (
+    'dadar',
+    'Dadar (Swami Narayan Temple)',
+    'Dadar (Swaminarayan Temple)',
+    'Amar Mahal',
+    'Airoli',
+    'Borivali',
+    'Vile Parle (Sahara Star)',
+    'Airport Terminal 1',
+    'Airport Terminal 2',
+    'Railway Station (Bandra Terminus)',
+    'Railway Station (Kurla Terminus)',
+    'Railway station (LTT - Kurla)',
+    'Railway Station (CSMT)',
+    'Railway Station (Mumbai Central)',
+    'mullund',
+    'Mulund',
+    'AIRPORT T1',
+    'AIRPORT T2',
+    'OTHER',
+    'RAILWAY STATION (LTT - KURLA)',
+    'VILE PARLE (SAHARA STAR HOTEL)',
+    'Full Car Booking',
+    'Dadar (Pritam Hotel)',
+    'Railway station (Mumbai Central)'
+  ) THEN 'Mumbai to Research Centre'
 
-  adminCommentFilters.forEach((c, i) => {
-    replacementMap[`adminComment${i}`] = c;
-    conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
-  });
+  WHEN t1.drop_point IN (
+    'dadar',
+    'Dadar (Swami Narayan Temple)',
+    'Dadar (Swaminarayan Temple)',
+    'Amar Mahal',
+    'Airoli',
+    'Borivali',
+    'Vile Parle (Sahara Star)',
+    'Airport Terminal 1',
+    'Airport Terminal 2',
+    'Railway Station (Bandra Terminus)',
+    'Railway Station (Kurla Terminus)',
+    'Railway station (LTT - Kurla)',
+    'Railway Station (CSMT)',
+    'Railway Station (Mumbai Central)',
+    'mullund',
+    'Mulund',
+    'AIRPORT T1',
+    'AIRPORT T2',
+    'OTHER',
+    'RAILWAY STATION (LTT - KURLA)',
+    'VILE PARLE (SAHARA STAR HOTEL)',
+    'Full Car Booking',
+    'Dadar (Pritam Hotel)',
+    'Railway station (Mumbai Central)'
+  ) THEN 'Research Centre to Mumbai'
 
-  const additionalWhereClause = getAdditionalConditions(conditions, pickupRC, dropRC, replacementMap);
+  ELSE 'Other'
+END AS destination,
+t1.status,
+  t1.admin_comments,
+        COUNT(*) AS count
+      FROM travel_db t1
+      WHERE t1.date >= :startDate AND t1.date <= :endDate
+      ${whereClause}
+      GROUP BY destination, t1.status, t1.admin_comments
+      ORDER BY destination, t1.status
+    `;
 
-  const data = await database.query(
-    `SELECT
-      CASE
-        WHEN t1.pickup_point IN (...) THEN 'Mumbai to Research Centre'
-        WHEN t1.drop_point IN (...) THEN 'Research Centre to Mumbai'
-        ELSE 'Other'
-      END AS destination,
-      t1.status,
-      t1.admin_comments,
-      COUNT(*) AS count
-    FROM travel_db t1
-    WHERE t1.date >= :startDate AND t1.date <= :endDate
-    ${additionalWhereClause}
-    GROUP BY destination, t1.status, t1.admin_comments
-    ORDER BY destination, t1.status`,
-    {
-      replacements: replacementMap,
+    console.log('📥 Replacements:', replacements);
+    const data = await database.query(sql, {
+      replacements,
       type: Sequelize.QueryTypes.SELECT
-    }
-  );
+    });
 
-  return res.status(200).send({ message: 'Fetched data', data });
+    console.log('📊 fetchSummary data:', data);
+    return res.status(200).send({ message: 'Fetched data', data });
+
+  } catch (error) {
+    console.error('❌ fetchSummary error:', error);
+    return res.status(500).send({
+      statusCode: 500,
+      message: error.message,
+      data: error.stack
+    });
+  }
 };
 
 
