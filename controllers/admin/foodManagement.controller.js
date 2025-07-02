@@ -39,6 +39,7 @@ export const issuePlate = async (req, res) => {
     dinner: moment.utc().hour(13).minute(30).second(0)
   };
 
+  // Find booking for today
   const booking = await FoodDb.findOne({
     where: {
       cardno: req.params.cardno,
@@ -50,11 +51,15 @@ export const issuePlate = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  // Use meal from request body if provided, otherwise determine from time
-  let currentMeal = req.body.meal;
+  // 🔁 NEW: Fetch the card details to get the name
+  const card = await CardDb.findOne({ where: { cardno: req.params.cardno } });
+  if (!card) {
+    throw new ApiError(404, 'Card not found');
+  }
 
+  // Determine current meal
+  let currentMeal = req.body.meal;
   if (!currentMeal) {
-    // Determine current meal period from time
     for (const meal of ['breakfast', 'lunch', 'dinner']) {
       if (currentTime.isSameOrBefore(mealTimes[meal])) {
         currentMeal = meal;
@@ -74,20 +79,22 @@ export const issuePlate = async (req, res) => {
     throw new ApiError(400, `${currentMeal} not booked`);
   }
 
-  // Check if plate is already issued
+  // Check if plate already issued
   const plateField = `${currentMeal}_plate_issued`;
   if (booking[plateField]) {
     throw new ApiError(400, `Plate for ${currentMeal} already issued`);
   }
 
-  // Issue plate
+  // ✅ Issue the plate
   await booking.update({
     [plateField]: true
   });
 
-  return res
-    .status(200)
-    .send({ message: `Plate for ${currentMeal} issued successfully` });
+  // ✅ Send success with name
+  return res.status(200).send({
+    message: `Plate for ${currentMeal} issued successfully`,
+    issuedto: card.issuedto
+  });
 };
 
 export const physicalPlatesIssued = async (req, res) => {
