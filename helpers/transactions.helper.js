@@ -32,7 +32,6 @@ export async function createPendingTransaction(
   t,
   cashAllowed = false
 ) {
-  if (card.country != 'India') cashAllowed = true;
 
   const pendingStatus = cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING;
 
@@ -60,7 +59,11 @@ export async function createPendingTransaction(
   }
 
   // 🆕 Proceed to create only if no existing pending transaction
-  const transaction = await Transactions.create(
+  if (card.country && card.country != 'India') {
+    cashAllowed = true;
+  }
+
+ const transaction = await Transactions.create(
     {
       cardno: card.cardno,
       bookingid: booking.bookingid,
