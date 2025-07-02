@@ -32,17 +32,44 @@ export async function createPendingTransaction(
   t,
   cashAllowed = false
 ) {
+
+  const pendingStatus = cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING;
+
+  // ✅ Prevent duplicate pending transaction
+  const existingTx = await Transactions.findOne({
+    where: {
+      bookingid: booking.bookingid,
+      category,
+      status: pendingStatus
+    },
+    transaction: t
+  });
+
+  if (existingTx) {
+    console.warn('Duplicate transaction avoided');
+    const discountedAmount = await useCredit(
+      card,
+      booking,
+      existingTx,
+      amount,
+      updatedBy,
+      t
+    );
+    return { transaction: existingTx, discountedAmount };
+  }
+
+  // 🆕 Proceed to create only if no existing pending transaction
   if (card.country && card.country != 'India') {
     cashAllowed = true;
   }
 
-  const transaction = await Transactions.create(
+ const transaction = await Transactions.create(
     {
       cardno: card.cardno,
       bookingid: booking.bookingid,
       category,
       amount,
-      status: cashAllowed ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING,
+      status: pendingStatus,
       updatedBy
     },
     { transaction: t }
@@ -59,6 +86,7 @@ export async function createPendingTransaction(
 
   return { transaction, discountedAmount };
 }
+
 
 export async function userCancelBooking(user, booking, t) {
   var transaction = await Transactions.findOne({

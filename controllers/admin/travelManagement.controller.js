@@ -16,6 +16,7 @@ import {
   STATUS_WAITING,
   TYPE_TRAVEL,
   STATUS_CASH_COMPLETED,
+  STATUS_CASH_PENDING,
   STATUS_PROCEED_FOR_PAYMENT,
   RAJ_PRAVAS_EMAIL
 } from '../../config/constants.js';
@@ -353,16 +354,27 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
-      if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-        await transaction.update(
-          {
-            description,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
-      }
-      break;
+  if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+    let newTransactionStatus;
+
+    if (transaction.status === STATUS_CASH_PENDING) {
+      newTransactionStatus = STATUS_PAYMENT_COMPLETED;
+    } else if (transaction.status === STATUS_PAYMENT_PENDING) {
+      newTransactionStatus = STATUS_PAYMENT_COMPLETED;
+    }
+
+    if (newTransactionStatus) {
+      await transaction.update(
+        {
+          status: newTransactionStatus,
+          description,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+    }
+  }
+  break;
 
     case STATUS_WAITING:
     default:

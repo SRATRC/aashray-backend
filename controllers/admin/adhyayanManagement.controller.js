@@ -446,49 +446,43 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
 
-  // 1. Booking Status = WAITING, Transaction is Not Created
-  // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
-  // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
-  // 4. Booking Status = CANCELLED OR ADMIN_CANCELLED, Transaction is Not Created or Status = CANCELLED OR ADMIN_CANCELLED
-
-  // waiting to confirmed
-  // waiting to payment pending -- not needed
-  //
+  
   switch (status) {
     // Only Waiting & Payment Pending booking can be changed to
     // Confirmed
     case STATUS_CONFIRMED:
-      if (booking.status == STATUS_WAITING) {
-        await reserveAdhyayanSeat(adhyayan, t);
-      }
+  if (booking.status == STATUS_WAITING) {
+    await reserveAdhyayanSeat(adhyayan, t);
+  }
 
-      if (!transaction) {
-        transaction = await createPendingTransaction(
-          bookedByCard,
-          booking,
-          TYPE_ADHYAYAN,
-          adhyayan.amount,
-          req.user.username,
-          t,
-          true
-        );
-      }
+  if (!transaction) {
+    transaction = await createPendingTransaction(
+      bookedByCard,
+      booking,
+      TYPE_ADHYAYAN,
+      adhyayan.amount,
+      req.user.username,
+      t,
+      true
+    );
+  }
 
-      // TODO: is this correct?
-      // After applying credits, if the status is still payment pending
-      // then accept the UPI or cash payment and mark is complete.
-      if (transaction.status == STATUS_PAYMENT_PENDING) {
-        await transaction.update(
-          {
-            status: STATUS_CASH_COMPLETED,
-            description: description,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
-      }
+  // ✅ Update transaction status if pending or cash pending
+  if (
+    transaction.status === STATUS_PAYMENT_PENDING ||
+    transaction.status === STATUS_CASH_PENDING
+  ) {
+    await transaction.update(
+      {
+        status: STATUS_PAYMENT_COMPLETED,
+        description: description,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
 
-      break;
+  break;
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status == STATUS_CONFIRMED) {
