@@ -4,7 +4,7 @@ import {
   fetchUpcomingBookings,
   updateBookingStatus,
   updateTransactionStatus,
-  fectchSummary,
+  fetchSummary,
   fetchBookingForDriver
 } from '../../controllers/admin/travelManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
@@ -15,7 +15,7 @@ router.use(auth);
 router.use(authorizeRoles(ROLE_TRAVEL_ADMIN, ROLE_SUPER_ADMIN, ROLE_DRI_TRAVEL_ADMIN));
 
 router.get('/upcoming', CatchAsync(fetchUpcomingBookings));
-router.get('/summary', CatchAsync(fectchSummary));
+router.get('/summary', CatchAsync(fetchSummary));
 router.get('/driver', CatchAsync(fetchBookingForDriver));
 
 router.post('/booking/status', CatchAsync(updateBookingStatus));
