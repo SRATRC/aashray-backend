@@ -29,12 +29,11 @@ import {
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 
-function getAdditionalConditions(statuses, pickupRC, dropRC, replacementMap) {
+function getAdditionalConditions(whereClauses, pickupRC, dropRC, replacementMap) {
   let additionalWhereClause = '';
 
-  if (statuses && statuses.length > 0) {
-    additionalWhereClause += ' AND t1.status IN (:status)';
-    replacementMap.status = statuses;
+  if (whereClauses && whereClauses.length > 0) {
+    additionalWhereClause += ` AND ${whereClauses.join(' AND ')}`;
   }
 
   if (pickupRC === 'true') {
@@ -49,12 +48,14 @@ function getAdditionalConditions(statuses, pickupRC, dropRC, replacementMap) {
 }
 
 export const fectchSummary = async (req, res) => {
-  const { start_date, end_date, statuses, pickupRC, dropRC } = req.query;
+  const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
 
   const normalizedStatuses = statuses
-    ? Array.isArray(statuses)
-      ? statuses
-      : [statuses]
+    ? Array.isArray(statuses) ? statuses : [statuses]
+    : [];
+
+  const adminCommentFilters = adminComments
+    ? Array.isArray(adminComments) ? adminComments : [adminComments]
     : [];
 
   const replacementMap = {
@@ -62,96 +63,58 @@ export const fectchSummary = async (req, res) => {
     endDate: end_date
   };
 
-  const additionalWhereClause = getAdditionalConditions(
-    normalizedStatuses,
-    pickupRC,
-    dropRC,
-    replacementMap
-  );
+  const conditions = [];
+
+  normalizedStatuses.forEach((s, i) => {
+    if (s === 'admin cancelled' && adminCommentFilters.length > 0) {
+      return;
+    }
+
+    replacementMap[`status${i}`] = s;
+    conditions.push(`t1.status = :status${i}`);
+  });
+
+  adminCommentFilters.forEach((c, i) => {
+    replacementMap[`adminComment${i}`] = c;
+    conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
+  });
+
+  const additionalWhereClause = getAdditionalConditions(conditions, pickupRC, dropRC, replacementMap);
 
   const data = await database.query(
     `SELECT
-  CASE
-    WHEN t1.pickup_point IN (
-      'dadar',
-  'Dadar (Swami Narayan Temple)',
-  'Dadar (Swaminarayan Temple)',
-  'Amar Mahal',
-  'Airoli',
-  'Borivali',
-  'Vile Parle (Sahara Star)',
-  'Airport Terminal 1',
-  'Airport Terminal 2',
-  'Railway Station (Bandra Terminus)',
-  'Railway Station (Kurla Terminus)',
-  'Railway station (LTT - Kurla)',
-  'Railway Station (CSMT)',
-  'Railway Station (Mumbai Central)',
-  'mullund',
-  'Mulund',
-  'AIRPORT T1',
-  'AIRPORT T2',
-  'OTHER',
-  'RAILWAY STATION (LTT - KURLA)',
-  'VILE PARLE (SAHARA STAR HOTEL)',
-  'Full Car Booking',
-  'Dadar (Pritam Hotel)',
-  'Railway station (Mumbai Central)'
-    ) THEN 'Mumbai to Research Centre'
-    
-    WHEN t1.drop_point IN (
-      'dadar',
-  'Dadar (Swami Narayan Temple)',
-  'Dadar (Swaminarayan Temple)',
-  'Amar Mahal',
-  'Airoli',
-  'Borivali',
-  'Vile Parle (Sahara Star)',
-  'Airport Terminal 1',
-  'Airport Terminal 2',
-  'Railway Station (Bandra Terminus)',
-  'Railway Station (Kurla Terminus)',
-  'Railway station (LTT - Kurla)',
-  'Railway Station (CSMT)',
-  'Railway Station (Mumbai Central)',
-  'mullund',
-  'Mulund',
-  'AIRPORT T1',
-  'AIRPORT T2',
-  'OTHER',
-  'RAILWAY STATION (LTT - KURLA)',
-  'VILE PARLE (SAHARA STAR HOTEL)',
-  'Full Car Booking',
-  'Dadar (Pritam Hotel)',
-  'Railway station (Mumbai Central)'
-    ) THEN 'Research Centre to Mumbai'
-    ELSE 'Other'
-  END AS destination,
-  t1.status,
-  t1.admin_comments,
-  COUNT(*) AS count
-FROM travel_db t1
-WHERE t1.date >= :startDate AND t1.date <= :endDate
-${additionalWhereClause} -- Your existing dynamic filtering conditions
-GROUP BY destination, t1.status, t1.admin_comments
-ORDER BY destination, t1.status`,
+      CASE
+        WHEN t1.pickup_point IN (...) THEN 'Mumbai to Research Centre'
+        WHEN t1.drop_point IN (...) THEN 'Research Centre to Mumbai'
+        ELSE 'Other'
+      END AS destination,
+      t1.status,
+      t1.admin_comments,
+      COUNT(*) AS count
+    FROM travel_db t1
+    WHERE t1.date >= :startDate AND t1.date <= :endDate
+    ${additionalWhereClause}
+    GROUP BY destination, t1.status, t1.admin_comments
+    ORDER BY destination, t1.status`,
     {
       replacements: replacementMap,
       type: Sequelize.QueryTypes.SELECT
     }
   );
-  console.log('Summary data from DB:', data);
 
   return res.status(200).send({ message: 'Fetched data', data });
 };
 
+
 export const fetchUpcomingBookings = async (req, res) => {
-  const { start_date, end_date, statuses, pickupRC, dropRC } = req.query;
+  const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
 
   const normalizedStatuses = statuses
-    ? Array.isArray(statuses)
-      ? statuses
-      : [statuses]
+    ? Array.isArray(statuses) ? statuses : [statuses]
+    : [];
+
+  const adminCommentFilters = adminComments
+    ? Array.isArray(adminComments) ? adminComments : [adminComments]
     : [];
 
   const replacementMap = {
@@ -160,21 +123,34 @@ export const fetchUpcomingBookings = async (req, res) => {
     category: TYPE_TRAVEL
   };
 
-  const additionalWhereClause = getAdditionalConditions(
-    normalizedStatuses,
-    pickupRC,
-    dropRC,
-    replacementMap
-  );
+  const conditions = [];
+
+  normalizedStatuses.forEach((s, i) => {
+    if (s === 'admin cancelled' && adminCommentFilters.length > 0) {
+      return;
+    }
+
+    replacementMap[`status${i}`] = s;
+    conditions.push(`t1.status = :status${i}`);
+  });
+
+  adminCommentFilters.forEach((c, i) => {
+    replacementMap[`adminComment${i}`] = c;
+    conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
+  });
+
+  const additionalWhereClause = getAdditionalConditions(conditions, pickupRC, dropRC, replacementMap);
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.arrival_time, t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.arrival_time,
+            t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
             t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
             t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
      FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-     WHERE t1.date >= :startDate AND t1.date <= :endDate ${additionalWhereClause}
+     WHERE t1.date >= :startDate AND t1.date <= :endDate
+     ${additionalWhereClause}
      ORDER BY date ASC`,
     {
       replacements: replacementMap,
@@ -183,7 +159,6 @@ export const fetchUpcomingBookings = async (req, res) => {
   );
 
   return res.status(200).send({ message: 'Fetched data', data });
-  
 };
 
 import { QueryTypes } from 'sequelize'; // Make sure you import this if you're using Sequelize
