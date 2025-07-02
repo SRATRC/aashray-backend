@@ -18,6 +18,8 @@ import {
   STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
   STATUS_PROCEED_FOR_PAYMENT,
+  STATUS_SEATSFULL_CANCELLED,
+  STATUS_WRONGFORM_CANCELLED,
   RAJ_PRAVAS_EMAIL
 } from '../../config/constants.js';
 import {
@@ -126,11 +128,12 @@ export const fectchSummary = async (req, res) => {
     ELSE 'Other'
   END AS destination,
   t1.status,
+  t1.admin_comments,
   COUNT(*) AS count
 FROM travel_db t1
 WHERE t1.date >= :startDate AND t1.date <= :endDate
 ${additionalWhereClause} -- Your existing dynamic filtering conditions
-GROUP BY destination, t1.status
+GROUP BY destination, t1.status, t1.admin_comments
 ORDER BY destination, t1.status`,
     {
       replacements: replacementMap,
@@ -353,6 +356,20 @@ export const updateBookingStatus = async (req, res) => {
       }
       break;
 
+      case STATUS_SEATSFULL_CANCELLED:
+      if (transaction) {
+        await adminCancelTransaction(req.user, bookedByCard, transaction, t);
+        updateWaitingTravelBooking(booking.date);
+      }
+      break;
+
+      case STATUS_WRONGFORM_CANCELLED:
+      if (transaction) {
+        await adminCancelTransaction(req.user, bookedByCard, transaction, t);
+        updateWaitingTravelBooking(booking.date);
+      }
+      break;
+
     case STATUS_CONFIRMED:
   if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
     let newTransactionStatus;
@@ -391,9 +408,15 @@ export const updateBookingStatus = async (req, res) => {
   );
 
   const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
-  if(newBookingStatus == STATUS_ADMIN_CANCELLED){
-    newBookingStatus="Cancelled because of wrong form filled"
+  if (newBookingStatus === STATUS_ADMIN_CANCELLED) {
+  if (booking.admin_comments === 'admin_cancel_seats_full') {
+    newBookingStatus = 'Cancelled because all seats were booked';
+  } else if (booking.admin_comments === 'admin_cancel_wrong_form') {
+    newBookingStatus = 'Cancelled because of wrong form filled';
+  } else {
+    newBookingStatus = 'Cancelled by admin';
   }
+}
   sendMail({
     email: card.email,
     subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
