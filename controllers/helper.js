@@ -23,7 +23,10 @@ import {
   STATUS_ACTIVE,
   ERR_DATES_NOT_BETWEEN_UTSAV,
   RAJ_PRAVAS_EMAIL,
-  BOOKING_STATUS_PENDING
+  BOOKING_STATUS_PENDING,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CANCELLED,
+  ROOM_STATUS_CHECKEDOUT
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -88,6 +91,13 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
           ]
         }
       ],
+      status: {
+        [Sequelize.Op.notIn]: [
+          STATUS_CANCELLED,
+          STATUS_ADMIN_CANCELLED,
+          ROOM_STATUS_CHECKEDOUT
+        ]
+      },
       cardno: card_no
     }
   });
