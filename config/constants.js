@@ -39,6 +39,8 @@ export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
 export const STATUS_PROCEED_FOR_PAYMENT = 'proceed for payment';
+export const STATUS_SEATSFULL_CANCELLED = 'seats full cancel';
+export const STATUS_WRONGFORM_CANCELLED = 'wrong form cancel';
 
 export const STATUS_PAYMENT_COMPLETED = 'completed';
 export const STATUS_AWAITING_REFUND = 'awaiting refund';
@@ -88,6 +90,7 @@ export const ROLE_GATE_ADMIN = 'gateAdmin';
 export const ROLE_MAINTENANCE_ADMIN = 'maintenanceAdmin';
 export const ROLE_HOUSEKEEPING_ADMIN = 'housekeepingAdmin';
 export const ROLE_ELECTRICAL_ADMIN = 'electricalAdmin';
+export const ROLE_AVT_ADMIN = 'avtAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

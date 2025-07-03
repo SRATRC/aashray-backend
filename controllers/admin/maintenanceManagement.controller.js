@@ -19,38 +19,52 @@ export const fetchMaintenanceReport = async (req, res) => {
   const { department } = req.params;
 
   const requests = await MaintenanceDb.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'mobno']
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'requested_by',
-      'createdAt',
-      'department',
-      'work_detail',
-      'area_of_work',
-      'comments',
-      'status'
-    ],
-    where: { 
-      department,
-      status: [STATUS_OPEN, STATUS_INPROGRESS, STATUS_CLOSED]
-    },
-    order: [
-      [Sequelize.literal(`
-        CASE 
-          WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_OPEN}' THEN 0
-          WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_INPROGRESS}' THEN 1
-          WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_CLOSED}' THEN 2
-          ELSE 3
-        END
-      `), 'ASC'],
-      ['createdAt', 'ASC']
-    ]
-  });
+  include: [
+    {
+      model: CardDb,
+      attributes: ['issuedto', 'mobno']
+    }
+  ],
+  attributes: [
+  'bookingid',
+  'requested_by',
+  'createdAt',
+  'department',
+  'work_detail',
+  'area_of_work',
+  'comments',
+  'status',
+  [Sequelize.literal(`
+    CASE 
+      WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_CLOSED}' THEN \`MaintenanceDb\`.\`updatedAt\`
+      ELSE NULL
+    END
+  `), 'closedAt'],
+  [Sequelize.literal(`
+      CASE 
+        WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_OPEN}' THEN 0
+        WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_INPROGRESS}' THEN 1
+        WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_CLOSED}' THEN 2
+        ELSE 3
+      END
+    `), 'priority']
+  ],
+  where: { 
+    department,
+    status: [STATUS_OPEN, STATUS_INPROGRESS, STATUS_CLOSED]
+  },
+  order: [
+    [Sequelize.literal(`
+      CASE 
+        WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_OPEN}' THEN 0
+        WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_INPROGRESS}' THEN 1
+        WHEN \`MaintenanceDb\`.\`status\` = '${STATUS_CLOSED}' THEN 2
+        ELSE 3
+      END
+    `), 'ASC'],
+    ['createdAt', 'DESC']
+  ]
+});
 
   return res.status(200).send({
     message: 'Fetched requests for department',

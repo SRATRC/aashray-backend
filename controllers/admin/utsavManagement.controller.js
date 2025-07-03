@@ -324,30 +324,48 @@ export const utsavStatusUpdate = async (req, res) => {
       break;
 
     case STATUS_PAYMENT_PENDING:
-      if (booking.status !== STATUS_WAITING) {
-        throw new ApiError(400, 'Payment Pending can only be set from waiting');
-      }
+  if (booking.status !== STATUS_WAITING) {
+    throw new ApiError(400, 'Payment Pending can only be set from waiting');
+  }
 
-      // Refresh transaction from DB just in case (to avoid stale object)
-      transaction = await Transactions.findOne({
-        where: { bookingid: booking.bookingid },
-        transaction: t
-      });
+  // Refresh transaction from DB just in case (to avoid stale object)
+  transaction = await Transactions.findOne({
+    where: { bookingid: booking.bookingid },
+    transaction: t
+  });
 
-      if (
-        !transaction ||
-        ['credited', 'cancelled'].includes(transaction.status)
-      ) {
-        const packageData = await UtsavPackagesDb.findByPk(booking.packageid, {
-          transaction: t
-        });
-        if (!packageData) throw new Error('Utsav Package not found');
+  if (
+    !transaction ||
+    ['credited', 'cancelled'].includes(transaction.status)
+  ) {
+    const packageData = await UtsavPackagesDb.findByPk(booking.packageid, {
+      transaction: t
+    });
+    if (!packageData) throw new Error('Utsav Package not found');
 
-        // Double-check to avoid race condition (find/create pattern)
-        const [existingTransaction, created] = await Transactions.findOrCreate({
-          where: { bookingid: booking.bookingid },
-          defaults: {
-            cardno: booking.cardno,
+    const cardnoToUse = booking.bookedBy || booking.cardno;  // 👈 Use bookedBy if present
+
+    const [existingTransaction, created] = await Transactions.findOrCreate({
+      where: { bookingid: booking.bookingid },
+      defaults: {
+        cardno: cardnoToUse,
+        category: TYPE_UTSAV,
+        amount: packageData.amount,
+        discount: 0,
+        razorpay_order_id: null,
+        description: req.body.description || 'Payment pending for Utsav',
+        status: STATUS_PAYMENT_PENDING,
+        updatedBy: req.user.username || 'admin'
+      },
+      transaction: t
+    });
+
+    if (!created) {
+      if (['credited', 'cancelled'].includes(existingTransaction.status)) {
+        transaction = await Transactions.create(
+          {
+            bookingid: booking.bookingid,
+            cardno: cardnoToUse,
             category: TYPE_UTSAV,
             amount: packageData.amount,
             discount: 0,
@@ -356,42 +374,23 @@ export const utsavStatusUpdate = async (req, res) => {
             status: STATUS_PAYMENT_PENDING,
             updatedBy: req.user.username || 'admin'
           },
-          transaction: t
-        });
-
-        if (!created) {
-          if (['credited', 'cancelled'].includes(existingTransaction.status)) {
-            // Existing transaction is not reusable → create a new one manually
-            transaction = await Transactions.create(
-              {
-                bookingid: booking.bookingid,
-                cardno: booking.cardno,
-                category: TYPE_UTSAV,
-                amount: packageData.amount,
-                discount: 0,
-                razorpay_order_id: null,
-                description:
-                  req.body.description || 'Payment pending for Utsav',
-                status: STATUS_PAYMENT_PENDING,
-                updatedBy: req.user.username || 'admin'
-              },
-              { transaction: t }
-            );
-          } else {
-            console.warn(
-              'Duplicate transaction avoided: already exists and active.'
-            );
-            transaction = existingTransaction;
-          }
-        } else {
-          transaction = existingTransaction;
-        }
+          { transaction: t }
+        );
       } else {
-        console.warn('Valid transaction already exists. Skipping creation.');
+        console.warn(
+          'Duplicate transaction avoided: already exists and active.'
+        );
+        transaction = existingTransaction;
       }
+    } else {
+      transaction = existingTransaction;
+    }
+  } else {
+    console.warn('Valid transaction already exists. Skipping creation.');
+  }
 
-      newBookingStatus = STATUS_PAYMENT_PENDING;
-      break;
+  newBookingStatus = STATUS_PAYMENT_PENDING;
+  break;
 
     case STATUS_ADMIN_CANCELLED:
       console.log('>> Admin cancelling booking');

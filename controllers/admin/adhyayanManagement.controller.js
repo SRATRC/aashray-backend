@@ -93,7 +93,7 @@ export const fetchRCAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date > CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Research Centre'
     GROUP BY 
       shibir_db.id,
@@ -143,7 +143,7 @@ export const fetchKolAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date > CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Kolkata'
     GROUP BY 
       shibir_db.id,
@@ -193,7 +193,7 @@ export const fetchDhuleAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date > CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Dhule'
     GROUP BY 
       shibir_db.id,
@@ -243,7 +243,7 @@ export const fetchRajAdhyayan = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date >= CURRENT_DATE
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
       AND shibir_db.location = 'Rajnandgaon'
     GROUP BY 
       shibir_db.id,
@@ -446,49 +446,43 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
 
-  // 1. Booking Status = WAITING, Transaction is Not Created
-  // 2. Booking Status = PAYMENT_PENDING, Transaction Status = PAYMENT_PENDING
-  // 3. Booking Status = CONFIRMED, Transaction Status = PAYMENT_COMPLETED OR CASH_COMPLETED
-  // 4. Booking Status = CANCELLED OR ADMIN_CANCELLED, Transaction is Not Created or Status = CANCELLED OR ADMIN_CANCELLED
-
-  // waiting to confirmed
-  // waiting to payment pending -- not needed
-  //
+  
   switch (status) {
     // Only Waiting & Payment Pending booking can be changed to
     // Confirmed
     case STATUS_CONFIRMED:
-      if (booking.status == STATUS_WAITING) {
-        await reserveAdhyayanSeat(adhyayan, t);
-      }
+  if (booking.status == STATUS_WAITING) {
+    await reserveAdhyayanSeat(adhyayan, t);
+  }
 
-      if (!transaction) {
-        transaction = await createPendingTransaction(
-          bookedByCard,
-          booking,
-          TYPE_ADHYAYAN,
-          adhyayan.amount,
-          req.user.username,
-          t,
-          true
-        );
-      }
+  if (!transaction) {
+    transaction = await createPendingTransaction(
+      bookedByCard,
+      booking,
+      TYPE_ADHYAYAN,
+      adhyayan.amount,
+      req.user.username,
+      t,
+      true
+    );
+  }
 
-      // TODO: is this correct?
-      // After applying credits, if the status is still payment pending
-      // then accept the UPI or cash payment and mark is complete.
-      if (transaction.status == STATUS_PAYMENT_PENDING) {
-        await transaction.update(
-          {
-            status: STATUS_CASH_COMPLETED,
-            description: description,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
-      }
+  // ✅ Update transaction status if pending or cash pending
+  if (
+    transaction.status === STATUS_PAYMENT_PENDING ||
+    transaction.status === STATUS_CASH_PENDING
+  ) {
+    await transaction.update(
+      {
+        status: STATUS_PAYMENT_COMPLETED,
+        description: description,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
 
-      break;
+  break;
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status == STATUS_CONFIRMED) {

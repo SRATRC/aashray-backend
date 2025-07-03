@@ -29,12 +29,12 @@ const bookingTypeMap = {
   [TYPE_FLAT]: TYPE_FLAT,
   [TYPE_ADHYAYAN]: TYPE_ADHYAYAN,
   [TYPE_GUEST_ADHYAYAN]: TYPE_ADHYAYAN,
-  [TYPE_GUEST_BREAKFAST]: TYPE_FOOD,
-  [TYPE_GUEST_LUNCH]: TYPE_FOOD,
-  [TYPE_GUEST_DINNER]: TYPE_FOOD,
+  [TYPE_GUEST_BREAKFAST]: TYPE_GUEST_BREAKFAST || TYPE_FOOD,
+  [TYPE_GUEST_LUNCH]: TYPE_GUEST_LUNCH || TYPE_FOOD,
+  [TYPE_GUEST_DINNER]: TYPE_GUEST_DINNER || TYPE_FOOD,
   [TYPE_TRAVEL]: TYPE_TRAVEL,
   [TYPE_UTSAV]: TYPE_UTSAV,
-  [TYPE_GUEST_UTSAV]: TYPE_UTSAV
+  [TYPE_GUEST_UTSAV]: TYPE_GUEST_UTSAV
 };
 
 export async function getBooking(bookingType, bookingid) {
@@ -87,7 +87,10 @@ export async function getBooking(bookingType, bookingid) {
 export function ifMigrated(transaction) {
   let bookingid = transaction.bookingid;
   let description = transaction.description;
-  if(bookingid.length < 36 || (description && description.includes('came from datachef migration'))) {
+  if (
+    bookingid.length < 36 ||
+    (description && description.includes('came from datachef migration'))
+  ) {
     return true;
   }
   return false;

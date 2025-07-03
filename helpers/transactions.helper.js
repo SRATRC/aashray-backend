@@ -32,7 +32,10 @@ export async function createPendingTransaction(
   t,
   cashAllowed = false
 ) {
-  if (card.country != 'India') cashAllowed = true;
+  if (card.country && card.country != 'India') {
+    cashAllowed = true;
+  }
+
   const transaction = await Transactions.create(
     {
       cardno: card.cardno,

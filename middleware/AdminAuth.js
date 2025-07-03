@@ -26,6 +26,7 @@ export const auth = CatchAsync(async (req, res, next) => {
     where: { user_id: decoded.user.id, status: STATUS_ACTIVE }
   });
   const admin_roles = roles.map((role) => role.dataValues.role_name);
+  
 
   req.user = decoded.user;
   req.roles = admin_roles;
@@ -35,6 +36,8 @@ export const auth = CatchAsync(async (req, res, next) => {
 export const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     const userRoles = req.roles || [];
+     const path = req.originalUrl || req.url; // Add path tracking
+    
     const isAuthorized = roles.some((role) => userRoles.includes(role));
     if (isAuthorized) {
       next();
