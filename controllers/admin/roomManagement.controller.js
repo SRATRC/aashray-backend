@@ -20,12 +20,10 @@ import {
   ERR_CARD_NOT_FOUND,
   MSG_BOOKING_SUCCESSFUL,
   MSG_UPDATE_SUCCESSFUL,
-  ERR_TRANSACTION_NOT_FOUND,
   ERR_ROOM_NOT_FOUND,
   STATUS_ADMIN_CANCELLED,
   TYPE_ROOM,
   TYPE_FLAT,
-  STATUS_CASH_COMPLETED,
   MSG_CANCEL_SUCCESSFUL,
   ERR_FLAT_ALREADY_BOOKED,
   STATUS_CASH_PENDING,
@@ -48,13 +46,14 @@ import {
   findAllRooms,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
-import { adjustAmount } from '../../helpers/transactions.helper.js';
+import { adminCancelTransaction, createPendingTransaction } from '../../helpers/transactions.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import getDates from '../../utils/getDates.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const CHECKOUT_DEADLINE = '11:00:00';
 const LATE_CHECKOUT_HALF = '15:00:00';
@@ -162,30 +161,80 @@ const handleEarlyCheckout = async ({
 
   if (newAmount > originalAmount) {
     throw new ApiError(
-      404,
+      400,
       'New amount is more than previously paid. This does not seem right.'
     );
   }
+  
+  const t = await database.transaction(); 
 
-  if (newAmount < originalAmount) {
-    await adjustAmount(
-      card,
-      booking,
-      transaction,
-      newAmount,
-      transaction.cardno,
-      dbTransaction
-    );
-  }
-
+  // cancel the original booking and create a new booking
   await booking.update(
     {
-      nights,
-      checkout: today,
-      status: ROOM_STATUS_CHECKEDOUT,
+      status: STATUS_ADMIN_CANCELLED,
       updatedBy: user.username
     },
-    { transaction: dbTransaction }
+    { transaction: t }
+  );
+
+  await adminCancelTransaction(
+    user, 
+    card,
+    transaction,
+    t
+  );
+
+  // create a new booking with the new booking dates
+  let bookingId = uuidv4();
+  const newBooking = await RoomBooking.create(
+    {
+      bookingid: bookingId,
+      roomno: booking.roomno,
+      cardno: booking.cardno,
+      bookedBy: booking.bookedBy,
+      checkin: booking.checkin,
+      checkout: today,
+      nights,
+      roomtype: booking.roomtype,
+      gender: booking.gender,
+      updatedBy: user.username,
+      status: ROOM_STATUS_CHECKEDOUT,
+    },
+    { transaction: t }
+  );
+
+  if (!newBooking) {
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+  }
+
+  const newTransaction = await createPendingTransaction(
+    card,
+    newBooking,
+    TYPE_ROOM,
+    newAmount,
+    user.username,
+    t,
+    true
+  );
+
+  if (!newTransaction) {
+    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+  }
+
+  // need to commit the transaction before
+  // the booking status is updated, as this transaction
+  // holds a lock on the booking row
+  await t.commit();
+
+  // new booking's status needs to be set to 'checkedout'
+  // after `createPendingTransaction` is called
+  await newBooking.update(
+    {
+      status: ROOM_STATUS_CHECKEDOUT
+    }, 
+    {
+      transaction: dbTransaction
+    }
   );
 };
 
