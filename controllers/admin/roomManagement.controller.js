@@ -849,7 +849,13 @@ export const unblockRC = async (req, res) => {
   return res.status(200).send({ message: 'Unblocked RC successfully' });
 };
 
+import { Op } from 'sequelize';
+// import moment from 'moment';
+
 export const occupancyReport = async (req, res) => {
+  const today = moment().startOf('day').toDate(); // today's 00:00
+  const tomorrow = moment().add(1, 'day').startOf('day').toDate(); // tomorrow 00:00
+
   const result = await RoomBooking.findAll({
     attributes: [
       'bookingid',
@@ -868,7 +874,9 @@ export const occupancyReport = async (req, res) => {
       }
     ],
     where: {
-      status: ROOM_STATUS_CHECKEDIN
+      status: ROOM_STATUS_CHECKEDIN,
+      checkin: { [Op.lte]: today },
+      checkout: { [Op.gt]: today }
     }
   });
 
@@ -999,7 +1007,7 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
     include: [
       {
         model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        attributes: ['cardno', 'issuedto', 'mobno', 'center', 'credits'],
         required: true
       }
     ],
@@ -1055,7 +1063,6 @@ export const updateBookingStatus = async (req, res) => {
       const cardno = booking.bookedBy || booking.cardno;
       const card = await validateCard(cardno);
 
-      // ✅ Calculate amount based on room type
       const rate = booking.roomtype?.toLowerCase() === 'ac' ? 1100 : 700;
       const baseAmount = rate * booking.nights;
 
@@ -1064,7 +1071,6 @@ export const updateBookingStatus = async (req, res) => {
       let txDescription = description || 'Payment pending for room booking';
       let txStatus = STATUS_PAYMENT_PENDING;
 
-      // ✅ Apply available credits
       let updatedCredits = card.credits || {};
       const currentRoomCredits = parseInt(updatedCredits.room || 0);
 
@@ -1073,26 +1079,22 @@ export const updateBookingStatus = async (req, res) => {
         finalAmount = baseAmount - discount;
         txDescription += ` | Credits used: ₹${discount}`;
 
-        // Deduct used credits
         updatedCredits.room = currentRoomCredits - discount;
 
-        // Update credits in CardDb
         await CardDb.update(
           { credits: updatedCredits },
           { where: { cardno }, transaction: t }
         );
       }
 
-      // ✅ If fully covered by credits
       if (finalAmount === 0) {
-  newStatus = ROOM_STATUS_PENDING_CHECKIN;
-  txStatus = STATUS_PAYMENT_COMPLETED;
-} else {
-  newStatus = STATUS_PAYMENT_PENDING;
-  txStatus = STATUS_CASH_PENDING;
-}
+        newStatus = ROOM_STATUS_PENDING_CHECKIN;
+        txStatus = STATUS_PAYMENT_COMPLETED;
+      } else {
+        newStatus = STATUS_PAYMENT_PENDING;
+        txStatus = STATUS_CASH_PENDING;
+      }
 
-      // ✅ Save amount to booking (so it reflects in UI)
       await booking.update(
         {
           amount: finalAmount,
@@ -1117,6 +1119,39 @@ export const updateBookingStatus = async (req, res) => {
       break;
     }
 
+    case ROOM_STATUS_PENDING_CHECKIN: {
+      if (originalStatus !== STATUS_PAYMENT_PENDING) {
+        throw new ApiError(400, 'Can only mark pending checkin from payment pending');
+      }
+
+      const tx = await Transactions.findOne({
+        where: { bookingid },
+        order: [['createdAt', 'DESC']],
+        transaction: t
+      });
+
+      if (!tx) {
+        throw new ApiError(400, ERR_TRANSACTION_NOT_FOUND);
+      }
+
+      await tx.update({
+  status: STATUS_PAYMENT_COMPLETED,
+  updatedBy: req.user.username,
+  description: description || tx.description
+}, { transaction: t });
+
+      newStatus = ROOM_STATUS_PENDING_CHECKIN;
+      await booking.update(
+        {
+          status: newStatus,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      break;
+    }
+
     case STATUS_ADMIN_CANCELLED: {
       if (![STATUS_WAITING, STATUS_PAYMENT_PENDING].includes(originalStatus)) {
         throw new ApiError(400, 'Admin Cancelled allowed only from waiting or pending');
@@ -1124,14 +1159,16 @@ export const updateBookingStatus = async (req, res) => {
 
       const tx = await Transactions.findOne({
         where: { bookingid },
+        order: [['createdAt', 'DESC']],
         transaction: t
       });
 
-      if (
-        tx &&
-        ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(tx.status)
-      ) {
-        await adminCancelTransaction(req.user, null, tx, t);
+      if (tx && ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_PAYMENT_COMPLETED].includes(tx.status)) {
+      await tx.update({
+  status: STATUS_ADMIN_CANCELLED,
+  updatedBy: req.user.username,
+  description: description || tx.description
+}, { transaction: t });
       }
 
       newStatus = STATUS_ADMIN_CANCELLED;
