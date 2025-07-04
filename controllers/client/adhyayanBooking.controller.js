@@ -130,7 +130,7 @@ export const CancelShibir = async (req, res) => {
   });
 
   if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
-    await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
+    await openAdhyayanSeat(adhyayan, req.user.username, t);
   }
 
   await userCancelBooking(req.user, booking, t);

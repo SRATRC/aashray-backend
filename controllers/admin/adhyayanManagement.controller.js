@@ -522,7 +522,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
         booking.status == STATUS_CONFIRMED ||
         booking.status == STATUS_PAYMENT_PENDING
       ) {
-        await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
+        await openAdhyayanSeat(adhyayan, req.user.username, t);
       }
 
       if (transaction) {
