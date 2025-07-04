@@ -35,12 +35,12 @@ import UtsavDb from './models/utsav_db.model.js';
 import { validateCard } from './helpers/card.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 
-const MAX_APP_PAYMENT_DURATION = 1; // 24 hrs
+const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
 
 // Schedule the cron job to run every 10 minutes
-const job = cron.schedule('*/1 * * * *', async () => {
+const job = cron.schedule('*/30 * * * *', async () => {
   logger.info('Cron job started.');
   isRunning = true;
 
