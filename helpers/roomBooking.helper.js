@@ -23,16 +23,13 @@ import {
   FlatDb
 } from '../models/associations.js';
 import { createPendingTransaction } from './transactions.helper.js';
-import {
-  calculateNights,
-  validateDate,
-  validateBookingDatesBetweenUtsav
-} from '../controllers/helper.js';
+import { calculateNights, validateDate } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
+import logger from '../config/logger.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
