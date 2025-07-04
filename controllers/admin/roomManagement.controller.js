@@ -22,6 +22,7 @@ import {
   MSG_UPDATE_SUCCESSFUL,
   ERR_ROOM_NOT_FOUND,
   STATUS_ADMIN_CANCELLED,
+  STATUS_WAITING,
   TYPE_ROOM,
   TYPE_FLAT,
   MSG_CANCEL_SUCCESSFUL,
@@ -29,7 +30,9 @@ import {
   STATUS_CASH_PENDING,
   STATUS_PAYMENT_PENDING,
   NAC_ROOM_PRICE,
-  AC_ROOM_PRICE
+  AC_ROOM_PRICE,
+  STATUS_CREDITED,
+  STATUS_PAYMENT_COMPLETED
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -1022,3 +1025,135 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
 
   return data;
 }
+
+export const updateBookingStatus = async (req, res) => {
+  const { bookingid, status, description } = req.body;
+
+  const booking = await RoomBooking.findOne({ where: { bookingid } });
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const originalStatus = booking.status;
+  let newStatus = originalStatus;
+
+  if (!status || status === originalStatus) {
+    throw new ApiError(400, 'Status is same as before or missing');
+  }
+
+  if (originalStatus === STATUS_ADMIN_CANCELLED) {
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+
+  switch (status) {
+    case STATUS_PAYMENT_PENDING: {
+      if (originalStatus !== STATUS_WAITING) {
+        throw new ApiError(400, 'Pending can only be set from waiting status');
+      }
+
+      const cardno = booking.bookedBy || booking.cardno;
+      const card = await validateCard(cardno);
+
+      // ✅ Calculate amount based on room type
+      const rate = booking.roomtype?.toLowerCase() === 'ac' ? 1100 : 700;
+      const baseAmount = rate * booking.nights;
+
+      let discount = 0;
+      let finalAmount = baseAmount;
+      let txDescription = description || 'Payment pending for room booking';
+      let txStatus = STATUS_PAYMENT_PENDING;
+
+      // ✅ Apply available credits
+      let updatedCredits = card.credits || {};
+      const currentRoomCredits = parseInt(updatedCredits.room || 0);
+
+      if (currentRoomCredits > 0) {
+        discount = Math.min(currentRoomCredits, baseAmount);
+        finalAmount = baseAmount - discount;
+        txDescription += ` | Credits used: ₹${discount}`;
+
+        // Deduct used credits
+        updatedCredits.room = currentRoomCredits - discount;
+
+        // Update credits in CardDb
+        await CardDb.update(
+          { credits: updatedCredits },
+          { where: { cardno }, transaction: t }
+        );
+      }
+
+      // ✅ If fully covered by credits
+      if (finalAmount === 0) {
+  newStatus = ROOM_STATUS_PENDING_CHECKIN;
+  txStatus = STATUS_PAYMENT_COMPLETED;
+} else {
+  newStatus = STATUS_PAYMENT_PENDING;
+  txStatus = STATUS_CASH_PENDING;
+}
+
+      // ✅ Save amount to booking (so it reflects in UI)
+      await booking.update(
+        {
+          amount: finalAmount,
+          status: newStatus,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      await Transactions.create({
+        bookingid,
+        cardno,
+        category: TYPE_ROOM,
+        amount: finalAmount,
+        discount,
+        razorpay_order_id: null,
+        description: txDescription,
+        status: txStatus,
+        updatedBy: req.user.username
+      }, { transaction: t });
+
+      break;
+    }
+
+    case STATUS_ADMIN_CANCELLED: {
+      if (![STATUS_WAITING, STATUS_PAYMENT_PENDING].includes(originalStatus)) {
+        throw new ApiError(400, 'Admin Cancelled allowed only from waiting or pending');
+      }
+
+      const tx = await Transactions.findOne({
+        where: { bookingid },
+        transaction: t
+      });
+
+      if (
+        tx &&
+        ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(tx.status)
+      ) {
+        await adminCancelTransaction(req.user, null, tx, t);
+      }
+
+      newStatus = STATUS_ADMIN_CANCELLED;
+
+      await booking.update(
+        {
+          status: newStatus,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      break;
+    }
+
+    case STATUS_WAITING:
+      throw new ApiError(400, 'Cannot revert back to waiting');
+
+    default:
+      throw new ApiError(400, 'Invalid status provided');
+  }
+
+  await t.commit();
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+};
