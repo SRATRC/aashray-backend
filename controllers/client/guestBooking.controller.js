@@ -733,6 +733,7 @@ export const guestBookingFlat = async (req, res) => {
       nights,
       flatDb.dataValues.flatno,
       req.user,
+      req.user.cardno,
       t
     );
     amount += result.discountedAmount;
