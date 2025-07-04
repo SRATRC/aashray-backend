@@ -9,10 +9,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   ERR_BOOKING_ALREADY_CANCELLED
 } from '../../config/constants.js';
-import {
-  openAdhyayanSeat,
-  validateAdhyayans
-} from '../../helpers/adhyayanBooking.helper.js';
+import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
@@ -103,55 +100,6 @@ export const FetchBookedShibir = async (req, res) => {
 
   return res.status(200).send({ data: shibirs });
 };
-
-// export const CancelShibir = async (req, res) => {
-//   const { shibir_id, bookedBy } = req.body;
-
-//   const adhyayan = (await validateAdhyayans(shibir_id))[0];
-
-//   const t = await database.transaction();
-//   req.transaction = t;
-
-//   const booking = await ShibirBookingDb.findOne({
-//     where: {
-//       shibir_id: shibir_id,
-//       cardno: req.user.cardno,
-//       bookedBy: bookedBy ? bookedBy : null
-//     }
-//   });
-
-//   if (!booking) {
-//     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
-//   }
-
-//   if (
-//     booking.status == STATUS_CANCELLED ||
-//     booking.status == STATUS_ADMIN_CANCELLED
-//   )
-//     throw new ApiError(400, 'Booking already cancelled');
-
-//   if (
-//     booking.status == STATUS_CONFIRMED ||
-//     booking.status == STATUS_PAYMENT_PENDING
-//   ) {
-//     await openAdhyayanSeat(adhyayan, booking.cardno, req.user.username, t);
-//   }
-
-//   await userCancelBooking(req.user, booking, t);
-//   await t.commit();
-
-//   sendMail({
-//     email: req.user.email,
-//     subject: 'Your Raj Adhyayan Booking has been cancelled',
-//     template: 'rajAdhyayanCancellation',
-//     context: {
-//       name: req.user.issuedto,
-//       adhyayanName: adhyayan.dataValues.name
-//     }
-//   });
-
-//   return res.status(200).send({ message: 'Shibir booking cancelled' });
-// };
 
 export const CancelShibir = async (req, res) => {
   const { bookingid } = req.body;
@@ -248,4 +196,18 @@ export const FetchShibirInRange = async (req, res) => {
   });
 
   return res.status(200).send({ data: shibirs });
+};
+
+export const FetchShibirById = async (req, res) => {
+  const { id } = req.params;
+
+  const shibir = await ShibirDb.findOne({
+    where: {
+      id: id
+    }
+  });
+
+  if (!shibir) throw new ApiError(404, 'Shibir not found');
+
+  return res.status(200).send({ data: shibir });
 };

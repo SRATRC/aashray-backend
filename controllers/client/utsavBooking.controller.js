@@ -2,7 +2,11 @@ import {
   ERR_BOOKING_NOT_FOUND,
   MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
-import { UtsavBooking } from '../../models/associations.js';
+import {
+  UtsavBooking,
+  UtsavDb,
+  UtsavPackagesDb
+} from '../../models/associations.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import moment from 'moment';
 import database from '../../config/database.js';
@@ -142,4 +146,26 @@ export const CancelUtsavBooking = async (req, res) => {
 
   await t.commit();
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
+};
+
+export const FetchUtsavById = async (req, res) => {
+  const { id } = req.params;
+
+  const utsav = await UtsavDb.findOne({
+    include: [
+      {
+        model: UtsavPackagesDb,
+        where: {
+          utsavid: id
+        }
+      }
+    ],
+    where: {
+      id: id
+    }
+  });
+
+  if (!utsav) throw new ApiError(404, 'Utsav not found');
+
+  return res.status(200).send({ data: utsav });
 };
