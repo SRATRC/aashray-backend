@@ -52,13 +52,13 @@ import {
   setBookingIdMap,
   retrieveBookingIds,
   setWaitingBookingCountMap,
-  sendUnifiedEmailForBookedBy,
-  validateBookingDatesBetweenUtsav
+  sendUnifiedEmailForBookedBy
 } from '../helper.js';
+import { UtsavDb } from '../../models/associations.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import { UtsavDb } from '../../models/associations.js';
+import Sequelize from 'sequelize';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -149,6 +149,27 @@ export const validateBooking = async (req, res) => {
     utsav = await UtsavDb.findOne({
       where: {
         id: primary_booking.details.utsavid
+      }
+    });
+  } else {
+    utsav = await UtsavDb.findOne({
+      where: {
+        [Sequelize.Op.or]: [
+          {
+            start_date: {
+              [Sequelize.Op.lte]:
+                primary_booking.details.checkin_date ||
+                primary_booking.details.date
+            }
+          },
+          {
+            end_date: {
+              [Sequelize.Op.gte]:
+                primary_booking.details.checkout_date ||
+                primary_booking.details.date
+            }
+          }
+        ]
       }
     });
   }
@@ -410,7 +431,6 @@ async function checkRoomAvailability(user, data, utsav) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
   validateDate(checkin_date, checkout_date);
-  validateBookingDatesBetweenUtsav(checkin_date, checkout_date, utsav);
 
   const gender = floor_pref ? floor_pref + user.gender : user.gender;
 
@@ -467,7 +487,6 @@ async function checkFoodAvailability(user, body, data, utsav) {
   }
 
   validateDate(start_date, end_date);
-  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
   await validateFood(
     start_date,
     end_date,

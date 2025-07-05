@@ -549,6 +549,7 @@ export const flatBooking = async (req, res) => {
     nights,
     req.body.flat_no,
     card,
+    req.user.username,
     t,
     true
   );

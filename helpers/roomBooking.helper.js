@@ -23,16 +23,13 @@ import {
   FlatDb
 } from '../models/associations.js';
 import { createPendingTransaction } from './transactions.helper.js';
-import {
-  calculateNights,
-  validateDate,
-  validateBookingDatesBetweenUtsav
-} from '../controllers/helper.js';
+import { calculateNights, validateDate } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
+import logger from '../config/logger.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -343,7 +340,8 @@ export async function createFlatBooking(
   checkout,
   nights,
   flatno,
-  user,
+  bookedBy,
+  updatedBy,
   t,
   cashAllowed = false
 ) {
@@ -367,7 +365,8 @@ export async function createFlatBooking(
       checkin,
       checkout,
       nights,
-      updatedBy: user.cardno,
+      updatedBy,
+      bookedBy: bookedBy.cardno == cardno ? null : bookedBy.cardno,
       status
     },
     { transaction: t }
@@ -383,11 +382,11 @@ export async function createFlatBooking(
     let amount = roomCharge('nac') * nights;
 
     const result = await createPendingTransaction(
-      user,
+      bookedBy,
       booking,
       TYPE_FLAT,
       amount,
-      user.cardno,
+      updatedBy,
       t,
       cashAllowed
     );
