@@ -43,8 +43,7 @@ import {
   sendUnifiedEmail,
   sendUnifiedEmailForBookedBy,
   checkFlatAlreadyBooked,
-  setWaitingBookingCountMap,
-  validateBookingDatesBetweenUtsav
+  setWaitingBookingCountMap
 } from '../helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -339,7 +338,6 @@ async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
 
   validateDate(checkin_date, checkout_date);
-  validateBookingDatesBetweenUtsav(checkin_date, checkout_date, utsav);
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
@@ -487,7 +485,6 @@ async function checkFoodAvailability(data, user, utsav) {
   }
 
   validateDate(start_date, end_date);
-  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
 
   let allDates = [];
   if (utsav) {
@@ -733,6 +730,7 @@ export const guestBookingFlat = async (req, res) => {
       nights,
       flatDb.dataValues.flatno,
       req.user,
+      req.user.cardno,
       t
     );
     amount += result.discountedAmount;

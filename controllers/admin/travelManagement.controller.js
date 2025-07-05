@@ -20,7 +20,8 @@ import {
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_SEATSFULL_CANCELLED,
   STATUS_WRONGFORM_CANCELLED,
-  RAJ_PRAVAS_EMAIL
+  RAJ_PRAVAS_EMAIL,
+  STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
