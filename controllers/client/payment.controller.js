@@ -199,8 +199,8 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   const { data } = req.body;
   const t = await database.transaction();
 
-  const bookingCategoryMap = data.reduce((map, item) => {
-    map[item.bookingid] = item.category;
+  const bookingCategoryMap = data.reduce((map, { bookingid, category }) => {
+    (map[bookingid] ??= []).push(category);
     return map;
   }, {});
 
@@ -217,8 +217,8 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   });
 
   const totalAmount = transactions.reduce((sum, transaction) => {
-    const category = bookingCategoryMap[transaction.bookingid];
-    if (category === getBookingType(transaction)) {
+    const categories = bookingCategoryMap[transaction.bookingid];
+    if (categories.includes(getBookingType(transaction))) {
       return sum + transaction.amount;
     }
     return sum;
@@ -227,7 +227,9 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
     const validBookingIds = transactions
-      .filter((t) => bookingCategoryMap[t.bookingid] === getBookingType(t))
+      .filter((t) =>
+        bookingCategoryMap[t.bookingid].includes(getBookingType(t))
+      )
       .map((t) => t.bookingid);
 
     await updateRazorpayTransactions(validBookingIds, [], order.id, t);
