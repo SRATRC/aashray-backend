@@ -1,17 +1,14 @@
 import {
-  STATUS_PAYMENT_COMPLETED,
-  STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
   STATUS_CREDITED,
   STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
-
-import Sequelize, { QueryTypes } from 'sequelize';
+import { Op } from 'sequelize';
+import { QueryTypes } from 'sequelize';
 import database from '../../config/database.js';
 import XLSX from 'xlsx';
 import RazorpaySettlement from '../../models/razorpay_settlement.model.js'; // adjust path if needed
 import RazorpaySettlementRecon from '../../models/razorpay_settlement_recon.model.js'; // adjust path if needed
-import Transactions from '../../models/transactions.model.js'; // adjust path if needed
 
 export const fetchCompletedTransactions = async (req, res) => {
   const { startDate, endDate, category, adhyayanId, utsavId } = req.query;
@@ -214,7 +211,6 @@ export const fetchPendingTransactions = async (req, res) => {
   });
 };
 
-
 export const fetchAllCreditTransactions = async (req, res) => {
   const { startDate, endDate } = req.query;
 
@@ -311,7 +307,10 @@ import moment from 'moment';
 export const uploadRazorpaySettlementExcel = async (req, res) => {
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+    const sheet = XLSX.utils.sheet_to_json(
+      workbook.Sheets[workbook.SheetNames[0]],
+      { defval: '' }
+    );
 
     const formattedRows = [];
 
@@ -326,7 +325,9 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
       const parsedDate = moment(rawDate, 'DD/MM/YYYY HH:mm:ss', true);
 
       if (!parsedDate.isValid()) {
-        console.warn(`Invalid date format in row with ID ${row.id}: ${rawDate}`);
+        console.warn(
+          `Invalid date format in row with ID ${row.id}: ${rawDate}`
+        );
         continue;
       }
 
@@ -342,10 +343,12 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
     }
 
     if (formattedRows.length === 0) {
-      return res.status(400).json({ error: 'No valid rows found with correct date format.' });
+      return res
+        .status(400)
+        .json({ error: 'No valid rows found with correct date format.' });
     }
 
-    const incomingIds = formattedRows.map(row => row.id);
+    const incomingIds = formattedRows.map((row) => row.id);
 
     const existingRecords = await RazorpaySettlement.findAll({
       where: { id: incomingIds },
@@ -353,31 +356,40 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
       raw: true
     });
 
-    const existingIds = new Set(existingRecords.map(r => r.id));
+    const existingIds = new Set(existingRecords.map((r) => r.id));
 
-    const uniqueRows = formattedRows.filter(row => !existingIds.has(row.id));
+    const uniqueRows = formattedRows.filter((row) => !existingIds.has(row.id));
 
     if (uniqueRows.length === 0) {
-      return res.status(200).json({ message: 'No new rows to insert. All IDs were duplicates.' });
+      return res
+        .status(200)
+        .json({ message: 'No new rows to insert. All IDs were duplicates.' });
     }
 
     await RazorpaySettlement.bulkCreate(uniqueRows);
 
     res.status(200).json({
-      message: `${uniqueRows.length} new record(s) inserted. ${formattedRows.length - uniqueRows.length} duplicate(s) ignored.`
+      message: `${uniqueRows.length} new record(s) inserted. ${
+        formattedRows.length - uniqueRows.length
+      } duplicate(s) ignored.`
     });
   } catch (err) {
     console.error('Error processing Excel upload:', err);
-    res.status(500).json({ error: 'Failed to process and store Excel data: ' + err.message });
+    res
+      .status(500)
+      .json({
+        error: 'Failed to process and store Excel data: ' + err.message
+      });
   }
 };
-
 
 function safeParseFloat(val) {
   if (val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
   // Remove commas, currency symbols etc.
-  let cleaned = String(val).replace(/[^0-9.-]/g, '').trim();
+  let cleaned = String(val)
+    .replace(/[^0-9.-]/g, '')
+    .trim();
   let num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
 }
@@ -385,11 +397,16 @@ function safeParseFloat(val) {
 export const updateSettlementFieldsFromExcel = async (req, res) => {
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+    const sheet = XLSX.utils.sheet_to_json(
+      workbook.Sheets[workbook.SheetNames[0]],
+      { defval: '' }
+    );
 
     const safeParseFloat = (val) => {
       if (val == null || val === '') return 0;
-      const cleaned = String(val).replace(/[^0-9.-]/g, '').trim();
+      const cleaned = String(val)
+        .replace(/[^0-9.-]/g, '')
+        .trim();
       const num = parseFloat(cleaned);
       return isNaN(num) ? 0 : num;
     };
@@ -407,7 +424,11 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
       }
 
       const settledAtRaw = row['settled_at'];
-      const settledAt = moment(settledAtRaw, ['DD/MM/YYYY HH:mm:ss', moment.ISO_8601], true);
+      const settledAt = moment(
+        settledAtRaw,
+        ['DD/MM/YYYY HH:mm:ss', moment.ISO_8601],
+        true
+      );
 
       if (!settledAt.isValid()) {
         console.warn(`Invalid date in row with order_id ${orderId}, skipping.`);
@@ -437,13 +458,13 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating settlements from Excel:', err);
-    res.status(500).json({ error: 'Failed to process and update Excel data: ' + err.message });
+    res
+      .status(500)
+      .json({
+        error: 'Failed to process and update Excel data: ' + err.message
+      });
   }
 };
-
-
-
-import { Op } from 'sequelize';
 
 export const fetchAllSettlements = async (req, res) => {
   try {
@@ -452,7 +473,7 @@ export const fetchAllSettlements = async (req, res) => {
     const whereClause = {};
     if (startDate && endDate) {
       whereClause.cerated_at = {
-        [Op.between]: [new Date(startDate), new Date(endDate)],
+        [Op.between]: [new Date(startDate), new Date(endDate)]
       };
     }
 
@@ -460,21 +481,21 @@ export const fetchAllSettlements = async (req, res) => {
     const settlements = await RazorpaySettlement.findAll({
       where: whereClause,
       order: [['cerated_at', 'DESC']],
-      raw: true,
+      raw: true
     });
 
     if (!settlements.length) {
       return res.status(200).json([]);
     }
 
-    const settlementIds = settlements.map(s => s.id);
+    const settlementIds = settlements.map((s) => s.id);
 
     // Step 2: Fetch total fees & tax from recon table grouped by settlement_id
     const reconTotals = await RazorpaySettlementRecon.findAll({
       attributes: [
         'settlement_id',
         [fn('SUM', col('fees')), 'totalFees'],
-        [fn('SUM', col('tax')), 'totalTax'],
+        [fn('SUM', col('tax')), 'totalTax']
       ],
       where: {
         settlement_id: { [Op.in]: settlementIds }
@@ -484,7 +505,7 @@ export const fetchAllSettlements = async (req, res) => {
     });
 
     const reconMap = {};
-    reconTotals.forEach(r => {
+    reconTotals.forEach((r) => {
       reconMap[r.settlement_id] = {
         totalFees: parseFloat(r.totalFees) || 0,
         totalTax: parseFloat(r.totalTax) || 0
@@ -492,7 +513,7 @@ export const fetchAllSettlements = async (req, res) => {
     });
 
     // Step 3: Merge recon data into settlements
-    const enrichedSettlements = settlements.map(s => ({
+    const enrichedSettlements = settlements.map((s) => ({
       ...s,
       fees: reconMap[s.id]?.totalFees || 0,
       tax: reconMap[s.id]?.totalTax || 0
@@ -504,7 +525,6 @@ export const fetchAllSettlements = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch settlements' });
   }
 };
-
 
 import { fn, col } from 'sequelize';
 
@@ -561,7 +581,6 @@ export const fetchTransactionsBySettlementId = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
-
 
 export const fetchTransactionsByPaymentId = async (req, res) => {
   const { razorpay_order_id } = req.params;
@@ -654,7 +673,6 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
   }
 };
 
-
 export const fetchCredits = async (req, res) => {
   try {
     const cardholders = await database.query(
@@ -709,8 +727,6 @@ export const fetchCredits = async (req, res) => {
     });
   }
 };
-
-
 
 export const fetchCreditTransactions = async (req, res) => {
   try {
