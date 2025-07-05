@@ -30,12 +30,18 @@ export const verifyPayment = async (req, res) => {
   const razorpay_payment_id = req.body.payload.payment.entity.id;
   const razorpay_status = req.body.payload.payment.entity.status;
 
-  await RazorpayWebhook.create({
-    order_id: razorpay_order_id,
-    payment_id: razorpay_payment_id,
-    status: razorpay_status,
-    json: req.body
-  });
+  const t = await database.transaction();
+  req.transaction = t;
+
+  await RazorpayWebhook.create(
+    {
+      order_id: razorpay_order_id,
+      payment_id: razorpay_payment_id,
+      status: razorpay_status,
+      json: req.body
+    }, 
+   { transaction: t }
+  );
 
   var message;
 
@@ -51,6 +57,8 @@ export const verifyPayment = async (req, res) => {
     );
 
     message = `Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`;
+    await t.commit();
+
     return res.status(200).json({ message, status: 'ok' });
   }
 
@@ -73,9 +81,6 @@ export const verifyPayment = async (req, res) => {
   if (transactions && transactions.length > 0) {
     const bookedBy = await validateCard(transactions[0].cardno);
     const updatedBy = RAZORPAY_CALLBACK;
-
-    const t = await database.transaction();
-    req.transaction = t;
 
     const userBookingIdMap = {};
 
