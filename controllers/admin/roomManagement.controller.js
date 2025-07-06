@@ -685,12 +685,7 @@ export const availableRooms = async (req, res) => {
 
   const today = moment().format('YYYY-MM-DD');
 
-  const rooms = await findAllRooms(
-    today,
-    booking.checkout,
-    booking.roomtype,
-    booking.gender
-  );
+  const rooms = await findAllRoomsUnfiltered(booking.roomtype, booking.gender);
 
   return res
     .status(200)
@@ -1249,3 +1244,24 @@ export const guestsByDateAndRoomtype = async (req, res) => {
 
   return res.status(200).send({ message: 'Fetched guests for the day', data: guests });
 };
+
+
+export async function findAllRoomsUnfiltered(room_type, gender) {
+  return RoomDb.findAll({
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%'
+      },
+      roomstatus: ROOM_STATUS_AVAILABLE,
+      roomtype: room_type,
+      ...(gender && { gender })
+    },
+    order: [
+      Sequelize.literal(
+        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
+      ),
+      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
+    ]
+  });
+}
