@@ -29,6 +29,7 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 
+
 export const createUtsav = async (req, res) => {
   const { name, start_date, end_date, total_seats, location } = req.body;
 
@@ -621,7 +622,7 @@ export const utsavCheckin = async (req, res) => {
     });
   } catch (error) {
     await t.rollback();
-    logger.error(error);
+    // logger.error(error);
     return res.status(500).send({ message: 'Internal server error' });
   }
 };
