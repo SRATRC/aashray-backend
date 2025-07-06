@@ -1,4 +1,4 @@
-import { UtsavDb, UtsavPackagesDb } from '../../models/associations.js';
+import { UtsavDb, UtsavPackagesDb, UtsavBooking, CardDb } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
   validateUtsavBooking,
@@ -589,40 +589,42 @@ export const utsavCheckin = async (req, res) => {
   const { cardno } = req.body;
 
   try {
-    const UtsavBooking = await UtsavBooking.findOne({
+    const booking = await UtsavBooking.findOne({
       where: { cardno },
-      transaction: t
+      transaction: t,
     });
 
-    if (!UtsavBooking) {
+    if (!booking) {
       await t.rollback();
       return res.status(404).send({ message: 'Booking not found.' });
     }
 
-    if (UtsavBooking.status === ROOM_STATUS_CHECKEDIN) {
+    if (booking.status === ROOM_STATUS_CHECKEDIN) {
       await t.rollback();
       return res.status(200).send({ message: 'Already checked in.' });
     }
 
-    if (UtsavBooking.status !== STATUS_CONFIRMED) {
+    if (booking.status !== STATUS_CONFIRMED) {
       await t.rollback();
       return res.status(400).send({ message: 'Booking is not in confirmed state.' });
     }
 
-    await UtsavBooking.update(
-      { status: ROOM_STATUS_CHECKEDIN },
-      { transaction: t }
-    );
+    // Run both update and card fetch in parallel
+    const [_, card] = await Promise.all([
+      booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t }),
+      CardDb.findOne({ where: { cardno } })
+    ]);
 
     await t.commit();
     return res.status(200).send({
       message: 'Utsav booking status updated to checkedin.',
-      cardno: UtsavBooking.cardno,
-      // issuedto: UtsavBooking.issuedto
+      cardno: booking.cardno,
+      issuedto: card?.issuedto || null
     });
+
   } catch (error) {
     await t.rollback();
-    // logger.error(error);
+    console.error('utsavCheckin error:', error);
     return res.status(500).send({ message: 'Internal server error' });
   }
 };

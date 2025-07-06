@@ -39,6 +39,6 @@ router.get('/fetchpackage/:id', CatchAsync(fetchPackage));
 router.put('/:id/:activate', CatchAsync(activateUtsav));
 router.put('/status', CatchAsync(utsavStatusUpdate));
 router.get('/fetchList', CatchAsync(fetchAllUtsavList));
-router.put('/utsavCheckin', CatchAsync(utsavCheckin));
+router.post('/utsavCheckin', CatchAsync(utsavCheckin));
 
 export default router;
