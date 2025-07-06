@@ -172,7 +172,7 @@ export async function reserveAdhyayanSeat(adhyayan, t) {
   );
 }
 
-export async function openAdhyayanSeat(adhyayan, cardno, updatedBy, t) {
+export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
   const booking = await ShibirBookingDb.findOne({
     where: {
       shibir_id: adhyayan.id,

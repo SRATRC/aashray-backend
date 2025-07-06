@@ -685,12 +685,7 @@ export const availableRooms = async (req, res) => {
 
   const today = moment().format('YYYY-MM-DD');
 
-  const rooms = await findAllRooms(
-    today,
-    booking.checkout,
-    booking.roomtype,
-    booking.gender
-  );
+  const rooms = await findAllRoomsUnfiltered(booking.roomtype, booking.gender);
 
   return res
     .status(200)
@@ -698,13 +693,14 @@ export const availableRooms = async (req, res) => {
 };
 
 export const availableRoomsForDay = async (req, res) => {
-  const { date, roomtype } = req.query;
+  const { date, roomtype, gender } = req.query;
 
-  const rooms = await findAllRooms(date, date, roomtype);
+  const rooms = await findAllRoomsForDay(date, roomtype, gender);
 
-  return res
-    .status(200)
-    .send({ message: 'Fetched available rooms', data: rooms });
+  return res.status(200).send({
+    message: 'Fetched available rooms',
+    data: rooms
+  });
 };
 
 export const blockRoom = async (req, res) => {
@@ -940,67 +936,52 @@ export const dayWiseGuestCountReport = async (req, res) => {
   const { start_date, end_date } = req.query;
   const allDates = getDates(start_date, end_date);
 
-  const allRooms = await database.query(
-    `SELECT
-      SUM(CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END) as nac,
-      SUM(CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END) as ac
-    FROM
-      roomdb
-    WHERE roomstatus <> 'blocked'
-      AND roomtype <> 'NA'
-    `,
-    {
-      type: Sequelize.QueryTypes.SELECT
-    }
-  );
+  const data = [];
 
-  var data = [];
   for (let date of allDates) {
-    const report = (
-      await RoomBooking.findAll({
-        attributes: [
-          [
-            Sequelize.fn(
-              'SUM',
-              Sequelize.literal(`CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END`)
-            ),
-            'nac'
-          ],
-          [
-            Sequelize.fn(
-              'SUM',
-              Sequelize.literal(`CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END`)
-            ),
-            'ac'
-          ]
+    // Get total confirmed bookings for this date
+    const report = await RoomBooking.findOne({
+      attributes: [
+        [
+          Sequelize.fn(
+            'SUM',
+            Sequelize.literal(`CASE WHEN roomtype = 'nac' THEN 1 ELSE 0 END`)
+          ),
+          'nac'
         ],
-        where: {
-          checkin: { [Sequelize.Op.lte]: date },
-          checkout: { [Sequelize.Op.gt]: date },
-          status: [
-            ROOM_STATUS_PENDING_CHECKIN,
-            ROOM_STATUS_CHECKEDIN,
-            ROOM_STATUS_CHECKEDOUT
-          ]
-        },
-        group: 'checkin'
-      })
-    )[0];
+        [
+          Sequelize.fn(
+            'SUM',
+            Sequelize.literal(`CASE WHEN roomtype = 'ac' THEN 1 ELSE 0 END`)
+          ),
+          'ac'
+        ]
+      ],
+      where: {
+        checkin: { [Sequelize.Op.lte]: date },
+        checkout: { [Sequelize.Op.gt]: date },
+        status: [
+          ROOM_STATUS_PENDING_CHECKIN,
+          ROOM_STATUS_CHECKEDIN,
+          STATUS_PAYMENT_PENDING
+        ]
+      },
+      raw: true
+    });
 
-    if (report) {
-      data.push({
-        date: date,
-        ac: report.dataValues.ac,
-        nac: report.dataValues.nac,
-        ac_available: allRooms[0].ac - report.dataValues.ac,
-        nac_available: allRooms[0].nac - report.dataValues.nac
-      });
-    }
+    const acRooms = await findAllRoomsForDay(date, 'ac');
+    const nacRooms = await findAllRoomsForDay(date, 'nac');
+
+    data.push({
+      date: date,
+      ac: parseInt(report.ac) || 0,
+      nac: parseInt(report.nac) || 0,
+      ac_available: acRooms.length,
+      nac_available: nacRooms.length
+    });
   }
 
-  return res
-    .status(200)
-    .send({ message: 'Fetched daywise report', data: data });
+  return res.status(200).send({ message: 'Fetched daywise report', data });
 };
 
 async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
@@ -1195,3 +1176,92 @@ export const updateBookingStatus = async (req, res) => {
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
+
+
+export async function findAllRoomsForDay(date, room_type, gender) {
+  // Step 1: Determine which roomnos are booked (pending checkin or checkedin)
+  const bookings = await RoomBooking.findAll({
+    attributes: ['roomno'],
+    where: {
+      [Sequelize.Op.and]: [
+        { checkin: { [Sequelize.Op.lte]: date } },
+        { checkout: { [Sequelize.Op.gt]: date } }  // i.e., date ∈ [checkin, checkout)
+      ],
+      status: {
+        [Sequelize.Op.in]: [
+          ROOM_STATUS_PENDING_CHECKIN,
+          ROOM_STATUS_CHECKEDIN,
+          STATUS_PAYMENT_PENDING
+        ]
+      }
+    }
+  });
+
+  const bookedRoomNos = bookings.map(b => b.roomno);
+
+  // Step 2: Get available rooms from roomdb excluding booked ones
+  return RoomDb.findAll({
+    where: {
+      roomtype: room_type,
+      roomstatus: ROOM_STATUS_AVAILABLE,
+      roomno: {
+        [Sequelize.Op.notIn]: bookedRoomNos
+      },
+      ...(gender && { gender })
+    },
+    order: [
+      Sequelize.literal(
+        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
+      ),
+      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
+    ]
+  });
+}
+
+
+export const guestsByDateAndRoomtype = async (req, res) => {
+  const { date, roomtype } = req.query;
+
+  const guests = await RoomBooking.findAll({
+    where: {
+      roomtype,
+      checkin: { [Sequelize.Op.lte]: date },
+      checkout: { [Sequelize.Op.gt]: date },
+      status: [
+        ROOM_STATUS_PENDING_CHECKIN,
+        ROOM_STATUS_CHECKEDIN,
+        STATUS_PAYMENT_PENDING
+      ]
+    },
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'center']
+      }
+    ],
+    order: [['roomno', 'ASC']]
+  });
+
+  return res.status(200).send({ message: 'Fetched guests for the day', data: guests });
+};
+
+
+export async function findAllRoomsUnfiltered(room_type, gender) {
+  return RoomDb.findAll({
+    where: {
+      roomno: {
+        [Sequelize.Op.notLike]: 'NA%',
+        [Sequelize.Op.notLike]: 'WL%'
+      },
+      roomstatus: ROOM_STATUS_AVAILABLE,
+      roomtype: room_type,
+      ...(gender && { gender })
+    },
+    order: [
+      Sequelize.literal(
+        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
+      ),
+      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
+    ]
+  });
+}

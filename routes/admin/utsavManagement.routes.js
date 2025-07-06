@@ -14,6 +14,8 @@ import {
   fetchAllPackages,
   fetchPackage,
   fetchAllUtsavList,
+  utsavCheckin,
+  utsavCheckinReport
 } from '../../controllers/admin/utsavManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -38,5 +40,7 @@ router.get('/fetchpackage/:id', CatchAsync(fetchPackage));
 router.put('/:id/:activate', CatchAsync(activateUtsav));
 router.put('/status', CatchAsync(utsavStatusUpdate));
 router.get('/fetchList', CatchAsync(fetchAllUtsavList));
+router.post('/utsavCheckin', CatchAsync(utsavCheckin));
+router.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
 
 export default router;
