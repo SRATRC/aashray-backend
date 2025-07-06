@@ -20,7 +20,8 @@ import {
   STATUS_CASH_PENDING,
   TYPE_UTSAV,
   STATUS_CREDITED,
-  STATUS_CANCELLED
+  STATUS_CANCELLED,
+  ROOM_STATUS_CHECKEDIN
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
@@ -575,5 +576,52 @@ export const fetchAllUtsavList = async (req, res) => {
       message: 'Failed to fetch adhyayan list',
       error: error.message
     });
+  }
+};
+
+
+
+export const utsavCheckin = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const { cardno } = req.body;
+
+  try {
+    const UtsavBooking = await UtsavBooking.findOne({
+      where: { cardno },
+      transaction: t
+    });
+
+    if (!UtsavBooking) {
+      await t.rollback();
+      return res.status(404).send({ message: 'Booking not found.' });
+    }
+
+    if (UtsavBooking.status === ROOM_STATUS_CHECKEDIN) {
+      await t.rollback();
+      return res.status(200).send({ message: 'Already checked in.' });
+    }
+
+    if (UtsavBooking.status !== STATUS_CONFIRMED) {
+      await t.rollback();
+      return res.status(400).send({ message: 'Booking is not in confirmed state.' });
+    }
+
+    await UtsavBooking.update(
+      { status: ROOM_STATUS_CHECKEDIN },
+      { transaction: t }
+    );
+
+    await t.commit();
+    return res.status(200).send({
+      message: 'Utsav booking status updated to checkedin.',
+      cardno: UtsavBooking.cardno,
+      // issuedto: UtsavBooking.issuedto
+    });
+  } catch (error) {
+    await t.rollback();
+    logger.error(error);
+    return res.status(500).send({ message: 'Internal server error' });
   }
 };
