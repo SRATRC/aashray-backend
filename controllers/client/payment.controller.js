@@ -66,6 +66,11 @@ export const verifyPayment = async (req, res) => {
     logger.error(`Razorpay: Payment failed for order id: ${razorpay_order_id}`);
   }
 
+
+  
+  const t = await database.transaction();
+  req.transaction = t;
+
   const transactions = await Transactions.findAll({
     where: {
       razorpay_order_id,
@@ -75,7 +80,9 @@ export const verifyPayment = async (req, res) => {
         STATUS_PAYMENT_FAILED,
         STATUS_PAYMENT_AUTHORIZED
       ]
-    }
+    },
+    lock: { update: true }, 
+    transaction: t
   });
 
   if (transactions && transactions.length > 0) {
@@ -149,6 +156,7 @@ export const verifyPayment = async (req, res) => {
     }
     message = `Payment ${razorpay_status} for order id: ${razorpay_order_id}`;
   } else {
+    await t.rollback();
     message = `No pending bookings found for order id: ${razorpay_order_id}`;
   }
 
