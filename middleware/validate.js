@@ -94,12 +94,14 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
         break;
     }
 
+    // Skip travel bookings from blocked date validation
+    if (booking_type === TYPE_TRAVEL) continue;
+
     if (checkin && checkout) {
       dateRanges.push({
         checkin,
         checkout,
-        isUtsav: booking_type === TYPE_UTSAV,
-        isTravel: booking_type === TYPE_TRAVEL
+        isUtsav: booking_type === TYPE_UTSAV
       });
     }
   }
@@ -111,15 +113,9 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
 
   // 3. Validate every extracted date range against blocked dates
   const conflictingBlocks = [];
-  for (const { checkin, checkout, isUtsav, isTravel } of dateRanges) {
+  for (const { checkin, checkout } of dateRanges) {
     const blockedDates = await getBlockedDates(checkin, checkout);
     if (blockedDates.length === 0) continue;
-
-    const hasUtsavBooking = await hasOverlappingUtsavBooking(
-      req.user.cardno,
-      checkin,
-      checkout
-    );
 
     const hasOverlapBeyondBoundary = blockedDates.some((block) => {
       const touchesOnlyBoundary =
