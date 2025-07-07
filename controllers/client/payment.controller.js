@@ -226,13 +226,13 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
 
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
-    const validBookingIds = transactions
+    const validTransactionIds = transactions
       .filter((t) =>
         bookingCategoryMap[t.bookingid].includes(getBookingType(t))
       )
-      .map((t) => t.bookingid);
+      .map((t) => t.id);
 
-    await updateRazorpayTransactions(validBookingIds, [], order.id, t);
+    await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();
 
     return res.status(200).send({ message: 'payment successful', data: order });
