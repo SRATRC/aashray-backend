@@ -51,18 +51,6 @@ if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir);
 }
 
-(async () => {
-  try {
-    await sequelize.authenticate();
-    logger.info('Connected to Database 🚀');
-
-    // Synchronize the models with the database (create tables if they don't exist)
-    await sequelize.sync();
-  } catch (error) {
-    logger.error('Unable to connect to the database:', error);
-  }
-})();
-
 const corsOptions = {
   // origin: [
   //   'https://aashray.vitraagvigyaan.org',
@@ -133,10 +121,26 @@ app.use((_req, _res) => {
 
 app.use(ErrorHandler);
 
-const port = process.env.PORT || 3000;
-const server = app.listen(port, () => {
-  logger.info(`Server is listening on port ${port}...`);
-});
+(async () => {
+  try {
+    if (process.env.NODE_ENV != 'test') {
+      await sequelize.authenticate();
+      logger.info('Connected to Database 🚀');
+
+      // Synchronize the models with the database (create tables if they don't exist)
+      await sequelize.sync();
+
+      const port = process.env.PORT || 3000;
+      app.listen(port, () => {
+        logger.info(`Server is listening on port ${port}...`);
+      });
+    }
+  } catch (error) {
+    logger.error('Unable to connect to the database:', error);
+  }
+})();
+
+
 
 // Export the app and a function to close the database connection
-export { app, sequelize, server };
+export { app, sequelize };

@@ -47,7 +47,8 @@ const errorFileTransport = new winston.transports.DailyRotateFile({
 
 // Define console transport
 const consoleTransport = new winston.transports.Console({
-  format: winston.format.combine(winston.format.colorize(), format)
+  format: winston.format.combine(winston.format.colorize(), format),
+  forceConsole: true
 });
 
 // Create the logger
