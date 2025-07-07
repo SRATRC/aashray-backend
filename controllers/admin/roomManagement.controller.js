@@ -49,7 +49,10 @@ import {
   findAllRooms,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
-import { adminCancelTransaction, createPendingTransaction } from '../../helpers/transactions.helper.js';
+import {
+  adminCancelTransaction,
+  createPendingTransaction
+} from '../../helpers/transactions.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import getDates from '../../utils/getDates.js';
 import Sequelize from 'sequelize';
@@ -168,8 +171,8 @@ const handleEarlyCheckout = async ({
       'New amount is more than previously paid. This does not seem right.'
     );
   }
-  
-  const t = await database.transaction(); 
+
+  const t = await database.transaction();
 
   // cancel the original booking and create a new booking
   await booking.update(
@@ -180,12 +183,7 @@ const handleEarlyCheckout = async ({
     { transaction: t }
   );
 
-  await adminCancelTransaction(
-    user, 
-    card,
-    transaction,
-    t
-  );
+  await adminCancelTransaction(user, card, transaction, t);
 
   // create a new booking with the new booking dates
   let bookingId = uuidv4();
@@ -201,7 +199,7 @@ const handleEarlyCheckout = async ({
       roomtype: booking.roomtype,
       gender: booking.gender,
       updatedBy: user.username,
-      status: ROOM_STATUS_CHECKEDOUT,
+      status: ROOM_STATUS_CHECKEDOUT
     },
     { transaction: t }
   );
@@ -234,7 +232,7 @@ const handleEarlyCheckout = async ({
   await newBooking.update(
     {
       status: ROOM_STATUS_CHECKEDOUT
-    }, 
+    },
     {
       transaction: dbTransaction
     }
@@ -307,36 +305,50 @@ export const manualCheckout = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
-  });
+  await booking.update(
+    {
+      status: ROOM_STATUS_CHECKEDOUT,
+      updatedBy: req.user.username
+    },
+    { transaction: dbTransaction }
+  );
 
-  const today = moment().format('YYYY-MM-DD');
-  const checkoutTime = moment().format('HH:mm:ss');
+  logger.info(
+    `Successfully checked out for bookingid ${booking.bookingid} of user ${
+      booking.cardno
+    } on ${moment().format('DD-MM-YYYY')}, ${moment().format('HH:mm:ss')}`
+  );
 
-  if (today === booking.checkout) {
-    await handleSameDayCheckout({
-      booking,
-      checkoutTime,
-      dbTransaction,
-      user: req.user
-    });
-  } else if (today > booking.checkout) {
-    await handleOverstayCheckout({
-      booking,
-      today,
-      dbTransaction,
-      user: req.user
-    });
-  } else {
-    await handleEarlyCheckout({
-      booking,
-      transaction,
-      today,
-      dbTransaction,
-      user: req.user
-    });
-  }
+  // const transaction = await Transactions.findOne({
+  //   where: { bookingid: booking.bookingid }
+  // });
+
+  // const today = moment().format('YYYY-MM-DD');
+  // const checkoutTime = moment().format('HH:mm:ss');
+
+  // if (today === booking.checkout) {
+  //   await handleSameDayCheckout({
+  //     booking,
+  //     checkoutTime,
+  //     dbTransaction,
+  //     user: req.user
+  //   });
+  // } else if (today > booking.checkout) {
+  //   await handleOverstayCheckout({
+  //     booking,
+  //     today,
+  //     dbTransaction,
+  //     user: req.user
+  //   });
+  // } else {
+  //   await handleEarlyCheckout({
+  //     booking,
+  //     transaction,
+  //     today,
+  //     dbTransaction,
+  //     user: req.user
+  //   });
+  // }
 
   await dbTransaction.commit();
   return res.status(200).send({ message: 'Successfully checked out' });
@@ -514,7 +526,15 @@ export const flatBooking = async (req, res) => {
   validateDate(req.body.checkin_date, req.body.checkout_date);
 
   const card = await CardDb.findOne({
-    attributes: ['id', 'cardno', 'issuedto', 'gender', 'mobno', 'email', 'credits'],
+    attributes: [
+      'id',
+      'cardno',
+      'issuedto',
+      'gender',
+      'mobno',
+      'email',
+      'credits'
+    ],
     where: {
       mobno: req.params.mobno
     }
@@ -1086,24 +1106,30 @@ export const updateBookingStatus = async (req, res) => {
         { transaction: t }
       );
 
-      await Transactions.create({
-        bookingid,
-        cardno,
-        category: TYPE_ROOM,
-        amount: finalAmount,
-        discount,
-        razorpay_order_id: null,
-        description: txDescription,
-        status: txStatus,
-        updatedBy: req.user.username
-      }, { transaction: t });
+      await Transactions.create(
+        {
+          bookingid,
+          cardno,
+          category: TYPE_ROOM,
+          amount: finalAmount,
+          discount,
+          razorpay_order_id: null,
+          description: txDescription,
+          status: txStatus,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
 
       break;
     }
 
     case ROOM_STATUS_PENDING_CHECKIN: {
       if (originalStatus !== STATUS_PAYMENT_PENDING) {
-        throw new ApiError(400, 'Can only mark pending checkin from payment pending');
+        throw new ApiError(
+          400,
+          'Can only mark pending checkin from payment pending'
+        );
       }
 
       const tx = await Transactions.findOne({
@@ -1116,11 +1142,14 @@ export const updateBookingStatus = async (req, res) => {
         throw new ApiError(400, ERR_TRANSACTION_NOT_FOUND);
       }
 
-      await tx.update({
-  status: STATUS_PAYMENT_COMPLETED,
-  updatedBy: req.user.username,
-  description: description || tx.description
-}, { transaction: t });
+      await tx.update(
+        {
+          status: STATUS_PAYMENT_COMPLETED,
+          updatedBy: req.user.username,
+          description: description || tx.description
+        },
+        { transaction: t }
+      );
 
       newStatus = ROOM_STATUS_PENDING_CHECKIN;
       await booking.update(
@@ -1136,7 +1165,10 @@ export const updateBookingStatus = async (req, res) => {
 
     case STATUS_ADMIN_CANCELLED: {
       if (![STATUS_WAITING, STATUS_PAYMENT_PENDING].includes(originalStatus)) {
-        throw new ApiError(400, 'Admin Cancelled allowed only from waiting or pending');
+        throw new ApiError(
+          400,
+          'Admin Cancelled allowed only from waiting or pending'
+        );
       }
 
       const tx = await Transactions.findOne({
@@ -1145,12 +1177,23 @@ export const updateBookingStatus = async (req, res) => {
         transaction: t
       });
 
-      if (tx && ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_PAYMENT_COMPLETED].includes(tx.status)) {
-      await tx.update({
-  status: STATUS_ADMIN_CANCELLED,
-  updatedBy: req.user.username,
-  description: description || tx.description
-}, { transaction: t });
+      if (
+        tx &&
+        ![
+          STATUS_CREDITED,
+          STATUS_CANCELLED,
+          STATUS_ADMIN_CANCELLED,
+          STATUS_PAYMENT_COMPLETED
+        ].includes(tx.status)
+      ) {
+        await tx.update(
+          {
+            status: STATUS_ADMIN_CANCELLED,
+            updatedBy: req.user.username,
+            description: description || tx.description
+          },
+          { transaction: t }
+        );
       }
 
       newStatus = STATUS_ADMIN_CANCELLED;
@@ -1177,7 +1220,6 @@ export const updateBookingStatus = async (req, res) => {
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
-
 export async function findAllRoomsForDay(date, room_type, gender) {
   // Step 1: Determine which roomnos are booked (pending checkin or checkedin)
   const bookings = await RoomBooking.findAll({
@@ -1185,7 +1227,7 @@ export async function findAllRoomsForDay(date, room_type, gender) {
     where: {
       [Sequelize.Op.and]: [
         { checkin: { [Sequelize.Op.lte]: date } },
-        { checkout: { [Sequelize.Op.gt]: date } }  // i.e., date ∈ [checkin, checkout)
+        { checkout: { [Sequelize.Op.gt]: date } } // i.e., date ∈ [checkin, checkout)
       ],
       status: {
         [Sequelize.Op.in]: [
@@ -1197,7 +1239,7 @@ export async function findAllRoomsForDay(date, room_type, gender) {
     }
   });
 
-  const bookedRoomNos = bookings.map(b => b.roomno);
+  const bookedRoomNos = bookings.map((b) => b.roomno);
 
   // Step 2: Get available rooms from roomdb excluding booked ones
   return RoomDb.findAll({
@@ -1217,7 +1259,6 @@ export async function findAllRoomsForDay(date, room_type, gender) {
     ]
   });
 }
-
 
 export const guestsByDateAndRoomtype = async (req, res) => {
   const { date, roomtype } = req.query;
@@ -1242,9 +1283,10 @@ export const guestsByDateAndRoomtype = async (req, res) => {
     order: [['roomno', 'ASC']]
   });
 
-  return res.status(200).send({ message: 'Fetched guests for the day', data: guests });
+  return res
+    .status(200)
+    .send({ message: 'Fetched guests for the day', data: guests });
 };
-
 
 export async function findAllRoomsUnfiltered(room_type, gender) {
   return RoomDb.findAll({
