@@ -84,18 +84,9 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
         checkin = details.checkin_date;
         checkout = details.checkout_date;
         break;
-      case TYPE_TRAVEL:
-        // Travel bookings have a single date field
-        checkin = details.date;
-        checkout = details.date;
-        break;
       default:
-        // Skip booking types that don’t block accommodation dates
         break;
     }
-
-    // Skip travel bookings from blocked date validation
-    if (booking_type === TYPE_TRAVEL) continue;
 
     if (checkin && checkout) {
       dateRanges.push({
@@ -107,9 +98,6 @@ export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
   }
 
   if (dateRanges.length === 0) return next();
-
-  // Extract Utsav ranges for comparison with travel bookings in this request
-  const utsavRanges = dateRanges.filter((dr) => dr.isUtsav);
 
   // 3. Validate every extracted date range against blocked dates
   const conflictingBlocks = [];
