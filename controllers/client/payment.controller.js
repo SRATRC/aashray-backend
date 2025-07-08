@@ -18,7 +18,6 @@ import {
   generateOrderId,
   updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
-import { validateWebhookSignature } from 'razorpay/dist/utils/razorpay-utils.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
@@ -218,7 +217,9 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
 
   const totalAmount = transactions.reduce((sum, transaction) => {
     const categories = bookingCategoryMap[transaction.bookingid];
-    if (categories.includes(getBookingType(transaction))) {
+    const bookingType = getBookingType(transaction);
+    if (bookingType != TYPE_FOOD
+      || categories.includes(transaction.category)) {
       return sum + transaction.amount;
     }
     return sum;
