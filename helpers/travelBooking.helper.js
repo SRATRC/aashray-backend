@@ -74,7 +74,7 @@ export async function updateWaitingTravelBooking(date) {
 
     sendMail({
       email: user.email,
-      subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
+      subject: 'Vitraag Vigyaan Aashray: '+user.issuedto,
       template: 'rajPravasStatusUpdate',
       context: {
         name: user.issuedto,

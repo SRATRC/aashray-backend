@@ -12,9 +12,7 @@ import {
   ERR_INVALID_DATE,
   STATUS_AWAITING_CONFIRMATION,
   MSG_BOOKING_WAITING,
-  SUBJECT_BOOKING_PENDING,
-  BOOKING_STATUS_PENDING,
-  WELCOME_MESSAGE_PENDING
+  BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
@@ -103,9 +101,7 @@ export const unifiedBooking = async (req, res) => {
   sendUnifiedEmailForBookedBy(
     userBookingIdMap,
     req.user,
-    SUBJECT_BOOKING_PENDING,
-    BOOKING_STATUS_PENDING,
-    WELCOME_MESSAGE_PENDING
+    BOOKING_STATUS_PENDING
   );
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
@@ -115,9 +111,7 @@ export const unifiedBooking = async (req, res) => {
         cardno,
         bookings,
         req.user,
-        SUBJECT_BOOKING_PENDING,
-        BOOKING_STATUS_PENDING,
-        WELCOME_MESSAGE_PENDING
+        BOOKING_STATUS_PENDING
       );
     }
   }
