@@ -305,50 +305,56 @@ export const manualCheckout = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  await booking.update(
-    {
-      status: ROOM_STATUS_CHECKEDOUT,
-      updatedBy: req.user.username
-    },
-    { transaction: dbTransaction }
-  );
-
   logger.info(
     `Successfully checked out for bookingid ${booking.bookingid} of user ${
       booking.cardno
     } on ${moment().format('DD-MM-YYYY')}, ${moment().format('HH:mm:ss')}`
   );
 
-  // const transaction = await Transactions.findOne({
-  //   where: { bookingid: booking.bookingid }
-  // });
+  const transaction = await Transactions.findOne({
+    where: { bookingid: booking.bookingid }
+  });
 
-  // const today = moment().format('YYYY-MM-DD');
-  // const checkoutTime = moment().format('HH:mm:ss');
+  const today = moment().format('YYYY-MM-DD');
+  const checkoutTime = moment().format('HH:mm:ss');
 
-  // if (today === booking.checkout) {
-  //   await handleSameDayCheckout({
-  //     booking,
-  //     checkoutTime,
-  //     dbTransaction,
-  //     user: req.user
-  //   });
-  // } else if (today > booking.checkout) {
-  //   await handleOverstayCheckout({
-  //     booking,
-  //     today,
-  //     dbTransaction,
-  //     user: req.user
-  //   });
-  // } else {
-  //   await handleEarlyCheckout({
-  //     booking,
-  //     transaction,
-  //     today,
-  //     dbTransaction,
-  //     user: req.user
-  //   });
-  // }
+  if (today === booking.checkout) {
+    // await handleSameDayCheckout({
+    //   booking,
+    //   checkoutTime,
+    //   dbTransaction,
+    //   user: req.user
+    // });
+    await booking.update(
+      {
+        status: ROOM_STATUS_CHECKEDOUT,
+        updatedBy: req.user.username
+      },
+      { transaction: dbTransaction }
+    );
+  } else if (today > booking.checkout) {
+    // await handleOverstayCheckout({
+    //   booking,
+    //   today,
+    //   dbTransaction,
+    //   user: req.user
+    // });
+    await booking.update(
+      {
+        status: ROOM_STATUS_CHECKEDOUT,
+        updatedBy: req.user.username
+      },
+      { transaction: dbTransaction }
+    );
+  } else {
+    await handleEarlyCheckout({
+      booking,
+      transaction,
+      today,
+      dbTransaction,
+      user: req.user
+    });
+  }
 
   await dbTransaction.commit();
   return res.status(200).send({ message: 'Successfully checked out' });
