@@ -394,14 +394,14 @@ export const updateBookingStatus = async (req, res) => {
   switch (status) {
     case STATUS_PROCEED_FOR_PAYMENT:
       if (!transaction) {
-        transaction = await createPendingTransaction(
+        transaction = (await createPendingTransaction(
           bookedByCard,
           booking,
           TYPE_TRAVEL,
           charges,
           req.user.username,
           t
-        );
+        )).transaction;
       }
 
       if (transaction.status === STATUS_PAYMENT_COMPLETED) {
