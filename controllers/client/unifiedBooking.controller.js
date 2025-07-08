@@ -154,17 +154,17 @@ export const validateBooking = async (req, res) => {
   } else {
     utsav = await UtsavDb.findOne({
       where: {
-        [Sequelize.Op.or]: [
+        [Sequelize.Op.and]: [
           {
-            start_date: {
-              [Sequelize.Op.lte]:
+            end_date: {
+              [Sequelize.Op.gte]:
                 primary_booking.details.checkin_date ||
                 primary_booking.details.date
             }
           },
           {
-            end_date: {
-              [Sequelize.Op.gte]:
+            start_date: {
+              [Sequelize.Op.lte]:
                 primary_booking.details.checkout_date ||
                 primary_booking.details.date
             }
