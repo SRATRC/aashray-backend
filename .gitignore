@@ -7,3 +7,8 @@ coverage
 *.mwb
 logs/
 /logs/*
+.env
+controllers/admin/sratrc-portal-backend.code-workspace
+env.dev
+env.prod
+services/

@@ -310,6 +310,16 @@ export async function sendUnifiedEmailForBookedBy(
   }
 }
 
+export function getSubject(bookingStatus){
+  if(bookingStatus == BOOKING_STATUS_PENDING){
+    return 'Booking created';
+  }
+  if(bookingStatus == BOOKING_STATUS_CANCEL){
+    return 'Booking cancelled';
+  }
+  return 'Booking confirmed';
+}
+
 export function getWelcomeMessage(bookingStatus,country){
 
   if (bookingStatus == BOOKING_STATUS_PENDING)
@@ -556,7 +566,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject:SUBJECT_BOOKING + name,
+      subject:SUBJECT_BOOKING + getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,

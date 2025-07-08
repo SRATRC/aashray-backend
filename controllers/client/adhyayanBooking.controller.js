@@ -190,7 +190,7 @@ export const CancelShibir = async (req, res) => {
 
   sendMail({
     email: req.user.email,
-    subject: 'Vitraag Vigyaan Aashray: '+req.user.issuedto,
+    subject: 'Vitraag Vigyaan Aashray: Raj Adhyayan Booking Cancelled',
     template: 'rajAdhyayanCancellation',
     context: {
       name: req.user.issuedto,

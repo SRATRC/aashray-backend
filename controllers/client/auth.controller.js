@@ -129,7 +129,7 @@ export async function forgotPassword(req, res) {
   await CardDb.update({ password: hash }, { where: { mobno: mobno } });
   sendMail({
     email: details.email,
-    subject: 'Vitraag Vigyaan Aashray: '+details.issuedto,
+    subject: 'Vitraag Vigyaan Aashray: Temporary Password',
     template: 'forgotPasswordEmail',
     context: {
       password: temporaryPassword,

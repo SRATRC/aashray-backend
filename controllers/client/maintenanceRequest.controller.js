@@ -60,7 +60,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
   sendMail({
     email: req.user.email,
     cc: dept_email.dataValues.dept_email,
-    subject: 'Vitraag Vigyaan Aashray: '+req.user.issuedto,
+    subject: 'Vitraag Vigyaan Aashray: Maintenance Request Received',
     template: 'maintainanceRequest',
     context: {
       name: req.user.issuedto,

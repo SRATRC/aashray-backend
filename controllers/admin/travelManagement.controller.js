@@ -478,7 +478,7 @@ export const updateBookingStatus = async (req, res) => {
 }
   sendMail({
     email: card.email,
-    subject: 'Vitraag Vigyaan Aashray: '+card.issuedto,
+    subject: 'Vitraag Vigyaan Aashray: Raj Pravas - Travel Booking Updated',
     template: 'rajPravasStatusUpdate',
     context: {
       name: card.issuedto,
