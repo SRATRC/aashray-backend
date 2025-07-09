@@ -9,7 +9,8 @@
     "dev": "nodemon app.js",
     "start:prod": "NODE_ENV=prod node app.js",
     "start:cron": "node cron.js",
-    "logs:clean": "rm -rf logs/*"
+    "logs:clean": "rm -rf logs/*",
+    "test": "npx jest"
   },
   "keywords": [],
   "author": "",
