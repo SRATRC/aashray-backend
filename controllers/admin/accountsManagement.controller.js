@@ -56,6 +56,7 @@ export const fetchCompletedTransactions = async (req, res) => {
       t.discount,
       t.status,
       t.razorpay_order_id,
+      t.description,
 
       CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
       CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
@@ -149,6 +150,7 @@ export const fetchPendingTransactions = async (req, res) => {
       t.discount,
       t.status,
       t.razorpay_order_id,
+      t.description,
 
       CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
       CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
@@ -239,6 +241,9 @@ export const fetchAllCreditTransactions = async (req, res) => {
       t.discount,
       t.status,
       t.razorpay_order_id,
+      t.createdAt,
+      t.updatedAt,
+      t.description,
 
       CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
       CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
@@ -294,7 +299,7 @@ export const fetchAllCreditTransactions = async (req, res) => {
       replacements
     }
   );
-
+// console.log(transactions[0]);
   return res.status(200).send({
     message: 'Fetched credits transactions',
     data: transactions
@@ -600,6 +605,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         t.discount,
         t.status,
         t.razorpay_order_id,
+        t.description,
 
         CASE WHEN t.category = 'room' THEN rb.checkin ELSE '-' END AS checkin,
         CASE WHEN t.category = 'room' THEN rb.checkout ELSE '-' END AS checkout,
