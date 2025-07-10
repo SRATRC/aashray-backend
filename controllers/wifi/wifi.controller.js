@@ -44,10 +44,6 @@ export const generatePassword = async (req, res) => {
     const roombookingid =
       isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid;
 
-    if (!roombookingid) {
-      throw new APIError(400, 'Booking ID not found');
-    }
-
     const [updatedRows, updatedRowsCount] = await WifiDb.update(
       {
         status: STATUS_INACTIVE,
@@ -84,6 +80,8 @@ export const generatePassword = async (req, res) => {
       data: updatedRow?.password,
       message: 'Your wifi password has been generated'
     });
+  } else {
+    throw new APIError(400, 'Cannot generate more than 4 passwords');
   }
 };
 
