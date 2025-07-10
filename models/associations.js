@@ -30,6 +30,7 @@ import BulkFoodBooking from './bulk_food_booking.model.js';
 import RazorpayWebhook from './razorpay_webhook.model.js';
 import RazorpaySettlement from './razorpay_settlement.model.js';
 import SupportTickets from './support_tickets.model.js';
+import BlockDates from './block_dates.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {

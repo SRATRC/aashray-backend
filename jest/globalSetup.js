@@ -4,6 +4,7 @@ import logger from '../config/logger.js';
 import { } from '../models/associations.js';
 import CardFactory from '../tests/factories/cardFactory.js';
 import ShibirFactory from '../tests/factories/shibirFactory.js';
+import RoomFactory from '../tests/factories/roomFactory.js';
 
 const setup = async () => {
   logger.info('Authenticating DB...');
@@ -25,6 +26,10 @@ async function seed() {
 
   // create shibir
   await ShibirFactory.create();
+
+  // create room
+  await RoomFactory.createRoomFor1DayVisit();
+  await RoomFactory.create();
 }
 
 export default setup;
