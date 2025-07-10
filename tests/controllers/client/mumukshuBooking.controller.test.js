@@ -3,9 +3,12 @@ import { app, sequelize } from '../../../app.js';
 import { CardDb, RoomBooking } from '../../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
-  STATUS_PAYMENT_PENDING
+  STATUS_PAYMENT_PENDING,
+  STATUS_WAITING
 } from '../../../config/constants.js';
 import { MUMUKSHU_1 } from '../../testConstants.js';
+import UtsavFactory from '../../factories/utsavFactory.js';
+import { nDaysFromToday } from '../../helpers/date.helper.js';
 
 jest.mock('../../../utils/sendMail.js');
 
@@ -28,28 +31,17 @@ describe('Mumukshu Booking Controller', () => {
 
     describe('Room Booking', () => {
       beforeEach(async () => {
-        await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
-        await RoomBooking.truncate();
-        await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
+        // await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
+        // await RoomBooking.truncate();
+        // await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
       });
-
-      test.todo(
-        'should book room in waiting status if checking in on Utsav end date'
-      );
-      test.todo(
-        'should book room in waiting status if checking out on Utsav begining date'
-      );
 
       it('should book room for single day visit successfully', async () => {
         const res = await request(app)
           .post('/api/v1/mumukshu/booking')
           .send({
             cardno: MUMUKSHU_1,
-            primary_booking: createRoomJson(
-              MUMUKSHU_1,
-              TODAY,
-              TODAY
-            )
+            primary_booking: createRoomJson(MUMUKSHU_1, TODAY, TODAY)
           });
 
         const booking = await RoomBooking.findOne({
@@ -69,16 +61,13 @@ describe('Mumukshu Booking Controller', () => {
       });
 
       it('should book room for multiple days successfully', async () => {
-        const checkout = new Date(Date.now() + 2 * 86400000);
+        const checkin = nDaysFromToday(1);
+        const checkout = nDaysFromToday(2);
         const res = await request(app)
           .post('/api/v1/mumukshu/booking')
           .send({
             cardno: MUMUKSHU_1,
-            primary_booking: createRoomJson(
-              MUMUKSHU_1,
-              TODAY,
-              checkout
-            )
+            primary_booking: createRoomJson(MUMUKSHU_1, checkin, checkout)
           });
 
         const booking = await RoomBooking.findOne({
@@ -86,15 +75,82 @@ describe('Mumukshu Booking Controller', () => {
             cardno: MUMUKSHU_1,
             status: STATUS_PAYMENT_PENDING,
             bookedBy: null,
-            checkin: TODAY,
+            checkin: checkin,
             checkout: checkout,
-            nights: 3,
+            nights: 1,
             updatedBy: MUMUKSHU_1
           }
         });
 
         expect(booking).not.toBeNull();
         expect(res.status).toBe(200);
+      });
+
+      describe('During Utsav', () => {
+        it('should book room in waiting status if checking in on Utsav end date', async () => {
+          const utsavStart = nDaysFromToday(3);
+          const utsavEnd = nDaysFromToday(5);
+          await UtsavFactory.create(utsavStart, utsavEnd);
+
+          const checkin = utsavEnd;
+          const checkout = nDaysFromToday(6);
+          const res = await request(app)
+            .post('/api/v1/mumukshu/booking')
+            .send({
+              cardno: MUMUKSHU_1,
+              primary_booking: createRoomJson(MUMUKSHU_1, checkin, checkout)
+            });
+
+          const booking = await RoomBooking.findOne({
+            where: {
+              cardno: MUMUKSHU_1,
+              status: STATUS_WAITING,
+              bookedBy: null,
+              checkin: checkin,
+              checkout: checkout,
+              nights: 1,
+              updatedBy: MUMUKSHU_1
+            }
+          });
+
+          expect(booking).not.toBeNull();
+          expect(res.status).toBe(200);
+        });
+
+        it('should book room in waiting status if checking out on Utsav begining date', async () => {
+          try {
+          const utsavStart = nDaysFromToday(7);
+          const utsavEnd = nDaysFromToday(8);
+          await UtsavFactory.create(utsavStart, utsavEnd);
+
+          const checkin = nDaysFromToday(6);
+          const checkout = utsavStart;
+          const res = await request(app)
+            .post('/api/v1/mumukshu/booking')
+            .send({
+              cardno: MUMUKSHU_1,
+              primary_booking: createRoomJson(MUMUKSHU_1, checkin, checkout)
+            });
+
+          const booking = await RoomBooking.findOne({
+            where: {
+              cardno: MUMUKSHU_1,
+              status: STATUS_WAITING,
+              bookedBy: null,
+              checkin: checkin,
+              checkout: checkout,
+              nights: 1,
+              updatedBy: MUMUKSHU_1
+            }
+          });
+          
+
+          expect(booking).not.toBeNull();
+          expect(res.status).toBe(200);
+        } catch (error) {
+          console.log(error);
+        }
+        });
       });
     });
 
