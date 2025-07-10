@@ -2,11 +2,10 @@ import request from 'supertest';
 import { app, sequelize } from '../../../app.js';
 import { CardDb, RoomBooking } from '../../../models/associations.js';
 import {
-  STATUS_CONFIRMED,
-  STATUS_CANCELLED,
-  TYPE_ADHYAYAN,
-  ROOM_STATUS_PENDING_CHECKIN
+  ROOM_STATUS_PENDING_CHECKIN,
+  STATUS_PAYMENT_PENDING
 } from '../../../config/constants.js';
+import { MUMUKSHU_1 } from '../../testConstants.js';
 
 jest.mock('../../../utils/sendMail.js');
 
@@ -28,6 +27,12 @@ describe('Mumukshu Booking Controller', () => {
     });
 
     describe('Room Booking', () => {
+      beforeEach(async () => {
+        await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
+        await RoomBooking.truncate();
+        await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
+      });
+
       test.todo(
         'should book room in waiting status if checking in on Utsav end date'
       );
@@ -39,9 +44,9 @@ describe('Mumukshu Booking Controller', () => {
         const res = await request(app)
           .post('/api/v1/mumukshu/booking')
           .send({
-            cardno: 'Mumukshu_1',
+            cardno: MUMUKSHU_1,
             primary_booking: createRoomJson(
-              'Mumukshu_1',
+              MUMUKSHU_1,
               TODAY,
               TODAY
             )
@@ -49,11 +54,13 @@ describe('Mumukshu Booking Controller', () => {
 
         const booking = await RoomBooking.findOne({
           where: {
-            cardno: 'Mumukshu_1',
+            cardno: MUMUKSHU_1,
             status: ROOM_STATUS_PENDING_CHECKIN,
+            bookedBy: null,
             checkin: TODAY,
             checkout: TODAY,
-            nights: 0
+            nights: 0,
+            updatedBy: MUMUKSHU_1
           }
         });
 
@@ -61,7 +68,34 @@ describe('Mumukshu Booking Controller', () => {
         expect(res.status).toBe(200);
       });
 
-      test.todo('should book room for multiple days successfully');
+      it('should book room for multiple days successfully', async () => {
+        const checkout = new Date(Date.now() + 2 * 86400000);
+        const res = await request(app)
+          .post('/api/v1/mumukshu/booking')
+          .send({
+            cardno: MUMUKSHU_1,
+            primary_booking: createRoomJson(
+              MUMUKSHU_1,
+              TODAY,
+              checkout
+            )
+          });
+
+        const booking = await RoomBooking.findOne({
+          where: {
+            cardno: MUMUKSHU_1,
+            status: STATUS_PAYMENT_PENDING,
+            bookedBy: null,
+            checkin: TODAY,
+            checkout: checkout,
+            nights: 3,
+            updatedBy: MUMUKSHU_1
+          }
+        });
+
+        expect(booking).not.toBeNull();
+        expect(res.status).toBe(200);
+      });
     });
 
     test.todo('should book adhyayans successfully');

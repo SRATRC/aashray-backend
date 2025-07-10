@@ -1,0 +1,1 @@
+export const MUMUKSHU_1 = 'Mumukshu_1';
