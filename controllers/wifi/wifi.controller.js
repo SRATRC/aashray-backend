@@ -9,14 +9,23 @@ import Sequelize from 'sequelize';
 import moment from 'moment';
 
 export const generatePassword = async (req, res) => {
-  const isCheckedin = await RoomBooking.findOne({
+  const isRoomCheckedin = await RoomBooking.findOne({
     where: {
       cardno: req.user.cardno,
       checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
       status: ROOM_STATUS_CHECKEDIN
     }
   });
-  if (!isCheckedin) {
+
+  const isFlatCheckedin = await FlatBooking.findOne({
+    where: {
+      cardno: req.user.cardno,
+      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
+      status: ROOM_STATUS_CHECKEDIN
+    }
+  });
+
+  if (!isRoomCheckedin && !isFlatCheckedin) {
     throw new APIError(401, 'User not checkedin');
   }
 
@@ -24,14 +33,14 @@ export const generatePassword = async (req, res) => {
     where: {
       cardno: req.user.cardno,
       status: STATUS_INACTIVE,
-      roombookingid: isCheckedin.bookingid
+      roombookingid: isRoomCheckedin.bookingid || isFlatCheckedin.bookingid
     }
   });
   if (count < 5) {
     const [updatedRows, updatedRowsCount] = await WifiDb.update(
       {
         status: STATUS_INACTIVE,
-        roombookingid: isCheckedin.bookingid,
+        roombookingid: isRoomCheckedin.bookingid || isFlatCheckedin.bookingid,
         cardno: req.user.cardno
       },
       {
