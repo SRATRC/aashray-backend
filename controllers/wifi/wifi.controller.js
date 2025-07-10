@@ -1,4 +1,4 @@
-import { RoomBooking, WifiDb } from '../../models/associations.js';
+import { FlatBooking, RoomBooking, WifiDb } from '../../models/associations.js';
 import {
   ROOM_STATUS_CHECKEDIN,
   STATUS_ACTIVE,
@@ -6,9 +6,13 @@ import {
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
+import database from '../../config/database.js';
 import moment from 'moment';
 
 export const generatePassword = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
   const isRoomCheckedin = await RoomBooking.findOne({
     where: {
       cardno: req.user.cardno,
@@ -33,39 +37,53 @@ export const generatePassword = async (req, res) => {
     where: {
       cardno: req.user.cardno,
       status: STATUS_INACTIVE,
-      roombookingid: isRoomCheckedin.bookingid || isFlatCheckedin.bookingid
+      roombookingid: isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid
     }
   });
   if (count < 5) {
+    const roombookingid =
+      isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid;
+
+    if (!roombookingid) {
+      throw new APIError(400, 'Booking ID not found');
+    }
+
     const [updatedRows, updatedRowsCount] = await WifiDb.update(
       {
         status: STATUS_INACTIVE,
-        roombookingid: isRoomCheckedin.bookingid || isFlatCheckedin.bookingid,
+        roombookingid,
         cardno: req.user.cardno
       },
       {
         where: { status: STATUS_ACTIVE },
         order: [['pwd_id', 'ASC']],
         limit: 1,
-        returning: true
+        returning: true,
+        transaction: t
       }
     );
-    const updatedRow = await WifiDb.findOne({
-      attributes: ['password'],
-      where: { status: STATUS_INACTIVE },
-      order: [['pwd_id', 'DESC']],
-      limit: 1
-    });
+
     if (updatedRowsCount === 0) {
       throw new APIError(404, 'Error updating the status');
     }
 
+    const updatedRow = await WifiDb.findOne({
+      attributes: ['password'],
+      where: {
+        status: STATUS_INACTIVE,
+        roombookingid,
+        cardno: req.user.cardno
+      },
+      order: [['updatedAt', 'DESC']],
+      transaction: t
+    });
+
+    await t.commit();
+
     return res.status(200).send({
-      data: updatedRow,
+      data: updatedRow?.password,
       message: 'Your wifi password has been generated'
     });
-  } else {
-    throw new APIError(400, 'Cannot generate more than 4 passwords');
   }
 };
 
