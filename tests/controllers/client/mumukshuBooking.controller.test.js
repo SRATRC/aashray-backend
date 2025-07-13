@@ -118,7 +118,6 @@ describe('Mumukshu Booking Controller', () => {
         });
 
         it('should book room in waiting status if checking out on Utsav begining date', async () => {
-          try {
           const utsavStart = nDaysFromToday(7);
           const utsavEnd = nDaysFromToday(8);
           await UtsavFactory.create(utsavStart, utsavEnd);
@@ -143,13 +142,9 @@ describe('Mumukshu Booking Controller', () => {
               updatedBy: MUMUKSHU_1
             }
           });
-          
 
           expect(booking).not.toBeNull();
           expect(res.status).toBe(200);
-        } catch (error) {
-          console.log(error);
-        }
         });
       });
     });
