@@ -26,7 +26,8 @@ import {
   cancelFlatBooking,
   availableRoomsForDay,
   updateBookingStatus,
-  guestsByDateAndRoomtype
+  guestsByDateAndRoomtype,
+  updateFlatBookingStatus
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN } from '../../config/constants.js';
@@ -53,6 +54,8 @@ router.put('/flat_checkout/:bookingid', CatchAsync(flatCheckout));
 router.put('/flat_cancel/:bookingid', CatchAsync(cancelFlatBooking));
 router.get('/flat_list', CatchAsync(flatList));
 router.get('/fetch_flat_bookings/:cardno', CatchAsync(fetchFlatBookingsByCard));
+router.put('/update_flat_booking_status', CatchAsync(updateFlatBookingStatus));
+
 
 // room management routes
 router.put('/block_room/:roomno', CatchAsync(blockRoom));
