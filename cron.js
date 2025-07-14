@@ -82,7 +82,7 @@ async function runJob(systemUser, t) {
   const bookings = [];
 
   await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
-  await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+  // await getUnpaidPastBookingsAndTransactions(bookings, transactions);
 
   logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings.map(x => x.bookingid))}`);
   logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions.map(x => x.id))}`);
