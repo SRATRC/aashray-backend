@@ -12,21 +12,22 @@ import {
     UtsavDb
 } from '../models/associations.js';
 import {
-    STATUS_CONFIRMED,
-    TYPE_ROOM,
-    TYPE_TRAVEL,
-    TYPE_ADHYAYAN,
-    ERR_INVALID_DATE,
-    TYPE_FLAT,
-    TYPE_UTSAV,
-    STATUS_GUEST,
-    STATUS_ACTIVE,
-    ERR_DATES_NOT_BETWEEN_UTSAV,
-    RAJ_PRAVAS_EMAIL,
-    SUBJECT_BOOKING,
-    BOOKING_STATUS_PENDING,
-    STATUS_CANCELLED,
-    BOOKING_STATUS_CONFIRMED
+  STATUS_CONFIRMED,
+  TYPE_ROOM,
+  TYPE_TRAVEL,
+  TYPE_ADHYAYAN,
+  ERR_INVALID_DATE,
+  TYPE_FLAT,
+  TYPE_UTSAV,
+  STATUS_GUEST,
+  STATUS_ACTIVE,
+  ERR_DATES_NOT_BETWEEN_UTSAV,
+  RAJ_PRAVAS_EMAIL,
+  BOOKING_STATUS_PENDING,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CANCELLED,
+  ROOM_STATUS_CHECKEDOUT,
+  BOOKING_STATUS_CONFIRMED
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -131,7 +132,19 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
             ],
             cardno: card_no
         }
-    });
+
+      ],
+      status: {
+        [Sequelize.Op.notIn]: [
+          STATUS_CANCELLED,
+          STATUS_ADMIN_CANCELLED,
+          ROOM_STATUS_CHECKEDOUT
+        ]
+      },
+      cardno: card_no
+    }
+  });
+
 
     return result.length > 0;
 }
@@ -753,18 +766,3 @@ if (newIds.length<count) {
   return newIds;
 }
 
-// Validate that at least one of the selected dates intersects the Utsav period.
-// Completely outside Utsav bookings are now permitted, so we only restrict a booking
-// if it ends before it even starts or starts after it ends (i.e. an invalid range).
-export function validateBookingDatesBetweenUtsav(start_date, end_date, utsav) {
-  if (!utsav) return;
-
-  const start = new Date(start_date);
-  const end = new Date(end_date);
-  const utsavStart = new Date(utsav.start_date);
-  const utsavEnd = new Date(utsav.end_date);
-
-  if (start> end) {
-    throw new ApiError(400, ERR_DATES_NOT_BETWEEN_UTSAV);
-}
-// No further restrictions – bookings completely outside the Utsav period are allowed.}

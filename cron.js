@@ -12,6 +12,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_PENDING,
   STATUS_PROCEED_FOR_PAYMENT,
+  TYPE_ADHYAYAN,
   TYPE_FOOD
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
@@ -32,6 +33,7 @@ import {
 } from './helpers/booking.helper.js';
 import UtsavDb from './models/utsav_db.model.js';
 import { validateCard } from './helpers/card.helper.js';
+import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
@@ -80,7 +82,7 @@ async function runJob(systemUser, t) {
   const bookings = [];
 
   await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
-  await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+  // await getUnpaidPastBookingsAndTransactions(bookings, transactions);
 
   logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings.map(x => x.bookingid))}`);
   logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions.map(x => x.id))}`);
@@ -117,6 +119,22 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
 
 async function cancelBookings(systemUser, bookings, userBookingIds, t) {
   for (const booking of bookings) {
+
+    const bookingType = getBookingTypeFromBooking(booking);
+
+    switch(bookingType) {
+      case TYPE_ADHYAYAN:
+        const adhyayan = await ShibirDb.findOne({
+          where: { id: booking.shibir_id }
+        });
+        await openAdhyayanSeat(
+          adhyayan,
+          systemUser.username,
+          t
+        );
+        break;
+    }
+
     await booking.update(
       {
         status: STATUS_ADMIN_CANCELLED,

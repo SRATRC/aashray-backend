@@ -12,12 +12,18 @@ export const httpLogger = (req, res, next) => {
   // Store original response methods
   const originalSend = res.send;
 
-  // Override res.send
+  let logged = false; // NEW FLAG
+
   res.send = function (body) {
-    const responseBody = typeof body === 'string' ? body : JSON.stringify(body);
-    logger.info(
-      `Response: ${req.method} ${req.originalUrl} - Body: ${responseBody}`
-    );
+    if (!logged) {
+      // log only once
+      logged = true;
+      const responseBody =
+        typeof body === 'string' ? body : JSON.stringify(body);
+      logger.info(
+        `Response: ${req.method} ${req.originalUrl} - Body: ${responseBody}`
+      );
+    }
     return originalSend.call(this, body);
   };
 
