@@ -136,7 +136,6 @@ export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
 
 export const SUBJECT_BOOKING = 'Vitraag Vigyaan Aashray: ';
 export const BOOKING_STATUS_PENDING = 'pending';
-export const BOOKING_STATUS_CANCEL = 'cancel';
 
 export const RAJ_PRAVAS_EMAIL = "rajpravas7@gmail.com";
 
