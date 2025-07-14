@@ -32,7 +32,8 @@ import {
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
   STATUS_CREDITED,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  ERR_INVALID_DATE
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -457,7 +458,9 @@ export const flatCheckout = async (req, res) => {
 export const roomBooking = async (req, res) => {
   const { mobno, cardno, checkin_date, checkout_date, room_type, floor_pref } =
     req.body;
-  validateDate(checkin_date, checkout_date);
+  if (checkin_date > checkout_date) {
+    throw new ApiError(400, ERR_INVALID_DATE);
+  }
 
   const card = mobno
     ? await CardDb.findOne({ where: { mobno } })
