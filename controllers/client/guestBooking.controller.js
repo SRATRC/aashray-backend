@@ -30,9 +30,7 @@ import {
   TYPE_UTSAV,
   TYPE_FLAT,
   MSG_BOOKING_WAITING,
-  SUBJECT_BOOKING_PENDING,
-  BOOKING_STATUS_PENDING,
-  WELCOME_MESSAGE_PENDING
+  BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -193,9 +191,7 @@ export const guestBooking = async (req, res) => {
   sendUnifiedEmailForBookedBy(
     userBookingIdMap,
     req.user,
-    SUBJECT_BOOKING_PENDING,
-    BOOKING_STATUS_PENDING,
-    WELCOME_MESSAGE_PENDING
+    BOOKING_STATUS_PENDING
   );
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
@@ -205,9 +201,7 @@ export const guestBooking = async (req, res) => {
         cardno,
         bookings,
         req.user,
-        SUBJECT_BOOKING_PENDING,
-        BOOKING_STATUS_PENDING,
-        WELCOME_MESSAGE_PENDING
+        BOOKING_STATUS_PENDING
       );
     }
   }
@@ -750,9 +744,7 @@ export const guestBookingFlat = async (req, res) => {
     null,
     { [TYPE_FLAT]: bookingIds },
     req.user,
-    SUBJECT_BOOKING_PENDING,
-    BOOKING_STATUS_PENDING,
-    WELCOME_MESSAGE_PENDING
+    BOOKING_STATUS_PENDING
   );
 
   Object.entries(userBookingIdMap)
@@ -763,9 +755,7 @@ export const guestBookingFlat = async (req, res) => {
         guestCardNo,
         { [TYPE_FLAT]: bookings },
         req.user,
-        SUBJECT_BOOKING_PENDING,
-        BOOKING_STATUS_PENDING,
-        WELCOME_MESSAGE_PENDING
+        BOOKING_STATUS_PENDING
       );
     });
 

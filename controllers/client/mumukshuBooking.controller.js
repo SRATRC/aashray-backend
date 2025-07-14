@@ -16,9 +16,7 @@ import {
   TYPE_UTSAV,
   STATUS_GUEST,
   STATUS_AWAITING_CONFIRMATION,
-  SUBJECT_BOOKING_PENDING,
   BOOKING_STATUS_PENDING,
-  WELCOME_MESSAGE_PENDING,
   STATUS_SEVA_KUTIR
 } from '../../config/constants.js';
 import {
@@ -106,9 +104,7 @@ export const mumukshuBooking = async (req, res) => {
   sendUnifiedEmailForBookedBy(
     userBookingIdMap,
     req.user,
-    SUBJECT_BOOKING_PENDING,
-    BOOKING_STATUS_PENDING,
-    WELCOME_MESSAGE_PENDING
+    BOOKING_STATUS_PENDING
   );
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
@@ -118,9 +114,7 @@ export const mumukshuBooking = async (req, res) => {
         cardno,
         bookings,
         req.user,
-        SUBJECT_BOOKING_PENDING,
-        BOOKING_STATUS_PENDING,
-        WELCOME_MESSAGE_PENDING
+        BOOKING_STATUS_PENDING
       );
     }
   }

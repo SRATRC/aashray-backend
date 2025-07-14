@@ -7,3 +7,5 @@ coverage
 *.mwb
 logs/
 /logs/*
+.env
+services/
