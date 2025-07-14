@@ -514,7 +514,9 @@ export const roomBooking = async (req, res) => {
 };
 
 export const flatBooking = async (req, res) => {
-  validateDate(req.body.checkin_date, req.body.checkout_date);
+  if (req.body.checkin_date > req.body.checkout_date) {
+    throw new ApiError(400, ERR_INVALID_DATE);
+  }
 
   const card = await CardDb.findOne({
     attributes: ['id', 'cardno', 'issuedto', 'gender', 'mobno', 'email', 'credits'],
