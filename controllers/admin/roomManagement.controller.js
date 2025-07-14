@@ -900,7 +900,25 @@ export const ReservationReport = async (req, res) => {
 };
 
 export const flatReservationReport = async (req, res) => {
-  const { start_date, end_date } = req.query;
+  const { start_date, end_date, statuses } = req.query;
+
+  // Handle if `statuses` is not provided or is a single value
+  const statusArray = Array.isArray(statuses)
+    ? statuses
+    : statuses
+    ? [statuses]
+    : null;
+
+  const whereClause = {
+    [Sequelize.Op.or]: [
+      { checkin: { [Sequelize.Op.between]: [start_date, end_date] } },
+      { checkout: { [Sequelize.Op.between]: [start_date, end_date] } }
+    ]
+  };
+
+  if (statusArray) {
+    whereClause.status = { [Sequelize.Op.in]: statusArray };
+  }
 
   const bookings = await FlatBooking.findAll({
     include: [
@@ -918,12 +936,7 @@ export const flatReservationReport = async (req, res) => {
       'status',
       'nights'
     ],
-    where: {
-      [Sequelize.Op.or]: [
-        { checkin: { [Sequelize.Op.between]: [start_date, end_date] } },
-        { checkout: { [Sequelize.Op.between]: [start_date, end_date] } }
-      ]
-    },
+    where: whereClause,
     order: [['checkin', 'ASC']]
   });
 
@@ -1265,3 +1278,163 @@ export async function findAllRoomsUnfiltered(room_type, gender) {
     ]
   });
 }
+
+export const updateFlatBookingStatus = async (req, res) => {
+  const { bookingid, status, description } = req.body;
+
+  const booking = await FlatBooking.findOne({ where: { bookingid } });
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const originalStatus = booking.status;
+  let newStatus = originalStatus;
+
+  if (!status || status === originalStatus) {
+    throw new ApiError(400, 'Status is same as before or missing');
+  }
+
+  if (originalStatus === STATUS_ADMIN_CANCELLED) {
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+
+  switch (status) {
+    case STATUS_PAYMENT_PENDING: {
+      if (originalStatus !== STATUS_WAITING) {
+        throw new ApiError(400, 'Pending can only be set from waiting status');
+      }
+
+      const cardno = booking.bookedBy || booking.cardno;
+      const card = await validateCard(cardno);
+
+      const rate = 700; // flat rate per night
+      const baseAmount = rate * booking.nights;
+
+      let discount = 0;
+      let finalAmount = baseAmount;
+      let txDescription = description || 'Payment pending for flat booking';
+      let txStatus = STATUS_PAYMENT_PENDING;
+
+      let updatedCredits = card.credits || {};
+      const currentFlatCredits = parseInt(updatedCredits.room || 0);
+
+      if (currentFlatCredits > 0) {
+        discount = Math.min(currentFlatCredits, baseAmount);
+        finalAmount = baseAmount - discount;
+        txDescription += ` | Credits used: ₹${discount}`;
+        updatedCredits.room = currentFlatCredits - discount;
+
+        await CardDb.update(
+          { credits: updatedCredits },
+          { where: { cardno }, transaction: t }
+        );
+      }
+
+      if (finalAmount === 0) {
+        newStatus = ROOM_STATUS_PENDING_CHECKIN;
+        txStatus = STATUS_PAYMENT_COMPLETED;
+      } else {
+        newStatus = STATUS_PAYMENT_PENDING;
+        txStatus = STATUS_CASH_PENDING;
+      }
+
+      await booking.update(
+        {
+          amount: finalAmount,
+          status: newStatus,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      await Transactions.create({
+        bookingid,
+        cardno,
+        category: TYPE_FLAT,
+        amount: finalAmount,
+        discount,
+        razorpay_order_id: null,
+        description: txDescription,
+        status: txStatus,
+        updatedBy: req.user.username
+      }, { transaction: t });
+
+      break;
+    }
+
+    case ROOM_STATUS_PENDING_CHECKIN: {
+      if (originalStatus !== STATUS_PAYMENT_PENDING) {
+        throw new ApiError(400, 'Can only mark pending checkin from payment pending');
+      }
+
+      const tx = await Transactions.findOne({
+        where: { bookingid },
+        order: [['createdAt', 'DESC']],
+        transaction: t
+      });
+
+      if (!tx) {
+        throw new ApiError(400, ERR_TRANSACTION_NOT_FOUND);
+      }
+
+      await tx.update({
+        status: STATUS_PAYMENT_COMPLETED,
+        updatedBy: req.user.username,
+        description: description || tx.description
+      }, { transaction: t });
+
+      newStatus = ROOM_STATUS_PENDING_CHECKIN;
+      await booking.update(
+        {
+          status: newStatus,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      break;
+    }
+
+    case STATUS_ADMIN_CANCELLED: {
+      if (![STATUS_WAITING, STATUS_PAYMENT_PENDING].includes(originalStatus)) {
+        throw new ApiError(400, 'Admin Cancelled allowed only from waiting or pending');
+      }
+
+      const tx = await Transactions.findOne({
+        where: { bookingid },
+        order: [['createdAt', 'DESC']],
+        transaction: t
+      });
+
+      if (tx && ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_PAYMENT_COMPLETED].includes(tx.status)) {
+        await tx.update({
+          status: STATUS_ADMIN_CANCELLED,
+          updatedBy: req.user.username,
+          description: description || tx.description
+        }, { transaction: t });
+      }
+
+      newStatus = STATUS_ADMIN_CANCELLED;
+
+      await booking.update(
+        {
+          status: newStatus,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      break;
+    }
+
+    case STATUS_WAITING:
+      throw new ApiError(400, 'Cannot revert back to waiting');
+
+    default:
+      throw new ApiError(400, 'Invalid status provided');
+  }
+
+  await t.commit();
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+};
