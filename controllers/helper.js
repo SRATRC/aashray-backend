@@ -323,12 +323,12 @@ export async function sendUnifiedEmailForBookedBy(
 
 export function getSubject(bookingStatus){
   if(bookingStatus == BOOKING_STATUS_PENDING){
-    return 'Booking created';
+    return 'Bookings created';
   }
   if(bookingStatus == STATUS_CANCELLED){
-    return 'Booking cancelled';
+    return 'Bookings cancelled';
   }
-  return 'Booking confirmed';
+  return 'Bookings confirmed';
 }
 
 export function getWelcomeMessage(bookingStatus,country){
@@ -336,7 +336,7 @@ export function getWelcomeMessage(bookingStatus,country){
   if (bookingStatus == BOOKING_STATUS_PENDING)
   {
 
-    const bookingCreate ="Your Bookings were created.";
+    const bookingCreate ="Your bookings were created.";
     return (country &&
     country != 'India' ) ? 
     bookingCreate+' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
