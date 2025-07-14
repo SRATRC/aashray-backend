@@ -23,9 +23,17 @@ import {
   STATUS_ACTIVE,
   ERR_DATES_NOT_BETWEEN_UTSAV,
   RAJ_PRAVAS_EMAIL,
+<<<<<<< HEAD
   SUBJECT_BOOKING,
   BOOKING_STATUS_PENDING,
   BOOKING_STATUS_CANCEL
+=======
+  BOOKING_STATUS_PENDING,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CANCELLED,
+  ROOM_STATUS_CHECKEDOUT,
+  BOOKING_STATUS_CONFIRMED
+>>>>>>> b12d6e7dc8b6c39be0794d23481359375e940dba
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -89,10 +97,26 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
             { checkout: { [Sequelize.Op.gte]: checkout } }
           ]
         }
+<<<<<<< HEAD
       ],
       cardno: card_no
     }
   });
+=======
+
+      ],
+      status: {
+        [Sequelize.Op.notIn]: [
+          STATUS_CANCELLED,
+          STATUS_ADMIN_CANCELLED,
+          ROOM_STATUS_CHECKEDOUT
+        ]
+      },
+      cardno: card_no
+    }
+  });
+
+>>>>>>> b12d6e7dc8b6c39be0794d23481359375e940dba
 
   return result.length > 0;
 }
@@ -738,6 +762,7 @@ export async function createCardIds(count) {
   return newIds;
 }
 
+<<<<<<< HEAD
 // Validate that at least one of the selected dates intersects the Utsav period.
 // Completely outside Utsav bookings are now permitted, so we only restrict a booking
 // if it ends before it even starts or starts after it ends (i.e. an invalid range).
@@ -754,3 +779,5 @@ export function validateBookingDatesBetweenUtsav(start_date, end_date, utsav) {
   }
   // No further restrictions – bookings completely outside the Utsav period are allowed.
 }
+=======
+>>>>>>> b12d6e7dc8b6c39be0794d23481359375e940dba

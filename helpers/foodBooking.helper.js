@@ -18,8 +18,7 @@ import {
   checkFlatAlreadyBooked,
   checkRoomBookingProgress,
   checkSpecialAllowance,
-  validateDate,
-  validateBookingDatesBetweenUtsav
+  validateDate
 } from '../controllers/helper.js';
 import {
   CardDb,
@@ -181,7 +180,6 @@ export async function bookFoodForGuests(
     });
     const event_start_date = new Date(utsav.start_date);
     const event_end_date = new Date(utsav.end_date);
-    validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
     if (new Date(start_date) < event_start_date) {
       const beforeEventDates = getDates(start_date, event_start_date);
       beforeEventDates.pop(); // Remove the event start date
@@ -459,8 +457,6 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   });
   const event_start_date = new Date(utsav.start_date);
   const event_end_date = new Date(utsav.end_date);
-
-  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cards = await validateCards(mumukshus);

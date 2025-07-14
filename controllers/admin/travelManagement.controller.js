@@ -20,7 +20,8 @@ import {
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_SEATSFULL_CANCELLED,
   STATUS_WRONGFORM_CANCELLED,
-  RAJ_PRAVAS_EMAIL
+  RAJ_PRAVAS_EMAIL,
+  STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
@@ -103,71 +104,71 @@ export const fetchSummary = async (req, res) => {
 
     const sql = `
       SELECT
-  CASE
-  WHEN t1.pickup_point IN (
-    'dadar',
-    'Dadar (Swami Narayan Temple)',
-    'Dadar (Swaminarayan Temple)',
-    'Amar Mahal',
-    'Airoli',
-    'Borivali',
-    'Vile Parle (Sahara Star)',
-    'Airport Terminal 1',
-    'Airport Terminal 2',
-    'Railway Station (Bandra Terminus)',
-    'Railway Station (Kurla Terminus)',
-    'Railway station (LTT - Kurla)',
-    'Railway Station (CSMT)',
-    'Railway Station (Mumbai Central)',
-    'mullund',
-    'Mulund',
-    'AIRPORT T1',
-    'AIRPORT T2',
-    'OTHER',
-    'RAILWAY STATION (LTT - KURLA)',
-    'VILE PARLE (SAHARA STAR HOTEL)',
-    'Full Car Booking',
-    'Dadar (Pritam Hotel)',
-    'Railway station (Mumbai Central)'
-  ) THEN 'Mumbai to Research Centre'
+        CASE
+          WHEN LOWER(t1.pickup_point) IN (
+            'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
+            'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
+            'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
+            'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
+            'dadar (pritam hotel)','borivali (indraprasth shopping centre)','dadar (pritam da dhaba)','mulund (sarvoday nagar)'
+          ) THEN 'Mumbai to Research Centre'
+          WHEN LOWER(t1.drop_point) IN (
+            'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
+            'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
+            'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
+            'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
+            'dadar (pritam hotel)','borivali (indraprasth shopping centre)','dadar (pritam da dhaba)','mulund (sarvoday nagar)'
+          ) THEN 'Research Centre to Mumbai'
+          ELSE 'Other'
+        END AS destination,
 
-  WHEN t1.drop_point IN (
-    'dadar',
-    'Dadar (Swami Narayan Temple)',
-    'Dadar (Swaminarayan Temple)',
-    'Amar Mahal',
-    'Airoli',
-    'Borivali',
-    'Vile Parle (Sahara Star)',
-    'Airport Terminal 1',
-    'Airport Terminal 2',
-    'Railway Station (Bandra Terminus)',
-    'Railway Station (Kurla Terminus)',
-    'Railway station (LTT - Kurla)',
-    'Railway Station (CSMT)',
-    'Railway Station (Mumbai Central)',
-    'mullund',
-    'Mulund',
-    'AIRPORT T1',
-    'AIRPORT T2',
-    'OTHER',
-    'RAILWAY STATION (LTT - KURLA)',
-    'VILE PARLE (SAHARA STAR HOTEL)',
-    'Full Car Booking',
-    'Dadar (Pritam Hotel)',
-    'Railway station (Mumbai Central)'
-  ) THEN 'Research Centre to Mumbai'
+        CASE
+          WHEN t1.status = 'admin cancelled' AND t1.admin_comments = 'admin_cancel_wrong_form'
+            THEN 'Cancelled as wrong form filled'
+          WHEN t1.status = 'admin cancelled' AND t1.admin_comments = 'admin_cancel_seats_full'
+            THEN 'Cancelled as all seats are booked'
+          ELSE t1.status
+        END AS status,
 
-  ELSE 'Other'
-END AS destination,
-t1.status,
-  t1.admin_comments,
         COUNT(*) AS count
+
       FROM travel_db t1
       WHERE t1.date >= :startDate AND t1.date <= :endDate
       ${whereClause}
-      GROUP BY destination, t1.status, t1.admin_comments
-      ORDER BY destination, t1.status
+      GROUP BY
+        CASE
+          WHEN LOWER(t1.pickup_point) IN (
+            'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
+            'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
+            'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
+            'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
+            'dadar (pritam hotel)','borivali (indraprasth shopping centre)','dadar (pritam da dhaba)','mulund (sarvoday nagar)'
+          ) THEN 'Mumbai to Research Centre'
+          WHEN LOWER(t1.drop_point) IN (
+            'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
+            'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
+            'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
+            'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
+            'dadar (pritam hotel)','borivali (indraprasth shopping centre)','dadar (pritam da dhaba)','mulund (sarvoday nagar)'
+          ) THEN 'Research Centre to Mumbai'
+          ELSE 'Other'
+        END,
+        CASE
+          WHEN t1.status = 'admin cancelled' AND t1.admin_comments = 'admin_cancel_wrong_form'
+            THEN 'Cancelled as wrong form filled'
+          WHEN t1.status = 'admin cancelled' AND t1.admin_comments = 'admin_cancel_seats_full'
+            THEN 'Cancelled as all seats are booked'
+          ELSE t1.status
+        END
+      ORDER BY destination, status
     `;
 
     console.log('📥 Replacements:', replacements);
@@ -213,7 +214,6 @@ export const fetchUpcomingBookings = async (req, res) => {
     if (s === 'admin cancelled' && adminCommentFilters.length > 0) {
       return;
     }
-
     replacementMap[`status${i}`] = s;
     conditions.push(`t1.status = :status${i}`);
   });
@@ -225,12 +225,28 @@ export const fetchUpcomingBookings = async (req, res) => {
 
   const additionalWhereClause = getAdditionalConditions(conditions, pickupRC, dropRC, replacementMap);
 
+  // Replace pickup and drop point if user selected "other"
+  const pickupSelect = `
+  CASE
+    WHEN t1.pickup_point IN ('Other', 'Other (enter location in comments)')
+      THEN t1.comments
+    ELSE t1.pickup_point
+  END AS pickup_point`;
+
+const dropSelect = `
+  CASE
+    WHEN t1.drop_point IN ('Other', 'Other (enter location in comments)')
+      THEN t1.comments
+    ELSE t1.drop_point
+  END AS drop_point`;
+
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.pickup_point, t1.drop_point, t1.arrival_time,
-            t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
-            t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
-            t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
-     FROM travel_db t1
+    `SELECT t1.bookingid, t1.bookedBy, t1.date,
+       ${pickupSelect}, ${dropSelect}, t1.arrival_time,
+       t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
+       t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
+       t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
+      FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
      WHERE t1.date >= :startDate AND t1.date <= :endDate
@@ -273,7 +289,7 @@ export const fetchBookingForDriver = async (req, res) => {
             'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
           ) THEN 'Mumbai to Research Centre'
 
           WHEN t1.drop_point IN (
@@ -282,7 +298,7 @@ export const fetchBookingForDriver = async (req, res) => {
             'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
           ) THEN 'Research Centre to Mumbai'
 
           ELSE 'Unknown'
@@ -295,7 +311,7 @@ export const fetchBookingForDriver = async (req, res) => {
             'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
           )
           THEN
             CASE
@@ -305,6 +321,8 @@ export const fetchBookingForDriver = async (req, res) => {
                 THEN 'Amar Mahal'
               WHEN LOWER(t1.pickup_point) = 'airoli'
                 THEN 'Airoli'
+              WHEN LOWER(t1.pickup_point) IN ('other', 'other (enter location in comments)')
+                THEN COALESCE(t1.comments, 'Other')
               ELSE t1.pickup_point
             END
 
@@ -314,7 +332,7 @@ export const fetchBookingForDriver = async (req, res) => {
             'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)'
+            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
           )
           THEN
             CASE
@@ -324,6 +342,8 @@ export const fetchBookingForDriver = async (req, res) => {
                 THEN 'Amar Mahal'
               WHEN LOWER(t1.drop_point) = 'airoli'
                 THEN 'Airoli'
+              WHEN LOWER(t1.drop_point) IN ('other', 'other (enter location in comments)')
+                THEN COALESCE(t1.comments, 'Other')
               ELSE t1.drop_point
             END
 
@@ -393,14 +413,14 @@ export const updateBookingStatus = async (req, res) => {
   switch (status) {
     case STATUS_PROCEED_FOR_PAYMENT:
       if (!transaction) {
-        transaction = await createPendingTransaction(
+        transaction = (await createPendingTransaction(
           bookedByCard,
           booking,
           TYPE_TRAVEL,
           charges,
           req.user.username,
           t
-        );
+        )).transaction;
       }
 
       if (transaction.status === STATUS_PAYMENT_COMPLETED) {

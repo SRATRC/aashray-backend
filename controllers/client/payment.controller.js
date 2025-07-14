@@ -18,7 +18,6 @@ import {
   generateOrderId,
   updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
-import { validateWebhookSignature } from 'razorpay/dist/utils/razorpay-utils.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
@@ -49,7 +48,6 @@ export const verifyPayment = async (req, res) => {
     logger.error(
       `Razorpay: Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`
     );
-
     message = `Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`;
     return res.status(200).json({ message, status: 'ok' });
   }
@@ -57,6 +55,9 @@ export const verifyPayment = async (req, res) => {
   if (razorpay_status == STATUS_PAYMENT_FAILED) {
     logger.error(`Razorpay: Payment failed for order id: ${razorpay_order_id}`);
   }
+
+  const t = await database.transaction();
+  req.transaction = t;
 
   const transactions = await Transactions.findAll({
     where: {
@@ -67,15 +68,14 @@ export const verifyPayment = async (req, res) => {
         STATUS_PAYMENT_FAILED,
         STATUS_PAYMENT_AUTHORIZED
       ]
-    }
+    },
+    lock: { update: true }, 
+    transaction: t
   });
 
   if (transactions && transactions.length > 0) {
     const bookedBy = await validateCard(transactions[0].cardno);
     const updatedBy = RAZORPAY_CALLBACK;
-
-    const t = await database.transaction();
-    req.transaction = t;
 
     const userBookingIdMap = {};
 
@@ -144,6 +144,7 @@ export const verifyPayment = async (req, res) => {
     }
     message = `Payment ${razorpay_status} for order id: ${razorpay_order_id}`;
   } else {
+    await t.rollback();
     message = `No pending bookings found for order id: ${razorpay_order_id}`;
   }
 
@@ -199,8 +200,8 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   const { data } = req.body;
   const t = await database.transaction();
 
-  const bookingCategoryMap = data.reduce((map, item) => {
-    map[item.bookingid] = item.category;
+  const bookingCategoryMap = data.reduce((map, { bookingid, category }) => {
+    (map[bookingid] ??= []).push(category);
     return map;
   }, {});
 
@@ -217,8 +218,10 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   });
 
   const totalAmount = transactions.reduce((sum, transaction) => {
-    const category = bookingCategoryMap[transaction.bookingid];
-    if (category === getBookingType(transaction)) {
+    const categories = bookingCategoryMap[transaction.bookingid];
+    const bookingType = getBookingType(transaction);
+    if (bookingType != TYPE_FOOD
+      || categories.includes(transaction.category)) {
       return sum + transaction.amount;
     }
     return sum;
@@ -226,11 +229,13 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
 
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
-    const validBookingIds = transactions
-      .filter((t) => bookingCategoryMap[t.bookingid] === getBookingType(t))
-      .map((t) => t.bookingid);
+    const validTransactionIds = transactions
+      .filter((t) =>
+        bookingCategoryMap[t.bookingid].includes(getBookingType(t))
+      )
+      .map((t) => t.id);
 
-    await updateRazorpayTransactions(validBookingIds, [], order.id, t);
+    await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();
 
     return res.status(200).send({ message: 'payment successful', data: order });

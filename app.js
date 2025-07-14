@@ -39,7 +39,8 @@ import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 import accountsManagementRoutes from './routes/admin/accountsManagement.routes.js';
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagement.routes.js';
 import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
-import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
+// import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
+import { utsavPublicRouter, utsavAdminRouter } from './routes/admin/utsavManagement.routes.js';
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 
 // Unified Route Imports
@@ -118,7 +119,9 @@ app.use('/api/v1/admin/travel', travelManagementRoutes);
 app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
 app.use('/api/v1/admin/bookings', bookingManagementRoutes);
-app.use('/api/v1/admin/utsav', utsavManagementRoutes);
+// app.use('/api/v1/admin/utsav', utsavManagementRoutes);
+app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
+app.use('/api/v1/admin/utsav', utsavAdminRouter);  // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 
 // Unified Routes

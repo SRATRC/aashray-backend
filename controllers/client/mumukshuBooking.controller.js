@@ -57,8 +57,7 @@ import {
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
   sendUnifiedEmail,
-  setWaitingBookingCountMap,
-  validateBookingDatesBetweenUtsav
+  setWaitingBookingCountMap
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -362,8 +361,6 @@ async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   validateDate(checkin_date, checkout_date);
 
-  validateBookingDatesBetweenUtsav(checkin_date, checkout_date, utsav);
-
   let nights = await calculateNights(checkin_date, checkout_date);
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   const cardDb = await validateCards(mumukshus);
@@ -438,8 +435,6 @@ async function checkFoodAvailability(body, data, utsav) {
   }
 
   validateDate(start_date, end_date);
-
-  validateBookingDatesBetweenUtsav(start_date, end_date, utsav);
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
 
