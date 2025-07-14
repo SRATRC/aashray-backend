@@ -23,17 +23,11 @@ import {
   STATUS_ACTIVE,
   ERR_DATES_NOT_BETWEEN_UTSAV,
   RAJ_PRAVAS_EMAIL,
-<<<<<<< HEAD
   SUBJECT_BOOKING,
-  BOOKING_STATUS_PENDING,
-  BOOKING_STATUS_CANCEL
-=======
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
-  ROOM_STATUS_CHECKEDOUT,
-  BOOKING_STATUS_CONFIRMED
->>>>>>> b12d6e7dc8b6c39be0794d23481359375e940dba
+  ROOM_STATUS_CHECKEDOUT
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -97,12 +91,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
             { checkout: { [Sequelize.Op.gte]: checkout } }
           ]
         }
-<<<<<<< HEAD
-      ],
-      cardno: card_no
-    }
-  });
-=======
 
       ],
       status: {
@@ -116,7 +104,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
     }
   });
 
->>>>>>> b12d6e7dc8b6c39be0794d23481359375e940dba
 
   return result.length > 0;
 }
@@ -338,7 +325,7 @@ export function getSubject(bookingStatus){
   if(bookingStatus == BOOKING_STATUS_PENDING){
     return 'Booking created';
   }
-  if(bookingStatus == BOOKING_STATUS_CANCEL){
+  if(bookingStatus == STATUS_CANCELLED){
     return 'Booking cancelled';
   }
   return 'Booking confirmed';
@@ -356,7 +343,7 @@ export function getWelcomeMessage(bookingStatus,country){
     :bookingCreate+" Payment is due within 24 hours to confirm any bookings in pending status.";
   }
 
-  if( bookingStatus == BOOKING_STATUS_CANCEL){
+  if( bookingStatus == STATUS_CANCELLED){
     return "We are sorry to inform you that your bookings have been cancelled.";
   }
   return 'We are pleased to inform you that your bookings have been confirmed.';
@@ -366,7 +353,7 @@ export async function sendUnifiedEmail(
   cardno,
   bookingIds,
   bookedBy,
-  bookingStatus = 'confirmed',
+  bookingStatus =STATUS_CONFIRMED,
   template = 'unifiedBookingEmail'
 ) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
@@ -762,22 +749,3 @@ export async function createCardIds(count) {
   return newIds;
 }
 
-<<<<<<< HEAD
-// Validate that at least one of the selected dates intersects the Utsav period.
-// Completely outside Utsav bookings are now permitted, so we only restrict a booking
-// if it ends before it even starts or starts after it ends (i.e. an invalid range).
-export function validateBookingDatesBetweenUtsav(start_date, end_date, utsav) {
-  if (!utsav) return;
-
-  const start = new Date(start_date);
-  const end = new Date(end_date);
-  const utsavStart = new Date(utsav.start_date);
-  const utsavEnd = new Date(utsav.end_date);
-
-  if (start > end) {
-    throw new ApiError(400, ERR_DATES_NOT_BETWEEN_UTSAV);
-  }
-  // No further restrictions – bookings completely outside the Utsav period are allowed.
-}
-=======
->>>>>>> b12d6e7dc8b6c39be0794d23481359375e940dba
