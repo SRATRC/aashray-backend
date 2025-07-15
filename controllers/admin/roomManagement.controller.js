@@ -89,14 +89,14 @@ const handleSameDayCheckout = async ({
   await Transactions.create(
     {
       cardno: booking.cardno,
-      bookingid: booking.bookingid,
+      bookingid: uuidv4(),
       category: TYPE_ROOM,
       amount: calcLateCheckoutFee(
         booking.roomtype || booking.roomType,
         isHalfDay
       ),
       status: STATUS_CASH_PENDING,
-      description: 'Late checkout fee',
+      description: `Late checkout fee for booking ${booking.bookingid}`,
       updatedBy: user.username
     },
     { transaction: dbTransaction }
