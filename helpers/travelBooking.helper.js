@@ -90,7 +90,7 @@ export async function updateWaitingTravelBooking(date) {
 
 export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   const today = moment().format('YYYY-MM-DD');
-  if (date <= today) {
+  if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
   let userBookingIds = {},
