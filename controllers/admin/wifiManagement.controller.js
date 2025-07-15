@@ -1,5 +1,17 @@
 import XLSX from 'xlsx';
-import WifiPwd from '../../models/wifi.model.js'; // adjust path if needed
+// import WifiPwd from '../../models/wifi.model.js'; // adjust path if needed
+import {
+  WifiDb,
+  CardDb,
+  FlatBooking,
+  RoomBooking
+} from '../../models/associations.js';
+// import logger from '../../config/logger.js';
+import database from '../../config/database.js';
+import Sequelize from 'sequelize';
+// import moment from 'moment';
+
+
 
 
 export const uploadWiFiCodes = async (req, res) => {
@@ -33,7 +45,7 @@ export const uploadWiFiCodes = async (req, res) => {
 
     const incomingPwd = formattedRows.map((row) => row.password);
 
-    const existingRecords = await WifiPwd.findAll({
+    const existingRecords = await WifiDb.findAll({
       where: { password: incomingPwd },
       attributes: ['password'],
       raw: true
@@ -49,7 +61,7 @@ export const uploadWiFiCodes = async (req, res) => {
         .json({ message: 'No new rows to insert. All passwords were duplicates.' });
     }
 
-    await WifiPwd.bulkCreate(uniqueRows);
+    await WifiDb.bulkCreate(uniqueRows);
 
     res.status(200).json({
       message: `${uniqueRows.length} new record(s) inserted. ${
@@ -66,3 +78,69 @@ export const uploadWiFiCodes = async (req, res) => {
   }
 };
 
+
+export const wifiRecord = async (req, res) => {
+  const { startDate, endDate, status, bookingType } = req.query;
+
+  let whereClause = 'WHERE 1 = 1';
+  const replacements = {};
+
+  if (startDate && endDate) {
+    whereClause += ' AND DATE(wp.updatedAt) BETWEEN :startDate AND :endDate';
+    replacements.startDate = startDate;
+    replacements.endDate = endDate;
+  }
+
+  if (status && status !== 'all') {
+    whereClause += ' AND wp.status = :status';
+    replacements.status = status;
+  }
+
+  if (bookingType === 'room') {
+    whereClause += ' AND rb.bookingid IS NOT NULL';
+  } else if (bookingType === 'flat') {
+    whereClause += ' AND fb.bookingid IS NOT NULL';
+  }
+
+  const query = `
+    SELECT 
+      wp.cardno,
+      wp.password,
+      wp.roombookingid,
+      wp.status,
+      wp.updatedAt AS wifi_updatedAt,
+
+      cd.issuedto,
+      cd.mobno,
+      cd.email,
+
+      rb.checkin AS room_checkin,
+      rb.checkout AS room_checkout,
+      rb.updatedAt AS room_updatedAt,
+
+      fb.checkin AS flat_checkin,
+      fb.checkout AS flat_checkout,
+      fb.updatedAt AS flat_updatedAt
+
+    FROM wifi_pwd AS wp
+
+    LEFT JOIN card_db AS cd ON wp.cardno = cd.cardno
+    LEFT JOIN room_booking AS rb ON wp.roombookingid = rb.bookingid
+    LEFT JOIN flat_booking AS fb ON wp.roombookingid = fb.bookingid
+
+    ${whereClause}
+    ORDER BY wp.updatedAt DESC;
+  `;
+
+  try {
+    const result = await database.query(query, {
+      type: Sequelize.QueryTypes.SELECT,
+      replacements
+    });
+
+    res.status(200).json({ message: 'Success', data: result });
+  } catch (err) {
+    console.error('Error fetching wifi records:', err);
+    res.status(500).json({ error: 'Failed to fetch wifi records' });
+  }
+};
