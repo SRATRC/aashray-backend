@@ -42,6 +42,7 @@ import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js'
 // import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
 import { utsavPublicRouter, utsavAdminRouter } from './routes/admin/utsavManagement.routes.js';
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
+import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -123,6 +124,7 @@ app.use('/api/v1/admin/bookings', bookingManagementRoutes);
 app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
 app.use('/api/v1/admin/utsav', utsavAdminRouter);  // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
+app.use('/api/v1/admin/wifi', wifiManagementRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
