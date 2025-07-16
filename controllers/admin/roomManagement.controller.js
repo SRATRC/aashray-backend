@@ -55,7 +55,7 @@ import {
 } from '../../helpers/transactions.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import getDates from '../../utils/getDates.js';
-import Sequelize from 'sequelize';
+import Sequelize, { Op } from 'sequelize';
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -77,8 +77,8 @@ const handleSameDayCheckout = async ({
   dbTransaction,
   user
 }) => {
-  // On-time checkout ⇒ simply mark as checked-out.
-  if (checkoutTime <= CHECKOUT_DEADLINE) {
+  // On-time checkout || single day booking ⇒ simply mark as checked-out.
+  if (checkoutTime <= CHECKOUT_DEADLINE || booking.nights < 1) {
     await booking.update(
       { status: ROOM_STATUS_CHECKEDOUT, updatedBy: user.username },
       { transaction: dbTransaction }
@@ -90,7 +90,7 @@ const handleSameDayCheckout = async ({
   const isHalfDay = checkoutTime <= LATE_CHECKOUT_HALF;
   await Transactions.create(
     {
-      cardno: booking.cardno,
+      cardno: uuidv4(),
       bookingid: booking.bookingid,
       category: TYPE_ROOM,
       amount: calcLateCheckoutFee(
@@ -98,7 +98,7 @@ const handleSameDayCheckout = async ({
         isHalfDay
       ),
       status: STATUS_CASH_PENDING,
-      description: 'Late checkout fee',
+      description: `Late checkout fee for booking ${booking.bookingid}`,
       updatedBy: user.username
     },
     { transaction: dbTransaction }
@@ -319,19 +319,12 @@ export const manualCheckout = async (req, res) => {
   const checkoutTime = moment().format('HH:mm:ss');
 
   if (today === booking.checkout) {
-    // await handleSameDayCheckout({
-    //   booking,
-    //   checkoutTime,
-    //   dbTransaction,
-    //   user: req.user
-    // });
-    await booking.update(
-      {
-        status: ROOM_STATUS_CHECKEDOUT,
-        updatedBy: req.user.username
-      },
-      { transaction: dbTransaction }
-    );
+    await handleSameDayCheckout({
+      booking,
+      checkoutTime,
+      dbTransaction,
+      user: req.user
+    });
   } else if (today > booking.checkout) {
     // await handleOverstayCheckout({
     //   booking,
@@ -871,9 +864,6 @@ export const unblockRC = async (req, res) => {
 
   return res.status(200).send({ message: 'Unblocked RC successfully' });
 };
-
-import { Op } from 'sequelize';
-// import moment from 'moment';
 
 export const occupancyReport = async (req, res) => {
   const today = moment().startOf('day').toDate(); // today's 00:00
