@@ -16,10 +16,9 @@ import {
   TYPE_UTSAV,
   STATUS_GUEST,
   STATUS_AWAITING_CONFIRMATION,
-  SUBJECT_BOOKING_PENDING,
   BOOKING_STATUS_PENDING,
-  WELCOME_MESSAGE_PENDING,
-  STATUS_SEVA_KUTIR
+  STATUS_SEVA_KUTIR,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
@@ -106,22 +105,13 @@ export const mumukshuBooking = async (req, res) => {
   sendUnifiedEmailForBookedBy(
     userBookingIdMap,
     req.user,
-    SUBJECT_BOOKING_PENDING,
-    BOOKING_STATUS_PENDING,
-    WELCOME_MESSAGE_PENDING
+    BOOKING_STATUS_PENDING
   );
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(
-        cardno,
-        bookings,
-        req.user,
-        SUBJECT_BOOKING_PENDING,
-        BOOKING_STATUS_PENDING,
-        WELCOME_MESSAGE_PENDING
-      );
+      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
     }
   }
   let message =
@@ -464,13 +454,28 @@ async function checkFoodAvailability(body, data, utsav) {
 async function checkTravelAvailability(data) {
   const { date, mumukshuGroup } = data.details;
   const today = moment().format('YYYY-MM-DD');
-  if (date <= today) {
+  if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
-  await checkTravelAlreadyBooked(date, mumukshus);
+
+  for (const group of mumukshuGroup) {
+    const { pickup_point, drop_point, mumukshus: groupMumukshus } = group;
+
+    if (pickup_point !== RESEARCH_CENTRE && drop_point !== RESEARCH_CENTRE) {
+      throw new ApiError(
+        400,
+        'Travel must be either to or from Research Centre'
+      );
+    }
+
+    await checkTravelAlreadyBooked(date, {
+      mumukshus: groupMumukshus,
+      drop_point
+    });
+  }
 
   return {
     status: STATUS_AWAITING_CONFIRMATION,

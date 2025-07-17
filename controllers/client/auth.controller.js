@@ -1,5 +1,5 @@
 import { MSG_UPDATE_SUCCESSFUL } from '../../config/constants.js';
-import { CardDb } from '../../models/associations.js';
+import { CardDb, FlatDb } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
 import sendMail from '../../utils/sendMail.js';
@@ -93,7 +93,15 @@ export const verifyAndLogin = async (req, res) => {
   if (!updated) {
     throw new ApiError(500, 'Error while logging in user');
   }
-  details.password = '';
+
+  const isFlatOwner = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: details.cardno
+    }
+  });
+  details.setDataValue('isFlatOwner', !!isFlatOwner);
+  details.setDataValue('password', '');
   return res.status(200).send({ message: 'logged in', data: details });
 };
 
@@ -122,7 +130,7 @@ export async function forgotPassword(req, res) {
     throw new ApiError(404, 'user not found');
   }
   let temporaryPassword = generateTemporaryPassword();
-  temporaryPassword=temporaryPassword.trim();
+  temporaryPassword = temporaryPassword.trim();
   const salt = bcrypt.genSaltSync(10);
   const hash = bcrypt.hashSync(temporaryPassword, salt);
 

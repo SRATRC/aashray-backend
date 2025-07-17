@@ -3,7 +3,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand
 } from '@aws-sdk/client-s3';
-import { CardDb } from '../../models/associations.js';
+import { CardDb, FlatDb } from '../../models/associations.js';
 import { Expo } from 'expo-server-sdk';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -340,6 +340,15 @@ export const fetchProfile = async (req, res) => {
   if (!profile) {
     throw new ApiError(404, 'user not found');
   }
+
+  const isFlatOwner = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: cardno
+    }
+  });
+
+  profile.setDataValue('isFlatOwner', !!isFlatOwner);
 
   return res.status(200).json({ message: 'Profile fetched', data: profile });
 };

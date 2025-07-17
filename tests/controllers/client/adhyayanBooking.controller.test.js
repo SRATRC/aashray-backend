@@ -1,11 +1,8 @@
 // client/adhyayanBooking.controller.integration.test.js
 import request from 'supertest';
 import { app, sequelize } from '../../../app';
-import { CardDb } from '../../../models/associations';
 import {
-  STATUS_CONFIRMED,
-  STATUS_CANCELLED,
-  TYPE_ADHYAYAN
+  STATUS_CANCELLED
 } from '../../../config/constants';
 
 import ShibirBookingFactory from '../../factories/shibirBookingFactory.js';

@@ -23,6 +23,7 @@ import {
   STATUS_ACTIVE,
   ERR_DATES_NOT_BETWEEN_UTSAV,
   RAJ_PRAVAS_EMAIL,
+  SUBJECT_BOOKING,
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
@@ -90,6 +91,7 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
             { checkout: { [Sequelize.Op.gte]: checkout } }
           ]
         }
+
       ],
       status: {
         [Sequelize.Op.notIn]: [
@@ -101,6 +103,7 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
       cardno: card_no
     }
   });
+
 
   return result.length > 0;
 }
@@ -285,9 +288,7 @@ export function retrieveBookingIds(userBookingIdMap) {
 export async function sendUnifiedEmailForBookedBy(
   userBookingIdMap,
   bookedBy,
-  subject,
-  bookingStatus,
-  welcomeMessage
+  bookingStatus
 ) {
   const flattenedMap = {};
   let isSelfBooking = true;
@@ -315,20 +316,44 @@ export async function sendUnifiedEmailForBookedBy(
       isSelfBooking ? bookedBy.cardno : null,
       flattenedMap,
       bookedBy,
-      subject,
-      bookingStatus,
-      welcomeMessage
+      bookingStatus
     );
   }
+}
+
+export function getSubject(bookingStatus){
+  if(bookingStatus == BOOKING_STATUS_PENDING){
+    return 'Bookings created';
+  }
+  if(bookingStatus == STATUS_CANCELLED){
+    return 'Bookings cancelled';
+  }
+  return 'Bookings confirmed';
+}
+
+export function getWelcomeMessage(bookingStatus,country){
+
+  if (bookingStatus == BOOKING_STATUS_PENDING)
+  {
+
+    const bookingCreate ="Your bookings were created.";
+    return (country &&
+    country != 'India' ) ? 
+    bookingCreate+' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
+    :bookingCreate+" Payment is due within 24 hours to confirm any bookings in pending status.";
+  }
+
+  if( bookingStatus == STATUS_CANCELLED){
+    return "We are sorry to inform you that your bookings have been cancelled.";
+  }
+  return 'We are pleased to inform you that your bookings have been confirmed.';
 }
 
 export async function sendUnifiedEmail(
   cardno,
   bookingIds,
   bookedBy,
-  subject = 'Vitraag Vigyaan Aashray: Bookings Confirmed',
-  bookingStatus = 'Confirmed',
-  welcomeMessage = 'We are pleased to inform you that your bookings have been confirmed.',
+  bookingStatus =STATUS_CONFIRMED,
   template = 'unifiedBookingEmail'
 ) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
@@ -538,16 +563,12 @@ export async function sendUnifiedEmail(
     });
   }
 
+
   const country =
     user && user.country ? user.country : bookedBy && bookedBy.country;
-  if (
-    country &&
-    country != 'India' &&
-    bookingStatus == BOOKING_STATUS_PENDING
-  ) {
-    welcomeMessage =
-      'Your bookings are temporarily reserved. NRIs can make payments for bookings at the Research Center upon arrival.';
-  }
+
+  let welcomeMessage = getWelcomeMessage(bookingStatus,country) ;
+  
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
@@ -556,7 +577,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject,
+      subject:SUBJECT_BOOKING + getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
@@ -583,7 +604,7 @@ export async function sendUnifiedEmail(
   ) {
     sendMail({
       email: RAJ_PRAVAS_EMAIL,
-      subject: 'Vitraag Vigyaan Aashray: ' + name,
+      subject: SUBJECT_BOOKING + name,
       template: template,
       context: {
         showTravelDetail: wasRajprvasBooked,
@@ -727,3 +748,4 @@ export async function createCardIds(count) {
 
   return newIds;
 }
+
