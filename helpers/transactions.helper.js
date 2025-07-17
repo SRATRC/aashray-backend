@@ -136,7 +136,12 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
     case STATUS_PAYMENT_FAILED:
-      if (credits > 0 && bookingType != TYPE_ADHYAYAN && bookingType != TYPE_UTSAV && !ifMigrated(transaction)) {
+      if ([TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) || ifMigrated(transaction)) {
+        // for bookings that are not credited, keep txn status as completed for reports
+        if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+          status = transaction.status;
+        }
+      } else if (credits > 0) {
         await addCredit(user, card, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;
