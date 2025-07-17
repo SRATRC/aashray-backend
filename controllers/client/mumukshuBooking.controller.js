@@ -110,12 +110,7 @@ export const mumukshuBooking = async (req, res) => {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(
-        cardno,
-        bookings,
-        req.user,
-        BOOKING_STATUS_PENDING
-      );
+      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
     }
   }
   let message =
@@ -458,7 +453,7 @@ async function checkFoodAvailability(body, data, utsav) {
 async function checkTravelAvailability(data) {
   const { date, mumukshuGroup } = data.details;
   const today = moment().format('YYYY-MM-DD');
-  if (date <= today) {
+  if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
