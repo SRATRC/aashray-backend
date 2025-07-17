@@ -491,14 +491,23 @@ async function checkFoodAvailability(user, body, data, utsav) {
 }
 
 async function checkTravelAvailability(user, data) {
-  const { date } = data.details;
+  const { date, pickup_point, drop_point } = data.details;
 
   const today = moment().format('YYYY-MM-DD');
   if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
-  await checkTravelAlreadyBooked(date, [user.cardno]);
+  // Check if travel is either to or from Research Centre
+  if (pickup_point !== 'Research Centre' && drop_point !== 'Research Centre') {
+    throw new ApiError(400, 'Travel must be either to or from Research Centre');
+  }
+
+  await checkTravelAlreadyBooked(date, { 
+    mumukshus: [user.cardno],
+    pickup_point,
+    drop_point
+  });
 
   return {
     status: STATUS_AWAITING_CONFIRMATION,
