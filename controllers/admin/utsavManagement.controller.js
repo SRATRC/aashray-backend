@@ -26,7 +26,9 @@ import {
   TYPE_UTSAV,
   STATUS_CREDITED,
   STATUS_CANCELLED,
-  ROOM_STATUS_CHECKEDIN
+  ROOM_STATUS_CHECKEDIN,
+  RESEARCH_CENTRE,
+  STATUS_OPEN
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
@@ -58,9 +60,9 @@ export const createUtsav = async (req, res) => {
       end_date,
       month,
       total_seats,
-      location: location || 'Research Centre',
+      location: location || RESEARCH_CENTRE,
       available_seats: total_seats,
-      status: 'open',
+      status: STATUS_OPEN,
       updatedBy: req.user.username
     },
     { transaction: t }

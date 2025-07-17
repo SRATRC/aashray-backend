@@ -12,7 +12,8 @@ import {
   ERR_INVALID_DATE,
   STATUS_AWAITING_CONFIRMATION,
   MSG_BOOKING_WAITING,
-  BOOKING_STATUS_PENDING
+  BOOKING_STATUS_PENDING,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
@@ -498,14 +499,12 @@ async function checkTravelAvailability(user, data) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
-  // Check if travel is either to or from Research Centre
-  if (pickup_point !== 'Research Centre' && drop_point !== 'Research Centre') {
+  if (pickup_point !== RESEARCH_CENTRE && drop_point !== RESEARCH_CENTRE) {
     throw new ApiError(400, 'Travel must be either to or from Research Centre');
   }
 
-  await checkTravelAlreadyBooked(date, { 
+  await checkTravelAlreadyBooked(date, {
     mumukshus: [user.cardno],
-    pickup_point,
     drop_point
   });
 

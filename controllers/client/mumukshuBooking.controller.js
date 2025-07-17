@@ -17,7 +17,8 @@ import {
   STATUS_GUEST,
   STATUS_AWAITING_CONFIRMATION,
   BOOKING_STATUS_PENDING,
-  STATUS_SEVA_KUTIR
+  STATUS_SEVA_KUTIR,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
@@ -457,23 +458,22 @@ async function checkTravelAvailability(data) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
-  // Validate all cards first
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
 
-  // Check for existing bookings in the same direction
   for (const group of mumukshuGroup) {
     const { pickup_point, drop_point, mumukshus: groupMumukshus } = group;
-    
-    // Check if travel is either to or from Research Centre
-    if (pickup_point !== 'Research Centre' && drop_point !== 'Research Centre') {
-      throw new ApiError(400, 'Travel must be either to or from Research Centre');
+
+    if (pickup_point !== RESEARCH_CENTRE && drop_point !== RESEARCH_CENTRE) {
+      throw new ApiError(
+        400,
+        'Travel must be either to or from Research Centre'
+      );
     }
 
-    await checkTravelAlreadyBooked(date, { 
-      mumukshus: groupMumukshus, 
-      pickup_point, 
-      drop_point 
+    await checkTravelAlreadyBooked(date, {
+      mumukshus: groupMumukshus,
+      drop_point
     });
   }
 
