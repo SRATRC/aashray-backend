@@ -6,13 +6,11 @@ import {
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING
 } from '../../../config/constants.js';
-import { MUMUKSHU_1 } from '../../testConstants.js';
+import { MUMUKSHU_1, TODAY } from '../../testConstants.js';
 import UtsavFactory from '../../factories/utsavFactory.js';
 import { nDaysFromToday } from '../../helpers/date.helper.js';
 
 jest.mock('../../../utils/sendMail.js');
-
-const TODAY = new Date();
 
 describe('Mumukshu Booking Controller', () => {
   describe('Booking', () => {
