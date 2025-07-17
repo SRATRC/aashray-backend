@@ -457,9 +457,25 @@ async function checkTravelAvailability(data) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
+  // Validate all cards first
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
-  await checkTravelAlreadyBooked(date, mumukshus);
+
+  // Check for existing bookings in the same direction
+  for (const group of mumukshuGroup) {
+    const { pickup_point, drop_point, mumukshus: groupMumukshus } = group;
+    
+    // Check if travel is either to or from Research Centre
+    if (pickup_point !== 'Research Centre' && drop_point !== 'Research Centre') {
+      throw new ApiError(400, 'Travel must be either to or from Research Centre');
+    }
+
+    await checkTravelAlreadyBooked(date, { 
+      mumukshus: groupMumukshus, 
+      pickup_point, 
+      drop_point 
+    });
+  }
 
   return {
     status: STATUS_AWAITING_CONFIRMATION,

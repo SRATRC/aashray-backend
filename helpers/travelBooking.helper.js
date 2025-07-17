@@ -1,7 +1,6 @@
 import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
-  RAJ_PRAVAS_EMAIL,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
   STATUS_CANCELLED,
@@ -19,17 +18,65 @@ import moment from 'moment';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
 
-export async function checkTravelAlreadyBooked(date, ...mumukshus) {
+export async function checkTravelAlreadyBooked(date, mumukshuData) {
+  // If mumukshuData is an array of card numbers (backward compatibility)
+  if (Array.isArray(mumukshuData)) {
+    const booking = await TravelDb.findOne({
+      where: {
+        cardno: mumukshuData,
+        status: [
+          STATUS_CONFIRMED,
+          STATUS_WAITING,
+          STATUS_PAYMENT_PENDING,
+          STATUS_AWAITING_CONFIRMATION
+        ],
+        date: date
+      }
+    });
+
+    if (booking) {
+      throw new ApiError(400, ERR_TRAVEL_ALREADY_BOOKED);
+    }
+    return;
+  }
+
+  // New format with direction check
+  const { mumukshus, pickup_point, drop_point } = mumukshuData;
+
+  // Determine direction: true if going to Research Centre, false if coming from Research Centre
+  const isToResearchCentre = drop_point === 'Research Centre';
+  const isFromResearchCentre = pickup_point === 'Research Centre';
+
+  if (!isToResearchCentre && !isFromResearchCentre) {
+    throw new ApiError(400, 'Travel must be either to or from Research Centre');
+  }
+
+  // Check for existing booking in the same direction
   const booking = await TravelDb.findOne({
     where: {
       cardno: mumukshus,
-      status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING],
-      date: date
+      status: [
+        STATUS_CONFIRMED,
+        STATUS_WAITING,
+        STATUS_PAYMENT_PENDING,
+        STATUS_AWAITING_CONFIRMATION
+      ],
+      date: date,
+      // Only check for the same direction
+      pickup_point: isToResearchCentre
+        ? { [Sequelize.Op.ne]: 'Research Centre' }
+        : 'Research Centre',
+      drop_point: isToResearchCentre
+        ? 'Research Centre'
+        : { [Sequelize.Op.ne]: 'Research Centre' }
     }
   });
 
   if (booking) {
-    throw new ApiError(400, ERR_TRAVEL_ALREADY_BOOKED);
+    throw new ApiError(
+      400,
+      'Travel already booked for this direction on the selected date'
+    );
   }
 }
 
@@ -97,7 +144,16 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     waitingBookingCount = 0;
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
-  await checkTravelAlreadyBooked(date, mumukshus);
+
+  // Check for existing bookings with same pickup/drop points
+  for (const group of mumukshuGroup) {
+    const { pickup_point, drop_point, mumukshus: groupMumukshus } = group;
+    await checkTravelAlreadyBooked(date, {
+      mumukshus: groupMumukshus,
+      pickup_point,
+      drop_point
+    });
+  }
 
   const bookings = await TravelDb.findAll({
     where: {
