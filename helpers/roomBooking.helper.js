@@ -492,3 +492,81 @@ export async function checkRoomAvailabilityDuringUtsav(
   }
   return roomDetails;
 }
+
+export async function checkRoomAvailabilityForMumukshus(
+  checkin_date,
+  checkout_date,
+  mumukshuGroup,
+  user,
+  utsav
+) {
+  validateDate(checkin_date, checkout_date);
+
+  let nights = await calculateNights(checkin_date, checkout_date);
+  const mumukshus = mumukshuGroup.flatMap(
+    (group) => group.mumukshus || group.guests
+  );
+  const cardDb = await validateCards(mumukshus);
+
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
+  }
+
+  var roomDetails = [];
+  for (const group of mumukshuGroup) {
+    const { roomType, floorType, mumukshus } = group;
+
+    for (const mumukshu of mumukshus) {
+      const card = cardDb.filter(
+        (item) => item.dataValues.cardno == mumukshu
+      )[0];
+
+      const gender = floorType
+        ? floorType + card.dataValues.gender
+        : card.dataValues.gender;
+
+      if (utsav) {
+        roomDetails.push(
+          ...(await checkRoomAvailabilityDuringUtsav(
+            checkin_date,
+            checkout_date,
+            roomType,
+            gender,
+            utsav,
+            mumukshu,
+            user
+          ))
+        );
+      } else {
+        var status = STATUS_WAITING;
+        var charge = 0;
+        var availableCredits = 0;
+
+        if (nights > 0) {
+          const roomno = await findRoom(
+            checkin_date,
+            checkout_date,
+            roomType,
+            gender
+          );
+          if (roomno) {
+            status = STATUS_AVAILABLE;
+            charge = roomCharge(roomType) * nights;
+            availableCredits = usableCredits(user, TYPE_ROOM, charge);
+          }
+        } else {
+          status = STATUS_AVAILABLE;
+        }
+
+        roomDetails.push({
+          mumukshu,
+          status,
+          charge,
+          availableCredits
+        });
+      }
+    }
+  }
+
+  return roomDetails;
+}

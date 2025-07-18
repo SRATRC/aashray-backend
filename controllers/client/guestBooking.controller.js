@@ -7,7 +7,6 @@ import {
 import {
   STATUS_AVAILABLE,
   TYPE_ROOM,
-  STATUS_WAITING,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
@@ -37,11 +36,9 @@ import {
 import {
   bookDayVisit,
   checkRoomAlreadyBooked,
-  findRoom,
-  roomCharge,
   createFlatBooking,
-  checkRoomAvailabilityDuringUtsav,
-  createRoomBooking
+  createRoomBooking,
+  checkRoomAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import {
   generateOrderId,
@@ -323,79 +320,15 @@ export const validateBooking = async (req, res) => {
 
 async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
+  const result = await checkRoomAvailabilityForMumukshus(
+    checkin_date,
+    checkout_date,
+    guestGroup,
+    user,
+    utsav
+  );
 
-  validateDate(checkin_date, checkout_date);
-
-  const nights = await calculateNights(checkin_date, checkout_date);
-
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
-  const guest_db = await CardDb.findAll({
-    attributes: ['cardno', 'issuedto', 'gender'],
-    where: { cardno: totalGuests }
-  });
-  const guest_details = guest_db.map((guest) => guest.dataValues);
-
-  if (
-    await checkRoomAlreadyBooked(checkin_date, checkout_date, ...totalGuests)
-  ) {
-    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
-  }
-
-  var roomDetails = [];
-  for (const group of guestGroup) {
-    const { roomType, floorType, guests } = group;
-
-    for (const guest of guests) {
-      const gender = floorType
-        ? floorType +
-          guest_details.filter((item) => item.cardno == guest)[0].gender
-        : guest_details.filter((item) => item.cardno == guest)[0].gender;
-
-      if (utsav) {
-        roomDetails.push(
-          ...(await checkRoomAvailabilityDuringUtsav(
-            checkin_date,
-            checkout_date,
-            roomType,
-            gender,
-            utsav,
-            guest,
-            user
-          ))
-        );
-      } else {
-        var status = STATUS_WAITING;
-        var charge = 0;
-        var availableCredits = 0;
-
-        if (nights > 0) {
-          const room = await findRoom(
-            checkin_date,
-            checkout_date,
-            roomType,
-            gender
-          );
-
-          if (room) {
-            status = STATUS_AVAILABLE;
-            charge = roomCharge(roomType) * nights;
-            availableCredits = usableCredits(user, TYPE_ROOM, charge);
-          }
-        } else {
-          status = STATUS_AVAILABLE;
-        }
-
-        roomDetails.push({
-          guestId: guest,
-          status,
-          charge,
-          availableCredits
-        });
-      }
-    }
-  }
-
-  return roomDetails;
+  return result;
 }
 
 async function bookUtsav(data, t, user) {
