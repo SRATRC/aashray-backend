@@ -1,6 +1,10 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
-import { STATUS_CLOSED, STATUS_OPEN } from '../config/constants.js';
+import {
+  RESEARCH_CENTRE,
+  STATUS_CLOSED,
+  STATUS_OPEN
+} from '../config/constants.js';
 
 const ShibirDb = sequelize.define(
   'ShibirDb',
@@ -33,7 +37,7 @@ const ShibirDb = sequelize.define(
     location: {
       type: DataTypes.STRING,
       allowNull: false,
-      defaultValue: 'Research Centre'
+      defaultValue: RESEARCH_CENTRE
     },
     total_seats: {
       type: DataTypes.INTEGER,
