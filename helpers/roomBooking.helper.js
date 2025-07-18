@@ -185,7 +185,9 @@ export async function bookRoomForMumukshus(
 ) {
   validateDate(checkin_date, checkout_date);
 
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  const mumukshus = mumukshuGroup.flatMap(
+    (group) => group.mumukshus || group.guests
+  );
   const cardDb = await validateCards(mumukshus);
 
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {

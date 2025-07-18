@@ -10,7 +10,6 @@ import {
   TYPE_FOOD,
   TYPE_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
-  ERR_ROOM_ALREADY_BOOKED,
   LUNCH_PRICE,
   BREAKFAST_PRICE,
   DINNER_PRICE,
@@ -34,11 +33,9 @@ import {
   setWaitingBookingCountMap
 } from '../helper.js';
 import {
-  bookDayVisit,
-  checkRoomAlreadyBooked,
   createFlatBooking,
-  createRoomBooking,
-  checkRoomAvailabilityForMumukshus
+  checkRoomAvailabilityForMumukshus,
+  bookRoomForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import {
   generateOrderId,
@@ -339,63 +336,14 @@ async function bookUtsav(data, t, user) {
 
 async function bookRoom(data, t, user) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
-
-  validateDate(checkin_date, checkout_date);
-
-  let amount = 0;
-  let userBookingIds = {};
-
-  const nights = await calculateNights(checkin_date, checkout_date);
-  const totalGuests = guestGroup.flatMap((group) => group.guests);
-
-  const guest_db = await CardDb.findAll({
-    attributes: ['cardno', 'issuedto', 'gender'],
-    where: { cardno: totalGuests, res_status: STATUS_GUEST }
-  });
-
-  if (guest_db.length != totalGuests.length) {
-    throw new ApiError(404, 'Guest not found');
-  }
-
-  const guest_details = guest_db.map((guest) => guest.dataValues);
-
-  if (
-    await checkRoomAlreadyBooked(checkin_date, checkout_date, ...totalGuests)
-  ) {
-    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
-  }
-
-  for (const group of guestGroup) {
-    const { roomType, floorType, guests } = group;
-    let result = {};
-    for (const guest of guests) {
-      if (nights == 0) {
-        result = await bookDayVisit(
-          guest,
-          checkin_date,
-          checkout_date,
-          user.cardno,
-          user.cardno,
-          t
-        );
-      } else {
-        result = await createRoomBooking(
-          guest,
-          checkin_date,
-          checkout_date,
-          nights,
-          roomType,
-          guest_details.find((item) => item.cardno == guest)?.gender,
-          floorType,
-          user,
-          t
-        );
-        amount += result.discountedAmount;
-      }
-      userBookingIds[guest] = [result.bookingId];
-    }
-  }
-  return { amount, userBookingIds };
+  const result = await bookRoomForMumukshus(
+    checkin_date,
+    checkout_date,
+    guestGroup,
+    t,
+    user
+  );
+  return result;
 }
 
 async function checkFoodAvailability(data, user, utsav) {
