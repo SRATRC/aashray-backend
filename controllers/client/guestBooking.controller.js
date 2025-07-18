@@ -70,7 +70,7 @@ import {
   validateUtsavs,
   bookUtsavForMumukshus
 } from '../../helpers/utsavBooking.helper.js';
-import { checkAdhyayanAlreadyBooked } from '../../helpers/adhyayanBooking.helper.js';
+import { bookAdhyayanForMumukshus, checkAdhyayanAlreadyBooked } from '../../helpers/adhyayanBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -609,85 +609,8 @@ async function checkAdhyayanAvailability(data) {
 
 async function bookAdhyayan(data, t, user) {
   const { shibir_ids, guests } = data.details;
-  const userBookingIds = {};
-
-  let amount = 0,
-    idx = 0;
-
-  await checkAdhyayanAlreadyBooked(shibir_ids, ...guests);
-
-  const shibirs = await ShibirDb.findAll({
-    where: {
-      id: {
-        [Sequelize.Op.in]: shibir_ids
-      }
-    }
-  });
-
-  if (shibirs.length != shibir_ids.length) {
-    throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
-  }
-
-  var booking_data = [];
-  var transaction_data = [];
-  var waitingBookingCount = 0;
-  for (const guest of guests) {
-    const bookingIds = [];
-    for (var shibir of shibirs) {
-      const bookingid = uuidv4();
-
-      if (shibir.available_seats > 0 && shibir.status == STATUS_OPEN) {
-        booking_data.push({
-          bookingid: bookingid,
-          shibir_id: shibir.dataValues.id,
-          cardno: guest,
-          bookedBy: user.cardno,
-          status:
-            shibir.dataValues.amount > 0
-              ? STATUS_PAYMENT_PENDING
-              : STATUS_CONFIRMED,
-          updatedBy: user.cardno
-        });
-
-        shibir.available_seats -= 1;
-        await shibir.save({ transaction: t });
-
-        if (shibir.dataValues.amount > 0) {
-          transaction_data.push({
-            cardno: user.cardno,
-            bookingid: bookingid,
-            category: TYPE_GUEST_ADHYAYAN,
-            type: TYPE_EXPENSE,
-            amount: shibir.dataValues.amount,
-            status: STATUS_PAYMENT_PENDING,
-            updatedBy: user.cardno
-          });
-
-          amount += shibir.dataValues.amount;
-        }
-      } else {
-        bookingIds[idx++] = bookingid;
-        booking_data.push({
-          bookingid: bookingid,
-          shibir_id: shibir.dataValues.id,
-          cardno: guest,
-          bookedBy: user.cardno,
-          status: STATUS_WAITING,
-          updatedBy: user.cardno
-        });
-        waitingBookingCount++;
-      }
-
-      bookingIds.push(bookingid);
-    }
-
-    userBookingIds[guest] = bookingIds;
-  }
-
-  await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
-  await Transactions.bulkCreate(transaction_data, { transaction: t });
-
-  return { amount, userBookingIds, waitingBookingCount };
+  const result = await bookAdhyayanForMumukshus(shibir_ids, guests, t, user);
+  return result;
 }
 
 export const guestBookingFlat = async (req, res) => {
