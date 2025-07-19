@@ -9,7 +9,8 @@ import {
   STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
   TYPE_ADHYAYAN,
-  ERR_BOOKING_ALREADY_CANCELLED
+  ERR_BOOKING_ALREADY_CANCELLED,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
@@ -69,6 +70,55 @@ export const createAdhyayan = async (req, res) => {
   res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
 };
 
+export const fetchALLAdhyayan = async (req, res) => {
+  const shibirs = await database.query(
+    `SELECT 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      COUNT(CASE WHEN shibir_booking_db.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    FROM 
+      shibir_db
+    LEFT JOIN 
+      shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
+    WHERE 
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
+    GROUP BY 
+      shibir_db.id,
+      shibir_db.name,
+      shibir_db.speaker,
+      shibir_db.month,
+      shibir_db.start_date,
+      shibir_db.end_date,
+      shibir_db.location,
+      shibir_db.total_seats,
+      shibir_db.available_seats,
+      shibir_db.food_allowed,
+      shibir_db.comments,
+      shibir_db.status,
+      shibir_db.updatedBy
+    ORDER BY 
+      shibir_db.start_date ASC;`,
+    {
+      type: QueryTypes.SELECT
+    }
+  );
+
+  return res.status(200).send({ message: 'Fetched Results', data: shibirs });
+};
+
 export const fetchRCAdhyayan = async (req, res) => {
   const shibirs = await database.query(
     `SELECT 
@@ -94,7 +144,7 @@ export const fetchRCAdhyayan = async (req, res) => {
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
       shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
-      AND shibir_db.location = 'Research Centre'
+      AND shibir_db.location = '${RESEARCH_CENTRE}'
     GROUP BY 
       shibir_db.id,
       shibir_db.name,
@@ -446,43 +496,42 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
 
-  
   switch (status) {
     // Only Waiting & Payment Pending booking can be changed to
     // Confirmed
     case STATUS_CONFIRMED:
-  if (booking.status == STATUS_WAITING) {
-    await reserveAdhyayanSeat(adhyayan, t);
-  }
+      if (booking.status == STATUS_WAITING) {
+        await reserveAdhyayanSeat(adhyayan, t);
+      }
 
-  if (!transaction) {
-    transaction = await createPendingTransaction(
-      bookedByCard,
-      booking,
-      TYPE_ADHYAYAN,
-      adhyayan.amount,
-      req.user.username,
-      t,
-      true
-    );
-  }
+      if (!transaction) {
+        transaction = await createPendingTransaction(
+          bookedByCard,
+          booking,
+          TYPE_ADHYAYAN,
+          adhyayan.amount,
+          req.user.username,
+          t,
+          true
+        );
+      }
 
-  // ✅ Update transaction status if pending or cash pending
-  if (
-    transaction.status === STATUS_PAYMENT_PENDING ||
-    transaction.status === STATUS_CASH_PENDING
-  ) {
-    await transaction.update(
-      {
-        status: STATUS_PAYMENT_COMPLETED,
-        description: description,
-        updatedBy: req.user.username
-      },
-      { transaction: t }
-    );
-  }
+      // ✅ Update transaction status if pending or cash pending
+      if (
+        transaction.status === STATUS_PAYMENT_PENDING ||
+        transaction.status === STATUS_CASH_PENDING
+      ) {
+        await transaction.update(
+          {
+            status: STATUS_PAYMENT_COMPLETED,
+            description: description,
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      }
 
-  break;
+      break;
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status == STATUS_CONFIRMED) {
