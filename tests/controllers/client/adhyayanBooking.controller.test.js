@@ -78,7 +78,7 @@ describe('Adhyayan Booking Controller', () => {
         expect(mockTransaction.commit).toHaveBeenCalled();
         expect(sendMail).toHaveBeenCalledWith({
             email: 'test@example.com',
-            subject: 'Vitraag Vigyaan Aashray: Cancellation',
+            subject: 'Cancellation',
             template: 'rajAdhyayanCancellation',
             context: {
                 name: 'Test User',
