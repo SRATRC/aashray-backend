@@ -15,36 +15,17 @@ export const generatePassword = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const isRoomCheckedin = await RoomBooking.findOne({
-    where: {
-      cardno: req.user.cardno,
-      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
-      status: ROOM_STATUS_CHECKEDIN
-    }
-  });
-
-  const isFlatCheckedin = await FlatBooking.findOne({
-    where: {
-      cardno: req.user.cardno,
-      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
-      status: ROOM_STATUS_CHECKEDIN
-    }
-  });
-
-  if (!isRoomCheckedin && !isFlatCheckedin) {
-    throw new APIError(401, 'User not checkedin');
-  }
+  const booking = await fetchBookings(req.user.cardno);
 
   const count = await WifiDb.count({
     where: {
       cardno: req.user.cardno,
       status: STATUS_INACTIVE,
-      roombookingid: isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid
+      roombookingid: booking?.bookingid
     }
   });
   if (count < MAX_WIFI_PASS_LIMIT) {
-    const roombookingid =
-      isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid;
+    const roombookingid = booking?.bookingid;
 
     const [updatedRows, updatedRowsCount] = await WifiDb.update(
       {
@@ -91,33 +72,40 @@ export const generatePassword = async (req, res) => {
 };
 
 export const getPassword = async (req, res) => {
-  const isRoomCheckedin = await RoomBooking.findOne({
-    where: {
-      cardno: req.user.cardno,
-      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
-      status: ROOM_STATUS_CHECKEDIN
-    }
-  });
-
-  const isFlatCheckedin = await FlatBooking.findOne({
-    where: {
-      cardno: req.user.cardno,
-      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
-      status: ROOM_STATUS_CHECKEDIN
-    }
-  });
-
-  if (!isRoomCheckedin && !isFlatCheckedin) {
-    throw new APIError(401, 'User not checkedin');
-  }
+  const booking = await fetchBookings(req.user.cardno);
 
   const passwords = await WifiDb.findAll({
     attributes: ['password', 'createdAt'],
     where: {
       cardno: req.user.cardno,
-      roombookingid: isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid
+      roombookingid: booking?.bookingid
     },
     order: [['createdAt', 'ASC']]
   });
   return res.status(200).send({ message: 'Wifi Passwords', data: passwords });
+};
+
+const fetchBookings = async (cardno) => {
+  const [isRoomCheckedin, isFlatCheckedin] = await Promise.all([
+    RoomBooking.findOne({
+      where: {
+        cardno,
+        checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
+        status: ROOM_STATUS_CHECKEDIN
+      }
+    }),
+    FlatBooking.findOne({
+      where: {
+        cardno,
+        checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
+        status: ROOM_STATUS_CHECKEDIN
+      }
+    })
+  ]);
+
+  if (!isRoomCheckedin && !isFlatCheckedin) {
+    throw new APIError(401, 'User not checkedin');
+  }
+
+  return isRoomCheckedin || isFlatCheckedin;
 };
