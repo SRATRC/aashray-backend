@@ -86,21 +86,16 @@ export const getPassword = async (req, res) => {
 };
 
 const fetchBookings = async (cardno) => {
+  const today = moment().format('YYYY-MM-DD');
+  const commonWhereClause = {
+    cardno,
+    checkout: { [Sequelize.Op.gte]: today },
+    status: ROOM_STATUS_CHECKEDIN
+  };
+
   const [isRoomCheckedin, isFlatCheckedin] = await Promise.all([
-    RoomBooking.findOne({
-      where: {
-        cardno,
-        checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
-        status: ROOM_STATUS_CHECKEDIN
-      }
-    }),
-    FlatBooking.findOne({
-      where: {
-        cardno,
-        checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
-        status: ROOM_STATUS_CHECKEDIN
-      }
-    })
+    RoomBooking.findOne({ where: commonWhereClause }),
+    FlatBooking.findOne({ where: commonWhereClause })
   ]);
 
   if (!isRoomCheckedin && !isFlatCheckedin) {
