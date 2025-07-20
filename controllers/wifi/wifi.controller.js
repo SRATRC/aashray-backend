@@ -9,6 +9,8 @@ import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import moment from 'moment';
 
+const MAX_WIFI_PASS_LIMIT = 3;
+
 export const generatePassword = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
@@ -40,7 +42,7 @@ export const generatePassword = async (req, res) => {
       roombookingid: isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid
     }
   });
-  if (count < 5) {
+  if (count < MAX_WIFI_PASS_LIMIT) {
     const roombookingid =
       isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid;
 
@@ -81,12 +83,15 @@ export const generatePassword = async (req, res) => {
       message: 'Your wifi password has been generated'
     });
   } else {
-    throw new APIError(400, 'Cannot generate more than 4 passwords');
+    throw new APIError(
+      400,
+      `Cannot generate more than ${MAX_WIFI_PASS_LIMIT} passwords`
+    );
   }
 };
 
 export const getPassword = async (req, res) => {
-  const isCheckedIn = await RoomBooking.findOne({
+  const isRoomCheckedin = await RoomBooking.findOne({
     where: {
       cardno: req.user.cardno,
       checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
@@ -94,15 +99,23 @@ export const getPassword = async (req, res) => {
     }
   });
 
-  if (!isCheckedIn) {
-    return res.status(200).send({ message: 'Wifi Passwords', data: [] });
+  const isFlatCheckedin = await FlatBooking.findOne({
+    where: {
+      cardno: req.user.cardno,
+      checkout: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') },
+      status: ROOM_STATUS_CHECKEDIN
+    }
+  });
+
+  if (!isRoomCheckedin && !isFlatCheckedin) {
+    throw new APIError(401, 'User not checkedin');
   }
 
   const passwords = await WifiDb.findAll({
     attributes: ['password', 'createdAt'],
     where: {
       cardno: req.user.cardno,
-      roombookingid: isCheckedIn.bookingid
+      roombookingid: isRoomCheckedin?.bookingid || isFlatCheckedin?.bookingid
     },
     order: [['createdAt', 'ASC']]
   });
