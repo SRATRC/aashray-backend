@@ -1,6 +1,6 @@
 import express from 'express';
 const router = express.Router();
-import { login, createAdmin } from '../../controllers/admin/auth.controller.js';
+import { login, createAdmin, resetPassword } from '../../controllers/admin/auth.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_SUPER_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -12,5 +12,6 @@ router.post(
   authorizeRoles(ROLE_SUPER_ADMIN),
   CatchAsync(createAdmin)
 );
+router.post('/reset-password', CatchAsync(resetPassword));
 
 export default router;
