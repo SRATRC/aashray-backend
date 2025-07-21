@@ -199,7 +199,8 @@ export async function bookRoomForMumukshus(
   let amount = 0;
   let userBookingIds = {};
   for (const group of mumukshuGroup) {
-    const { roomType, floorType, mumukshus } = group;
+    const { roomType, floorType } = group;
+    const mumukshus = group.mumukshus || group.guests;
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
@@ -516,7 +517,8 @@ export async function checkRoomAvailabilityForMumukshus(
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
-    const { roomType, floorType, mumukshus } = group;
+    const { roomType, floorType } = group;
+    const mumukshus = group.mumukshus || group.guests;
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter(
