@@ -1,32 +1,23 @@
 import {
-  ShibirDb,
-  ShibirBookingDb,
-  Transactions,
   CardDb,
   GuestRelationship,
   FlatDb,
   UtsavDb
 } from '../../models/associations.js';
 import {
-  STATUS_PAYMENT_PENDING,
-  TYPE_EXPENSE,
   STATUS_AVAILABLE,
   TYPE_ROOM,
-  STATUS_CONFIRMED,
   STATUS_WAITING,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
-  TYPE_GUEST_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
   ERR_ROOM_ALREADY_BOOKED,
-  ERR_ADHYAYAN_NOT_FOUND,
   LUNCH_PRICE,
   BREAKFAST_PRICE,
   DINNER_PRICE,
   MSG_BOOKING_SUCCESSFUL,
   MSG_UPDATE_SUCCESSFUL,
   STATUS_GUEST,
-  STATUS_OPEN,
   TYPE_UTSAV,
   TYPE_FLAT,
   MSG_BOOKING_WAITING,
@@ -43,7 +34,6 @@ import {
   checkFlatAlreadyBooked,
   setWaitingBookingCountMap
 } from '../helper.js';
-import { v4 as uuidv4 } from 'uuid';
 import {
   bookDayVisit,
   checkRoomAlreadyBooked,
@@ -59,7 +49,6 @@ import {
   usableCredits
 } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import {
@@ -70,7 +59,7 @@ import {
   validateUtsavs,
   bookUtsavForMumukshus
 } from '../../helpers/utsavBooking.helper.js';
-import { checkAdhyayanAlreadyBooked } from '../../helpers/adhyayanBooking.helper.js';
+import { bookAdhyayanForMumukshus, checkAdhyayanAvailabilityForMumukshus } from '../../helpers/adhyayanBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -258,8 +247,9 @@ export const validateBooking = async (req, res) => {
       break;
 
     case TYPE_ADHYAYAN:
-      response.adhyayanDetails = await checkAdhyayanAvailability(
-        req.body.primary_booking
+      response.adhyayanDetails = await checkAdhyayanAvailabilityForMumukshus(
+        primary_booking.details.shibir_ids,
+        primary_booking.details.guests
       );
       response.totalCharge += response.adhyayanDetails.reduce(
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
@@ -308,7 +298,10 @@ export const validateBooking = async (req, res) => {
           break;
 
         case TYPE_ADHYAYAN:
-          response.adhyayanDetails = await checkAdhyayanAvailability(addon);
+          response.adhyayanDetails = await checkAdhyayanAvailabilityForMumukshus(
+            addon.details.shibir_ids,
+            addon.details.guests
+          );
           response.totalCharge += response.adhyayanDetails.reduce(
             (partialSum, adhyayan) => partialSum + adhyayan.charge,
             0
@@ -565,129 +558,10 @@ async function bookFood(primary_booking, data, t, user) {
   return result;
 }
 
-async function checkAdhyayanAvailability(data) {
-  const { shibir_ids, guests } = data.details;
-
-  const shibirs = await ShibirDb.findAll({
-    where: {
-      id: {
-        [Sequelize.Op.in]: shibir_ids
-      }
-    }
-  });
-
-  if (shibirs.length != shibir_ids.length) {
-    throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
-  }
-
-  await checkAdhyayanAlreadyBooked(shibir_ids, ...guests);
-
-  var adhyayanDetails = [];
-  for (var shibir of shibirs) {
-    var available = 0;
-    var waiting = 0;
-    var charge = 0;
-
-    if (shibir.dataValues.status == STATUS_OPEN) {
-      available = Math.min(shibir.dataValues.available_seats, guests.length);
-      charge = available * shibir.dataValues.amount;
-      waiting = guests.length - available;
-    } else {
-      waiting = guests.length;
-    }
-
-    adhyayanDetails.push({
-      shibirId: shibir.dataValues.id,
-      available: available,
-      waiting: waiting,
-      charge: charge
-    });
-  }
-
-  return adhyayanDetails;
-}
-
 async function bookAdhyayan(data, t, user) {
   const { shibir_ids, guests } = data.details;
-  const userBookingIds = {};
-
-  let amount = 0,
-    idx = 0;
-
-  await checkAdhyayanAlreadyBooked(shibir_ids, ...guests);
-
-  const shibirs = await ShibirDb.findAll({
-    where: {
-      id: {
-        [Sequelize.Op.in]: shibir_ids
-      }
-    }
-  });
-
-  if (shibirs.length != shibir_ids.length) {
-    throw new ApiError(400, ERR_ADHYAYAN_NOT_FOUND);
-  }
-
-  var booking_data = [];
-  var transaction_data = [];
-  var waitingBookingCount = 0;
-  for (const guest of guests) {
-    const bookingIds = [];
-    for (var shibir of shibirs) {
-      const bookingid = uuidv4();
-
-      if (shibir.available_seats > 0 && shibir.status == STATUS_OPEN) {
-        booking_data.push({
-          bookingid: bookingid,
-          shibir_id: shibir.dataValues.id,
-          cardno: guest,
-          bookedBy: user.cardno,
-          status:
-            shibir.dataValues.amount > 0
-              ? STATUS_PAYMENT_PENDING
-              : STATUS_CONFIRMED,
-          updatedBy: user.cardno
-        });
-
-        shibir.available_seats -= 1;
-        await shibir.save({ transaction: t });
-
-        if (shibir.dataValues.amount > 0) {
-          transaction_data.push({
-            cardno: user.cardno,
-            bookingid: bookingid,
-            category: TYPE_GUEST_ADHYAYAN,
-            type: TYPE_EXPENSE,
-            amount: shibir.dataValues.amount,
-            status: STATUS_PAYMENT_PENDING,
-            updatedBy: user.cardno
-          });
-
-          amount += shibir.dataValues.amount;
-        }
-      } else {
-        bookingIds[idx++] = bookingid;
-        booking_data.push({
-          bookingid: bookingid,
-          shibir_id: shibir.dataValues.id,
-          cardno: guest,
-          bookedBy: user.cardno,
-          status: STATUS_WAITING,
-          updatedBy: user.cardno
-        });
-        waitingBookingCount++;
-      }
-
-      bookingIds.push(bookingid);
-    }
-
-    userBookingIds[guest] = bookingIds;
-  }
-
-  await ShibirBookingDb.bulkCreate(booking_data, { transaction: t });
-  await Transactions.bulkCreate(transaction_data, { transaction: t });
-
-  return { amount, userBookingIds, waitingBookingCount };
+  const result = await bookAdhyayanForMumukshus(shibir_ids, guests, t, user);
+  return result;
 }
 
 export const guestBookingFlat = async (req, res) => {
