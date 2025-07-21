@@ -2,10 +2,8 @@ import express from 'express';
 const router = express.Router();
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import {
-  fetchRCAdhyayan,
-  fetchKolAdhyayan,
-  fetchRajAdhyayan,
-  fetchDhuleAdhyayan,
+  fetchPGS,
+  fetchAdhyayanByLocation,
   fetchAdhyayanBookings,
   createAdhyayan,
   updateAdhyayan,
@@ -15,7 +13,8 @@ import {
   fetchAdhyayan,
   fetchAllAdhyayanList,
   adhyayanPendinglist,
-  fetchALLAdhyayan
+  fetchALLAdhyayan,
+  softDeleteShibir
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -34,10 +33,8 @@ router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADM
 
 router.post('/create', CatchAsync(createAdhyayan));
 router.get('/fetchALLadhyayan', CatchAsync(fetchALLAdhyayan));
-router.get('/fetchRCadhyayan', CatchAsync(fetchRCAdhyayan));
-router.get('/fetchKolAdhyayan', CatchAsync(fetchKolAdhyayan));
-router.get('/fetchRajAdhyayan', CatchAsync(fetchRajAdhyayan));
-router.get('/fetchDhuleAdhyayan', CatchAsync(fetchDhuleAdhyayan));
+router.get('/fetchPGS', CatchAsync(fetchPGS));
+router.get('/fetchAdhyayan', CatchAsync(fetchAdhyayanByLocation));
 router.get('/fetch/:id', CatchAsync(fetchAdhyayan));
 router.put('/update/:id', CatchAsync(updateAdhyayan));
 router.get('/waitlist/:id', CatchAsync(adhyayanWaitlist));
@@ -46,5 +43,6 @@ router.get('/bookings', CatchAsync(fetchAdhyayanBookings));
 router.put('/status', CatchAsync(adhyayanStatusUpdate));
 router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 router.get('/fetchList', CatchAsync(fetchAllAdhyayanList));
+router.put('/:id', CatchAsync(softDeleteShibir));
 
 export default router;
