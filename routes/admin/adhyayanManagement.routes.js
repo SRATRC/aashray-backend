@@ -14,7 +14,8 @@ import {
   activateAdhyayan,
   fetchAdhyayan,
   fetchAllAdhyayanList,
-  adhyayanPendinglist
+  adhyayanPendinglist,
+  fetchALLAdhyayan
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -32,6 +33,7 @@ router.use(auth);
 router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN, ROLE_DHU_ADHYAYAN_ADMIN, ROLE_RAJ_ADHYAYAN_ADMIN, ROLE_KOL_ADHYAYAN_ADMIN, ROLE_ACCOUNTS_ADMIN, ROLE_PRA_ACCOUNTS_ADMIN));
 
 router.post('/create', CatchAsync(createAdhyayan));
+router.get('/fetchALLadhyayan', CatchAsync(fetchALLAdhyayan));
 router.get('/fetchRCadhyayan', CatchAsync(fetchRCAdhyayan));
 router.get('/fetchKolAdhyayan', CatchAsync(fetchKolAdhyayan));
 router.get('/fetchRajAdhyayan', CatchAsync(fetchRajAdhyayan));
