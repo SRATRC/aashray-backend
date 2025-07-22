@@ -16,7 +16,7 @@ module.exports = {
   async down(queryInterface, Sequelize) {
     // Rollback: remove 'deleted' from status column
     await queryInterface.sequelize.query(`
-      ALTER TABLE adhyayan_db
+      ALTER TABLE shibir_db
       MODIFY COLUMN status ENUM(
         'open',
         'closed'
