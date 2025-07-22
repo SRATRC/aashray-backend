@@ -43,6 +43,6 @@ router.get('/bookings', CatchAsync(fetchAdhyayanBookings));
 router.put('/status', CatchAsync(adhyayanStatusUpdate));
 router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 router.get('/fetchList', CatchAsync(fetchAllAdhyayanList));
-router.put('/:id', CatchAsync(softDeleteShibir));
+router.delete('/:id', CatchAsync(softDeleteShibir));
 
 export default router;
