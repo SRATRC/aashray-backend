@@ -6,9 +6,14 @@ import {
 } from '../../../config/constants';
 
 import ShibirBookingFactory from '../../factories/shibirBookingFactory.js';
+import ShibirBookingDb from '../../../models/shibir_booking_db.model.js';
 jest.mock('../../../utils/sendMail.js');
 
 describe('Adhyayan Booking Controller', () => {
+  beforeEach(async () => {
+    await ShibirBookingDb.truncate();
+  });
+
   describe('Cancel Shibir', () => {
     it('should cancel self booking successfully', async () => {
       const booking = await ShibirBookingFactory.create('Mumukshu_1');

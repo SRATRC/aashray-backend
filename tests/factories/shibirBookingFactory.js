@@ -1,12 +1,13 @@
-import { CardDb, ShibirBookingDb } from "../../models/associations.js";
+import { STATUS_CONFIRMED } from "../../config/constants.js";
+import { ShibirBookingDb } from "../../models/associations.js";
 
 export default class ShibirBookingFactory {
   static async create(cardno) {
     const bookingDetails = {
-      bookingid: "1",
+      bookingid: 1,
       cardno: cardno,
       shibir_id: 1,
-      status: "confirmed"
+      status: STATUS_CONFIRMED
     };
 
     return await ShibirBookingDb.create(bookingDetails);

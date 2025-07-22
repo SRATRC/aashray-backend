@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { app, sequelize } from '../../../app.js';
-import { CardDb, RoomBooking } from '../../../models/associations.js';
+import { CardDb, RoomBooking, UtsavDb } from '../../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
@@ -28,10 +28,11 @@ describe('Mumukshu Booking Controller', () => {
     });
 
     describe('Room Booking', () => {
-      beforeEach(async () => {
-        // await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
-        // await RoomBooking.truncate();
-        // await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
+      beforeAll(async () => {
+        await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
+        await RoomBooking.truncate();
+        await UtsavDb.truncate();
+        await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
       });
 
       it('should book room for single day visit successfully', async () => {
