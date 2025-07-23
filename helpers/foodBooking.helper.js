@@ -112,9 +112,9 @@ export async function bookFoodForMumukshus(
   const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
   const bookings = await getFoodBookings(allDates, mumukshus);
 
-  var bookingsToCreate = [];
-  var transactionsToCreate = [];
-  var amount = 0;
+  const bookingsToCreate = [];
+  const transactionsToCreate = [];
+  let amount = 0;
   const userBookingIds = {};
 
   for (const group of mumukshuGroup) {
