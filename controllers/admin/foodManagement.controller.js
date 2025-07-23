@@ -21,12 +21,9 @@ import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import {
-  bookFoodForGuests,
   bookFoodForMumukshus,
-  cancelFood,
   cancelMeal,
-  createGroupFoodRequest,
-  createGroupFoodRequestForGuest
+  createGroupFoodRequest
 } from '../../helpers/foodBooking.helper.js';
 import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
@@ -153,51 +150,28 @@ export const bookFood = async (req, res) => {
     card = await findCardByMobno(mobno);
   }
 
-  if (card.res_status == STATUS_GUEST) {
-    const guestGroup = createGroupFoodRequestForGuest(
-      card.cardno,
-      breakfast,
-      lunch,
-      dinner,
-      spicy,
-      hightea
-    );
+  const mumukshuGroup = createGroupFoodRequest(
+    card.cardno,
+    breakfast,
+    lunch,
+    dinner,
+    spicy,
+    hightea
+  );
 
-    await bookFoodForGuests(
-      start_date,
-      end_date,
-      guestGroup,
-      null,
-      req.user.username,
-      t,
-      null,
-      true
-    );
-  } else {
-    const mumukshuGroup = createGroupFoodRequest(
-      card.cardno,
-      breakfast,
-      lunch,
-      dinner,
-      spicy,
-      hightea
-    );
-
-    console.log(JSON.stringify(req.roles));
-
-    await bookFoodForMumukshus(
-      start_date,
-      end_date,
-      mumukshuGroup,
-      null,
-      null,
-      null,
-      t,
-      req.user.username,
-      req.roles
-    );
-  }
-
+  await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    null,
+    null,
+    card.cardno,
+    t,
+    req.user.username,
+    req.roles,
+    true
+  );
+  
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };

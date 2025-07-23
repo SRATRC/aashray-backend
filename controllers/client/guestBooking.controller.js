@@ -46,7 +46,7 @@ import database from '../../config/database.js';
 import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import {
-  bookFoodForGuests,
+  bookFoodForMumukshus,
   getFoodBookings
 } from '../../helpers/foodBooking.helper.js';
 import {
@@ -74,7 +74,7 @@ export const guestBooking = async (req, res) => {
 
     case TYPE_FOOD:
       const foodResult = await bookFood(
-        primary_booking,
+        req.body,
         primary_booking,
         t,
         req.user
@@ -130,7 +130,7 @@ export const guestBooking = async (req, res) => {
 
         case TYPE_FOOD:
           const foodResult = await bookFood(
-            primary_booking,
+            req.body,
             addon,
             t,
             req.user
@@ -415,25 +415,21 @@ async function checkFoodAvailability(data, user, utsav) {
   };
 }
 
-async function bookFood(primary_booking, data, t, user) {
+async function bookFood(body, data, t, user) {
   let { start_date, end_date, guestGroup } = data.details;
   if (!end_date) {
     end_date = start_date;
   }
 
-  const utsavid =
-    primary_booking.booking_type == TYPE_UTSAV
-      ? primary_booking.details.utsavid
-      : null;
-
-  const result = await bookFoodForGuests(
+  const result = await bookFoodForMumukshus(
     start_date,
     end_date,
     guestGroup,
-    user.cardno,
+    body.primary_booking,
+    body.addons,
     user.cardno,
     t,
-    utsavid
+    user.cardno
   );
 
   return result;
