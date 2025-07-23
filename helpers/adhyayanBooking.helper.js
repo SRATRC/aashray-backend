@@ -222,15 +222,17 @@ export async function checkAdhyayanAvailabilityForMumukshus(
 
   var adhyayanDetails = [];
   for (var shibir of shibirs) {
-    var available = mumukshus.length;
+    var available = 0;
     var waiting = 0;
     var charge = 0;
 
-    if (shibir.dataValues.available_seats < mumukshus.length) {
-      available = shibir.dataValues.available_seats;
-      waiting = mumukshus.length - shibir.dataValues.available_seats;
+    if (shibir.status == STATUS_OPEN) {
+      available = Math.min(shibir.available_seats, mumukshus.length);
+      charge = available * shibir.amount;
+      waiting = mumukshus.length - available;
+    } else {
+      waiting = mumukshus.length;
     }
-    charge = available * shibir.dataValues.amount;
 
     adhyayanDetails.push({
       shibirId: shibir.dataValues.id,
