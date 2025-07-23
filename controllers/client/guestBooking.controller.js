@@ -47,7 +47,7 @@ import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import {
   bookFoodForMumukshus,
-  getFoodBookings
+  checkFoodAvailabilityForMumumkshus
 } from '../../helpers/foodBooking.helper.js';
 import {
   validateUtsavs,
@@ -233,6 +233,7 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
+        req.body,
         req.body.primary_booking,
         req.user,
         utsav
@@ -284,6 +285,7 @@ export const validateBooking = async (req, res) => {
 
         case TYPE_FOOD:
           response.foodDetails = await checkFoodAvailability(
+            req.body,
             addon,
             req.user,
             utsav
@@ -346,73 +348,21 @@ async function bookRoom(data, t, user) {
   return result;
 }
 
-async function checkFoodAvailability(data, user, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date, guestGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
 
-  validateDate(start_date, end_date);
+  const result = await checkFoodAvailabilityForMumumkshus(
+    start_date,
+    end_date,
+    guestGroup,
+    body.primary_booking,
+    body.addons,
+    utsav,
+    user,
+    true
+  );
 
-  let allDates = [];
-  if (utsav) {
-    const event_start_date = utsav.start_date;
-    const event_end_date = utsav.end_date;
-
-    if (new Date(start_date) < event_start_date) {
-      const beforeEventDates = getDates(start_date, event_start_date);
-      beforeEventDates.pop(); // Remove the event start date
-      allDates = [...allDates, ...beforeEventDates];
-    }
-
-    if (new Date(end_date) > event_end_date) {
-      const afterEventDates = getDates(event_end_date, end_date);
-      afterEventDates.shift(); // Remove the event end date
-      allDates = [...allDates, ...afterEventDates];
-    }
-  } else {
-    allDates = getDates(start_date, end_date);
-  }
-
-  const guests = guestGroup.flatMap((group) => group.guests);
-
-  const bookings = await getFoodBookings(allDates, guests);
-
-  var charge = 0;
-  var availableCredits = 0;
-
-  for (const group of guestGroup) {
-    const { meals, guests } = group;
-
-    for (const date of allDates) {
-      for (const guest of guests) {
-        const booking = bookings[guest] && bookings[guest][date];
-
-        if (booking) {
-          // Only charge for meals that weren't previously booked
-          charge +=
-            meals.includes('breakfast') && !booking.breakfast
-              ? BREAKFAST_PRICE
-              : 0;
-          charge += meals.includes('lunch') && !booking.lunch ? LUNCH_PRICE : 0;
-          charge +=
-            meals.includes('dinner') && !booking.dinner ? DINNER_PRICE : 0;
-        } else {
-          // Charge for all new meals
-          charge += meals.includes('breakfast') ? BREAKFAST_PRICE : 0;
-          charge += meals.includes('lunch') ? LUNCH_PRICE : 0;
-          charge += meals.includes('dinner') ? DINNER_PRICE : 0;
-        }
-      }
-    }
-  }
-  availableCredits = usableCredits(user, TYPE_FOOD, charge);
-
-  return {
-    status: STATUS_AVAILABLE,
-    charge,
-    availableCredits
-  };
+  return result;
 }
 
 async function bookFood(body, data, t, user) {

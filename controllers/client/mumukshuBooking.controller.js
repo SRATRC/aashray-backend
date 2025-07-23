@@ -255,7 +255,7 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data, utsav);
+      response.foodDetails = await checkFoodAvailability(body, data, user, utsav);
       break;
 
     case TYPE_ADHYAYAN:
@@ -353,7 +353,7 @@ async function checkRoomAvailability(data, user, utsav) {
   return result;
 }
 
-async function checkFoodAvailability(body, data, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date, mumukshuGroup } = data.details;
 
   const result = await checkFoodAvailabilityForMumumkshus(
@@ -362,7 +362,8 @@ async function checkFoodAvailability(body, data, utsav) {
     mumukshuGroup,
     body.primary_booking,
     body.addons,
-    utsav
+    utsav,
+    user
   );
 
   return result;

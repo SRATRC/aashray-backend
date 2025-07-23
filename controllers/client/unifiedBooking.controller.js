@@ -259,9 +259,9 @@ async function validate(body, user, data, response, utsav) {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
-        user,
         body,
         data,
+        user,
         utsav
       );
       // food charges are not added for Mumukshus
@@ -470,7 +470,7 @@ async function checkRoomAvailability(user, data, utsav) {
   }
 }
 
-async function checkFoodAvailability(user, body, data, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date } = data.details;
 
   const result = await checkFoodAvailabilityForMumumkshus(
@@ -483,7 +483,8 @@ async function checkFoodAvailability(user, body, data, utsav) {
     ],
     body.primary_booking,
     body.addons,
-    utsav
+    utsav,
+    user
   );
 
   return result;
