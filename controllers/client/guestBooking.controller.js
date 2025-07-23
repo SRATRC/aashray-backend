@@ -417,10 +417,6 @@ async function checkFoodAvailability(data, user, utsav) {
 
 async function bookFood(body, data, t, user) {
   let { start_date, end_date, guestGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
-
   const result = await bookFoodForMumukshus(
     start_date,
     end_date,

@@ -28,8 +28,8 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  createGroupFoodRequest,
-  validateFood
+  checkFoodAvailabilityForMumumkshus,
+  createGroupFoodRequest
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
@@ -473,23 +473,20 @@ async function checkRoomAvailability(user, data, utsav) {
 async function checkFoodAvailability(user, body, data, utsav) {
   let { start_date, end_date } = data.details;
 
-  if (!end_date) {
-    end_date = start_date;
-  }
-
-  validateDate(start_date, end_date);
-  await validateFood(
+  const result = await checkFoodAvailabilityForMumumkshus(
     start_date,
     end_date,
+    [
+      {
+        mumukshus: [user.cardno],
+      }
+    ],
     body.primary_booking,
     body.addons,
-    user
+    utsav
   );
 
-  return {
-    status: STATUS_AVAILABLE,
-    charge: 0
-  };
+  return result;
 }
 
 async function checkTravelAvailability(user, data) {

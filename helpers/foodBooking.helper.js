@@ -84,6 +84,9 @@ export async function bookFoodForMumukshus(
   userRoles = [],
   cashAllowed = false
 ) {
+  if (!end_date) {
+    end_date = start_date;
+  }
   validateDate(start_date, end_date);
 
   const mumukshus = mumukshuGroup.flatMap(
@@ -199,6 +202,38 @@ export async function bookFoodForMumukshus(
   });
   const transactionIds = transactions.map((item) => item.id);
   return { amount, userBookingIds, transactionIds };
+}
+
+export async function checkFoodAvailabilityForMumumkshus(
+  start_date,
+  end_date,
+  mumukshuGroup,
+  primary_booking,
+  addons,
+  utsav
+) {  
+  if (!end_date) {
+    end_date = start_date;
+  }
+  validateDate(start_date, end_date);
+
+  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  const cards = await validateCards(mumukshus);
+
+  for (const card of cards) {
+    await validateFood(
+      start_date,
+      end_date,
+      primary_booking,
+      addons,
+      card
+    );
+  }
+
+  return {
+    status: STATUS_AVAILABLE,
+    charge: 0
+  };
 }
 
 async function getDatesDuringUtsav(start_date, end_date, utsavId) {
