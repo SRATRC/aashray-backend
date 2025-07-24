@@ -69,7 +69,7 @@ export const verifyPayment = async (req, res) => {
         STATUS_PAYMENT_AUTHORIZED
       ]
     },
-    lock: { update: true }, 
+    lock: { update: true },
     transaction: t
   });
 
@@ -217,11 +217,12 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     }
   });
 
+  logger.info(`Transactions found: ${transactions}`);
+
   const totalAmount = transactions.reduce((sum, transaction) => {
     const categories = bookingCategoryMap[transaction.bookingid];
     const bookingType = getBookingType(transaction);
-    if (bookingType != TYPE_FOOD
-      || categories.includes(transaction.category)) {
+    if (bookingType != TYPE_FOOD || categories.includes(transaction.category)) {
       return sum + transaction.amount;
     }
     return sum;
@@ -230,10 +231,14 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
     const validTransactionIds = transactions
-      .filter((t) =>
-        bookingCategoryMap[t.bookingid].includes(getBookingType(t))
-      )
-      .map((t) => t.id);
+      .filter((transaction) => {
+        const categories = bookingCategoryMap[transaction.bookingid];
+        const bookingType = getBookingType(transaction);
+        return (
+          bookingType != TYPE_FOOD || categories.includes(transaction.category)
+        );
+      })
+      .map((transaction) => transaction.id);
 
     await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();
