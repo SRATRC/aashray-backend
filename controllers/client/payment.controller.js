@@ -231,14 +231,13 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
     const validTransactionIds = transactions
-    const validTransactions = transactions.filter((transaction) => {
-      const categories = bookingCategoryMap[transaction.bookingid];
-      const bookingType = getBookingType(transaction);
-      return bookingType != TYPE_FOOD || categories.includes(transaction.category);
-    });
-
-    const totalAmount = validTransactions.reduce((sum, t) => sum + t.amount, 0);
-    const validTransactionIds = validTransactions.map((t) => t.id);
+      .filter((transaction) => {
+        const categories = bookingCategoryMap[transaction.bookingid];
+        const bookingType = getBookingType(transaction);
+        return (
+          bookingType != TYPE_FOOD || categories.includes(transaction.category)
+        );
+      })
       .map((transaction) => transaction.id);
 
     await updateRazorpayTransactions([], validTransactionIds, order.id, t);
