@@ -217,28 +217,26 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     }
   });
 
-  logger.info(`Transactions found: ${transactions}`);
+  logger.info(`Transactions found: ${JSON.stringify(transactions)}`);
 
-  const totalAmount = transactions.reduce((sum, transaction) => {
-    const categories = bookingCategoryMap[transaction.bookingid];
-    const bookingType = getBookingType(transaction);
-    if (bookingType != TYPE_FOOD || categories.includes(transaction.category)) {
-      return sum + transaction.amount;
-    }
-    return sum;
-  }, 0);
+  const { totalAmount, validTransactionIds } = transactions.reduce(
+    (acc, transaction) => {
+      const categories = bookingCategoryMap[transaction.bookingid];
+      const bookingType = getBookingType(transaction);
+      if (
+        bookingType != TYPE_FOOD ||
+        categories.includes(transaction.category)
+      ) {
+        acc.totalAmount += transaction.amount;
+        acc.validTransactionIds.push(transaction.id);
+      }
+      return acc;
+    },
+    { totalAmount: 0, validTransactionIds: [] }
+  );
 
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
-    const validTransactionIds = transactions
-      .filter((transaction) => {
-        const categories = bookingCategoryMap[transaction.bookingid];
-        const bookingType = getBookingType(transaction);
-        return (
-          bookingType != TYPE_FOOD || categories.includes(transaction.category)
-        );
-      })
-      .map((transaction) => transaction.id);
 
     await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();
