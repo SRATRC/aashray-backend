@@ -14,14 +14,15 @@ import {
   validateDate,
   calculateNights,
   checkFlatAlreadyBooked,
-  sendUnifiedEmail
+  sendUnifiedEmail,
+  sendUnifiedEmailForBookedBy
 } from '../helper.js';
 import {
   updateRazorpayTransactions,
   userCancelBooking
 } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
-import { createFlatBooking } from '../../helpers/roomBooking.helper.js';
+import { bookFlatForMumukshus, createFlatBooking } from '../../helpers/roomBooking.helper.js';
 import { generateOrderId } from '../../helpers/transactions.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
@@ -146,60 +147,36 @@ export const CancelBooking = async (req, res) => {
 export const FlatBookingMumukshu = async (req, res) => {
   const { mumukshus, startDay, endDay } = req.body;
 
-  const flatDb = await FlatDb.findOne({
-    attributes: ['flatno'],
-    where: {
-      owner: req.user.cardno
-    }
-  });
-
-  if (!flatDb) throw new ApiError(404, 'Flat not found');
-
-  validateDate(startDay, endDay);
-
-  for (var mumukshu of mumukshus) {
-    if (await checkFlatAlreadyBooked(startDay, endDay, mumukshu['cardno'])) {
-      throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
-    }
-  }
-
-  const nights = await calculateNights(startDay, endDay);
-
   const t = await database.transaction();
   req.transaction = t;
 
-  const userBookingIds = {},
-    bookingIds = [];
-  let amount = 0;
-  for (var mumukshu of mumukshus) {
-    const booking = await createFlatBooking(
-      mumukshu['cardno'],
-      startDay,
-      endDay,
-      nights,
-      flatDb.dataValues.flatno,
-      req.user,
-      req.user.cardno,
-      t
-    );
-    amount += booking.discountedAmount;
-    userBookingIds[mumukshu['cardno']] = [booking.bookingId];
-    bookingIds.push(booking.bookingId);
-  }
+  const cardnos = mumukshus.map((mumukshu) => mumukshu['cardno']);
 
-  const order = await generateOrderId(amount);
-  await updateRazorpayTransactions(bookingIds, [], order.id, t);
+  const { userBookingIds, order } = await bookFlatForMumukshus(
+    startDay,
+    endDay,
+    cardnos,
+    req.user,
+    t
+  );
 
   await t.commit();
 
-sendUnifiedEmail(null, { [TYPE_FLAT]: bookingIds }, req.user, BOOKING_STATUS_PENDING);
-  
+  sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
+
   Object.entries(userBookingIds)
-    .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
-    .forEach(([guestCardNo, bookings]) => {
-      // Create the single-entry bookingMap object directly when calling the function
-sendUnifiedEmail(guestCardNo, { [TYPE_FLAT]: bookings }, req.user, BOOKING_STATUS_PENDING);
+    .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
+    .forEach(([cardno, bookings]) => {
+      sendUnifiedEmail(
+        cardno,
+        { [TYPE_FLAT]: bookings },
+        req.user,
+        BOOKING_STATUS_PENDING
+      );
     });
 
-  return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL, data: order });
+  return res.status(200).send({
+    message: MSG_BOOKING_SUCCESSFUL,
+    data: order
+  });
 };
