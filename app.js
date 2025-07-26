@@ -65,6 +65,16 @@ if (!fs.existsSync(logsDir)) {
     // Synchronize the models with the database (create tables if they don't exist)
     await sequelize.sync();
 
+    // Pre-warm the connection pool to minimum size
+    const minConnections = sequelize.options.pool.min || 2;
+    const warmupPromises = Array.from({ length: minConnections }, () =>
+      sequelize.query('SELECT 1 as warmup', {
+        type: sequelize.QueryTypes.SELECT
+      })
+    );
+    await Promise.all(warmupPromises);
+    logger.info(`Connection pool warmed up with ${minConnections} connections`);
+
     // Start connection monitoring
     connectionMonitor.start();
   } catch (error) {

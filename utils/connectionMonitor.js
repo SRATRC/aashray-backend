@@ -5,7 +5,8 @@ import sequelize from '../config/database.js';
  * Monitor database connection pool status
  */
 export class ConnectionMonitor {
-  constructor(intervalMs = 60000) { // Default: check every minute
+  constructor(intervalMs = 60000) {
+    // Default: check every minute
     this.intervalMs = intervalMs;
     this.monitoringInterval = null;
     this.isMonitoring = false;
@@ -40,7 +41,7 @@ export class ConnectionMonitor {
   checkConnectionPool() {
     try {
       const pool = sequelize.connectionManager.pool;
-      
+
       const status = {
         size: pool.size,
         available: pool.available,
@@ -51,24 +52,31 @@ export class ConnectionMonitor {
 
       // Log warnings for potential issues
       if (status.waiting > 0) {
-        logger.warn(`Connection pool has ${status.waiting} waiting connections`, status);
+        logger.warn(
+          `Connection pool has ${
+            status.waiting
+          } waiting connections - ${JSON.stringify(status)}`
+        );
       }
 
       if (status.using / status.size > 0.8) {
-        logger.warn(`Connection pool usage is high: ${status.using}/${status.size}`, status);
+        logger.warn(
+          `Connection pool usage is high: ${status.using}/${
+            status.size
+          } - ${JSON.stringify(status)}`
+        );
       }
 
       if (status.available === 0 && status.using === status.size) {
-        logger.error('Connection pool exhausted!', status);
+        logger.error(`Connection pool exhausted! - ${JSON.stringify(status)}`);
       }
 
       // Log info every 10 minutes (600 seconds)
       if (Date.now() % 600000 < this.intervalMs) {
-        logger.info('Connection pool status:', status);
+        logger.info(`Connection pool status: ${JSON.stringify(status)}`);
       }
-
     } catch (error) {
-      logger.error('Failed to check connection pool status:', error);
+      logger.error(`Failed to check connection pool status: ${error.message}`);
     }
   }
 
@@ -78,7 +86,7 @@ export class ConnectionMonitor {
       logger.info('Database connection test successful');
       return true;
     } catch (error) {
-      logger.error('Database connection test failed:', error);
+      logger.error(`Database connection test failed: ${error.message}`);
       return false;
     }
   }
