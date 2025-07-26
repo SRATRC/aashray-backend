@@ -11,7 +11,15 @@ const config = {
     database: process.env.DB_NAME,
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
-    dialect: 'mysql'
+    dialect: 'mysql',
+    pool: {
+      max: 5,
+      min: 2,
+      acquire: 60000, // Maximum time (ms) to try getting connection before throwing error
+      idle: 30000, // Maximum time (ms) a connection can be idle before being released
+      evict: 1000, // Time interval (ms) to run eviction to free idle connections
+      handleDisconnects: true // Automatically handle disconnects
+    }
   },
   qa: {
     username: process.env.DB_USERNAME,
@@ -26,7 +34,14 @@ const config = {
         ca: private_key
       }
     },
-    pool: { maxConnections: 5, maxIdleTime: 30 },
+    pool: {
+      max: 10,
+      min: 2,
+      acquire: 60000,
+      idle: 30000,
+      evict: 1000,
+      handleDisconnects: true
+    },
     language: 'en'
   },
   prod: {
@@ -35,7 +50,15 @@ const config = {
     database: process.env.DB_NAME,
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
-    dialect: 'mysql'
+    dialect: 'mysql',
+    pool: {
+      max: 25,
+      min: 5,
+      acquire: 60000,
+      idle: 30000,
+      evict: 1000,
+      handleDisconnects: true
+    }
   }
 };
 

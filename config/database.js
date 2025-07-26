@@ -16,7 +16,14 @@ const sequelize = new Sequelize(
         ca: private_key
       }
     },
-    pool: { max: 5, idle: 30000 },
+    pool: {
+      max: 10, // Maximum number of connections in pool
+      min: 2, // Minimum number of connections in pool
+      acquire: 60000, // Maximum time (ms) to try getting connection before throwing error
+      idle: 30000, // Maximum time (ms) a connection can be idle before being released
+      evict: 1000, // Time interval (ms) to run eviction to free idle connections
+      handleDisconnects: true // Automatically handle disconnects
+    },
     language: 'en'
   }
 );
