@@ -20,6 +20,10 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
+import database from '../config/database.js';
+
+const SAMVATSARI_PACKAGE_ID = 21;
+const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   const utsav = await UtsavDb.findOne({
@@ -124,6 +128,53 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
       }
     }
   });
+
+  if (alreadyBooked.length > 0)
+    throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
+
+  await checkOverlapWithSamvatsari(mumukshus);
+}
+
+export async function checkOverlapWithSamvatsari(mumukshus) {
+  const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
+  const mumukshu_packages = mumukshus.map((mumukshu) => mumukshu.packageid);
+
+  if (mumukshu_packages.length === 0) return;
+
+  const alreadyBooked = await database.query(
+    `
+      SELECT *
+      FROM utsav_booking t1
+      WHERE t1.cardno IN (:cardnos)
+      AND t1.status IN (:status)
+      AND (
+        (
+          t1.packageid = :samvatsari_package_id
+          AND true = :packages_overlap_with_samvatsari
+        ) OR (
+          t1.packageid IN (:samvatsari_overlapping_packages)
+          AND true = :packages_include_samvatsari
+        )
+      )
+      `,
+    {
+      replacements: {
+        cardnos: mumukshu_cardnos,
+        status: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED, STATUS_WAITING],
+        samvatsari_package_id: SAMVATSARI_PACKAGE_ID,
+        samvatsari_overlapping_packages: SAMVATSARI_OVERLAPPING_PACKAGE_IDS,
+        packages_overlap_with_samvatsari:
+          mumukshu_packages.filter((mp) =>
+            SAMVATSARI_OVERLAPPING_PACKAGE_IDS.includes(mp)
+          ).length > 0,
+        packages_include_samvatsari:
+          mumukshu_packages.filter((mp) => mp === SAMVATSARI_PACKAGE_ID)
+            .length > 0
+      },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
+
   if (alreadyBooked.length > 0)
     throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
 }
