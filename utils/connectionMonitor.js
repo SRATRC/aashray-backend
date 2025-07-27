@@ -59,7 +59,7 @@ export class ConnectionMonitor {
         );
       }
 
-      if (status.using / status.size > 0.8) {
+      if (status.size > 0 && status.using / status.size > 0.8) {
         logger.warn(
           `Connection pool usage is high: ${status.using}/${
             status.size
@@ -71,7 +71,7 @@ export class ConnectionMonitor {
         logger.error(`Connection pool exhausted! - ${JSON.stringify(status)}`);
       }
 
-      // Log info every 10 minutes (600 seconds)
+      // Log info every 10 minutes
       if (Date.now() % 600000 < this.intervalMs) {
         logger.info(`Connection pool status: ${JSON.stringify(status)}`);
       }
