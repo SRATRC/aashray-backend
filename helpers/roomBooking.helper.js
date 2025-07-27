@@ -23,13 +23,14 @@ import {
   FlatDb
 } from '../models/associations.js';
 import { createPendingTransaction } from './transactions.helper.js';
-import { calculateNights, validateDate } from '../controllers/helper.js';
+import { calculateNights, groupByCardno, validateDate } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
 import logger from '../config/logger.js';
+import { overlappingUtsavBookings } from './utsavBooking.helper.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -428,6 +429,8 @@ export async function checkRoomAvailabilityDuringUtsav(
   let charge = 0;
   let availableCredits = 0;
 
+  
+
   if (new Date(checkin_date) < new Date(event_start_date)) {
     const beforeNights = await calculateNights(checkin_date, event_start_date);
 
@@ -515,6 +518,16 @@ export async function checkRoomAvailabilityForMumukshus(
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
+  let mumukshuUtsavBookings;
+  if (!utsav) {
+    const utsavBookings = await overlappingUtsavBookings(
+      mumukshus,
+      checkin_date,
+      checkout_date
+    );
+    mumukshuUtsavBookings = groupByCardno(utsavBookings);
+  }
+
   var roomDetails = [];
   for (const group of mumukshuGroup) {
     const { roomType, floorType } = group;
@@ -529,14 +542,15 @@ export async function checkRoomAvailabilityForMumukshus(
         ? floorType + card.dataValues.gender
         : card.dataValues.gender;
 
-      if (utsav) {
+      const utsavBooking = mumukshuUtsavBookings[mumukshu];
+      if (utsav || utsavBooking) {
         roomDetails.push(
           ...(await checkRoomAvailabilityDuringUtsav(
             checkin_date,
             checkout_date,
             roomType,
             gender,
-            utsav,
+            utsav || utsavBooking,
             mumukshu,
             user
           ))

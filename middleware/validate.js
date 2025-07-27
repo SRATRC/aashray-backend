@@ -25,34 +25,6 @@ export const validateCard = catchAsync(async (req, res, next) => {
   next();
 });
 
-async function hasOverlappingUtsavBooking(cardno, checkin_date, checkout_date) {
-  const utsavBookings = await UtsavBooking.findAll({
-    where: {
-      cardno,
-      status: {
-        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
-      }
-    },
-    include: [
-      {
-        model: UtsavDb,
-        where: {
-          [Sequelize.Op.or]: [
-            {
-              [Sequelize.Op.and]: [
-                { start_date: { [Sequelize.Op.lte]: checkout_date } },
-                { end_date: { [Sequelize.Op.gte]: checkin_date } }
-              ]
-            }
-          ]
-        }
-      }
-    ]
-  });
-
-  return utsavBookings.length > 0;
-}
-
 export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
   /*
     This middleware now supports validation for all booking types (room, utsav, travel)

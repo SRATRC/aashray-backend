@@ -229,3 +229,46 @@ export async function validateUtsavPackage(packageId, utsavId) {
 
   return packageData;
 }
+
+export async function overlappingUtsavBookings(cardnos, startDate, endDate) {
+  const utsavBookings = await UtsavBooking.findAll({
+    where: {
+      cardnos,
+      status: {
+        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
+      }
+    },
+    include: [
+      {
+        model: UtsavDb,
+        where: {
+          [Sequelize.Op.or]: [
+            {
+              // utsav starts between start and end date
+              [Sequelize.Op.and]: [
+                { start_date: { [Sequelize.Op.gte]: startDate } },
+                { start_date: { [Sequelize.Op.lt]: endDate } }
+              ]
+            },
+            {
+              // utsav ends between start and end date
+              [Sequelize.Op.and]: [
+                { end_date: { [Sequelize.Op.gt]: startDate } },
+                { end_date: { [Sequelize.Op.lte]: endDate } }
+              ]
+            },
+            {
+              // utsav starts before start and ends after end date
+              [Sequelize.Op.and]: [
+                { start_date: { [Sequelize.Op.lte]: startDate } },
+                { end_date: { [Sequelize.Op.gte]: endDate } }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  });
+
+  return utsavBookings;
+}

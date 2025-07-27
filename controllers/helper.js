@@ -749,3 +749,14 @@ export async function createCardIds(count) {
   return newIds;
 }
 
+export function groupByCardno(arr) {
+  const grouped = arr.reduce((acc, obj) => {
+    const cardno = obj.cardno;
+    acc[cardno] = acc[cardno] || [];
+    acc[cardno].push(obj);
+    return acc;
+  }, {});
+
+  return grouped;
+}
+
