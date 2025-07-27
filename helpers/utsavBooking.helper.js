@@ -164,12 +164,11 @@ export async function checkOverlapWithSamvatsari(mumukshus) {
         samvatsari_package_id: SAMVATSARI_PACKAGE_ID,
         samvatsari_overlapping_packages: SAMVATSARI_OVERLAPPING_PACKAGE_IDS,
         packages_overlap_with_samvatsari:
-          mumukshu_packages.filter((mp) =>
-            SAMVATSARI_OVERLAPPING_PACKAGE_IDS.includes(mp)
-          ).length > 0,
+          mumukshu_packages.some((packageid) =>
+            SAMVATSARI_OVERLAPPING_PACKAGE_IDS.includes(packageid)
+          ),
         packages_include_samvatsari:
-          mumukshu_packages.filter((mp) => mp === SAMVATSARI_PACKAGE_ID)
-            .length > 0
+          mumukshu_packages.includes(SAMVATSARI_PACKAGE_ID)
       },
       type: Sequelize.QueryTypes.SELECT
     }
