@@ -9,8 +9,7 @@ import {
   STATUS_ACTIVE,
   STATUS_INACTIVE,
   STATUS_PENDING,
-  STATUS_APPROVED,
-  STATUS_REJECTED
+  STATUS_APPROVED
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -24,6 +23,9 @@ export const generatePassword = async (req, res) => {
   req.transaction = t;
 
   const booking = await fetchBookings(req.user.cardno);
+  if (!booking) {
+    throw new APIError(404, 'user not checked in yet.');
+  }
 
   const count = await WifiDb.count({
     where: {
@@ -81,6 +83,12 @@ export const generatePassword = async (req, res) => {
 
 export const getPassword = async (req, res) => {
   const booking = await fetchBookings(req.user.cardno);
+  if (!booking) {
+    return res.status(200).send({
+      message: 'No active bookings found',
+      data: []
+    });
+  }
 
   const passwords = await WifiDb.findAll({
     attributes: ['password', 'createdAt'],
@@ -107,7 +115,7 @@ const fetchBookings = async (cardno) => {
   ]);
 
   if (!isRoomCheckedin && !isFlatCheckedin) {
-    throw new APIError(401, 'User not checkedin');
+    return null;
   }
 
   return isRoomCheckedin || isFlatCheckedin;
