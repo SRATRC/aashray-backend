@@ -161,7 +161,7 @@ export const requestPermanentCode = async (req, res) => {
 };
 
 export const getPermanentCodeStatus = async (req, res) => {
-  const permanentCodeRequest = await PermanentWifiCodes.findOne({
+  const permanentCodeRequest = await PermanentWifiCodes.findAll({
     where: { cardno: req.user.cardno },
     attributes: [
       'id',
@@ -172,10 +172,6 @@ export const getPermanentCodeStatus = async (req, res) => {
       'admin_comments'
     ]
   });
-
-  if (!permanentCodeRequest) {
-    throw new APIError(404, 'No permanent WiFi code request found');
-  }
 
   return res.status(200).send({
     message: 'Permanent WiFi code status',
