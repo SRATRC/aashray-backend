@@ -127,8 +127,6 @@ export const requestPermanentCode = async (req, res) => {
   });
 
   if (existingRequest) {
-    await t.rollback();
-
     let message = 'You have already requested a permanent WiFi code';
     if (existingRequest.status === STATUS_APPROVED) {
       message = 'You already have an approved permanent WiFi code';

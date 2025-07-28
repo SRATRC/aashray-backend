@@ -152,7 +152,7 @@ export const getPermanentCodeRequests = async (req, res) => {
     status &&
     [STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED].includes(status)
   ) {
-    whereClause.request_status = status;
+    whereClause.status = status;
   }
 
   const { count, rows } = await PermanentWifiCodes.findAndCountAll({
