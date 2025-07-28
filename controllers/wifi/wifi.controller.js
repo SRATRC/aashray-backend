@@ -1,8 +1,16 @@
-import { FlatBooking, RoomBooking, WifiDb } from '../../models/associations.js';
+import {
+  FlatBooking,
+  RoomBooking,
+  WifiDb,
+  PermanentWifiCodes
+} from '../../models/associations.js';
 import {
   ROOM_STATUS_CHECKEDIN,
   STATUS_ACTIVE,
-  STATUS_INACTIVE
+  STATUS_INACTIVE,
+  STATUS_PENDING,
+  STATUS_APPROVED,
+  STATUS_REJECTED
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -103,4 +111,76 @@ const fetchBookings = async (cardno) => {
   }
 
   return isRoomCheckedin || isFlatCheckedin;
+};
+
+export const requestPermanentCode = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  // Check if user already has a pending or approved request
+  const existingRequest = await PermanentWifiCodes.findOne({
+    where: {
+      cardno: req.user.cardno,
+      status: [STATUS_PENDING, STATUS_APPROVED]
+    },
+    transaction: t
+  });
+
+  if (existingRequest) {
+    await t.rollback();
+
+    let message = 'You have already requested a permanent WiFi code';
+    if (existingRequest.status === STATUS_APPROVED) {
+      message = 'You already have an approved permanent WiFi code';
+    } else if (existingRequest.status === STATUS_PENDING) {
+      message =
+        'You have a pending permanent WiFi code request. Please wait for admin approval.';
+    }
+
+    throw new APIError(400, message);
+  }
+
+  const newRequest = await PermanentWifiCodes.create(
+    {
+      cardno: req.user.cardno,
+      status: STATUS_PENDING,
+      requested_at: new Date()
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+
+  return res.status(201).send({
+    message:
+      'Permanent WiFi code request submitted successfully. It will be reviewed by the admin.',
+    data: {
+      id: newRequest.id,
+      status: newRequest.status,
+      requested_at: newRequest.requested_at
+    }
+  });
+};
+
+export const getPermanentCodeStatus = async (req, res) => {
+  const permanentCodeRequest = await PermanentWifiCodes.findOne({
+    where: { cardno: req.user.cardno },
+    attributes: [
+      'id',
+      'code',
+      'status',
+      'requested_at',
+      'reviewed_at',
+      'admin_comments'
+    ]
+  });
+
+  if (!permanentCodeRequest) {
+    throw new APIError(404, 'No permanent WiFi code request found');
+  }
+
+  return res.status(200).send({
+    message: 'Permanent WiFi code status',
+    data: permanentCodeRequest
+  });
 };
