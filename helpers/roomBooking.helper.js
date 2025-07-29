@@ -30,7 +30,7 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
 import logger from '../config/logger.js';
-import { overlappingUtsavBookings } from './utsavBooking.helper.js';
+import { overlappingUtsavBookings, splitDateRanges } from './utsavBooking.helper.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -419,83 +419,47 @@ export async function checkRoomAvailabilityDuringUtsav(
   roomType,
   gender,
   utsav,
-  mumkshu,
+  mumukshu,
   user
 ) {
   var roomDetails = [];
-  const event_start_date = utsav.start_date;
-  const event_end_date = utsav.end_date;
-  let statusValue = STATUS_WAITING;
+  
+  let status = STATUS_WAITING;
   let charge = 0;
   let availableCredits = 0;
 
-  
+  const ranges = splitDateRanges(
+    new Date(utsav.start_date),
+    new Date(utsav.end_date),
+    new Date(checkin_date),
+    new Date(checkout_date)
+  );
 
-  if (new Date(checkin_date) < new Date(event_start_date)) {
-    const beforeNights = await calculateNights(checkin_date, event_start_date);
+  for (const range of ranges) {
+    const nights = await calculateNights(range.start, range.end);
 
-    if (beforeNights > 0) {
-      if (beforeNights == 1) {
-        roomDetails.push({
-          mumukshu: mumkshu,
-          status: STATUS_WAITING,
-          charge: 0,
-          dates: checkin_date + ' to ' + event_start_date
-        });
-      } else {
-        const roomno = await findRoom(
-          checkin_date,
-          event_start_date,
-          roomType,
-          gender
-        );
-        if (roomno) {
-          statusValue = STATUS_AVAILABLE;
-          charge = roomCharge(roomType) * beforeNights;
-          availableCredits = usableCredits(user, TYPE_ROOM, charge);
-        }
-        roomDetails.push({
-          mumukshu: mumkshu,
-          status: statusValue,
-          charge: charge,
-          availableCredits: availableCredits,
-          dates: checkin_date + ' to ' + event_start_date
-        });
-      }
-    }
-  }
-
-  availableCredits = 0;
-  charge = 0;
-  statusValue = STATUS_WAITING;
-  // Handle booking after event ends
-  if (new Date(checkout_date) > new Date(event_end_date)) {
-    const afterNights = await calculateNights(event_end_date, checkout_date);
-
-    if (afterNights > 0) {
+    if (nights > 1) {
       const roomno = await findRoom(
-        event_end_date,
-        checkout_date,
+        range.start,
+        range.end,
         roomType,
         gender
       );
-
       if (roomno) {
-        statusValue = STATUS_AVAILABLE;
-
-        charge = roomCharge(roomType) * afterNights;
+        status = STATUS_AVAILABLE;
+        charge = roomCharge(roomType) * nights;
         availableCredits = usableCredits(user, TYPE_ROOM, charge);
       }
-
-      roomDetails.push({
-        mumukshu: mumkshu,
-        status: statusValue,
-        charge: charge,
-        availableCredits: availableCredits,
-        dates: event_end_date + ' to ' + checkout_date
-      });
     }
+    roomDetails.push({
+      mumukshu,
+      status,
+      charge,
+      availableCredits,
+      dates: range.start + ' to ' + range.end
+    });
   }
+
   return roomDetails;
 }
 

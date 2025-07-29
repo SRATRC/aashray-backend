@@ -272,3 +272,42 @@ export async function overlappingUtsavBookings(cardnos, startDate, endDate) {
 
   return utsavBookings;
 }
+export async function validBookingsDuringUtsav(
+  utsavStart,
+  utsavEnd,
+  bookingStart,
+  bookingEnd
+) {
+  // split date range from bookingStartDate and bookingEndDate
+  // into multiple date ranges such that the resulting ranges
+  // don't overlap with utsavStartDate and utsavEndDate.
+  const ranges = splitDateRanges(
+    utsavStart,
+    utsavEnd,
+    bookingStart,
+    bookingEnd
+  );
+
+  // return the resulting ranges
+  return ranges;
+}
+
+export function splitDateRanges(utsavStart, utsavEnd, bookingStart, bookingEnd) {
+  const ranges = [];
+
+  if (bookingStart < utsavStart) {
+    ranges.push({
+      start: bookingStart,
+      end: utsavStart
+    });
+  }
+
+  if (bookingEnd > utsavEnd) {
+    ranges.push({
+      start: utsavEnd,
+      end: bookingEnd
+    });
+  }
+
+  return ranges;
+}
