@@ -155,6 +155,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
   const { bookingids } = req.body;
 
   const t = await database.transaction();
+  req.transaction = t;
 
   const transactions = await Transactions.findAll({
     where: {
@@ -199,6 +200,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
 export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   const { data } = req.body;
   const t = await database.transaction();
+  req.transaction = t;
 
   const bookingCategoryMap = data.reduce((map, { bookingid, category }) => {
     (map[bookingid] ??= []).push(category);
