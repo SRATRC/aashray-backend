@@ -142,27 +142,6 @@ export const validateBooking = async (req, res) => {
         id: primary_booking.details.utsavid
       }
     });
-  } else {
-    utsav = await UtsavDb.findOne({
-      where: {
-        [Sequelize.Op.and]: [
-          {
-            end_date: {
-              [Sequelize.Op.gte]:
-                primary_booking.details.checkin_date ||
-                primary_booking.details.date
-            }
-          },
-          {
-            start_date: {
-              [Sequelize.Op.lte]:
-                primary_booking.details.checkout_date ||
-                primary_booking.details.date
-            }
-          }
-        ]
-      }
-    });
   }
   await validate(req.body, req.user, primary_booking, response, utsav);
 
