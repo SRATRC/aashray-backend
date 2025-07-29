@@ -20,8 +20,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
-import { getBookingType , ifMigrated} from './booking.helper.js';
+import { getBookingType, ifMigrated } from './booking.helper.js';
 import { validateCard } from './card.helper.js';
+import logger from '../config/logger.js';
 
 export async function createPendingTransaction(
   card,
@@ -116,7 +117,6 @@ export async function cancelTransaction(
   if (!card) {
     card = await validateCard(transaction.cardno);
   }
-
 
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
   var description = transaction.description;
@@ -385,8 +385,22 @@ export async function updateRazorpayTransactions(
   razorpay_order_id,
   t
 ) {
+  // I know i am running this query twice but for logging purposes it is better to do it this way
+  const transactionsToUpdate = await Transactions.findAll({
+    where: {
+      [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }]
+    },
+    transaction: t
+  });
+
+  logger.info(
+    `Updating razorpay order id for ${JSON.stringify(transactionsToUpdate)}`
+  );
+
   await Transactions.update(
-    { razorpay_order_id: razorpay_order_id },
+    {
+      razorpay_order_id: razorpay_order_id
+    },
     {
       where: {
         [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }]

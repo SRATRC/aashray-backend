@@ -1,7 +1,7 @@
 import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
-  RAJ_PRAVAS_EMAIL,
+  RESEARCH_CENTRE,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
   STATUS_CANCELLED,
@@ -19,17 +19,37 @@ import moment from 'moment';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
 
-export async function checkTravelAlreadyBooked(date, ...mumukshus) {
+export async function checkTravelAlreadyBooked(
+  date,
+  { mumukshus, drop_point }
+) {
+  const isToResearchCentre = drop_point === RESEARCH_CENTRE;
+
+  // Check for existing booking in the same direction
   const booking = await TravelDb.findOne({
     where: {
       cardno: mumukshus,
-      status: [STATUS_CONFIRMED, STATUS_WAITING, STATUS_PAYMENT_PENDING],
-      date: date
+      status: [
+        STATUS_CONFIRMED,
+        STATUS_WAITING,
+        STATUS_PAYMENT_PENDING,
+        STATUS_AWAITING_CONFIRMATION
+      ],
+      date: date,
+      pickup_point: isToResearchCentre
+        ? { [Sequelize.Op.ne]: RESEARCH_CENTRE }
+        : RESEARCH_CENTRE,
+      drop_point: isToResearchCentre
+        ? RESEARCH_CENTRE
+        : { [Sequelize.Op.ne]: RESEARCH_CENTRE }
     }
   });
 
   if (booking) {
-    throw new ApiError(400, ERR_TRAVEL_ALREADY_BOOKED);
+    throw new ApiError(
+      400,
+      'Travel already booked for this direction on the selected date'
+    );
   }
 }
 
@@ -97,7 +117,15 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     waitingBookingCount = 0;
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
-  await checkTravelAlreadyBooked(date, mumukshus);
+
+  // Check for existing bookings with same pickup/drop points
+  for (const group of mumukshuGroup) {
+    const { drop_point, mumukshus: groupMumukshus } = group;
+    await checkTravelAlreadyBooked(date, {
+      mumukshus: groupMumukshus,
+      drop_point
+    });
+  }
 
   const bookings = await TravelDb.findAll({
     where: {
