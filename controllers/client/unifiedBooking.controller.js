@@ -19,7 +19,8 @@ import {
   bookRoomForMumukshus,
   findRoom,
   roomCharge,
-  checkRoomAvailabilityDuringUtsav
+  checkRoomAvailabilityDuringUtsav,
+  checkRoomAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import {
   bookAdhyayanForMumukshus,
@@ -420,53 +421,19 @@ async function bookUtsav(user, data, t) {
 async function checkRoomAvailability(user, data, utsav) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
-  validateDate(checkin_date, checkout_date);
+  const result = await checkRoomAvailabilityForMumukshus(
+    checkin_date,
+    checkout_date,
+    [{
+      mumukshus: [user.cardno],
+      roomType: room_type,
+      floorType: floor_pref
+    }],
+    user,
+    utsav
+  );
 
-  const gender = floor_pref ? floor_pref + user.gender : user.gender;
-
-  if (utsav) {
-    return checkRoomAvailabilityDuringUtsav(
-      checkin_date,
-      checkout_date,
-      room_type,
-      gender,
-      utsav,
-      user.cardno,
-      user
-    );
-  } else {
-    const nights = await calculateNights(checkin_date, checkout_date);
-
-    var status = STATUS_WAITING;
-    var charge = 0;
-    var availableCredits = 0;
-
-    if (nights > 0) {
-      const roomno = await findRoom(
-        checkin_date,
-        checkout_date,
-        room_type,
-        gender
-      );
-      if (roomno) {
-        status = STATUS_AVAILABLE;
-        charge = roomCharge(room_type) * nights;
-        availableCredits = usableCredits(user, TYPE_ROOM, charge);
-      }
-    } else {
-      status = STATUS_AVAILABLE;
-    }
-
-    return [
-      {
-        mumukshu: user.cardno,
-        status: status,
-        charge: charge,
-        availableCredits: availableCredits,
-        dates: checkin_date + ' to ' + checkout_date
-      }
-    ];
-  }
+  return result;
 }
 
 async function checkFoodAvailability(user, body, data, utsav) {

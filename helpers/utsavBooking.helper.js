@@ -295,14 +295,14 @@ export async function validBookingsDuringUtsav(
 export function splitDateRanges(utsavStart, utsavEnd, bookingStart, bookingEnd) {
   const ranges = [];
 
-  if (bookingStart < utsavStart) {
+  if (new Date(bookingStart) < new Date(utsavStart)) {
     ranges.push({
       start: bookingStart,
       end: utsavStart
     });
   }
 
-  if (bookingEnd > utsavEnd) {
+  if (new Date(bookingEnd) > new Date(utsavEnd)) {
     ranges.push({
       start: utsavEnd,
       end: bookingEnd

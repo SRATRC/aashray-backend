@@ -429,10 +429,10 @@ export async function checkRoomAvailabilityDuringUtsav(
   let availableCredits = 0;
 
   const ranges = splitDateRanges(
-    new Date(utsav.start_date),
-    new Date(utsav.end_date),
-    new Date(checkin_date),
-    new Date(checkout_date)
+    utsav.start_date,
+    utsav.end_date,
+    checkin_date,
+    checkout_date
   );
 
   for (const range of ranges) {
@@ -482,7 +482,7 @@ export async function checkRoomAvailabilityForMumukshus(
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  let mumukshuUtsavBookings;
+  let mumukshuUtsavBookings = {};
   if (!utsav) {
     const utsavBookings = await overlappingUtsavBookings(
       mumukshus,
