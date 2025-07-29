@@ -3,7 +3,8 @@ import sequelize from '../config/database.js';
 import {
   RESEARCH_CENTRE,
   STATUS_CLOSED,
-  STATUS_OPEN
+  STATUS_OPEN,
+  STATUS_DELETED
 } from '../config/constants.js';
 
 const ShibirDb = sequelize.define(
@@ -63,9 +64,9 @@ const ShibirDb = sequelize.define(
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
-      values: [STATUS_OPEN, STATUS_CLOSED],
+      values: [STATUS_OPEN, STATUS_CLOSED, STATUS_DELETED],
       defaultValue: STATUS_OPEN
-    },
+    }, 
     updatedBy: {
       type: DataTypes.STRING,
       allowNull: false

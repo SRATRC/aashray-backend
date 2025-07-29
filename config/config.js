@@ -1,3 +1,5 @@
+// This file is used ONLY by Sequelize CLI for migrations and seeders
+// The actual application uses config/database.js for connection pooling
 import dotenv from 'dotenv';
 dotenv.config({ path: `.env.${process.env.NODE_ENV || 'dev'}` });
 
@@ -34,7 +36,7 @@ const config = {
         ca: private_key
       }
     },
-    pool: { maxConnections: 5, maxIdleTime: 30 },
+
     language: 'en'
   },
   prod: {
