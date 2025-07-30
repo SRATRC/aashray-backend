@@ -13,7 +13,8 @@ import {
   STATUS_ADMIN_CANCELLED,
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
-  ERR_FLAT_FAILED_TO_BOOK
+  ERR_FLAT_FAILED_TO_BOOK,
+  ERR_BLOCKED_DATES
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -25,6 +26,7 @@ import {
 import { createPendingTransaction } from './transactions.helper.js';
 import {
   calculateNights,
+  getBlockedDates,
   groupByCardno,
   validateDate
 } from '../controllers/helper.js';
@@ -498,6 +500,8 @@ export async function checkRoomAvailabilityForMumukshus(
         checkout_date
       )
     : {};
+  
+  const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
@@ -537,7 +541,24 @@ export async function checkRoomAvailabilityForMumukshus(
         )
       }
 
-      // check against block dates
+      // check dates against block dates
+      const conflictingBlocks = [];
+      for (const range of dateRanges) {
+        if (isDateRangeBlocked(blockedDates, range.start, range.end)) {
+          conflictingBlocks.push(
+            `${moment(range.start).format('Do MMMM, YYYY')} to 
+             ${moment(range.end).format('Do MMMM, YYYY')}`
+          );
+        }
+      }
+
+      if (conflictingBlocks.length > 0) {
+        const blockingInfo = conflictingBlocks.join(', ');
+        throw new ApiError(
+          400,
+          `Dates are blocked during following periods: ${blockingInfo}`
+        );
+      }
 
       for (const range of dateRanges) {
         var status = STATUS_WAITING;

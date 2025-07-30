@@ -765,3 +765,9 @@ export function isDateRangeOverlapping(start1, end1, start2, end2) {
 
   return !noOverlap;
 }
+
+export function isDateRangeBlocked(blockedDates, start, end) {
+  return blockedDates.some((block) =>
+    isDateRangeOverlapping(block.checkin, block.checkout, start, end)
+  );
+}
