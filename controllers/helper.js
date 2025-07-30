@@ -91,7 +91,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
             { checkout: { [Sequelize.Op.gte]: checkout } }
           ]
         }
-
       ],
       status: {
         [Sequelize.Op.notIn]: [
@@ -103,7 +102,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
       cardno: card_no
     }
   });
-
 
   return result.length > 0;
 }
@@ -321,30 +319,28 @@ export async function sendUnifiedEmailForBookedBy(
   }
 }
 
-export function getSubject(bookingStatus){
-  if(bookingStatus == BOOKING_STATUS_PENDING){
+export function getSubject(bookingStatus) {
+  if (bookingStatus == BOOKING_STATUS_PENDING) {
     return 'Bookings created';
   }
-  if(bookingStatus == STATUS_CANCELLED){
+  if (bookingStatus == STATUS_CANCELLED) {
     return 'Bookings cancelled';
   }
   return 'Bookings confirmed';
 }
 
-export function getWelcomeMessage(bookingStatus,country){
-
-  if (bookingStatus == BOOKING_STATUS_PENDING)
-  {
-
-    const bookingCreate ="Your bookings were created.";
-    return (country &&
-    country != 'India' ) ? 
-    bookingCreate+' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
-    :bookingCreate+" Payment is due within 24 hours to confirm any bookings in pending status.";
+export function getWelcomeMessage(bookingStatus, country) {
+  if (bookingStatus == BOOKING_STATUS_PENDING) {
+    const bookingCreate = 'Your bookings were created.';
+    return country && country != 'India'
+      ? bookingCreate +
+          ' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
+      : bookingCreate +
+          ' Payment is due within 24 hours to confirm any bookings in pending status.';
   }
 
-  if( bookingStatus == STATUS_CANCELLED){
-    return "We are sorry to inform you that your bookings have been cancelled.";
+  if (bookingStatus == STATUS_CANCELLED) {
+    return 'We are sorry to inform you that your bookings have been cancelled.';
   }
   return 'We are pleased to inform you that your bookings have been confirmed.';
 }
@@ -353,7 +349,7 @@ export async function sendUnifiedEmail(
   cardno,
   bookingIds,
   bookedBy,
-  bookingStatus =STATUS_CONFIRMED,
+  bookingStatus = STATUS_CONFIRMED,
   template = 'unifiedBookingEmail'
 ) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
@@ -563,12 +559,10 @@ export async function sendUnifiedEmail(
     });
   }
 
-
   const country =
     user && user.country ? user.country : bookedBy && bookedBy.country;
 
-  let welcomeMessage = getWelcomeMessage(bookingStatus,country) ;
-  
+  let welcomeMessage = getWelcomeMessage(bookingStatus, country);
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
@@ -577,7 +571,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject:SUBJECT_BOOKING + getSubject(bookingStatus),
+      subject: SUBJECT_BOOKING + getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
@@ -760,3 +754,14 @@ export function groupByCardno(arr) {
   return grouped;
 }
 
+export function isDateRangeOverlapping(start1, end1, start2, end2) {
+  const startDate1 = new Date(start1);
+  const endDate1 = new Date(end1);
+  const startDate2 = new Date(start2);
+  const endDate2 = new Date(end2);
+
+  // No overlap if one range ends before the other starts
+  const noOverlap = endDate1 <= startDate2 || endDate2 <= startDate1;
+
+  return !noOverlap;
+}

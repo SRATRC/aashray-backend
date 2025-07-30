@@ -23,14 +23,23 @@ import {
   FlatDb
 } from '../models/associations.js';
 import { createPendingTransaction } from './transactions.helper.js';
-import { calculateNights, groupByCardno, validateDate } from '../controllers/helper.js';
+import {
+  calculateNights,
+  groupByCardno,
+  validateDate
+} from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
 import logger from '../config/logger.js';
-import { overlappingUtsavBookings, splitDateRanges } from './utsavBooking.helper.js';
+import {
+  isUtsavOverlapping,
+  overlappingUtsavBookings,
+  overlappingUtsavBookingsByCardno,
+  splitDateRanges
+} from './utsavBooking.helper.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -423,7 +432,7 @@ export async function checkRoomAvailabilityDuringUtsav(
   user
 ) {
   var roomDetails = [];
-  
+
   let status = STATUS_WAITING;
   let charge = 0;
   let availableCredits = 0;
@@ -439,12 +448,7 @@ export async function checkRoomAvailabilityDuringUtsav(
     const nights = await calculateNights(range.start, range.end);
 
     if (nights > 1) {
-      const roomno = await findRoom(
-        range.start,
-        range.end,
-        roomType,
-        gender
-      );
+      const roomno = await findRoom(range.start, range.end, roomType, gender);
       if (roomno) {
         status = STATUS_AVAILABLE;
         charge = roomCharge(roomType) * nights;
@@ -472,7 +476,6 @@ export async function checkRoomAvailabilityForMumukshus(
 ) {
   validateDate(checkin_date, checkout_date);
 
-  let nights = await calculateNights(checkin_date, checkout_date);
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
   );
@@ -482,15 +485,19 @@ export async function checkRoomAvailabilityForMumukshus(
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  let mumukshuUtsavBookings = {};
-  if (!utsav) {
-    const utsavBookings = await overlappingUtsavBookings(
-      mumukshus,
-      checkin_date,
-      checkout_date
-    );
-    mumukshuUtsavBookings = groupByCardno(utsavBookings);
-  }
+  const utsavOverlapping = isUtsavOverlapping(
+    utsav,
+    checkin_date,
+    checkout_date
+  );
+
+  const existingUtsavBookings = !utsavOverlapping
+    ? await overlappingUtsavBookingsByCardno(
+        mumukshus,
+        checkin_date,
+        checkout_date
+      )
+    : {};
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
@@ -506,28 +513,53 @@ export async function checkRoomAvailabilityForMumukshus(
         ? floorType + card.dataValues.gender
         : card.dataValues.gender;
 
-      const utsavBooking = mumukshuUtsavBookings[mumukshu];
-      if (utsav || utsavBooking) {
-        roomDetails.push(
-          ...(await checkRoomAvailabilityDuringUtsav(
+      const utsavBooking = utsavOverlapping 
+        ? utsav 
+        : existingUtsavBookings[mumukshu];
+
+
+      const dateRanges = [];
+      if (utsavBooking) {
+        dateRanges.push({
+          ...splitDateRanges(
+            utsavBooking.start_date,
+            utsavBooking.end_date,
             checkin_date,
-            checkout_date,
-            roomType,
-            gender,
-            utsav || utsavBooking,
-            mumukshu,
-            user
-          ))
-        );
+            checkout_date
+          )
+        });
       } else {
+        dateRanges.push(
+          {
+            start: checkin_date,
+            end: checkout_date
+          }
+        )
+      }
+
+      // check against block dates
+
+      for (const range of dateRanges) {
         var status = STATUS_WAITING;
         var charge = 0;
         var availableCredits = 0;
 
-        if (nights > 0) {
+        const minNights = utsavBooking ? 1 : 0;
+
+        const nights = await calculateNights(
+          range.start,
+          range.end
+        );
+
+        if (nights == 0) {
+          // 1 day visit
+          status = STATUS_AVAILABLE;
+        } else if (nights > minNights) {
+          // around utsav, 2+ nights are confirmed
+          // but 1 night is in waitlist
           const roomno = await findRoom(
-            checkin_date,
-            checkout_date,
+            range.start,
+            range.end,
             roomType,
             gender
           );
@@ -536,15 +568,14 @@ export async function checkRoomAvailabilityForMumukshus(
             charge = roomCharge(roomType) * nights;
             availableCredits = usableCredits(user, TYPE_ROOM, charge);
           }
-        } else {
-          status = STATUS_AVAILABLE;
         }
-
+        
         roomDetails.push({
           mumukshu,
           status,
           charge,
-          availableCredits
+          availableCredits,
+          dates: range.start + ' to ' + range.end
         });
       }
     }

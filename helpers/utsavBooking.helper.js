@@ -6,7 +6,9 @@ import {
   STATUS_WAITING,
   STATUS_OPEN,
   ERR_UTSAV_ALREADY_BOOKED,
-  STATUS_AVAILABLE
+  STATUS_AVAILABLE,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../config/constants.js';
 import {
   UtsavDb,
@@ -20,6 +22,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
+import { groupByCardno, isDateRangeOverlapping } from '../controllers/helper.js';
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   const utsav = await UtsavDb.findOne({
@@ -230,10 +233,29 @@ export async function validateUtsavPackage(packageId, utsavId) {
   return packageData;
 }
 
+export function isUtsavOverlapping(utsav, startDate, endDate) {
+  return utsav && isDateRangeOverlapping(
+    utsav.start_date,
+    utsav.end_date,
+    startDate,
+    endDate
+  );
+}
+
+export async function overlappingUtsavBookingsByCardno(cardnos, startDate, endDate) {
+  const utsavBookings = await overlappingUtsavBookings(
+    cardnos,
+    startDate,
+    endDate
+  );
+
+  return groupByCardno(utsavBookings);
+}
+
 export async function overlappingUtsavBookings(cardnos, startDate, endDate) {
   const utsavBookings = await UtsavBooking.findAll({
     where: {
-      cardnos,
+      cardno: cardnos,
       status: {
         [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
       }
@@ -272,27 +294,13 @@ export async function overlappingUtsavBookings(cardnos, startDate, endDate) {
 
   return utsavBookings;
 }
-export async function validBookingsDuringUtsav(
+
+export function splitDateRanges(
   utsavStart,
   utsavEnd,
   bookingStart,
   bookingEnd
 ) {
-  // split date range from bookingStartDate and bookingEndDate
-  // into multiple date ranges such that the resulting ranges
-  // don't overlap with utsavStartDate and utsavEndDate.
-  const ranges = splitDateRanges(
-    utsavStart,
-    utsavEnd,
-    bookingStart,
-    bookingEnd
-  );
-
-  // return the resulting ranges
-  return ranges;
-}
-
-export function splitDateRanges(utsavStart, utsavEnd, bookingStart, bookingEnd) {
   const ranges = [];
 
   if (new Date(bookingStart) < new Date(utsavStart)) {
