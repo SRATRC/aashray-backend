@@ -1,7 +1,6 @@
 import './config/environment.js';
 import moment from 'moment';
 import {
-  adminCancelTransaction,
   cancelTransactions,
   getPendingTransactions
 } from './helpers/transactions.helper.js';
@@ -11,16 +10,12 @@ import logger from './config/logger.js';
 import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_PENDING,
-  STATUS_PROCEED_FOR_PAYMENT,
   TYPE_ADHYAYAN,
   TYPE_FOOD
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
-import ShibirBookingDb from './models/shibir_booking_db.model.js';
-import TravelDb from './models/travel_db.model.js';
 import AdminUsers from './models/admin_users.model.js';
-import { cancelFood, cancelMeal } from './helpers/foodBooking.helper.js';
-import UtsavBooking from './models/utsav_boking.model.js';
+import { cancelMeal } from './helpers/foodBooking.helper.js';
 import FlatBooking from './models/flat_booking.model.js';
 import { Sequelize } from 'sequelize';
 import Transactions from './models/transactions.model.js';
@@ -31,15 +26,13 @@ import {
   getBookingType,
   getBookingTypeFromBooking
 } from './helpers/booking.helper.js';
-import UtsavDb from './models/utsav_db.model.js';
-import { validateCard } from './helpers/card.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
 
-// Schedule the cron job to run every 10 minutes
+// Schedule the cron job to run every 30 minutes
 const job = cron.schedule('*/30 * * * *', async () => {
   logger.info('Cron job started.');
   isRunning = true;
@@ -52,14 +45,17 @@ const job = cron.schedule('*/30 * * * *', async () => {
 
   const t = await database.transaction();
 
-  runJob(systemUser, t).then(() => {
-    logger.info('Cron job finished.');
-  }).catch((error) => {
-    logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
-    t.rollback();
-  }).finally(() => {
-    isRunning = false;    
-  });  
+  runJob(systemUser, t)
+    .then(() => {
+      logger.info('Cron job finished.');
+    })
+    .catch((error) => {
+      logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
+      t.rollback();
+    })
+    .finally(() => {
+      isRunning = false;
+    });
 });
 
 async function cancelMeals(systemUser, transactions, t) {
@@ -84,8 +80,8 @@ async function runJob(systemUser, t) {
   await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
   // await getUnpaidPastBookingsAndTransactions(bookings, transactions);
 
-  logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings.map(x => x.bookingid))}`);
-  logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions.map(x => x.id))}`);
+  logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings)}`);
+  logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions)}`);
 
   await cancelBookings(systemUser, bookings, userBookingIds, t);
   await cancelTransactions(systemUser, transactions, t, true);
@@ -119,19 +115,14 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
 
 async function cancelBookings(systemUser, bookings, userBookingIds, t) {
   for (const booking of bookings) {
-
     const bookingType = getBookingTypeFromBooking(booking);
 
-    switch(bookingType) {
+    switch (bookingType) {
       case TYPE_ADHYAYAN:
         const adhyayan = await ShibirDb.findOne({
           where: { id: booking.shibir_id }
         });
-        await openAdhyayanSeat(
-          adhyayan,
-          systemUser.username,
-          t
-        );
+        await openAdhyayanSeat(adhyayan, systemUser.username, t);
         break;
     }
 
@@ -186,12 +177,8 @@ async function getUnpaidPastBookings() {
     }
   });
 
-  return [
-    ...roomBookings,
-    ...flatBookings
-  ];
+  return [...roomBookings, ...flatBookings];
 }
-
 
 /* ==============================
  * Job start and shutdown handler
