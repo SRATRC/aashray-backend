@@ -28,6 +28,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.month AS utsav_month,
        t1.location AS utsav_location,
        t1.status AS utsav_status,
+       t1.registration_deadline AS registration_deadline,
        JSON_ARRAYAGG(
            JSON_OBJECT(
                'package_id', t2.id,
@@ -40,6 +41,7 @@ export const FetchUpcoming = async (req, res) => {
     FROM utsav_db t1
     JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
     WHERE t1.start_date > :today
+      AND (t1.registration_deadline IS NULL OR t1.registration_deadline >= :today)
     GROUP BY t1.id
     ORDER BY t1.start_date ASC
     LIMIT :limit
@@ -150,6 +152,7 @@ export const CancelUtsavBooking = async (req, res) => {
 
 export const FetchUtsavById = async (req, res) => {
   const { id } = req.params;
+  const today = moment().format('YYYY-MM-DD');
 
   const utsav = await database.query(
     `
@@ -160,6 +163,7 @@ export const FetchUtsavById = async (req, res) => {
        t1.month AS utsav_month,
        t1.location AS utsav_location,
        t1.status AS utsav_status,
+       t1.registration_deadline AS registration_deadline,
        JSON_ARRAYAGG(
            JSON_OBJECT(
                'package_id', t2.id,
@@ -172,11 +176,13 @@ export const FetchUtsavById = async (req, res) => {
     FROM utsav_db t1
     JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
     WHERE t1.id = :id
+      AND (t1.registration_deadline IS NULL OR t1.registration_deadline >= :today)
     GROUP BY t1.id;
   `,
     {
       replacements: {
-        id: id
+        id: id,
+        today: today
       },
       type: database.QueryTypes.SELECT,
       raw: true

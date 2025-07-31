@@ -30,6 +30,7 @@ import BulkFoodBooking from './bulk_food_booking.model.js';
 import RazorpayWebhook from './razorpay_webhook.model.js';
 import RazorpaySettlement from './razorpay_settlement.model.js';
 import SupportTickets from './support_tickets.model.js';
+import PermanentWifiCodes from './permanent_wifi_codes.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -303,6 +304,16 @@ WifiDb.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
 });
+PermanentWifiCodes.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+CardDb.hasOne(PermanentWifiCodes, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 
 // Utsav
 UtsavBooking.belongsTo(CardDb, {
@@ -443,6 +454,7 @@ export {
   FlatBooking,
   TravelDb,
   WifiDb,
+  PermanentWifiCodes,
   UtsavDb,
   UtsavBooking,
   UtsavPackagesDb,
