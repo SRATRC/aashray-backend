@@ -14,7 +14,6 @@ import {
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
   ERR_FLAT_FAILED_TO_BOOK,
-  ERR_BLOCKED_DATES
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -27,7 +26,7 @@ import { createPendingTransaction } from './transactions.helper.js';
 import {
   calculateNights,
   getBlockedDates,
-  groupByCardno,
+  isDateRangeBlocked,
   validateDate
 } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -35,13 +34,12 @@ import { validateCards } from './card.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
-import logger from '../config/logger.js';
 import {
   isUtsavOverlapping,
-  overlappingUtsavBookings,
   overlappingUtsavBookingsByCardno,
   splitDateRanges
 } from './utsavBooking.helper.js';
+import moment from 'moment';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -524,14 +522,14 @@ export async function checkRoomAvailabilityForMumukshus(
 
       const dateRanges = [];
       if (utsavBooking) {
-        dateRanges.push({
+        dateRanges.push(
           ...splitDateRanges(
             utsavBooking.start_date,
             utsavBooking.end_date,
             checkin_date,
             checkout_date
           )
-        });
+        );
       } else {
         dateRanges.push(
           {
@@ -541,13 +539,15 @@ export async function checkRoomAvailabilityForMumukshus(
         )
       }
 
+      console.log("RANGES: " + JSON.stringify(dateRanges));
+
       // check dates against block dates
       const conflictingBlocks = [];
       for (const range of dateRanges) {
         if (isDateRangeBlocked(blockedDates, range.start, range.end)) {
           conflictingBlocks.push(
-            `${moment(range.start).format('Do MMMM, YYYY')} to 
-             ${moment(range.end).format('Do MMMM, YYYY')}`
+            `${moment(range.start).format('Do MMMM, YYYY')} to ${moment(
+              range.end).format('Do MMMM, YYYY')}`
           );
         }
       }
@@ -565,7 +565,7 @@ export async function checkRoomAvailabilityForMumukshus(
         var charge = 0;
         var availableCredits = 0;
 
-        const minNights = utsavBooking ? 1 : 0;
+        const minNights = utsavBooking ? 2 : 1;
 
         const nights = await calculateNights(
           range.start,
@@ -575,7 +575,7 @@ export async function checkRoomAvailabilityForMumukshus(
         if (nights == 0) {
           // 1 day visit
           status = STATUS_AVAILABLE;
-        } else if (nights > minNights) {
+        } else if (nights >= minNights) {
           // around utsav, 2+ nights are confirmed
           // but 1 night is in waitlist
           const roomno = await findRoom(

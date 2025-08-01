@@ -234,9 +234,17 @@ export async function validateUtsavPackage(packageId, utsavId) {
 }
 
 export function isUtsavOverlapping(utsav, startDate, endDate) {
-  return utsav && isDateRangeOverlapping(
-    utsav.start_date,
-    utsav.end_date,
+  if (!utsav) return false;
+
+  const utsavStart = new Date(utsav.start_date);
+  utsavStart.setDate(utsavStart.getDate() - 1);
+
+  const utsavEnd = new Date(utsav.end_date);
+  utsavEnd.setDate(utsavEnd.getDate() + 1);
+  
+  return isDateRangeOverlapping(
+    utsavStart,
+    utsavEnd,
     startDate,
     endDate
   );
@@ -306,14 +314,16 @@ export function splitDateRanges(
   if (new Date(bookingStart) < new Date(utsavStart)) {
     ranges.push({
       start: bookingStart,
-      end: utsavStart
+      end: utsavStart,
+      touchingUtsav: true
     });
   }
 
   if (new Date(bookingEnd) > new Date(utsavEnd)) {
     ranges.push({
       start: utsavEnd,
-      end: bookingEnd
+      end: bookingEnd,
+      touchingUtsav: true
     });
   }
 
