@@ -37,7 +37,14 @@ import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 
 export const createUtsav = async (req, res) => {
-  const { name, start_date, end_date, total_seats, location } = req.body;
+  const {
+    name,
+    start_date,
+    end_date,
+    total_seats,
+    location,
+    registration_deadline
+  } = req.body;
 
   const alreadyExists = await UtsavDb.findOne({
     where: {
@@ -63,6 +70,7 @@ export const createUtsav = async (req, res) => {
       location: location || RESEARCH_CENTRE,
       available_seats: total_seats,
       status: STATUS_OPEN,
+      registration_deadline,
       updatedBy: req.user.username
     },
     { transaction: t }
@@ -127,7 +135,8 @@ export const updateUtsav = async (req, res) => {
     status,
     total_seats,
     comments,
-    location
+    location,
+    registration_deadline
   } = req.body;
   const utsavId = req.params.id;
 
@@ -143,6 +152,7 @@ export const updateUtsav = async (req, res) => {
     total_seats,
     comments,
     location,
+    registration_deadline,
     updatedBy: req.user.username
   });
 
@@ -217,7 +227,7 @@ WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
 
 export const fetchAllUtsav = async (req, res) => {
   const utsavs = await database.query(
-    `SELECT 
+    `SELECT
       utsav_db.id,
       utsav_db.name,
       utsav_db.start_date,
@@ -226,6 +236,7 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.total_seats,
       utsav_db.location,
       utsav_db.available_seats,
+      utsav_db.registration_deadline,
       COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN utsav_booking.status = '${ROOM_STATUS_CHECKEDIN}' THEN 1 END) AS checkedin_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
@@ -236,7 +247,7 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db
     LEFT JOIN 
       utsav_booking ON utsav_db.id = utsav_booking.utsavid
-    GROUP BY 
+    GROUP BY
       utsav_db.id,
       utsav_db.name,
       utsav_db.start_date,
@@ -244,7 +255,8 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.status,
       utsav_db.total_seats,
       utsav_db.location,
-      utsav_db.available_seats      
+      utsav_db.available_seats,
+      utsav_db.registration_deadline
      ORDER BY 
       utsav_db.start_date ASC;`,
     {
