@@ -98,24 +98,42 @@ export async function bookDayVisit(
   return booking;
 }
 
-export async function findRoom(checkin, checkout, room_type, gender) {
+export async function findRoom(
+  checkin,
+  checkout,
+  room_type,
+  gender,
+  excludeRooms = []
+) {
+  const whereConditions = {
+    roomstatus: STATUS_AVAILABLE,
+    roomtype: room_type,
+    gender: gender,
+    [Sequelize.Op.and]: [
+      { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
+      { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
+      {
+        roomno: {
+          [Sequelize.Op.notIn]: Sequelize.literal(`(
+            SELECT roomno 
+            FROM room_booking 
+            WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
+            AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
+          )`)
+        }
+      }
+    ]
+  };
+
+  if (excludeRooms.length > 0) {
+    whereConditions[Sequelize.Op.and].push({
+      roomno: { [Sequelize.Op.notIn]: excludeRooms }
+    });
+  }
+
   return RoomDb.findOne({
     attributes: ['roomno'],
-    where: {
-      roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
-                    AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
-                )`)
-      },
-      roomstatus: STATUS_AVAILABLE,
-      roomtype: room_type,
-      gender: gender
-    },
+    where: whereConditions,
     order: [
       Sequelize.literal(
         `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
@@ -198,6 +216,7 @@ export async function bookRoomForMumukshus(
 
   let amount = 0;
   let userBookingIds = {};
+  const assignedRooms = [];
   for (const group of mumukshuGroup) {
     const { roomType, floorType } = group;
     const mumukshus = group.mumukshus || group.guests;
@@ -226,11 +245,14 @@ export async function bookRoomForMumukshus(
           card.gender,
           floorType,
           user,
-          t
+          t,
+          false,
+          assignedRooms
         );
 
         amount += result.discountedAmount;
         userBookingIds[card.cardno] = [result.bookingId];
+        assignedRooms.push(result.bookedRoomNo);
       }
     }
   }
@@ -247,7 +269,8 @@ export async function createRoomBooking(
   floor_pref,
   user,
   t,
-  cashAllowed = false
+  cashAllowed = false,
+  excludeRooms = []
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
 
@@ -283,20 +306,27 @@ export async function createRoomBooking(
         },
         { transaction: t }
       );
-      return { t, discountedAmount: 0, bookingId };
+      return { t, discountedAmount: 0, bookingId, bookedRoomNo: 'NA' };
     }
   }
-  const roomno = await findRoom(checkin, checkout, roomtype, gender);
+  const roomno = await findRoom(
+    checkin,
+    checkout,
+    roomtype,
+    gender,
+    excludeRooms
+  );
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
 
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
   let bookingId = uuidv4();
+  const bookedRoomNo = roomno.dataValues.roomno;
   const booking = await RoomBooking.create(
     {
       bookingid: bookingId,
-      roomno: roomno.dataValues.roomno,
+      roomno: bookedRoomNo,
       status: STATUS_PAYMENT_PENDING,
       cardno,
       bookedBy,
@@ -330,7 +360,7 @@ export async function createRoomBooking(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  return { t, discountedAmount, bookingId };
+  return { t, discountedAmount, bookingId, bookedRoomNo };
 }
 
 export function roomCharge(roomtype) {
