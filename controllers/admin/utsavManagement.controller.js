@@ -388,25 +388,27 @@ export const utsavStatusUpdate = async (req, res) => {
     );
   } else {
     if (transaction.status === STATUS_CANCELLED) {
-      await transaction.update(
-        {
-          status: STATUS_CONFIRMED,
-          updatedBy: req.user.username,
-          description: description || 'Reconfirmed by admin'
-        },
-        { transaction: t }
-      );
-    } else if (transaction.status === STATUS_CONFIRMED) {
-      console.log('Transaction already confirmed. No action needed.');
-    } else if (transaction.status === STATUS_PAYMENT_PENDING) {
-      await transaction.update(
-        {
-          description: description,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
-    }
+  await transaction.update(
+    {
+      status: STATUS_PAYMENT_PENDING,
+      updatedBy: req.user.username,
+      description: description || 'Reopened after cancellation'
+    },
+    { transaction: t }
+  );
+} else if (transaction.status === STATUS_CONFIRMED) {
+  console.log('Transaction already confirmed. No action needed.');
+} else if (transaction.status === STATUS_PAYMENT_PENDING) {
+  await transaction.update(
+    {
+      status: STATUS_CONFIRMED,  // ✅ add this line
+      description: description,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+}
+
   }
   break;
 
