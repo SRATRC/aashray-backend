@@ -1,8 +1,7 @@
 import {
   UtsavDb,
   UtsavPackagesDb,
-  UtsavBooking,
-  CardDb
+  UtsavBooking
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
@@ -370,59 +369,58 @@ export const utsavStatusUpdate = async (req, res) => {
 
   switch (status) {
     case STATUS_CONFIRMED:
-  // Confirmed allowed from payment pending or cancelled
-  if (
-    booking.status !== STATUS_PAYMENT_PENDING &&
-    booking.status !== STATUS_CANCELLED
-  ) {
-    throw new ApiError(
-      400,
-      'Confirmed status can only be set from payment pending or cancelled'
-    );
-  }
+      // Confirmed allowed from payment pending or cancelled
+      if (
+        booking.status !== STATUS_PAYMENT_PENDING &&
+        booking.status !== STATUS_CANCELLED
+      ) {
+        throw new ApiError(
+          400,
+          'Confirmed status can only be set from payment pending or cancelled'
+        );
+      }
 
-  if (booking.status === STATUS_WAITING) {
-    await reserveUtsavSeat(utsav, t);
-  }
+      if (booking.status === STATUS_WAITING) {
+        await reserveUtsavSeat(utsav, t);
+      }
 
-  if (!transaction) {
-    const cardno = booking.bookedBy || booking.cardno;
-    const card = await validateCard(cardno);
+      if (!transaction) {
+        const cardno = booking.bookedBy || booking.cardno;
+        const card = await validateCard(cardno);
 
-    transaction = await createPendingTransaction(
-      card,
-      booking,
-      TYPE_UTSAV,
-      utsav.amount,
-      req.user.username,
-      t,
-      true
-    );
-  } else {
-    if (transaction.status === STATUS_CANCELLED) {
-  await transaction.update(
-    {
-      status: STATUS_PAYMENT_PENDING,
-      updatedBy: req.user.username,
-      description: description || 'Reopened after cancellation'
-    },
-    { transaction: t }
-  );
-} else if (transaction.status === STATUS_CONFIRMED) {
-  console.log('Transaction already confirmed. No action needed.');
-} else if (transaction.status === STATUS_PAYMENT_PENDING) {
-  await transaction.update(
-    {
-      status: STATUS_CONFIRMED,  // ✅ add this line
-      description: description,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-}
-
-  }
-  break;
+        transaction = await createPendingTransaction(
+          card,
+          booking,
+          TYPE_UTSAV,
+          utsav.amount,
+          req.user.username,
+          t,
+          true
+        );
+      } else {
+        if (transaction.status === STATUS_CANCELLED) {
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_PENDING,
+              updatedBy: req.user.username,
+              description: description || 'Reopened after cancellation'
+            },
+            { transaction: t }
+          );
+        } else if (transaction.status === STATUS_CONFIRMED) {
+          console.log('Transaction already confirmed. No action needed.');
+        } else if (transaction.status === STATUS_PAYMENT_PENDING) {
+          await transaction.update(
+            {
+              status: STATUS_CONFIRMED, // ✅ add this line
+              description: description,
+              updatedBy: req.user.username
+            },
+            { transaction: t }
+          );
+        }
+      }
+      break;
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status !== STATUS_WAITING) {
@@ -658,86 +656,53 @@ export const fetchPackage = async (req, res) => {
 };
 
 export const fetchAllUtsavList = async (req, res) => {
-  try {
-    const adhyayans = await database.query(
-      `SELECT id, name FROM utsav_db ORDER BY id ASC`,
-      {
-        type: QueryTypes.SELECT,
-        raw: true
-      }
-    );
+  const adhyayans = await database.query(
+    `SELECT id, name FROM utsav_db ORDER BY id ASC`,
+    {
+      type: QueryTypes.SELECT,
+      raw: true
+    }
+  );
 
-    return res.status(200).json({
-      message: 'Fetched adhyayan list',
-      data: adhyayans
-    });
-  } catch (error) {
-    console.error('Error fetching adhyayans:', error);
-    return res.status(500).json({
-      message: 'Failed to fetch adhyayan list',
-      error: error.message
-    });
-  }
+  return res.status(200).json({
+    message: 'Fetched adhyayan list',
+    data: adhyayans
+  });
 };
 
 export const utsavCheckin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { cardno } = req.body;
-  console.log('👉 Received cardno:', cardno);
+  const { cardno, utsavid } = req.body;
+  const booking = await UtsavBooking.findOne({
+    where: {
+      cardno,
+      utsavid,
+      status: {
+        [Sequelize.Op.notIn]: [
+          STATUS_CANCELLED,
+          STATUS_WAITING,
+          STATUS_ADMIN_CANCELLED
+        ]
+      }
+    },
+    transaction: t
+  });
 
-  try {
-    const booking = await UtsavBooking.findOne({
-      where: { cardno },
-      transaction: t
-    });
-
-    if (!booking) {
-      await t.rollback();
-      console.log('❌ Booking not found for cardno:', cardno);
-      return res.status(404).send({ message: 'Booking not found.' });
-    }
-
-    console.log('✅ Found booking:', booking.toJSON());
-
-    if (booking.status === ROOM_STATUS_CHECKEDIN) {
-      await t.rollback();
-      console.log('ℹ️ Already checked in.');
-      return res.status(200).send({ message: 'Already checked in.' });
-    }
-
-    if (booking.status !== STATUS_CONFIRMED) {
-      await t.rollback();
-      console.log('⚠️ Booking not confirmed. Current status:', booking.status);
-      return res
-        .status(400)
-        .send({ message: 'Booking is not in confirmed state.' });
-    }
-
-    console.log('🚀 Proceeding to update and fetch card details...');
-
-    const [_, card] = await Promise.all([
-      booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t }),
-      CardDb.findOne({ where: { cardno } })
-    ]);
-
-    console.log('✅ Card fetched:', card?.toJSON?.());
-
-    await t.commit();
-    return res.status(200).send({
-      message: 'Utsav booking status updated to checkedin.',
-      cardno: booking.cardno,
-      issuedto: card?.issuedto || null
-    });
-  } catch (error) {
-    await t.rollback();
-    console.error('❌ utsavCheckin error:', error.message, error.stack);
-    return res.status(500).send({
-      message: 'Internal server error',
-      error: error.message
-    });
+  if (!booking) {
+    throw new ApiError(404, 'Booking not found for this user');
   }
+
+  if ([STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(booking.status)) {
+    throw new ApiError(400, "User haven't paid yet, cannot checkin");
+  }
+
+  await booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t });
+  await t.commit();
+  return res.status(200).send({
+    message: 'Utsav booking status updated to checkedin.'
+  });
 };
 
 export const utsavCheckinReport = async (req, res) => {
