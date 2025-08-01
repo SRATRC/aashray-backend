@@ -37,7 +37,14 @@ import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 
 export const createUtsav = async (req, res) => {
-  const { name, start_date, end_date, total_seats, location } = req.body;
+  const {
+    name,
+    start_date,
+    end_date,
+    total_seats,
+    location,
+    registration_deadline
+  } = req.body;
 
   const alreadyExists = await UtsavDb.findOne({
     where: {
@@ -63,6 +70,7 @@ export const createUtsav = async (req, res) => {
       location: location || RESEARCH_CENTRE,
       available_seats: total_seats,
       status: STATUS_OPEN,
+      registration_deadline,
       updatedBy: req.user.username
     },
     { transaction: t }
@@ -127,7 +135,8 @@ export const updateUtsav = async (req, res) => {
     status,
     total_seats,
     comments,
-    location
+    location,
+    registration_deadline
   } = req.body;
   const utsavId = req.params.id;
 
@@ -143,6 +152,7 @@ export const updateUtsav = async (req, res) => {
     total_seats,
     comments,
     location,
+    registration_deadline,
     updatedBy: req.user.username
   });
 
@@ -167,7 +177,6 @@ export const fetchUtsavBookings = async (req, res) => {
       ROOM_STATUS_CHECKEDIN
     ];
   } else if (status === 'checkedin') {
-    // For report view: fetch all these statuses
     statusToBeIncluded = [
       ROOM_STATUS_CHECKEDIN,
       STATUS_CONFIRMED,
@@ -189,15 +198,19 @@ export const fetchUtsavBookings = async (req, res) => {
 
   const utsavData = await database.query(
     `SELECT 
-  t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
-  t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t2.dob,
-  TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
-  t3.location, t3.name AS utsav_name
-FROM utsav_booking AS t1
-LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
-LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
-WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
-`,
+      t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
+      t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t2.dob,
+      TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
+      t3.location, t3.name AS utsav_name,
+      t4.name AS package_name,
+      t5.status AS transaction_status  -- 👈 fetch status from transactions table
+    FROM utsav_booking AS t1
+    LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
+    LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
+    LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
+    LEFT JOIN transactions AS t5 ON t1.bookingid = t5.bookingid
+    WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
+    `,
     {
       replacements: {
         utsavid,
@@ -215,9 +228,54 @@ WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
     .send({ message: 'Found Utsav Bookings', data: utsavData });
 };
 
+export const fetchUtsavBookingsVolunteer = async (req, res) => {
+  const utsavid = req.query.utsavid;
+  if (!utsavid) return res.status(400).send({ message: 'Missing utsavid' });
+
+  const statusToBeIncluded = [
+    ROOM_STATUS_CHECKEDIN,
+    STATUS_CONFIRMED,
+    STATUS_CASH_COMPLETED
+  ];
+
+  await validateUtsav(utsavid); // still useful to validate utsav ID
+
+  const result = await database.query(
+    `SELECT 
+  t2.issuedto AS name,
+  t2.center AS centre,
+  t4.name AS package_name,
+  TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
+  IFNULL(t1.volunteer, 'not selected') AS volunteer,
+  t2.mobno,
+  t2.gender,
+  t2.res_status
+FROM utsav_booking AS t1
+LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
+LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
+WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
+ORDER BY 
+  (IFNULL(t1.volunteer, 'not selected') = 'not selected') ASC,
+  (t1.volunteer = 'Unable to Volunteer') ASC,
+  t1.volunteer ASC
+
+    `,
+    {
+      replacements: { utsavid, status: statusToBeIncluded },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
+
+  return res.status(200).send({
+    message: 'Volunteer Access List Fetched',
+    data: result
+  });
+};
+
 export const fetchAllUtsav = async (req, res) => {
   const utsavs = await database.query(
-    `SELECT 
+    `SELECT
       utsav_db.id,
       utsav_db.name,
       utsav_db.start_date,
@@ -226,17 +284,25 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.total_seats,
       utsav_db.location,
       utsav_db.available_seats,
+      utsav_db.registration_deadline,
       COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN utsav_booking.status = '${ROOM_STATUS_CHECKEDIN}' THEN 1 END) AS checkedin_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_CANCELLED}' THEN 1 END) AS selfcancel_count,  
-      COUNT(CASE WHEN utsav_booking.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admincancel_count
+      COUNT(CASE WHEN utsav_booking.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admincancel_count,
+      COUNT(CASE 
+  WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin')
+       AND utsav_booking.volunteer NOT IN ('Unable to Volunteer', 'not selected') 
+       AND utsav_booking.volunteer IS NOT NULL
+  THEN 1 
+END) AS volunteer_opted_count
+
     FROM 
       utsav_db
     LEFT JOIN 
       utsav_booking ON utsav_db.id = utsav_booking.utsavid
-    GROUP BY 
+    GROUP BY
       utsav_db.id,
       utsav_db.name,
       utsav_db.start_date,
@@ -244,7 +310,8 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.status,
       utsav_db.total_seats,
       utsav_db.location,
-      utsav_db.available_seats      
+      utsav_db.available_seats,
+      utsav_db.registration_deadline
      ORDER BY 
       utsav_db.start_date ASC;`,
     {
@@ -303,43 +370,59 @@ export const utsavStatusUpdate = async (req, res) => {
 
   switch (status) {
     case STATUS_CONFIRMED:
-      // Confirmed allowed from waiting OR payment pending
-      if (booking.status !== STATUS_PAYMENT_PENDING) {
-        throw new ApiError(
-          400,
-          'Confirmed status can only be set from  payment pending'
-        );
-      }
+  // Confirmed allowed from payment pending or cancelled
+  if (
+    booking.status !== STATUS_PAYMENT_PENDING &&
+    booking.status !== STATUS_CANCELLED
+  ) {
+    throw new ApiError(
+      400,
+      'Confirmed status can only be set from payment pending or cancelled'
+    );
+  }
 
-      if (booking.status === STATUS_WAITING) {
-        await reserveUtsavSeat(utsav, t);
-      }
+  if (booking.status === STATUS_WAITING) {
+    await reserveUtsavSeat(utsav, t);
+  }
 
-      if (!transaction) {
-        const cardno = booking.bookedBy || booking.cardno;
-        const card = await validateCard(cardno);
+  if (!transaction) {
+    const cardno = booking.bookedBy || booking.cardno;
+    const card = await validateCard(cardno);
 
-        transaction = await createPendingTransaction(
-          card,
-          booking,
-          TYPE_UTSAV,
-          utsav.amount,
-          req.user.username,
-          t,
-          true
-        );
-      }
+    transaction = await createPendingTransaction(
+      card,
+      booking,
+      TYPE_UTSAV,
+      utsav.amount,
+      req.user.username,
+      t,
+      true
+    );
+  } else {
+    if (transaction.status === STATUS_CANCELLED) {
+  await transaction.update(
+    {
+      status: STATUS_PAYMENT_PENDING,
+      updatedBy: req.user.username,
+      description: description || 'Reopened after cancellation'
+    },
+    { transaction: t }
+  );
+} else if (transaction.status === STATUS_CONFIRMED) {
+  console.log('Transaction already confirmed. No action needed.');
+} else if (transaction.status === STATUS_PAYMENT_PENDING) {
+  await transaction.update(
+    {
+      status: STATUS_CONFIRMED,  // ✅ add this line
+      description: description,
+      updatedBy: req.user.username
+    },
+    { transaction: t }
+  );
+}
 
-      if (transaction.status === STATUS_PAYMENT_PENDING) {
-        await transaction.update(
-          {
-            description: description,
-            updatedBy: req.user.username
-          },
-          { transaction: t }
-        );
-      }
-      break;
+  }
+  break;
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status !== STATUS_WAITING) {
