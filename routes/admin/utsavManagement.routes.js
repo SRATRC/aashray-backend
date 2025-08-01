@@ -24,7 +24,7 @@ import {
   ROLE_UTSAV_ADMIN,
   ROLE_PRA_ACCOUNTS_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
-  ROLE_READONLY_ADMIN
+  ROROLE_UTSAV_READ_ONLY
 } from '../../config/constants.js';
 
 // ✅ Public router (NO auth required)
@@ -41,7 +41,7 @@ utsavAdminRouter.use(
     ROLE_SUPER_ADMIN,
     ROLE_PRA_ACCOUNTS_ADMIN,
     ROLE_ACCOUNTS_ADMIN,
-    ROLE_READONLY_ADMIN
+    ROLE_UTSAV_READ_ONLY
   )
 );
 
