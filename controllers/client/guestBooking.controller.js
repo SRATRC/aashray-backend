@@ -31,7 +31,8 @@ import {
 import {
   createFlatBooking,
   checkRoomAvailabilityForMumukshus,
-  bookRoomForMumukshus
+  bookRoomForMumukshus,
+  bookFlatForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import {
   generateOrderId,
@@ -384,66 +385,30 @@ async function bookAdhyayan(data, t, user) {
 export const guestBookingFlat = async (req, res) => {
   const { guests, startDay, endDay } = req.body;
 
-  const flatDb = await FlatDb.findOne({
-    attributes: ['flatno'],
-    where: {
-      owner: req.user.cardno
-    }
-  });
+  const t = await database.transaction();
+  req.transaction = t;
 
-  if (!flatDb) throw new ApiError(404, 'Flat not found');
-
-  validateDate(startDay, endDay);
-
-  for (var guest of guests) {
-    if (await checkFlatAlreadyBooked(startDay, endDay, guest))
-      throw new ApiError(400, `flat already Booked for ${guest}`);
-  }
-
-  const nights = await calculateNights(startDay, endDay);
-  var t = await database.transaction();
-
-  let amount = 0;
-  const bookingIds = [],
-    userBookingIdMap = {};
-
-  for (var guest of guests) {
-    const result = await createFlatBooking(
-      guest,
-      startDay,
-      endDay,
-      nights,
-      flatDb.dataValues.flatno,
-      req.user,
-      req.user.cardno,
-      t
-    );
-    amount += result.discountedAmount;
-    userBookingIdMap[guest] = [result.bookingId];
-    bookingIds.push(result.bookingId);
-  }
-
-  var order = null;
-  if (req.user.country == 'India' && amount > 0) {
-    order = await generateOrderId(amount);
-    await updateRazorpayTransactions(bookingIds, [], order.id, t);
-  }
+  const { userBookingIds, order } = await bookFlatForMumukshus(
+    startDay,
+    endDay,
+    guests,
+    req.user,
+    t
+  );
 
   await t.commit();
 
-  sendUnifiedEmail(
-    null,
-    { [TYPE_FLAT]: bookingIds },
+  sendUnifiedEmailForBookedBy(
+    userBookingIds,
     req.user,
     BOOKING_STATUS_PENDING
   );
 
-  Object.entries(userBookingIdMap)
-    .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
-    .forEach(([guestCardNo, bookings]) => {
-      // Create the single-entry bookingMap object directly when calling the function
+  Object.entries(userBookingIds)
+    .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
+    .forEach(([cardno, bookings]) => {
       sendUnifiedEmail(
-        guestCardNo,
+        cardno,
         { [TYPE_FLAT]: bookings },
         req.user,
         BOOKING_STATUS_PENDING
@@ -452,7 +417,7 @@ export const guestBookingFlat = async (req, res) => {
 
   return res.status(200).send({
     message: MSG_BOOKING_SUCCESSFUL,
-    data: order ? order : { amount: 0 }
+    data: order
   });
 };
 
