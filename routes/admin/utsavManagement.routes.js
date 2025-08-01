@@ -24,7 +24,7 @@ import {
   ROLE_UTSAV_ADMIN,
   ROLE_PRA_ACCOUNTS_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
-  ROROLE_UTSAV_READ_ONLY
+  ROLE_UTSAV_READ_ONLY
 } from '../../config/constants.js';
 
 // ✅ Public router (NO auth required)
