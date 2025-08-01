@@ -32,10 +32,13 @@ export const STATUS_CANCELLED = 'cancelled';
 export const STATUS_REJECTED = 'rejected';
 export const STATUS_ACTIVE = 'active';
 export const STATUS_INACTIVE = 'inactive';
+export const STATUS_PENDING = 'pending';
+export const STATUS_APPROVED = 'approved';
 export const STATUS_AVAILABLE = 'available';
 export const STATUS_TAKEN = 'taken';
 export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
+export const STATUS_DELETED = 'deleted';
 export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
@@ -93,6 +96,7 @@ export const ROLE_HOUSEKEEPING_ADMIN = 'housekeepingAdmin';
 export const ROLE_ELECTRICAL_ADMIN = 'electricalAdmin';
 export const ROLE_AVT_ADMIN = 'avtAdmin';
 export const ROLE_WIFI_ADMIN = 'wifiAdmin';
+export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

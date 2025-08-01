@@ -52,6 +52,12 @@ const UtsavDb = sequelize.define(
       allowNull: true,
       values: [STATUS_OPEN, STATUS_CLOSED],
       defaultValue: STATUS_OPEN
+    },
+    registration_deadline: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      comment:
+        'Registration deadline date - users can only see and register for utsavs before or on this date'
     }
   },
   {

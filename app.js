@@ -7,6 +7,7 @@ import session from 'express-session';
 import sequelize from './config/database.js';
 import ApiError from './utils/ApiError.js';
 import logger from './config/logger.js';
+import connectionMonitor from './utils/connectionMonitor.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -40,7 +41,10 @@ import accountsManagementRoutes from './routes/admin/accountsManagement.routes.j
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagement.routes.js';
 import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
 // import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
-import { utsavPublicRouter, utsavAdminRouter } from './routes/admin/utsavManagement.routes.js';
+import {
+  utsavPublicRouter,
+  utsavAdminRouter
+} from './routes/admin/utsavManagement.routes.js';
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
 
@@ -53,17 +57,34 @@ if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir);
 }
 
-(async () => {
-  try {
-    await sequelize.authenticate();
-    logger.info('Connected to Database 🚀');
+if (process.env.NODE_ENV != 'test') {
+  (async () => {
+    try {
+      await sequelize.authenticate();
+      logger.info('Connected to Database 🚀');
 
-    // Synchronize the models with the database (create tables if they don't exist)
-    await sequelize.sync();
-  } catch (error) {
-    logger.error('Unable to connect to the database:', error);
-  }
-})();
+      // Synchronize the models with the database (create tables if they don't exist)
+      await sequelize.sync();
+
+      // Pre-warm the connection pool to minimum size
+      const minConnections = sequelize.options.pool.min || 2;
+      const warmupPromises = Array.from({ length: minConnections }, () =>
+        sequelize.query('SELECT 1 as warmup', {
+          type: sequelize.QueryTypes.SELECT
+        })
+      );
+      await Promise.all(warmupPromises);
+      logger.info(
+        `Connection pool warmed up with ${minConnections} connections`
+      );
+
+      // Start connection monitoring
+      connectionMonitor.start();
+    } catch (error) {
+      logger.error('Unable to connect to the database:', error);
+    }
+  })();
+}
 
 const corsOptions = {
   // origin: [
@@ -95,6 +116,45 @@ app.get('/api', (_req, res) => {
   res.status(200).send({ data: 'API is up and running... 🚀', status: 200 });
 });
 
+// Health check endpoint with database connection test
+app.get('/api/health', async (_req, res) => {
+  try {
+    // Test database connection
+    await sequelize.authenticate();
+
+    // Get connection pool status
+    const pool = sequelize.connectionManager.pool;
+    const poolStatus = {
+      size: pool.size,
+      available: pool.available,
+      using: pool.using,
+      waiting: pool.waiting
+    };
+
+    // Get pool configuration for comparison
+    const poolConfig = sequelize.options.pool;
+
+    res.status(200).send({
+      status: 'healthy',
+      database: 'connected',
+      environment: process.env.NODE_ENV || 'dev',
+      pool: {
+        current: poolStatus,
+        configured: poolConfig
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Health check failed:', error);
+    res.status(503).send({
+      status: 'unhealthy',
+      database: 'disconnected',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.use('/api/v1/client', clientAuthRoutes);
 app.use('/api/v1/wifi', wifiRoutes);
 app.use('/api/v1/stay', roomRoutes);
@@ -122,7 +182,7 @@ app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
 app.use('/api/v1/admin/bookings', bookingManagementRoutes);
 // app.use('/api/v1/admin/utsav', utsavManagementRoutes);
 app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
-app.use('/api/v1/admin/utsav', utsavAdminRouter);  // With auth
+app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 app.use('/api/v1/admin/wifi', wifiManagementRoutes);
 
@@ -138,10 +198,56 @@ app.use((_req, _res) => {
 
 app.use(ErrorHandler);
 
-const port = process.env.PORT || 3000;
-const server = app.listen(port, () => {
-  logger.info(`Server is listening on port ${port}...`);
-});
+if (process.env.NODE_ENV != 'test') {
+  const port = process.env.PORT || 3000;
+  const server = app.listen(port, () => {
+    logger.info(`Server is listening on port ${port}...`);
+  });
+
+  // Graceful shutdown handling
+  const gracefulShutdown = async (signal) => {
+    logger.info(`Received ${signal}. Starting graceful shutdown...`);
+
+    // Close HTTP server first
+    server.close(async () => {
+      logger.info('HTTP server closed');
+
+      try {
+        // Stop connection monitoring
+        connectionMonitor.stop();
+
+        // Close database connections
+        await sequelize.close();
+        logger.info('Database connections closed');
+        process.exit(0);
+      } catch (error) {
+        logger.error('Error during graceful shutdown:', error);
+        process.exit(1);
+      }
+    });
+
+    // Force shutdown after 30 seconds
+    setTimeout(() => {
+      logger.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 30000);
+  };
+
+  // Handle shutdown signals
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception:', error);
+    gracefulShutdown('uncaughtException');
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    gracefulShutdown('unhandledRejection');
+  });
+}
 
 // Export the app and a function to close the database connection
-export { app, sequelize, server };
+export { app, sequelize };

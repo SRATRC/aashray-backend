@@ -9,7 +9,8 @@
     "dev": "nodemon app.js",
     "start:prod": "NODE_ENV=prod node app.js",
     "start:cron": "node cron.js",
-    "logs:clean": "rm -rf logs/*"
+    "logs:clean": "rm -rf logs/*",
+    "test": "npx jest"
   },
   "keywords": [],
   "author": "",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@babel/preset-env": "^7.25.8",
+    "@faker-js/faker": "^9.9.0",
     "babel-jest": "^29.7.0",
     "babel-register": "^6.26.0",
     "jest": "^29.7.0",
