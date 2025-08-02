@@ -1,5 +1,4 @@
 import {
-  STATUS_AVAILABLE,
   TYPE_ROOM,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
@@ -32,7 +31,7 @@ import {
 } from '../../helpers/travelBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  validateFood
+  checkFoodAvailabilityForMumumkshus
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
@@ -45,7 +44,6 @@ import {
   updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
 import {
-  validateDate,
   setBookingIdMap,
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
@@ -257,7 +255,7 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data, utsav);
+      response.foodDetails = await checkFoodAvailability(body, data, user, utsav);
       break;
 
     case TYPE_ADHYAYAN:
@@ -310,10 +308,6 @@ async function bookRoom(body, data, t, user) {
 
 async function bookFood(body, data, t, user) {
   let { start_date, end_date, mumukshuGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
-
   await bookFoodForMumukshus(
     start_date,
     end_date,
@@ -321,7 +315,8 @@ async function bookFood(body, data, t, user) {
     body.primary_booking,
     body.addons,
     user.cardno,
-    t
+    t,
+    user.cardno
   );
 
   return t;
@@ -358,31 +353,20 @@ async function checkRoomAvailability(data, user, utsav) {
   return result;
 }
 
-async function checkFoodAvailability(body, data, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date, mumukshuGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
 
-  validateDate(start_date, end_date);
+  const result = await checkFoodAvailabilityForMumumkshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    utsav,
+    user
+  );
 
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-
-  const cards = await validateCards(mumukshus);
-  for (const card of cards) {
-    await validateFood(
-      start_date,
-      end_date,
-      body.primary_booking,
-      body.addons,
-      card
-    );
-  }
-
-  return {
-    status: STATUS_AVAILABLE,
-    charge: 0
-  };
+  return result;
 }
 
 async function checkTravelAvailability(data) {

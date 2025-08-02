@@ -57,30 +57,34 @@ if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir);
 }
 
-(async () => {
-  try {
-    await sequelize.authenticate();
-    logger.info('Connected to Database 🚀');
+if (process.env.NODE_ENV != 'test') {
+  (async () => {
+    try {
+      await sequelize.authenticate();
+      logger.info('Connected to Database 🚀');
 
-    // Synchronize the models with the database (create tables if they don't exist)
-    await sequelize.sync();
+      // Synchronize the models with the database (create tables if they don't exist)
+      await sequelize.sync();
 
-    // Pre-warm the connection pool to minimum size
-    const minConnections = sequelize.options.pool.min || 2;
-    const warmupPromises = Array.from({ length: minConnections }, () =>
-      sequelize.query('SELECT 1 as warmup', {
-        type: sequelize.QueryTypes.SELECT
-      })
-    );
-    await Promise.all(warmupPromises);
-    logger.info(`Connection pool warmed up with ${minConnections} connections`);
+      // Pre-warm the connection pool to minimum size
+      const minConnections = sequelize.options.pool.min || 2;
+      const warmupPromises = Array.from({ length: minConnections }, () =>
+        sequelize.query('SELECT 1 as warmup', {
+          type: sequelize.QueryTypes.SELECT
+        })
+      );
+      await Promise.all(warmupPromises);
+      logger.info(
+        `Connection pool warmed up with ${minConnections} connections`
+      );
 
-    // Start connection monitoring
-    connectionMonitor.start();
-  } catch (error) {
-    logger.error('Unable to connect to the database:', error);
-  }
-})();
+      // Start connection monitoring
+      connectionMonitor.start();
+    } catch (error) {
+      logger.error('Unable to connect to the database:', error);
+    }
+  })();
+}
 
 const corsOptions = {
   // origin: [
@@ -194,54 +198,56 @@ app.use((_req, _res) => {
 
 app.use(ErrorHandler);
 
-const port = process.env.PORT || 3000;
-const server = app.listen(port, () => {
-  logger.info(`Server is listening on port ${port}...`);
-});
-
-// Graceful shutdown handling
-const gracefulShutdown = async (signal) => {
-  logger.info(`Received ${signal}. Starting graceful shutdown...`);
-
-  // Close HTTP server first
-  server.close(async () => {
-    logger.info('HTTP server closed');
-
-    try {
-      // Stop connection monitoring
-      connectionMonitor.stop();
-
-      // Close database connections
-      await sequelize.close();
-      logger.info('Database connections closed');
-      process.exit(0);
-    } catch (error) {
-      logger.error('Error during graceful shutdown:', error);
-      process.exit(1);
-    }
+if (process.env.NODE_ENV != 'test') {
+  const port = process.env.PORT || 3000;
+  const server = app.listen(port, () => {
+    logger.info(`Server is listening on port ${port}...`);
   });
 
-  // Force shutdown after 30 seconds
-  setTimeout(() => {
-    logger.error('Forced shutdown after timeout');
-    process.exit(1);
-  }, 30000);
-};
+  // Graceful shutdown handling
+  const gracefulShutdown = async (signal) => {
+    logger.info(`Received ${signal}. Starting graceful shutdown...`);
 
-// Handle shutdown signals
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    // Close HTTP server first
+    server.close(async () => {
+      logger.info('HTTP server closed');
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
-  gracefulShutdown('uncaughtException');
-});
+      try {
+        // Stop connection monitoring
+        connectionMonitor.stop();
 
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  gracefulShutdown('unhandledRejection');
-});
+        // Close database connections
+        await sequelize.close();
+        logger.info('Database connections closed');
+        process.exit(0);
+      } catch (error) {
+        logger.error('Error during graceful shutdown:', error);
+        process.exit(1);
+      }
+    });
+
+    // Force shutdown after 30 seconds
+    setTimeout(() => {
+      logger.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 30000);
+  };
+
+  // Handle shutdown signals
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception:', error);
+    gracefulShutdown('uncaughtException');
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    gracefulShutdown('unhandledRejection');
+  });
+}
 
 // Export the app and a function to close the database connection
-export { app, sequelize, server };
+export { app, sequelize };

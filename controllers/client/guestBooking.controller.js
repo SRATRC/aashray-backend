@@ -5,14 +5,10 @@ import {
   UtsavDb
 } from '../../models/associations.js';
 import {
-  STATUS_AVAILABLE,
   TYPE_ROOM,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
-  LUNCH_PRICE,
-  BREAKFAST_PRICE,
-  DINNER_PRICE,
   MSG_BOOKING_SUCCESSFUL,
   MSG_UPDATE_SUCCESSFUL,
   STATUS_GUEST,
@@ -35,19 +31,18 @@ import {
 import {
   createFlatBooking,
   checkRoomAvailabilityForMumukshus,
-  bookRoomForMumukshus
+  bookRoomForMumukshus,
+  bookFlatForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions,
-  usableCredits
+  updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
 import database from '../../config/database.js';
-import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import {
-  bookFoodForGuests,
-  getFoodBookings
+  bookFoodForMumukshus,
+  checkFoodAvailabilityForMumumkshus
 } from '../../helpers/foodBooking.helper.js';
 import {
   validateUtsavs,
@@ -74,7 +69,7 @@ export const guestBooking = async (req, res) => {
 
     case TYPE_FOOD:
       const foodResult = await bookFood(
-        primary_booking,
+        req.body,
         primary_booking,
         t,
         req.user
@@ -130,7 +125,7 @@ export const guestBooking = async (req, res) => {
 
         case TYPE_FOOD:
           const foodResult = await bookFood(
-            primary_booking,
+            req.body,
             addon,
             t,
             req.user
@@ -233,6 +228,7 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
+        req.body,
         req.body.primary_booking,
         req.user,
         utsav
@@ -284,6 +280,7 @@ export const validateBooking = async (req, res) => {
 
         case TYPE_FOOD:
           response.foodDetails = await checkFoodAvailability(
+            req.body,
             addon,
             req.user,
             utsav
@@ -346,94 +343,34 @@ async function bookRoom(data, t, user) {
   return result;
 }
 
-async function checkFoodAvailability(data, user, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date, guestGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
 
-  validateDate(start_date, end_date);
-
-  let allDates = [];
-  if (utsav) {
-    const event_start_date = utsav.start_date;
-    const event_end_date = utsav.end_date;
-
-    if (new Date(start_date) < event_start_date) {
-      const beforeEventDates = getDates(start_date, event_start_date);
-      beforeEventDates.pop(); // Remove the event start date
-      allDates = [...allDates, ...beforeEventDates];
-    }
-
-    if (new Date(end_date) > event_end_date) {
-      const afterEventDates = getDates(event_end_date, end_date);
-      afterEventDates.shift(); // Remove the event end date
-      allDates = [...allDates, ...afterEventDates];
-    }
-  } else {
-    allDates = getDates(start_date, end_date);
-  }
-
-  const guests = guestGroup.flatMap((group) => group.guests);
-
-  const bookings = await getFoodBookings(allDates, guests);
-
-  var charge = 0;
-  var availableCredits = 0;
-
-  for (const group of guestGroup) {
-    const { meals, guests } = group;
-
-    for (const date of allDates) {
-      for (const guest of guests) {
-        const booking = bookings[guest] && bookings[guest][date];
-
-        if (booking) {
-          // Only charge for meals that weren't previously booked
-          charge +=
-            meals.includes('breakfast') && !booking.breakfast
-              ? BREAKFAST_PRICE
-              : 0;
-          charge += meals.includes('lunch') && !booking.lunch ? LUNCH_PRICE : 0;
-          charge +=
-            meals.includes('dinner') && !booking.dinner ? DINNER_PRICE : 0;
-        } else {
-          // Charge for all new meals
-          charge += meals.includes('breakfast') ? BREAKFAST_PRICE : 0;
-          charge += meals.includes('lunch') ? LUNCH_PRICE : 0;
-          charge += meals.includes('dinner') ? DINNER_PRICE : 0;
-        }
-      }
-    }
-  }
-  availableCredits = usableCredits(user, TYPE_FOOD, charge);
-
-  return {
-    status: STATUS_AVAILABLE,
-    charge,
-    availableCredits
-  };
-}
-
-async function bookFood(primary_booking, data, t, user) {
-  let { start_date, end_date, guestGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
-
-  const utsavid =
-    primary_booking.booking_type == TYPE_UTSAV
-      ? primary_booking.details.utsavid
-      : null;
-
-  const result = await bookFoodForGuests(
+  const result = await checkFoodAvailabilityForMumumkshus(
     start_date,
     end_date,
     guestGroup,
-    user.cardno,
+    body.primary_booking,
+    body.addons,
+    utsav,
+    user,
+    true
+  );
+
+  return result;
+}
+
+async function bookFood(body, data, t, user) {
+  let { start_date, end_date, guestGroup } = data.details;
+  const result = await bookFoodForMumukshus(
+    start_date,
+    end_date,
+    guestGroup,
+    body.primary_booking,
+    body.addons,
     user.cardno,
     t,
-    utsavid
+    user.cardno
   );
 
   return result;
@@ -448,66 +385,30 @@ async function bookAdhyayan(data, t, user) {
 export const guestBookingFlat = async (req, res) => {
   const { guests, startDay, endDay } = req.body;
 
-  const flatDb = await FlatDb.findOne({
-    attributes: ['flatno'],
-    where: {
-      owner: req.user.cardno
-    }
-  });
+  const t = await database.transaction();
+  req.transaction = t;
 
-  if (!flatDb) throw new ApiError(404, 'Flat not found');
-
-  validateDate(startDay, endDay);
-
-  for (var guest of guests) {
-    if (await checkFlatAlreadyBooked(startDay, endDay, guest))
-      throw new ApiError(400, `flat already Booked for ${guest}`);
-  }
-
-  const nights = await calculateNights(startDay, endDay);
-  var t = await database.transaction();
-
-  let amount = 0;
-  const bookingIds = [],
-    userBookingIdMap = {};
-
-  for (var guest of guests) {
-    const result = await createFlatBooking(
-      guest,
-      startDay,
-      endDay,
-      nights,
-      flatDb.dataValues.flatno,
-      req.user,
-      req.user.cardno,
-      t
-    );
-    amount += result.discountedAmount;
-    userBookingIdMap[guest] = [result.bookingId];
-    bookingIds.push(result.bookingId);
-  }
-
-  var order = null;
-  if (req.user.country == 'India' && amount > 0) {
-    order = await generateOrderId(amount);
-    await updateRazorpayTransactions(bookingIds, [], order.id, t);
-  }
+  const { userBookingIds, order } = await bookFlatForMumukshus(
+    startDay,
+    endDay,
+    guests,
+    req.user,
+    t
+  );
 
   await t.commit();
 
-  sendUnifiedEmail(
-    null,
-    { [TYPE_FLAT]: bookingIds },
+  sendUnifiedEmailForBookedBy(
+    userBookingIds,
     req.user,
     BOOKING_STATUS_PENDING
   );
 
-  Object.entries(userBookingIdMap)
-    .filter(([guestCardNo]) => guestCardNo !== req.user.cardno) // Filter out the current user's cardno
-    .forEach(([guestCardNo, bookings]) => {
-      // Create the single-entry bookingMap object directly when calling the function
+  Object.entries(userBookingIds)
+    .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
+    .forEach(([cardno, bookings]) => {
       sendUnifiedEmail(
-        guestCardNo,
+        cardno,
         { [TYPE_FLAT]: bookings },
         req.user,
         BOOKING_STATUS_PENDING
@@ -516,7 +417,7 @@ export const guestBookingFlat = async (req, res) => {
 
   return res.status(200).send({
     message: MSG_BOOKING_SUCCESSFUL,
-    data: order ? order : { amount: 0 }
+    data: order
   });
 };
 

@@ -681,63 +681,52 @@ export const fetchAllUtsavList = async (req, res) => {
 };
 
 export const utsavCheckin = async (req, res) => {
+  console.log('📥 Received utsavid:', req.body.utsavid);
+console.log('📥 Received cardno:', req.body.cardno);
+
   const t = await database.transaction();
   req.transaction = t;
 
-  const { cardno } = req.body;
-  console.log('👉 Received cardno:', cardno);
+  const { cardno, utsavid } = req.body;
 
-  try {
-    const booking = await UtsavBooking.findOne({
-      where: { cardno },
-      transaction: t
-    });
+  const booking = await UtsavBooking.findOne({
+    where: {
+      cardno,
+      utsavid,
+      status: {
+        [Sequelize.Op.notIn]: [
+          STATUS_CANCELLED,
+          STATUS_WAITING,
+          STATUS_ADMIN_CANCELLED
+        ]
+      }
+    },
+    transaction: t
+  });
 
-    if (!booking) {
-      await t.rollback();
-      console.log('❌ Booking not found for cardno:', cardno);
-      return res.status(404).send({ message: 'Booking not found.' });
-    }
-
-    console.log('✅ Found booking:', booking.toJSON());
-
-    if (booking.status === ROOM_STATUS_CHECKEDIN) {
-      await t.rollback();
-      console.log('ℹ️ Already checked in.');
-      return res.status(200).send({ message: 'Already checked in.' });
-    }
-
-    if (booking.status !== STATUS_CONFIRMED) {
-      await t.rollback();
-      console.log('⚠️ Booking not confirmed. Current status:', booking.status);
-      return res
-        .status(400)
-        .send({ message: 'Booking is not in confirmed state.' });
-    }
-
-    console.log('🚀 Proceeding to update and fetch card details...');
-
-    const [_, card] = await Promise.all([
-      booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t }),
-      CardDb.findOne({ where: { cardno } })
-    ]);
-
-    console.log('✅ Card fetched:', card?.toJSON?.());
-
-    await t.commit();
-    return res.status(200).send({
-      message: 'Utsav booking status updated to checkedin.',
-      cardno: booking.cardno,
-      issuedto: card?.issuedto || null
-    });
-  } catch (error) {
+  if (!booking) {
     await t.rollback();
-    console.error('❌ utsavCheckin error:', error.message, error.stack);
-    return res.status(500).send({
-      message: 'Internal server error',
-      error: error.message
+    throw new ApiError(404, 'Booking not found for this user');
+  }
+
+  if ([STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(booking.status)) {
+    await t.rollback();
+    throw new ApiError(400, "User haven't paid yet, cannot checkin");
+  }
+
+  if (booking.status === ROOM_STATUS_CHECKEDIN) {
+    await t.rollback();
+    return res.status(200).send({
+      message: 'Already checked in'
     });
   }
+
+  await booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t });
+
+  await t.commit();
+  return res.status(200).send({
+    message: 'Utsav booking status updated to checkedin.'
+  });
 };
 
 export const utsavCheckinReport = async (req, res) => {

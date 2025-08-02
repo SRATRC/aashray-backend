@@ -5,14 +5,17 @@ import {
   LUNCH_PRICE,
   ROLE_FOOD_ADMIN,
   ROLE_SUPER_ADMIN,
+  STATUS_AVAILABLE,
   STATUS_CASH_PENDING,
   STATUS_GUEST,
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
   STATUS_SEVA_KUTIR,
+  TYPE_FOOD,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
-  TYPE_GUEST_LUNCH
+  TYPE_GUEST_LUNCH,
+  TYPE_UTSAV
 } from '../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -20,16 +23,11 @@ import {
   checkSpecialAllowance,
   validateDate
 } from '../controllers/helper.js';
-import {
-  CardDb,
-  FoodDb,
-  Transactions,
-  UtsavDb
-} from '../models/associations.js';
+import { FoodDb, Transactions, UtsavDb } from '../models/associations.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { cancelTransactions } from './transactions.helper.js';
+import { cancelTransactions, usableCredits } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
@@ -39,6 +37,21 @@ const mealTypeMapping = {
   lunch: TYPE_GUEST_LUNCH,
   dinner: TYPE_GUEST_DINNER
 };
+
+const MEALS = [
+  {
+    type: TYPE_GUEST_BREAKFAST,
+    price: BREAKFAST_PRICE
+  },
+  {
+    type: TYPE_GUEST_LUNCH,
+    price: LUNCH_PRICE
+  },
+  {
+    type: TYPE_GUEST_DINNER,
+    price: DINNER_PRICE
+  }
+];
 
 export async function getFoodBookings(allDates, ...cardnos) {
   const bookings = await FoodDb.findAll({
@@ -66,11 +79,17 @@ export async function bookFoodForMumukshus(
   bookedBy,
   t,
   updatedBy,
-  userRoles = []
+  userRoles = [],
+  cashAllowed = false
 ) {
+  if (!end_date) {
+    end_date = start_date;
+  }
   validateDate(start_date, end_date);
 
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  const mumukshus = mumukshuGroup.flatMap(
+    (group) => group.mumukshus || group.guests
+  );
   const cards = await validateCards(mumukshus);
   for (const card of cards) {
     await validateFood(
@@ -83,127 +102,24 @@ export async function bookFoodForMumukshus(
     );
   }
 
-  const allDates = getDates(start_date, end_date);
+  const utsav =
+    primary_booking.booking_type == TYPE_UTSAV
+      ? await UtsavDb.findOne({
+          where: { id: primary_booking.details.utsavid }
+        })
+      : null;
+
+  const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
   const bookings = await getFoodBookings(allDates, mumukshus);
 
-  var bookingsToCreate = [];
-  for (const group of mumukshuGroup) {
-    const { meals, spicy, high_tea, mumukshus } = group;
-
-    const breakfast = meals.includes('breakfast');
-    const lunch = meals.includes('lunch');
-    const dinner = meals.includes('dinner');
-
-    for (const mumukshu of mumukshus) {
-      for (const date of allDates) {
-        const booking = bookings[mumukshu] ? bookings[mumukshu][date] : null;
-        if (booking) {
-          await booking.update(
-            {
-              breakfast: booking.breakfast || breakfast,
-              lunch: booking.lunch || lunch,
-              dinner: booking.dinner || dinner,
-              hightea: high_tea,
-              spicy,
-              updatedBy: updatedBy ? updatedBy : bookedBy
-            },
-            { transaction: t }
-          );
-        } else {
-          bookingsToCreate.push({
-            id: uuidv4(),
-            cardno: mumukshu,
-            date,
-            bookedBy: bookedBy !== mumukshu ? bookedBy : null,
-            breakfast,
-            lunch,
-            dinner,
-            spicy,
-            hightea: high_tea,
-            plateissued: 0,
-            updatedBy: updatedBy ? updatedBy : bookedBy
-          });
-        }
-      }
-    }
-  }
-
-  await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return t;
-}
-
-export async function bookFoodForGuests(
-  start_date,
-  end_date,
-  guestGroup,
-  bookedBy,
-  updatedBy,
-  t,
-  utsaveId,
-  cashAllowed = false
-) {
-  const meals_object = [
-    {
-      name: 'breakfast',
-      price: BREAKFAST_PRICE,
-      type: TYPE_GUEST_BREAKFAST
-    },
-    {
-      name: 'lunch',
-      price: LUNCH_PRICE,
-      type: TYPE_GUEST_LUNCH
-    },
-    {
-      name: 'dinner',
-      price: DINNER_PRICE,
-      type: TYPE_GUEST_DINNER
-    }
-  ];
-
-  validateDate(start_date, end_date);
-
-  const guests = guestGroup.flatMap((group) => group.guests);
-  const guestDb = await CardDb.findAll({
-    where: { cardno: guests, res_status: STATUS_GUEST },
-    attributes: ['cardno']
-  });
-
-  if (guestDb.length != guests.length) {
-    throw new ApiError(404, 'Guest not found');
-  }
-
-  let allDates = [];
-
-  if (utsaveId) {
-    const utsav = await UtsavDb.findOne({
-      where: { id: utsaveId }
-    });
-    const event_start_date = new Date(utsav.start_date);
-    const event_end_date = new Date(utsav.end_date);
-    if (new Date(start_date) < event_start_date) {
-      const beforeEventDates = getDates(start_date, event_start_date);
-      beforeEventDates.pop(); // Remove the event start date
-      allDates = [...allDates, ...beforeEventDates];
-    }
-
-    if (new Date(end_date) > event_end_date) {
-      const afterEventDates = getDates(event_end_date, end_date);
-      afterEventDates.shift(); // Remove the event end date
-      allDates = [...allDates, ...afterEventDates];
-    }
-  } else {
-    allDates = getDates(start_date, end_date);
-  }
-
-  const bookings = await getFoodBookings(allDates, guests);
-
-  var bookingsToCreate = [];
-  var transactionsToCreate = [];
-  var amount = 0;
+  const bookingsToCreate = [];
+  const transactionsToCreate = [];
+  let amount = 0;
   const userBookingIds = {};
 
-  for (const group of guestGroup) {
-    const { meals, spicy, high_tea, guests } = group;
+  for (const group of mumukshuGroup) {
+    const { meals, spicy, high_tea } = group;
+    const mumukshus = group.mumukshus || group.guests;
 
     const breakfast = meals.includes('breakfast');
     const lunch = meals.includes('lunch');
@@ -211,28 +127,19 @@ export async function bookFoodForGuests(
 
     const mealSelections = { breakfast, lunch, dinner };
 
-    for (const guest of guests) {
-      const bookingIds = [];
+    for (const mumukshu of mumukshus) {
+      const card = cards.filter((item) => item.cardno == mumukshu)[0];
+      const isGuest = card.res_status == STATUS_GUEST;
+
+      var bookingIds = [];
       for (const date of allDates) {
-        const booking = bookings[guest] && bookings[guest][date];
-
+        let bookingId;
+        const existingMeals = {};
+        const booking = bookings[mumukshu] && bookings[mumukshu][date];
         if (booking) {
-          // Only charge for meals that weren't previously booked
-          meals_object.forEach((meal) => {
-            if (mealSelections[meal.name] && !booking[meal.name]) {
-              amount += meal.price;
-
-              transactionsToCreate.push({
-                cardno: bookedBy || guest,
-                bookingid: booking.dataValues.id,
-                category: meal.type,
-                amount: meal.price,
-                status: cashAllowed
-                  ? STATUS_CASH_PENDING
-                  : STATUS_PAYMENT_PENDING,
-                updatedBy
-              });
-            }
+          bookingId = booking.id;
+          MEALS.forEach((meal) => {
+            existingMeals[meal.type] = booking[meal.type];
           });
 
           await booking.update(
@@ -246,16 +153,13 @@ export async function bookFoodForGuests(
             },
             { transaction: t }
           );
-
-          bookingIds.push(booking.id);
         } else {
-          const bookingId = uuidv4();
-
+          bookingId = uuidv4();
           bookingsToCreate.push({
             id: bookingId,
-            cardno: guest,
-            bookedBy: bookedBy,
+            cardno: mumukshu,
             date,
+            bookedBy: bookedBy !== mumukshu ? bookedBy : null,
             breakfast,
             lunch,
             dinner,
@@ -264,13 +168,17 @@ export async function bookFoodForGuests(
             plateissued: 0,
             updatedBy
           });
+        }
+        bookingIds.push(bookingId);
 
-          meals_object.forEach((meal) => {
-            if (mealSelections[meal.name]) {
+        // Only charge for meals for guests
+        if (isGuest) {
+          MEALS.forEach((meal) => {
+            if (mealSelections[meal.type] && !existingMeals[meal.type]) {
               amount += meal.price;
 
               transactionsToCreate.push({
-                cardno: bookedBy || guest,
+                cardno: bookedBy,
                 bookingid: bookingId,
                 category: meal.type,
                 amount: meal.price,
@@ -281,21 +189,110 @@ export async function bookFoodForGuests(
               });
             }
           });
-
-          bookingIds.push(bookingId);
         }
       }
-      userBookingIds[guest] = bookingIds;
+      userBookingIds[mumukshu] = bookingIds;
     }
   }
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+
   const transactions = await Transactions.bulkCreate(transactionsToCreate, {
     transaction: t
   });
   const transactionIds = transactions.map((item) => item.id);
-
   return { amount, userBookingIds, transactionIds };
+}
+
+export async function checkFoodAvailabilityForMumumkshus(
+  start_date,
+  end_date,
+  mumukshuGroup,
+  primary_booking,
+  addons,
+  utsav,
+  user,
+  isGuestBooking = false
+) {
+  if (!end_date) {
+    end_date = start_date;
+  }
+  validateDate(start_date, end_date);
+
+  const mumukshus = mumukshuGroup.flatMap(
+    (group) => group.mumukshus || group.guests
+  );
+  const cards = await validateCards(mumukshus);
+
+  for (const card of cards) {
+    await validateFood(start_date, end_date, primary_booking, addons, card);
+  }
+
+  var charge = 0;
+  var availableCredits = 0;
+
+  if (isGuestBooking) {
+    const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
+    const bookings = await getFoodBookings(allDates, mumukshus);
+
+    for (const group of mumukshuGroup) {
+      const meals = group.meals;
+      const mumukshus = group.mumukshus || group.guests;
+
+      for (const date of allDates) {
+        for (const mumukshu of mumukshus) {
+          const booking = bookings[mumukshu] && bookings[mumukshu][date];
+
+          if (booking) {
+            // Only charge for meals that weren't previously booked
+            charge +=
+              meals.includes('breakfast') && !booking.breakfast
+                ? BREAKFAST_PRICE
+                : 0;
+            charge += meals.includes('lunch') && !booking.lunch ? LUNCH_PRICE : 0;
+            charge +=
+              meals.includes('dinner') && !booking.dinner ? DINNER_PRICE : 0;
+          } else {
+            // Charge for all new meals
+            charge += meals.includes('breakfast') ? BREAKFAST_PRICE : 0;
+            charge += meals.includes('lunch') ? LUNCH_PRICE : 0;
+            charge += meals.includes('dinner') ? DINNER_PRICE : 0;
+          }
+        }
+      }
+    }
+
+    availableCredits = usableCredits(user, TYPE_FOOD, charge);
+  }
+
+  return {
+    status: STATUS_AVAILABLE,
+    charge,
+    availableCredits
+  };
+}
+
+function getDatesDuringUtsav(start_date, end_date, utsav) {
+  let allDates = [];
+
+  if (utsav) {
+    const event_start_date = new Date(utsav.start_date);
+    const event_end_date = new Date(utsav.end_date);
+    if (new Date(start_date) < event_start_date) {
+      const beforeEventDates = getDates(start_date, event_start_date);
+      beforeEventDates.pop(); // Remove the event start date
+      allDates = [...allDates, ...beforeEventDates];
+    }
+    if (new Date(end_date) > event_end_date) {
+      const afterEventDates = getDates(event_end_date, end_date);
+      afterEventDates.shift(); // Remove the event end date
+      allDates = [...allDates, ...afterEventDates];
+    }
+  } else {
+    allDates = getDates(start_date, end_date);
+  }
+
+  return allDates;
 }
 
 export async function validateFood(
@@ -308,8 +305,9 @@ export async function validateFood(
 ) {
   if (
     !(
-      card.res_status === STATUS_RESIDENT ||
-      card.res_status === STATUS_SEVA_KUTIR ||
+      [STATUS_RESIDENT, STATUS_SEVA_KUTIR, STATUS_GUEST].includes(
+        card.res_status
+      ) ||
       [ROLE_FOOD_ADMIN, ROLE_SUPER_ADMIN].some((role) =>
         userRoles.includes(role)
       ) ||
@@ -350,29 +348,6 @@ export function createGroupFoodRequest(
   return [
     {
       mumukshus: [cardno],
-      meals,
-      spicy,
-      high_tea
-    }
-  ];
-}
-
-export function createGroupFoodRequestForGuest(
-  cardno,
-  breakfast,
-  lunch,
-  dinner,
-  spicy,
-  high_tea
-) {
-  const meals = [];
-  if (breakfast) meals.push('breakfast');
-  if (lunch) meals.push('lunch');
-  if (dinner) meals.push('dinner');
-
-  return [
-    {
-      guests: [cardno],
       meals,
       spicy,
       high_tea

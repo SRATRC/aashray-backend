@@ -7,4 +7,6 @@ module.exports = {
   collectCoverage: true,
   coverageDirectory: "coverage",
   coverageReporters: ["html"],
+  globalSetup: './jest/globalSetup.js',
+  globalTeardown: './jest/globalTeardown.js'
 };
