@@ -29,8 +29,8 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  createGroupFoodRequest,
-  validateFood
+  checkFoodAvailabilityForMumumkshus,
+  createGroupFoodRequest
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
@@ -239,9 +239,9 @@ async function validate(body, user, data, response, utsav) {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
-        user,
         body,
         data,
+        user,
         utsav
       );
       // food charges are not added for Mumukshus
@@ -320,7 +320,8 @@ async function bookFood(body, user, data, t) {
     body.primary_booking,
     body.addons,
     user.cardno,
-    t
+    t,
+    user.cardno
   );
 
   return t;
@@ -415,26 +416,24 @@ async function checkRoomAvailability(user, data, utsav) {
   return result;
 }
 
-async function checkFoodAvailability(user, body, data, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date } = data.details;
 
-  if (!end_date) {
-    end_date = start_date;
-  }
-
-  validateDate(start_date, end_date);
-  await validateFood(
+  const result = await checkFoodAvailabilityForMumumkshus(
     start_date,
     end_date,
+    [
+      {
+        mumukshus: [user.cardno],
+      }
+    ],
     body.primary_booking,
     body.addons,
+    utsav,
     user
   );
 
-  return {
-    status: STATUS_AVAILABLE,
-    charge: 0
-  };
+  return result;
 }
 
 async function checkTravelAvailability(user, data) {

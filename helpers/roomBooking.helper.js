@@ -14,6 +14,7 @@ import {
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
   ERR_FLAT_FAILED_TO_BOOK,
+  ERR_FLAT_ALREADY_BOOKED
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -22,11 +23,12 @@ import {
   FlatBooking,
   FlatDb
 } from '../models/associations.js';
-import { createPendingTransaction } from './transactions.helper.js';
+import { createPendingTransaction, generateOrderId, updateRazorpayTransactions } from './transactions.helper.js';
 import {
   calculateNights,
   getBlockedDates,
   isDateRangeBlocked,
+  checkFlatAlreadyBooked,
   validateDate
 } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -345,6 +347,68 @@ export async function createRoomBooking(
 
 export function roomCharge(roomtype) {
   return roomtype == 'nac' ? NAC_ROOM_PRICE : AC_ROOM_PRICE;
+}
+
+export async function bookFlatForMumukshus(
+  startDay,
+  endDay,
+  mumukshus,
+  user,
+  t
+) {
+  const flat = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: user.cardno
+    }
+  });
+
+  if (!flat) {
+    throw new ApiError(404, `Flat not found for ${user.cardno}`);
+  }
+
+  validateDate(startDay, endDay);
+  await validateCards(mumukshus);
+
+  for (var mumukshu of mumukshus) {
+    if (await checkFlatAlreadyBooked(startDay, endDay, mumukshu)) {
+      throw new ApiError(400, `${ERR_FLAT_ALREADY_BOOKED} for ${mumukshu}`);
+    }
+  }
+
+  const nights = await calculateNights(startDay, endDay);
+
+  const userBookingIds = {},
+    bookingIds = [];
+  let amount = 0;
+  for (var mumukshu of mumukshus) {
+    const booking = await createFlatBooking(
+      mumukshu,
+      startDay,
+      endDay,
+      nights,
+      flat.flatno,
+      user,
+      user.cardno,
+      t
+    );
+    amount += booking.discountedAmount;
+    userBookingIds[mumukshu] = [booking.bookingId];
+    bookingIds.push(booking.bookingId);
+  }
+
+  var order = null;
+  if (user.country == 'India' && amount > 0) {
+    order = await generateOrderId(amount);
+    await updateRazorpayTransactions(bookingIds, [], order.id, t);
+  } else {
+    order = { amount };
+  }
+
+  return {
+    userBookingIds,
+    order
+  };
 }
 
 export async function createFlatBooking(

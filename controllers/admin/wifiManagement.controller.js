@@ -1,18 +1,17 @@
 import XLSX from 'xlsx';
-// import WifiPwd from '../../models/wifi.model.js'; // adjust path if needed
 import {
   WifiDb,
   CardDb,
-  FlatBooking,
-  RoomBooking
+  PermanentWifiCodes
 } from '../../models/associations.js';
-// import logger from '../../config/logger.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-// import moment from 'moment';
-
-
-
+import {
+  STATUS_PENDING,
+  STATUS_APPROVED,
+  STATUS_REJECTED
+} from '../../config/constants.js';
+import ApiError from '../../utils/ApiError.js';
 
 export const uploadWiFiCodes = async (req, res) => {
   try {
@@ -26,7 +25,7 @@ export const uploadWiFiCodes = async (req, res) => {
 
     for (const row of sheet) {
       const createdAt = new Date(); // automatically use current timestamp
-      
+
       formattedRows.push({
         cardno: null,
         password: row.password,
@@ -53,12 +52,14 @@ export const uploadWiFiCodes = async (req, res) => {
 
     const existingPwd = new Set(existingRecords.map((r) => r.password));
 
-    const uniqueRows = formattedRows.filter((row) => !existingPwd.has(row.password));
+    const uniqueRows = formattedRows.filter(
+      (row) => !existingPwd.has(row.password)
+    );
 
     if (uniqueRows.length === 0) {
-      return res
-        .status(200)
-        .json({ message: 'No new rows to insert. All passwords were duplicates.' });
+      return res.status(200).json({
+        message: 'No new rows to insert. All passwords were duplicates.'
+      });
     }
 
     await WifiDb.bulkCreate(uniqueRows);
@@ -70,14 +71,11 @@ export const uploadWiFiCodes = async (req, res) => {
     });
   } catch (err) {
     console.error('Error processing Excel upload:', err);
-    res
-      .status(500)
-      .json({
-        error: 'Failed to process and store Excel data: ' + err.message
-      });
+    res.status(500).json({
+      error: 'Failed to process and store Excel data: ' + err.message
+    });
   }
 };
-
 
 export const wifiRecord = async (req, res) => {
   const { startDate, endDate, status, bookingType } = req.query;
@@ -143,4 +141,113 @@ export const wifiRecord = async (req, res) => {
     console.error('Error fetching wifi records:', err);
     res.status(500).json({ error: 'Failed to fetch wifi records' });
   }
+};
+
+export const getPermanentCodeRequests = async (req, res) => {
+  const { status, page = 1, limit = 10 } = req.query;
+  const offset = (page - 1) * limit;
+
+  const whereClause = {};
+  if (
+    status &&
+    [STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED].includes(status)
+  ) {
+    whereClause.status = status;
+  }
+
+  const { count, rows } = await PermanentWifiCodes.findAndCountAll({
+    where: whereClause,
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'email', 'mobno', 'res_status']
+      }
+    ],
+    order: [['requested_at', 'DESC']],
+    limit: parseInt(limit),
+    offset: parseInt(offset)
+  });
+
+  res.status(200).json({
+    message: 'Permanent WiFi code requests fetched successfully',
+    data: {
+      requests: rows,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit)
+      }
+    }
+  });
+};
+
+export const updatePermanentCodeRequest = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const { requestId } = req.params;
+  const { action, permanent_code, admin_comments } = req.body;
+
+  if (!action || ![STATUS_APPROVED, STATUS_REJECTED].includes(action)) {
+    throw new ApiError(
+      400,
+      'Invalid action. Must be either "approve" or "reject"'
+    );
+  }
+
+  if (action === STATUS_APPROVED && !permanent_code) {
+    throw new ApiError(400, 'Permanent code is required for approval');
+  }
+
+  const checkAlreadyrequested = await PermanentWifiCodes.findByPk(requestId, {
+    transaction: t
+  });
+
+  if (!checkAlreadyrequested) {
+    throw new ApiError(404, 'Permanent code request not found');
+  }
+
+  if (checkAlreadyrequested.status == STATUS_APPROVED) {
+    throw new ApiError(
+      400,
+      `Request has already been ${checkAlreadyrequested.status}`
+    );
+  }
+
+  if (action === STATUS_APPROVED) {
+    const existingCode = await PermanentWifiCodes.findOne({
+      where: {
+        code: permanent_code,
+        status: STATUS_APPROVED
+      },
+      transaction: t
+    });
+
+    if (existingCode) {
+      throw new ApiError(
+        400,
+        `This permanent code is already assigned to another user: ${existingCode.cardno}`
+      );
+    }
+  }
+
+  const updateData = {
+    status: action,
+    reviewed_at: new Date(),
+    reviewed_by: req.user?.username,
+    admin_comments
+  };
+
+  if (action === STATUS_APPROVED) {
+    updateData.code = permanent_code;
+  }
+
+  await checkAlreadyrequested.update(updateData, { transaction: t });
+  await t.commit();
+
+  res.status(200).json({
+    message: `Permanent WiFi code request ${action} successfully`,
+    data: checkAlreadyrequested
+  });
 };
