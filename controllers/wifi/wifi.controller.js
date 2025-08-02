@@ -125,6 +125,13 @@ export const requestPermanentCode = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  if (req.user.res_status !== STATUS_MUMUKSHU) {
+    throw new APIError(
+      403,
+      'You are not eligible to request a permanent WiFi code'
+    );
+  }
+
   // Check if user already has a pending or approved request
   const existingRequest = await PermanentWifiCodes.findOne({
     where: {
