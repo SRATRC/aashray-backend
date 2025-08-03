@@ -103,24 +103,42 @@ export async function bookDayVisit(
   return booking;
 }
 
-export async function findRoom(checkin, checkout, room_type, gender) {
+export async function findRoom(
+  checkin,
+  checkout,
+  room_type,
+  gender,
+  excludeRooms = []
+) {
+  const whereConditions = {
+    roomstatus: STATUS_AVAILABLE,
+    roomtype: room_type,
+    gender: gender,
+    [Sequelize.Op.and]: [
+      { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
+      { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
+      {
+        roomno: {
+          [Sequelize.Op.notIn]: Sequelize.literal(`(
+            SELECT roomno 
+            FROM room_booking 
+            WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
+            AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
+          )`)
+        }
+      }
+    ]
+  };
+
+  if (excludeRooms.length > 0) {
+    whereConditions[Sequelize.Op.and].push({
+      roomno: { [Sequelize.Op.notIn]: excludeRooms }
+    });
+  }
+
   return RoomDb.findOne({
     attributes: ['roomno'],
-    where: {
-      roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: Sequelize.literal(`(
-                    SELECT roomno 
-                    FROM room_booking 
-                    WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
-                    AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
-                )`)
-      },
-      roomstatus: STATUS_AVAILABLE,
-      roomtype: room_type,
-      gender: gender
-    },
+    where: whereConditions,
     order: [
       Sequelize.literal(
         `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
@@ -203,6 +221,7 @@ export async function bookRoomForMumukshus(
 
   let amount = 0;
   let userBookingIds = {};
+  const assignedRooms = [];
   for (const group of mumukshuGroup) {
     const { roomType, floorType } = group;
     const mumukshus = group.mumukshus || group.guests;
@@ -231,11 +250,14 @@ export async function bookRoomForMumukshus(
           card.gender,
           floorType,
           user,
-          t
+          t,
+          false,
+          assignedRooms
         );
 
         amount += result.discountedAmount;
         userBookingIds[card.cardno] = [result.bookingId];
+        assignedRooms.push(result.bookedRoomNo);
       }
     }
   }
@@ -252,7 +274,8 @@ export async function createRoomBooking(
   floor_pref,
   user,
   t,
-  cashAllowed = false
+  cashAllowed = false,
+  excludeRooms = []
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
 
@@ -288,20 +311,27 @@ export async function createRoomBooking(
         },
         { transaction: t }
       );
-      return { t, discountedAmount: 0, bookingId };
+      return { t, discountedAmount: 0, bookingId, bookedRoomNo: 'NA' };
     }
   }
-  const roomno = await findRoom(checkin, checkout, roomtype, gender);
+  const roomno = await findRoom(
+    checkin,
+    checkout,
+    roomtype,
+    gender,
+    excludeRooms
+  );
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
 
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
   let bookingId = uuidv4();
+  const bookedRoomNo = roomno.dataValues.roomno;
   const booking = await RoomBooking.create(
     {
       bookingid: bookingId,
-      roomno: roomno.dataValues.roomno,
+      roomno: bookedRoomNo,
       status: STATUS_PAYMENT_PENDING,
       cardno,
       bookedBy,
@@ -335,7 +365,7 @@ export async function createRoomBooking(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  return { t, discountedAmount, bookingId };
+  return { t, discountedAmount, bookingId, bookedRoomNo };
 }
 
 export function roomCharge(roomtype) {
@@ -486,7 +516,8 @@ export async function checkRoomAvailabilityDuringUtsav(
   gender,
   utsav,
   mumkshu,
-  user
+  user,
+  excludeRooms = []
 ) {
   var roomDetails = [];
   const event_start_date = utsav.start_date;
@@ -511,20 +542,33 @@ export async function checkRoomAvailabilityDuringUtsav(
           checkin_date,
           event_start_date,
           roomType,
-          gender
+          gender,
+          excludeRooms
         );
         if (roomno) {
           statusValue = STATUS_AVAILABLE;
           charge = roomCharge(roomType) * beforeNights;
           availableCredits = usableCredits(user, TYPE_ROOM, charge);
+          const assignedRoom = roomno.dataValues.roomno;
+          excludeRooms.push(assignedRoom);
+
+          roomDetails.push({
+            mumukshu: mumkshu,
+            status: statusValue,
+            charge: charge,
+            availableCredits: availableCredits,
+            dates: checkin_date + ' to ' + event_start_date,
+            roomno: assignedRoom
+          });
+        } else {
+          roomDetails.push({
+            mumukshu: mumkshu,
+            status: STATUS_WAITING,
+            charge: 0,
+            availableCredits: 0,
+            dates: checkin_date + ' to ' + event_start_date
+          });
         }
-        roomDetails.push({
-          mumukshu: mumkshu,
-          status: statusValue,
-          charge: charge,
-          availableCredits: availableCredits,
-          dates: checkin_date + ' to ' + event_start_date
-        });
       }
     }
   }
@@ -532,7 +576,7 @@ export async function checkRoomAvailabilityDuringUtsav(
   availableCredits = 0;
   charge = 0;
   statusValue = STATUS_WAITING;
-  // Handle booking after event ends
+
   if (new Date(checkout_date) > new Date(event_end_date)) {
     const afterNights = await calculateNights(event_end_date, checkout_date);
 
@@ -541,25 +585,37 @@ export async function checkRoomAvailabilityDuringUtsav(
         event_end_date,
         checkout_date,
         roomType,
-        gender
+        gender,
+        excludeRooms
       );
 
       if (roomno) {
         statusValue = STATUS_AVAILABLE;
-
         charge = roomCharge(roomType) * afterNights;
         availableCredits = usableCredits(user, TYPE_ROOM, charge);
-      }
+        const assignedRoom = roomno.dataValues.roomno;
+        excludeRooms.push(assignedRoom);
 
-      roomDetails.push({
-        mumukshu: mumkshu,
-        status: statusValue,
-        charge: charge,
-        availableCredits: availableCredits,
-        dates: event_end_date + ' to ' + checkout_date
-      });
+        roomDetails.push({
+          mumukshu: mumkshu,
+          status: statusValue,
+          charge: charge,
+          availableCredits: availableCredits,
+          dates: event_end_date + ' to ' + checkout_date,
+          roomno: assignedRoom
+        });
+      } else {
+        roomDetails.push({
+          mumukshu: mumkshu,
+          status: STATUS_WAITING,
+          charge: 0,
+          availableCredits: 0,
+          dates: event_end_date + ' to ' + checkout_date
+        });
+      }
     }
   }
+
   return roomDetails;
 }
 
@@ -583,6 +639,8 @@ export async function checkRoomAvailabilityForMumukshus(
   }
 
   var roomDetails = [];
+  const assignedRooms = [];
+
   for (const group of mumukshuGroup) {
     const { roomType, floorType } = group;
     const mumukshus = group.mumukshus || group.guests;
@@ -597,33 +655,37 @@ export async function checkRoomAvailabilityForMumukshus(
         : card.dataValues.gender;
 
       if (utsav) {
-        roomDetails.push(
-          ...(await checkRoomAvailabilityDuringUtsav(
-            checkin_date,
-            checkout_date,
-            roomType,
-            gender,
-            utsav,
-            mumukshu,
-            user
-          ))
+        const utsavRoomDetails = await checkRoomAvailabilityDuringUtsav(
+          checkin_date,
+          checkout_date,
+          roomType,
+          gender,
+          utsav,
+          mumukshu,
+          user,
+          assignedRooms
         );
+        roomDetails.push(...utsavRoomDetails);
       } else {
         var status = STATUS_WAITING;
         var charge = 0;
         var availableCredits = 0;
+        var assignedRoom = null;
 
         if (nights > 0) {
           const roomno = await findRoom(
             checkin_date,
             checkout_date,
             roomType,
-            gender
+            gender,
+            assignedRooms
           );
           if (roomno) {
             status = STATUS_AVAILABLE;
             charge = roomCharge(roomType) * nights;
             availableCredits = usableCredits(user, TYPE_ROOM, charge);
+            assignedRoom = roomno.dataValues.roomno;
+            assignedRooms.push(assignedRoom);
           }
         } else {
           status = STATUS_AVAILABLE;
@@ -633,7 +695,8 @@ export async function checkRoomAvailabilityForMumukshus(
           mumukshu,
           status,
           charge,
-          availableCredits
+          availableCredits,
+          ...(assignedRoom && { roomno: assignedRoom })
         });
       }
     }
