@@ -37,8 +37,8 @@ import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
-  const startDate = new Date(checkin_date);
-  const endDate = new Date(checkout_date);
+  // const startDate = new Date(checkin_date);
+  // const endDate = new Date(checkout_date);
 
   const blockedDates = await BlockDates.findAll({
     where: {
@@ -46,20 +46,20 @@ export async function getBlockedDates(checkin_date, checkout_date) {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: startDate } },
-            { checkout: { [Sequelize.Op.gte]: startDate } }
+            { checkin: { [Sequelize.Op.lte]: checkin_date } },
+            { checkout: { [Sequelize.Op.gte]: checkin_date } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: endDate } },
-            { checkout: { [Sequelize.Op.gte]: endDate } }
+            { checkin: { [Sequelize.Op.lte]: checkout_date } },
+            { checkout: { [Sequelize.Op.gte]: checkout_date } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: startDate } },
-            { checkin: { [Sequelize.Op.lte]: endDate } }
+            { checkin: { [Sequelize.Op.gte]: checkin_date } },
+            { checkin: { [Sequelize.Op.lte]: checkout_date } }
           ]
         }
       ]
@@ -754,29 +754,32 @@ export function groupByCardno(arr) {
   return grouped;
 }
 
-export function isDateRangeOverlapping(start1, end1, start2, end2) {
+export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllowed = true) {
   const startDate1 = new Date(start1);
   const endDate1 = new Date(end1);
   const startDate2 = new Date(start2);
   const endDate2 = new Date(end2);
 
+  // log all dates
+  console.log('Start Date 1:', startDate1);
+  console.log('End Date 1:', endDate1);
+  console.log('Start Date 2:', startDate2);
+  console.log('End Date 2:', endDate2);
+
   // No overlap if one range ends before the other starts
-  const noOverlap = endDate1 <= startDate2 || endDate2 <= startDate1;
+  const noOverlap = boundaryAllowed
+    ? endDate1 <= startDate2 || endDate2 <= startDate1
+    : endDate1 < startDate2 || endDate2 < startDate1
 
   return !noOverlap;
 }
 
-export function isDateBlocked(blockedDate, startDate, endDate) {
-  const blockStart = new Date(blockedDate.checkin);
-  blockStart.setDate(blockStart.getDate());
-
-  const blockEnd = new Date(blockedDate.checkout);
-  blockEnd.setDate(blockEnd.getDate());
-  
+export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {  
   return isDateRangeOverlapping(
-    blockStart,
-    blockEnd,
+    blockedDate.checkin,
+    blockedDate.checkout,
     startDate,
-    endDate
+    endDate,
+    boundaryAllowed
   );
 }

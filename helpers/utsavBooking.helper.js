@@ -286,17 +286,12 @@ export async function validateUtsavPackage(packageId, utsavId) {
 export function isUtsavOverlapping(utsav, startDate, endDate) {
   if (!utsav) return false;
 
-  const utsavStart = new Date(utsav.start_date);
-  utsavStart.setDate(utsavStart.getDate() - 1);
-
-  const utsavEnd = new Date(utsav.end_date);
-  utsavEnd.setDate(utsavEnd.getDate() + 1);
-  
   return isDateRangeOverlapping(
-    utsavStart,
-    utsavEnd,
+    utsav.start_date,
+    utsav.end_date,
     startDate,
-    endDate
+    endDate,
+    false
   );
 }
 

@@ -11,6 +11,6 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.use(validateCard);
 router.get('/', CatchAsync(checkMumukshuOrGuest));
 router.post('/booking', CheckDatesBlocked, CatchAsync(mumukshuBooking));
-router.post('/validate', CheckDatesBlocked, CatchAsync(validateBooking));
+router.post('/validate', CatchAsync(validateBooking));
 
 export default router;

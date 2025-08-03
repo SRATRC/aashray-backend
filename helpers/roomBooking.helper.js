@@ -563,7 +563,7 @@ export async function checkRoomAvailabilityForMumukshus(
       )
     : {};
   
-  const blockedDates = await getBlockedDates(checkin_date, checkout_date);
+  
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
@@ -598,19 +598,23 @@ export async function checkRoomAvailabilityForMumukshus(
         dateRanges.push(
           {
             start: checkin_date,
-            end: checkout_date
+            end: checkout_date,
+            touchingUtsav: false
           }
         )
       }
 
+      const blockedDates = await getBlockedDates(checkin_date, checkout_date);
+
       console.log("ORIGINAL RANGE: " + checkin_date + " to " + checkout_date);
       console.log("RANGES: " + JSON.stringify(dateRanges));
+      console.log("BLOCKED DATES: " + JSON.stringify(blockedDates));
 
       // check dates against block dates
       const conflictingBlocks = [];
       for (const range of dateRanges) {
         for (const blockedDate of blockedDates) {
-          if (isDateBlocked(blockedDate, range.start, range.end)) {
+          if (isDateBlocked(blockedDate, range.start, range.end, range.touchingUtsav)) {
             conflictingBlocks.push(
               `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
                 blockedDate.checkout).format('Do MMMM, YYYY')}`
