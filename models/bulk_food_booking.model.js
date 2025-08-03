@@ -26,16 +26,31 @@ const BulkFoodBooking = sequelize.define(
       allowNull: false,
     },
     breakfast: {
-      type: DataTypes.BOOLEAN,
+      type: DataTypes.INTEGER,
       allowNull: false
     },
     lunch: {
-      type: DataTypes.BOOLEAN,
+      type: DataTypes.INTEGER,
       allowNull: false
     },
     dinner: {
-      type: DataTypes.BOOLEAN,
+      type: DataTypes.INTEGER,
       allowNull: false
+    },
+    breakfast_plate_issued: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    lunch_plate_issued: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    dinner_plate_issued: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
     },
     department: {
       type: DataTypes.STRING,

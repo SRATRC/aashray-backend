@@ -248,17 +248,19 @@ export const cancelBooking = async (req, res) => {
 };
 
 export const bulkBooking = async (req, res) => {
-  const { cardno, date, guestCount, breakfast, lunch, dinner, department } =
-    req.body;
+  const { cardno, date, guestCount, breakfast, lunch, dinner, department } = req.body;
 
   const booking = await BulkFoodBooking.create({
     bookingid: uuidv4(),
     cardno,
     date,
     guestCount,
-    breakfast,
-    lunch,
-    dinner,
+    breakfast: breakfast ? guestCount : 0,
+    lunch: lunch ? guestCount : 0,
+    dinner: dinner ? guestCount : 0,
+    breakfast_plate_issued: 0,
+    lunch_plate_issued: 0,
+    dinner_plate_issued: 0,
     department,
     updatedBy: req.user.username
   });
@@ -267,7 +269,7 @@ export const bulkBooking = async (req, res) => {
 };
 
 export const fetchBulkBookings = async (req, res) => {
-  const cardno = req.query.cardno;
+  const { cardno, mobno } = req.query;
   const today = moment().format('YYYY-MM-DD');
 
   const bookings = await BulkFoodBooking.findAll({
@@ -275,11 +277,14 @@ export const fetchBulkBookings = async (req, res) => {
       {
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno'],
-        required: true
+        required: true,
+        where: {
+          ...(cardno && { cardno }),
+          ...(mobno && { mobno }),
+        },
       }
     ],
     where: {
-      ...(cardno != '' && { cardno }),
       date: { [Sequelize.Op.gt]: today }
     },
     order: [['date', 'ASC']]
@@ -290,20 +295,62 @@ export const fetchBulkBookings = async (req, res) => {
     .send({ message: MSG_FETCH_SUCCESSFUL, data: bookings });
 };
 
-export const cancelBulkBooking = async (req, res) => {
-  const bookingid = req.params.bookingid;
+// editBulkBooking: PUT /food/edit_bulk_booking/:bookingid
+export const editBulkBooking = async (req, res) => {
+  const { bookingid } = req.params;
+  const { breakfast = 0, lunch = 0, dinner = 0, guestCount = 0 } = req.body;
 
-  const booking = await BulkFoodBooking.findOne({
-    where: { bookingid }
+  const booking = await BulkFoodBooking.findOne({ where: { bookingid } });
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+
+  const maxCount = Math.max(breakfast, lunch, dinner, guestCount); // include guestCount from request
+
+  await booking.update({
+    breakfast,
+    lunch,
+    dinner,
+    guestCount: maxCount,
   });
 
-  if (!booking) {
-    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+};
+
+export const updatePlateIssued = async (req, res) => {
+  const { bookingid } = req.params;
+  const { mealType, plateIssued, updatedBy } = req.body;
+
+  if (!['breakfast', 'lunch', 'dinner'].includes(mealType)) {
+    return res.status(400).json({ message: 'Invalid meal type' });
   }
 
-  await booking.destroy();
+  try {
+    const booking = await BulkFoodBooking.findByPk(bookingid);
 
-  return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+
+    const bookedCount = booking[mealType]; // breakfast, lunch, or dinner count
+
+    if (plateIssued > bookedCount) {
+      return res.status(400).json({
+        message: `Cannot issue more than ${bookedCount} plates for ${mealType}.`,
+      });
+    }
+
+    const updateFields = {
+      [`${mealType}_plate_issued`]: plateIssued,
+    };
+
+    if (updatedBy) updateFields.updatedBy = updatedBy;
+
+    await booking.update(updateFields);
+
+    return res.status(200).json({ message: 'Plate issued status updated successfully' });
+  } catch (err) {
+    console.error('Error updating plate issued:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 export const foodReport = async (req, res) => {
@@ -354,9 +401,9 @@ export const foodReport = async (req, res) => {
     ) AS x ON d.date = x.date
     LEFT JOIN (
         SELECT date,
-          SUM(CASE WHEN breakfast = 1 THEN guestCount ELSE 0 END) AS breakfast_guest_count,
-          SUM(CASE WHEN lunch = 1 THEN guestCount ELSE 0 END) AS lunch_guest_count,
-          SUM(CASE WHEN dinner = 1 THEN guestCount ELSE 0 END) AS dinner_guest_count
+          SUM(breakfast) AS breakfast_guest_count,
+          SUM(lunch) AS lunch_guest_count,
+          SUM(dinner) AS dinner_guest_count
         FROM bulk_food_booking
         WHERE date >= :start_date AND date <= :end_date
         GROUP BY date
