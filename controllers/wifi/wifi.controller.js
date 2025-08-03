@@ -9,7 +9,8 @@ import {
   STATUS_ACTIVE,
   STATUS_INACTIVE,
   STATUS_PENDING,
-  STATUS_APPROVED
+  STATUS_APPROVED,
+  STATUS_MUMUKSHU
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
