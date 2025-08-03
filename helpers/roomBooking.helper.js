@@ -27,9 +27,9 @@ import { createPendingTransaction, generateOrderId, updateRazorpayTransactions }
 import {
   calculateNights,
   getBlockedDates,
-  isDateRangeBlocked,
   checkFlatAlreadyBooked,
-  validateDate
+  validateDate,
+  isDateBlocked
 } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
@@ -603,16 +603,19 @@ export async function checkRoomAvailabilityForMumukshus(
         )
       }
 
+      console.log("ORIGINAL RANGE: " + checkin_date + " to " + checkout_date);
       console.log("RANGES: " + JSON.stringify(dateRanges));
 
       // check dates against block dates
       const conflictingBlocks = [];
       for (const range of dateRanges) {
-        if (isDateRangeBlocked(blockedDates, range.start, range.end)) {
-          conflictingBlocks.push(
-            `${moment(range.start).format('Do MMMM, YYYY')} to ${moment(
-              range.end).format('Do MMMM, YYYY')}`
-          );
+        for (const blockedDate of blockedDates) {
+          if (isDateBlocked(blockedDate, range.start, range.end)) {
+            conflictingBlocks.push(
+              `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
+                blockedDate.checkout).format('Do MMMM, YYYY')}`
+            );
+          }
         }
       }
 

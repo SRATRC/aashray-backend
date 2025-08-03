@@ -766,15 +766,17 @@ export function isDateRangeOverlapping(start1, end1, start2, end2) {
   return !noOverlap;
 }
 
-export function isDateRangeBlocked(blockedDates, start, end) {
-  return blockedDates.some((block) => {
+export function isDateBlocked(blockedDate, startDate, endDate) {
+  const blockStart = new Date(blockedDate.checkin);
+  blockStart.setDate(blockStart.getDate());
 
-    const blockStart = new Date(block.checkin);
-    blockStart.setDate(blockStart.getDate() - 1);
-
-    const blockEnd = new Date(block.checkout);
-    blockEnd.setDate(blockEnd.getDate() - 1);
-
-    return isDateRangeOverlapping(blockStart, blockEnd, start, end);
-  });
+  const blockEnd = new Date(blockedDate.checkout);
+  blockEnd.setDate(blockEnd.getDate());
+  
+  return isDateRangeOverlapping(
+    blockStart,
+    blockEnd,
+    startDate,
+    endDate
+  );
 }
