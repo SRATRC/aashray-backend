@@ -144,8 +144,7 @@ export const wifiRecord = async (req, res) => {
 };
 
 export const getPermanentCodeRequests = async (req, res) => {
-  const { status, page = 1, limit = 10 } = req.query;
-  const offset = (page - 1) * limit;
+  const { status } = req.query;
 
   const whereClause = {};
   if (
@@ -155,7 +154,7 @@ export const getPermanentCodeRequests = async (req, res) => {
     whereClause.status = status;
   }
 
-  const { count, rows } = await PermanentWifiCodes.findAndCountAll({
+  const rows = await PermanentWifiCodes.findAll({
     where: whereClause,
     include: [
       {
@@ -163,21 +162,14 @@ export const getPermanentCodeRequests = async (req, res) => {
         attributes: ['cardno', 'issuedto', 'email', 'mobno', 'res_status']
       }
     ],
-    order: [['requested_at', 'DESC']],
-    limit: parseInt(limit),
-    offset: parseInt(offset)
+    order: [['requested_at', 'DESC']]
   });
 
   res.status(200).json({
     message: 'Permanent WiFi code requests fetched successfully',
     data: {
       requests: rows,
-      pagination: {
-        total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit)
-      }
+      total: rows.length // Optional: for frontend use
     }
   });
 };
@@ -250,4 +242,72 @@ export const updatePermanentCodeRequest = async (req, res) => {
     message: `Permanent WiFi code request ${action} successfully`,
     data: checkAlreadyrequested
   });
+};
+
+export const uploadPerWiFiCodes = async (req, res) => {
+  try {
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheet = XLSX.utils.sheet_to_json(
+      workbook.Sheets[workbook.SheetNames[0]],
+      { defval: '' }
+    );
+
+    const formattedRows = [];
+
+    for (const row of sheet) {
+      const timestamp = new Date();
+
+      const cardno = row.cardno?.toString().trim();
+      const code = row.code?.toString().trim();
+
+      if (!cardno || !code) continue; // skip incomplete rows
+
+      formattedRows.push({
+        cardno,
+        code,
+        roombookingid: null,
+        status: 'approved',
+        updated_at: timestamp,
+        reviewed_at: timestamp,
+        reviewed_by: req.user?.username || 'wifiAdmin'
+      });
+    }
+
+    if (formattedRows.length === 0) {
+      return res.status(400).json({ error: 'No valid rows found.' });
+    }
+
+    const incomingCodes = formattedRows.map((row) => row.code);
+
+    const existingRecords = await PermanentWifiCodes.findAll({
+      where: { code: incomingCodes },
+      attributes: ['code'],
+      raw: true
+    });
+
+    const existingCodeSet = new Set(existingRecords.map((r) => r.code));
+
+    const uniqueRows = formattedRows.filter(
+      (row) => !existingCodeSet.has(row.code)
+    );
+
+    if (uniqueRows.length === 0) {
+      return res.status(200).json({
+        message: 'No new rows to insert. All codes were duplicates.'
+      });
+    }
+
+    await PermanentWifiCodes.bulkCreate(uniqueRows);
+
+    res.status(200).json({
+      message: `${uniqueRows.length} new record(s) inserted. ${
+        formattedRows.length - uniqueRows.length
+      } duplicate(s) ignored.`
+    });
+  } catch (err) {
+    console.error('Error processing Excel upload:', err);
+    res.status(500).json({
+      error: 'Failed to process and store Excel data: ' + err.message
+    });
+  }
 };
