@@ -20,11 +20,11 @@ import {
   editBulkBooking,
   updatePlateIssued
 } from '../../controllers/admin/foodManagement.controller.js';
-import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN } from '../../config/constants.js';
+import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_FOOD_ADMIN_SMILESTONES } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
-router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN));
+router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_FOOD_ADMIN_SMILESTONES));
 
 router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));

@@ -18,7 +18,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import moment from 'moment';
-import Sequelize from 'sequelize';
+import Sequelize, { Op } from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import {
   bookFoodForMumukshus,
@@ -248,11 +248,31 @@ export const cancelBooking = async (req, res) => {
 };
 
 export const bulkBooking = async (req, res) => {
-  const { cardno, date, guestCount, breakfast, lunch, dinner, department } = req.body;
+  const { cardno, mobno, date, guestCount, breakfast, lunch, dinner, department } = req.body;
 
+  // Ensure at least cardno or mobno is provided
+  if (!cardno && !mobno) {
+    return res.status(400).send({ message: 'Either cardno or mobno is required.' });
+  }
+
+  // Find the card
+  const cardEntry = await CardDb.findOne({
+    where: {
+      ...(cardno && { cardno }),
+      ...(mobno && { mobno })
+    }
+  });
+
+  if (!cardEntry) {
+    return res.status(404).send({ message: 'No card found for the given cardno or mobno.' });
+  }
+
+  const finalCardNo = cardEntry.cardno;
+
+  // Create booking
   const booking = await BulkFoodBooking.create({
     bookingid: uuidv4(),
-    cardno,
+    cardno: finalCardNo,
     date,
     guestCount,
     breakfast: breakfast ? guestCount : 0,
@@ -270,29 +290,33 @@ export const bulkBooking = async (req, res) => {
 
 export const fetchBulkBookings = async (req, res) => {
   const { cardno, mobno } = req.query;
-  const today = moment().format('YYYY-MM-DD');
 
-  const bookings = await BulkFoodBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno'],
-        required: true,
-        where: {
-          ...(cardno && { cardno }),
-          ...(mobno && { mobno }),
+  try {
+    const cardWhereClause = {};
+    if (cardno) cardWhereClause.cardno = cardno;
+    if (mobno) cardWhereClause.mobno = mobno;
+
+    const bookings = await BulkFoodBooking.findAll({
+      include: [
+        {
+          model: CardDb,
+          required: true,
+          where: cardWhereClause,
+          attributes: ['cardno', 'issuedto', 'mobno'],
         },
-      }
-    ],
-    where: {
-      date: { [Sequelize.Op.gt]: today }
-    },
-    order: [['date', 'ASC']]
-  });
+      ],
+      order: [['date', 'ASC']],
+    });
 
-  return res
-    .status(200)
-    .send({ message: MSG_FETCH_SUCCESSFUL, data: bookings });
+    return res
+      .status(200)
+      .send({ message: MSG_FETCH_SUCCESSFUL, data: bookings });
+  } catch (error) {
+    console.error('Fetch error:', error);
+    return res
+      .status(500)
+      .send({ message: 'Something went wrong.', error: error.message });
+  }
 };
 
 // editBulkBooking: PUT /food/edit_bulk_booking/:bookingid
