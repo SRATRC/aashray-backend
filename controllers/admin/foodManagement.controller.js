@@ -377,6 +377,76 @@ export const updatePlateIssued = async (req, res) => {
   }
 };
 
+// export const foodReport = async (req, res) => {
+//   const start_date = req.query.start_date;
+//   const end_date = req.query.end_date;
+
+//   const report = await database.query(
+//     `WITH all_dates AS (
+//       SELECT DISTINCT date FROM food_db
+//       WHERE date >= :start_date AND date <= :end_date
+//       UNION
+//       SELECT DISTINCT date FROM bulk_food_booking
+//       WHERE date >= :start_date AND date <= :end_date
+//     )
+//     SELECT
+//       d.date,
+//       -- food_db counts
+//       COALESCE(SUM(CASE WHEN f.breakfast = 1 THEN 1 ELSE 0 END), 0) AS breakfast,
+//       COALESCE(SUM(CASE WHEN f.lunch = 1 THEN 1 ELSE 0 END), 0) AS lunch,
+//       COALESCE(SUM(CASE WHEN f.dinner = 1 THEN 1 ELSE 0 END), 0) AS dinner,
+//       COALESCE(SUM(CASE WHEN f.breakfast_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS breakfast_plate_issued,
+//       COALESCE(SUM(CASE WHEN f.lunch_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS lunch_plate_issued,
+//       COALESCE(SUM(CASE WHEN f.dinner_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS dinner_plate_issued,
+//       COALESCE(SUM(CASE WHEN f.breakfast = 1 AND f.breakfast_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS breakfast_noshow,
+//       COALESCE(SUM(CASE WHEN f.lunch = 1 AND f.lunch_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS lunch_noshow,
+//       COALESCE(SUM(CASE WHEN f.dinner = 1 AND f.dinner_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS dinner_noshow,
+//       COALESCE(SUM(CASE WHEN f.hightea = 'COFFEE' THEN 1 ELSE 0 END), 0) AS coffee,
+//       COALESCE(SUM(CASE WHEN f.hightea = 'TEA' THEN 1 ELSE 0 END), 0) AS tea,
+//       COALESCE(SUM(CASE WHEN f.spicy = 0 THEN 1 ELSE 0 END), 0) AS non_spicy,
+//       -- physical plate counts
+//       COALESCE(x.breakfast_physical_plates, 0) AS breakfast_physical_plates,
+//       COALESCE(x.lunch_physical_plates, 0) AS lunch_physical_plates,
+//       COALESCE(x.dinner_physical_plates, 0) AS dinner_physical_plates,
+//       -- bulk food guest counts
+//       COALESCE(b.breakfast_guest_count, 0) AS breakfast_guest_count,
+//       COALESCE(b.lunch_guest_count, 0) AS lunch_guest_count,
+//       COALESCE(b.dinner_guest_count, 0) AS dinner_guest_count
+//     FROM all_dates d
+//     LEFT JOIN food_db f ON f.date = d.date
+//     LEFT JOIN (
+//         SELECT date,
+//           SUM(CASE WHEN type = 'breakfast' THEN count ELSE 0 END) AS breakfast_physical_plates,
+//           SUM(CASE WHEN type = 'lunch' THEN count ELSE 0 END) AS lunch_physical_plates,
+//           SUM(CASE WHEN type = 'dinner' THEN count ELSE 0 END) AS dinner_physical_plates
+//         FROM food_physical_plate
+//         WHERE date >= :start_date AND date <= :end_date
+//         GROUP BY date
+//     ) AS x ON d.date = x.date
+//     LEFT JOIN (
+//         SELECT date,
+//           SUM(breakfast) AS breakfast_guest_count,
+//           SUM(lunch) AS lunch_guest_count,
+//           SUM(dinner) AS dinner_guest_count
+//         FROM bulk_food_booking
+//         WHERE date >= :start_date AND date <= :end_date
+//         GROUP BY date
+//     ) AS b ON d.date = b.date
+//     GROUP BY d.date, x.breakfast_physical_plates, x.lunch_physical_plates, x.dinner_physical_plates,
+//              b.breakfast_guest_count, b.lunch_guest_count, b.dinner_guest_count
+//     ORDER BY d.date ASC;`,
+//     {
+//       replacements: {
+//         start_date,
+//         end_date
+//       },
+//       type: Sequelize.QueryTypes.SELECT
+//     }
+//   );
+
+//   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
+// };
+
 export const foodReport = async (req, res) => {
   const start_date = req.query.start_date;
   const end_date = req.query.end_date;
@@ -404,14 +474,25 @@ export const foodReport = async (req, res) => {
       COALESCE(SUM(CASE WHEN f.hightea = 'COFFEE' THEN 1 ELSE 0 END), 0) AS coffee,
       COALESCE(SUM(CASE WHEN f.hightea = 'TEA' THEN 1 ELSE 0 END), 0) AS tea,
       COALESCE(SUM(CASE WHEN f.spicy = 0 THEN 1 ELSE 0 END), 0) AS non_spicy,
+
       -- physical plate counts
       COALESCE(x.breakfast_physical_plates, 0) AS breakfast_physical_plates,
       COALESCE(x.lunch_physical_plates, 0) AS lunch_physical_plates,
       COALESCE(x.dinner_physical_plates, 0) AS dinner_physical_plates,
-      -- bulk food guest counts
+
+      -- guest counts from bulk_food_booking
       COALESCE(b.breakfast_guest_count, 0) AS breakfast_guest_count,
       COALESCE(b.lunch_guest_count, 0) AS lunch_guest_count,
-      COALESCE(b.dinner_guest_count, 0) AS dinner_guest_count
+      COALESCE(b.dinner_guest_count, 0) AS dinner_guest_count,
+
+      COALESCE(b.breakfast_guest_issued, 0) AS breakfast_guest_issued,
+      COALESCE(b.lunch_guest_issued, 0) AS lunch_guest_issued,
+      COALESCE(b.dinner_guest_issued, 0) AS dinner_guest_issued,
+
+      COALESCE(b.breakfast_guest_noshow, 0) AS breakfast_guest_noshow,
+      COALESCE(b.lunch_guest_noshow, 0) AS lunch_guest_noshow,
+      COALESCE(b.dinner_guest_noshow, 0) AS dinner_guest_noshow
+
     FROM all_dates d
     LEFT JOIN food_db f ON f.date = d.date
     LEFT JOIN (
@@ -427,13 +508,26 @@ export const foodReport = async (req, res) => {
         SELECT date,
           SUM(breakfast) AS breakfast_guest_count,
           SUM(lunch) AS lunch_guest_count,
-          SUM(dinner) AS dinner_guest_count
+          SUM(dinner) AS dinner_guest_count,
+
+          SUM(breakfast_plate_issued) AS breakfast_guest_issued,
+          SUM(lunch_plate_issued) AS lunch_guest_issued,
+          SUM(dinner_plate_issued) AS dinner_guest_issued,
+
+          SUM(breakfast) - SUM(breakfast_plate_issued) AS breakfast_guest_noshow,
+          SUM(lunch) - SUM(lunch_plate_issued) AS lunch_guest_noshow,
+          SUM(dinner) - SUM(dinner_plate_issued) AS dinner_guest_noshow
         FROM bulk_food_booking
         WHERE date >= :start_date AND date <= :end_date
         GROUP BY date
     ) AS b ON d.date = b.date
-    GROUP BY d.date, x.breakfast_physical_plates, x.lunch_physical_plates, x.dinner_physical_plates,
-             b.breakfast_guest_count, b.lunch_guest_count, b.dinner_guest_count
+
+    GROUP BY d.date,
+             x.breakfast_physical_plates, x.lunch_physical_plates, x.dinner_physical_plates,
+             b.breakfast_guest_count, b.lunch_guest_count, b.dinner_guest_count,
+             b.breakfast_guest_issued, b.lunch_guest_issued, b.dinner_guest_issued,
+             b.breakfast_guest_noshow, b.lunch_guest_noshow, b.dinner_guest_noshow
+
     ORDER BY d.date ASC;`,
     {
       replacements: {
@@ -446,29 +540,6 @@ export const foodReport = async (req, res) => {
 
   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
 };
-
-// export const foodReportDetails = async (req, res) => {
-//   const { meal, is_issued, date } = req.query;
-
-//   const bookings = await FoodDb.findAll({
-//     attributes: ['id', 'date'],
-//     include: [
-//       {
-//         model: CardDb,
-//         attributes: ['cardno', 'issuedto', 'mobno'],
-//         required: true
-//       }
-//     ],
-//     where: {
-//       date,
-//       [meal]: true,
-//       [meal + '_plate_issued']: is_issued
-//     }
-//     // order: [['CardDb.issuedto', 'ASC']]
-//   });
-
-//   return res.status(200).send({ data: bookings });
-// };
 
 export const foodReportDetails = async (req, res) => {
   const { meal, is_issued, date } = req.query;
