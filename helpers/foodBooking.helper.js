@@ -103,7 +103,7 @@ export async function bookFoodForMumukshus(
   }
 
   const utsav =
-    primary_booking.booking_type == TYPE_UTSAV
+    primary_booking?.booking_type == TYPE_UTSAV
       ? await UtsavDb.findOne({
           where: { id: primary_booking.details.utsavid }
         })
@@ -249,7 +249,8 @@ export async function checkFoodAvailabilityForMumumkshus(
               meals.includes('breakfast') && !booking.breakfast
                 ? BREAKFAST_PRICE
                 : 0;
-            charge += meals.includes('lunch') && !booking.lunch ? LUNCH_PRICE : 0;
+            charge +=
+              meals.includes('lunch') && !booking.lunch ? LUNCH_PRICE : 0;
             charge +=
               meals.includes('dinner') && !booking.dinner ? DINNER_PRICE : 0;
           } else {
