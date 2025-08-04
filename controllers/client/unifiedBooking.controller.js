@@ -17,9 +17,6 @@ import {
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
-  findRoom,
-  roomCharge,
-  checkRoomAvailabilityDuringUtsav,
   checkRoomAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import {
@@ -39,16 +36,13 @@ import {
 } from '../../helpers/utsavBooking.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions,
-  usableCredits
+  updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
 import {
   bookTravelForMumukshus,
   checkTravelAlreadyBooked
 } from '../../helpers/travelBooking.helper.js';
 import {
-  calculateNights,
-  validateDate,
   setBookingIdMap,
   retrieveBookingIds,
   setWaitingBookingCountMap,
@@ -58,7 +52,6 @@ import { UtsavDb } from '../../models/associations.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import Sequelize from 'sequelize';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;

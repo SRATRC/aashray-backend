@@ -39,8 +39,7 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
 import {
-  getDateRangesDuringUtsav,
-  splitDateRanges
+  getDateRangesDuringUtsav
 } from './utsavBooking.helper.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
@@ -486,51 +485,6 @@ async function isMumukshuFlatOwner(cardno, flatno) {
   return flat ? true : false;
 }
 
-export async function checkRoomAvailabilityDuringUtsav(
-  checkin_date,
-  checkout_date,
-  roomType,
-  gender,
-  utsav,
-  mumukshu,
-  user
-) {
-  var roomDetails = [];
-
-  let status = STATUS_WAITING;
-  let charge = 0;
-  let availableCredits = 0;
-
-  const ranges = splitDateRanges(
-    utsav.start_date,
-    utsav.end_date,
-    checkin_date,
-    checkout_date
-  );
-
-  for (const range of ranges) {
-    const nights = await calculateNights(range.start, range.end);
-
-    if (nights > 1) {
-      const roomno = await findRoom(range.start, range.end, roomType, gender);
-      if (roomno) {
-        status = STATUS_AVAILABLE;
-        charge = roomCharge(roomType) * nights;
-        availableCredits = usableCredits(user, TYPE_ROOM, charge);
-      }
-    }
-    roomDetails.push({
-      mumukshu,
-      status,
-      charge,
-      availableCredits,
-      dates: range.start + ' to ' + range.end
-    });
-  }
-
-  return roomDetails;
-}
-
 export async function checkRoomAvailabilityForMumukshus(
   checkin_date,
   checkout_date,
@@ -563,25 +517,23 @@ export async function checkRoomAvailabilityForMumukshus(
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
-
       const gender = floorType ? floorType + card.gender : card.gender;
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
-
       for (const range of dateRanges) {
         var status = STATUS_WAITING;
         var charge = 0;
         var availableCredits = 0;
 
         const nights = await calculateNights(range.start, range.end);
-
         const minNights = range.overlappingWithUtsav ? 1 : 0;
+
         if (nights == 0) {
           // 1 day visit
           status = STATUS_AVAILABLE;
         } else if (nights > minNights) {
-          // around utsav, 2+ nights are confirmed
-          // but 1 night is in waitlist
+          // when booking around utsav, 2 or more nights are confirmed
+          // but 1 night is waitlisted.
           const roomno = await findRoom(
             range.start,
             range.end,
