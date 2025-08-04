@@ -1,6 +1,6 @@
 import { TravelDb, CardDb, Transactions } from '../../models/associations.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
+import Sequelize, { QueryTypes } from 'sequelize';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
@@ -20,7 +20,6 @@ import {
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_SEATSFULL_CANCELLED,
   STATUS_WRONGFORM_CANCELLED,
-  RAJ_PRAVAS_EMAIL,
   STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
 import {
@@ -29,7 +28,13 @@ import {
 } from '../../helpers/transactions.helper.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
-function getAdditionalConditions(whereClauses, pickupRC, dropRC, replacementMap) {
+
+function getAdditionalConditions(
+  whereClauses,
+  pickupRC,
+  dropRC,
+  replacementMap
+) {
   let additionalWhereClause = '';
 
   console.log('🔍 getAdditionalConditions called with:', {
@@ -62,15 +67,20 @@ export const fetchSummary = async (req, res) => {
   console.log('🚀 fetchSummary triggered');
 
   try {
-    const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
+    const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
+      req.query;
 
     const normalizedStatuses = Array.isArray(statuses)
       ? statuses
-      : statuses ? [statuses] : [];
+      : statuses
+      ? [statuses]
+      : [];
 
     const adminCommentFilters = Array.isArray(adminComments)
       ? adminComments
-      : adminComments ? [adminComments] : [];
+      : adminComments
+      ? [adminComments]
+      : [];
 
     const replacements = {
       startDate: start_date,
@@ -87,7 +97,9 @@ export const fetchSummary = async (req, res) => {
 
     adminCommentFilters.forEach((c, i) => {
       replacements[`adminComment${i}`] = c;
-      conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
+      conditions.push(
+        `(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`
+      );
     });
 
     // Build WHERE clause
@@ -179,7 +191,6 @@ export const fetchSummary = async (req, res) => {
 
     console.log('📊 fetchSummary data:', data);
     return res.status(200).send({ message: 'Fetched data', data });
-
   } catch (error) {
     console.error('❌ fetchSummary error:', error);
     return res.status(500).send({
@@ -190,16 +201,20 @@ export const fetchSummary = async (req, res) => {
   }
 };
 
-
 export const fetchUpcomingBookings = async (req, res) => {
-  const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
+  const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
+    req.query;
 
   const normalizedStatuses = statuses
-    ? Array.isArray(statuses) ? statuses : [statuses]
+    ? Array.isArray(statuses)
+      ? statuses
+      : [statuses]
     : [];
 
   const adminCommentFilters = adminComments
-    ? Array.isArray(adminComments) ? adminComments : [adminComments]
+    ? Array.isArray(adminComments)
+      ? adminComments
+      : [adminComments]
     : [];
 
   const replacementMap = {
@@ -220,10 +235,17 @@ export const fetchUpcomingBookings = async (req, res) => {
 
   adminCommentFilters.forEach((c, i) => {
     replacementMap[`adminComment${i}`] = c;
-    conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
+    conditions.push(
+      `(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`
+    );
   });
 
-  const additionalWhereClause = getAdditionalConditions(conditions, pickupRC, dropRC, replacementMap);
+  const additionalWhereClause = getAdditionalConditions(
+    conditions,
+    pickupRC,
+    dropRC,
+    replacementMap
+  );
 
   // Replace pickup and drop point if user selected "other"
   const pickupSelect = `
@@ -233,7 +255,7 @@ export const fetchUpcomingBookings = async (req, res) => {
     ELSE t1.pickup_point
   END AS pickup_point`;
 
-const dropSelect = `
+  const dropSelect = `
   CASE
     WHEN t1.drop_point IN ('Other', 'Other (enter location in comments)')
       THEN t1.comments
@@ -261,131 +283,41 @@ const dropSelect = `
   return res.status(200).send({ message: 'Fetched data', data });
 };
 
-import { QueryTypes } from 'sequelize'; // Make sure you import this if you're using Sequelize
-
 export const fetchBookingForDriver = async (req, res) => {
-  try {
-    // --- Get current IST time ---
-    const now = new Date();
-    const istNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const istNow = new Date().toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata'
+  });
+  const istDate = new Date(istNow);
 
-    // --- Decide date to fetch based on 8PM IST cutoff ---
-    const fetchDate =
-      istNow.getHours() < 20
-        ? istNow.toISOString().split('T')[0]
-        : new Date(istNow.getTime() + 86400000).toISOString().split('T')[0];
+  const isAfter8PM = istDate.getHours() >= 20;
+  const fetchDate = new Date(istDate.getTime() + (isAfter8PM ? 86400000 : 0))
+    .toISOString()
+    .split('T')[0];
 
-    const data = await database.query(
-      `
+  const data = await database.query(
+    `
       SELECT
         t1.date,
-        t3.issuedto AS Mumukshu_Name,
-        t3.mobno AS Mobile_Number,
-
-        CASE
-          WHEN t1.pickup_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
-            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
-            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
-            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
-          ) THEN 'Mumbai to Research Centre'
-
-          WHEN t1.drop_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
-            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
-            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
-            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
-          ) THEN 'Research Centre to Mumbai'
-
-          ELSE 'Unknown'
-        END AS Travelling_From,
-
-        CASE
-          WHEN t1.pickup_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
-            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
-            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
-            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
-          )
-          THEN
-            CASE
-              WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
-                THEN 'Dadar (Swami Narayan Temple)'
-              WHEN LOWER(t1.pickup_point) = 'amar mahal'
-                THEN 'Amar Mahal'
-              WHEN LOWER(t1.pickup_point) = 'airoli'
-                THEN 'Airoli'
-              WHEN LOWER(t1.pickup_point) IN ('other', 'other (enter location in comments)')
-                THEN COALESCE(t1.comments, 'Other')
-              ELSE t1.pickup_point
-            END
-
-          WHEN t1.drop_point IN (
-            'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
-            'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
-            'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
-            'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
-            'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
-          )
-          THEN
-            CASE
-              WHEN LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
-                THEN 'Dadar (Swami Narayan Temple)'
-              WHEN LOWER(t1.drop_point) = 'amar mahal'
-                THEN 'Amar Mahal'
-              WHEN LOWER(t1.drop_point) = 'airoli'
-                THEN 'Airoli'
-              WHEN LOWER(t1.drop_point) IN ('other', 'other (enter location in comments)')
-                THEN COALESCE(t1.comments, 'Other')
-              ELSE t1.drop_point
-            END
-
-          ELSE COALESCE(t1.pickup_point, t1.drop_point)
-        END AS \`Pickup/Dropoff_Point\`
-
+        t2.issuedto AS Mumukshu_Name,
+        t2.mobno AS Mobile_Number,
+        t1.pickup_point,
+        t1.drop_point
       FROM travel_db t1
-      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-      WHERE t1.status IN ('confirmed', 'awaiting confirmation')
-        AND t1.date = :fetchDate
-
-      ORDER BY
-        Travelling_From ASC,
-        CASE
-          WHEN LOWER(t1.pickup_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
-               OR LOWER(t1.drop_point) IN ('dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'dadar (pritam hotel)')
-            THEN 1
-          WHEN LOWER(t1.pickup_point) = 'amar mahal' OR LOWER(t1.drop_point) = 'amar mahal'
-            THEN 2
-          WHEN LOWER(t1.pickup_point) = 'airoli' OR LOWER(t1.drop_point) = 'airoli'
-            THEN 3
-          ELSE 4
-        END,
-        \`Pickup/Dropoff_Point\`
-      ;
+      LEFT JOIN card_db t2 ON t1.cardno = t2.cardno
+      WHERE t1.date = :fetchDate
+      AND t1.status = 'confirmed';
       `,
-      {
-        type: QueryTypes.SELECT,
-        replacements: { fetchDate },
-      }
-    );
+    {
+      type: QueryTypes.SELECT,
+      replacements: { fetchDate }
+    }
+  );
 
-    return res.status(200).send({ message: 'Fetched data', data });
-  } catch (error) {
-    console.error("Error fetching data for driver:", error);
-    return res.status(500).send({ message: 'Something went wrong', error });
-  }
+  return res.status(200).send({ message: 'Fetched data', data });
 };
 
-
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments,  description, charges } = req.body;
+  const { bookingid, status, adminComments, description, charges } = req.body;
   let newBookingStatus = status;
 
   const t = await database.transaction();
@@ -413,14 +345,16 @@ export const updateBookingStatus = async (req, res) => {
   switch (status) {
     case STATUS_PROCEED_FOR_PAYMENT:
       if (!transaction) {
-        transaction = (await createPendingTransaction(
-          bookedByCard,
-          booking,
-          TYPE_TRAVEL,
-          charges,
-          req.user.username,
-          t
-        )).transaction;
+        transaction = (
+          await createPendingTransaction(
+            bookedByCard,
+            booking,
+            TYPE_TRAVEL,
+            charges,
+            req.user.username,
+            t
+          )
+        ).transaction;
       }
 
       if (transaction.status === STATUS_PAYMENT_COMPLETED) {
@@ -435,14 +369,14 @@ export const updateBookingStatus = async (req, res) => {
       }
       break;
 
-      case STATUS_SEATSFULL_CANCELLED:
+    case STATUS_SEATSFULL_CANCELLED:
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);
         updateWaitingTravelBooking(booking.date);
       }
       break;
 
-      case STATUS_WRONGFORM_CANCELLED:
+    case STATUS_WRONGFORM_CANCELLED:
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);
         updateWaitingTravelBooking(booking.date);
@@ -450,27 +384,32 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
-  if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-    let newTransactionStatus;
+      if (
+        transaction &&
+        ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
+          transaction.status
+        )
+      ) {
+        let newTransactionStatus;
 
-    if (transaction.status === STATUS_CASH_PENDING) {
-      newTransactionStatus = STATUS_PAYMENT_COMPLETED;
-    } else if (transaction.status === STATUS_PAYMENT_PENDING) {
-      newTransactionStatus = STATUS_PAYMENT_COMPLETED;
-    }
+        if (transaction.status === STATUS_CASH_PENDING) {
+          newTransactionStatus = STATUS_PAYMENT_COMPLETED;
+        } else if (transaction.status === STATUS_PAYMENT_PENDING) {
+          newTransactionStatus = STATUS_PAYMENT_COMPLETED;
+        }
 
-    if (newTransactionStatus) {
-      await transaction.update(
-        {
-          status: newTransactionStatus,
-          description,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
-    }
-  }
-  break;
+        if (newTransactionStatus) {
+          await transaction.update(
+            {
+              status: newTransactionStatus,
+              description,
+              updatedBy: req.user.username
+            },
+            { transaction: t }
+          );
+        }
+      }
+      break;
 
     case STATUS_WAITING:
     default:
@@ -488,14 +427,14 @@ export const updateBookingStatus = async (req, res) => {
 
   const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
   if (newBookingStatus === STATUS_ADMIN_CANCELLED) {
-  if (booking.admin_comments === 'admin_cancel_seats_full') {
-    newBookingStatus = 'Cancelled because all seats were booked';
-  } else if (booking.admin_comments === 'admin_cancel_wrong_form') {
-    newBookingStatus = 'Cancelled because of wrong form filled';
-  } else {
-    newBookingStatus = 'Cancelled by admin';
+    if (booking.admin_comments === 'admin_cancel_seats_full') {
+      newBookingStatus = 'Cancelled because all seats were booked';
+    } else if (booking.admin_comments === 'admin_cancel_wrong_form') {
+      newBookingStatus = 'Cancelled because of wrong form filled';
+    } else {
+      newBookingStatus = 'Cancelled by admin';
+    }
   }
-}
   sendMail({
     email: card.email,
     subject: 'Raj Pravas - Travel Booking Updated',
