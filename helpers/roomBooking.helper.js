@@ -529,7 +529,7 @@ export async function checkRoomAvailabilityForMumukshus(
   );
   const cardDb = await validateCards(mumukshus);
 
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
