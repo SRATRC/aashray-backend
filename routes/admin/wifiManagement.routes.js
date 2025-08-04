@@ -7,7 +7,8 @@ import {
   uploadWiFiCodes,
   wifiRecord,
   getPermanentCodeRequests,
-  updatePermanentCodeRequest
+  updatePermanentCodeRequest,
+  uploadPerWiFiCodes
 } from '../../controllers/admin/wifiManagement.controller.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import multer from 'multer';
@@ -21,5 +22,6 @@ router.post('/uploadcode', upload.single('file'), CatchAsync(uploadWiFiCodes));
 router.get('/wifirecords', CatchAsync(wifiRecord));
 router.get('/permanent', CatchAsync(getPermanentCodeRequests));
 router.put('/permanent/:requestId', CatchAsync(updatePermanentCodeRequest));
+router.post('/uploadpercode', upload.single('file'), CatchAsync(uploadPerWiFiCodes));
 
 export default router;

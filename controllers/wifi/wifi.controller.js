@@ -9,7 +9,8 @@ import {
   STATUS_ACTIVE,
   STATUS_INACTIVE,
   STATUS_PENDING,
-  STATUS_APPROVED
+  STATUS_APPROVED,
+  STATUS_MUMUKSHU
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -124,6 +125,13 @@ const fetchBookings = async (cardno) => {
 export const requestPermanentCode = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
+
+  if (req.user.res_status !== STATUS_MUMUKSHU) {
+    throw new APIError(
+      403,
+      'You are not eligible to request a permanent WiFi code'
+    );
+  }
 
   // Check if user already has a pending or approved request
   const existingRequest = await PermanentWifiCodes.findOne({
