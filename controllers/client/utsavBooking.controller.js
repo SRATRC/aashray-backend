@@ -28,6 +28,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.month AS utsav_month,
        t1.location AS utsav_location,
        t1.status AS utsav_status,
+       t1.registration_deadline AS registration_deadline,
        JSON_ARRAYAGG(
            JSON_OBJECT(
                'package_id', t2.id,
@@ -40,6 +41,7 @@ export const FetchUpcoming = async (req, res) => {
     FROM utsav_db t1
     JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
     WHERE t1.start_date > :today
+      AND (t1.registration_deadline IS NULL OR t1.registration_deadline >= :today)
     GROUP BY t1.id
     ORDER BY t1.start_date ASC
     LIMIT :limit
@@ -150,22 +152,46 @@ export const CancelUtsavBooking = async (req, res) => {
 
 export const FetchUtsavById = async (req, res) => {
   const { id } = req.params;
+  const today = moment().format('YYYY-MM-DD');
 
-  const utsav = await UtsavDb.findOne({
-    include: [
-      {
-        model: UtsavPackagesDb,
-        where: {
-          utsavid: id
-        }
-      }
-    ],
-    where: {
-      id: id
+  const utsav = await database.query(
+    `
+    SELECT t1.id AS utsav_id,
+       t1.name AS utsav_name,
+       t1.start_date AS utsav_start,
+       t1.end_date AS utsav_end,
+       t1.month AS utsav_month,
+       t1.location AS utsav_location,
+       t1.status AS utsav_status,
+       t1.registration_deadline AS registration_deadline,
+       JSON_ARRAYAGG(
+           JSON_OBJECT(
+               'package_id', t2.id,
+               'package_name', t2.name,
+               'package_start', t2.start_date,
+               'package_end', t2.end_date,
+               'package_amount', t2.amount
+           )
+       ) AS packages
+    FROM utsav_db t1
+    JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
+    WHERE t1.id = :id
+      AND (t1.registration_deadline IS NULL OR t1.registration_deadline >= :today)
+    GROUP BY t1.id;
+  `,
+    {
+      replacements: {
+        id: id,
+        today: today
+      },
+      type: database.QueryTypes.SELECT,
+      raw: true
     }
-  });
+  );
 
-  if (!utsav) throw new ApiError(404, 'Utsav not found');
+  if (!utsav || utsav.length === 0) {
+    throw new ApiError(404, 'Utsav not found');
+  }
 
-  return res.status(200).send({ data: utsav });
+  return res.status(200).send({ data: utsav[0] });
 };

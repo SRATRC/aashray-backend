@@ -15,6 +15,7 @@ export const TYPE_GUEST_UTSAV = 'utsav';
 export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
+export const RESEARCH_CENTRE = 'Research Centre';
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
@@ -31,10 +32,13 @@ export const STATUS_CANCELLED = 'cancelled';
 export const STATUS_REJECTED = 'rejected';
 export const STATUS_ACTIVE = 'active';
 export const STATUS_INACTIVE = 'inactive';
+export const STATUS_PENDING = 'pending';
+export const STATUS_APPROVED = 'approved';
 export const STATUS_AVAILABLE = 'available';
 export const STATUS_TAKEN = 'taken';
 export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
+export const STATUS_DELETED = 'deleted';
 export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
@@ -91,6 +95,8 @@ export const ROLE_MAINTENANCE_ADMIN = 'maintenanceAdmin';
 export const ROLE_HOUSEKEEPING_ADMIN = 'housekeepingAdmin';
 export const ROLE_ELECTRICAL_ADMIN = 'electricalAdmin';
 export const ROLE_AVT_ADMIN = 'avtAdmin';
+export const ROLE_WIFI_ADMIN = 'wifiAdmin';
+export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
@@ -103,7 +109,8 @@ export const ERR_BLOCKED_DATES = 'Dates are blocked';
 
 export const ERR_ROOM_NO_BED_AVAILABLE = 'No beds available';
 export const ERR_ROOM_ALREADY_BOOKED = 'Room already booked';
-export const ERR_DATES_NOT_BETWEEN_UTSAV = 'Booking start/end date should be inclusive of Utsav Start/End date ';
+export const ERR_DATES_NOT_BETWEEN_UTSAV =
+  'Booking start/end date should be inclusive of Utsav Start/End date ';
 
 export const ERR_ROOM_NOT_FOUND = 'Room not found';
 export const ERR_ROOM_INVALID_DURATION = 'Invalid booking duration';
@@ -137,6 +144,4 @@ export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
 export const SUBJECT_BOOKING = 'Vitraag Vigyaan Aashray: ';
 export const BOOKING_STATUS_PENDING = 'pending';
 
-export const RAJ_PRAVAS_EMAIL = "rajpravas7@gmail.com";
-
-
+export const RAJ_PRAVAS_EMAIL = 'rajpravas7@gmail.com';

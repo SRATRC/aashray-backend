@@ -1,9 +1,3 @@
-## Database Schema
-
-#### ERD
-
-![ERD](./docs/images/ERD.png)
-
 ## Logging System
 
 The application uses Winston for logging with the following features:
@@ -19,8 +13,9 @@ The application uses Winston for logging with the following features:
 - **Application Logs**: `logs/application-YYYY-MM-DD.log` - Contains all logs
 - **Error Logs**: `logs/error-YYYY-MM-DD.log` - Contains only error logs
 
-### Commands
+## Commands
 
 - `npm run dev` - Run the app in development mode
 - `npm run start:prod` - Run the app in production mode
 - `npm run logs:clean` - Clean all log files
+- `npm run test -- --slient` - Run all tests using Jest

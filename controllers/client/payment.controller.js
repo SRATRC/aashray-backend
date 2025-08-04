@@ -69,7 +69,7 @@ export const verifyPayment = async (req, res) => {
         STATUS_PAYMENT_AUTHORIZED
       ]
     },
-    lock: { update: true }, 
+    lock: { update: true },
     transaction: t
   });
 
@@ -155,6 +155,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
   const { bookingids } = req.body;
 
   const t = await database.transaction();
+  req.transaction = t;
 
   const transactions = await Transactions.findAll({
     where: {
@@ -199,6 +200,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
 export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   const { data } = req.body;
   const t = await database.transaction();
+  req.transaction = t;
 
   const bookingCategoryMap = data.reduce((map, { bookingid, category }) => {
     (map[bookingid] ??= []).push(category);
@@ -217,23 +219,26 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     }
   });
 
-  const totalAmount = transactions.reduce((sum, transaction) => {
-    const categories = bookingCategoryMap[transaction.bookingid];
-    const bookingType = getBookingType(transaction);
-    if (bookingType != TYPE_FOOD
-      || categories.includes(transaction.category)) {
-      return sum + transaction.amount;
-    }
-    return sum;
-  }, 0);
+  logger.info(`Transactions found: ${JSON.stringify(transactions)}`);
+
+  const { totalAmount, validTransactionIds } = transactions.reduce(
+    (acc, transaction) => {
+      const categories = bookingCategoryMap[transaction.bookingid];
+      const bookingType = getBookingType(transaction);
+      if (
+        bookingType != TYPE_FOOD ||
+        categories.includes(transaction.category)
+      ) {
+        acc.totalAmount += transaction.amount;
+        acc.validTransactionIds.push(transaction.id);
+      }
+      return acc;
+    },
+    { totalAmount: 0, validTransactionIds: [] }
+  );
 
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
-    const validTransactionIds = transactions
-      .filter((t) =>
-        bookingCategoryMap[t.bookingid].includes(getBookingType(t))
-      )
-      .map((t) => t.id);
 
     await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();

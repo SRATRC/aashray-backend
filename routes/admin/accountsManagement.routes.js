@@ -18,7 +18,8 @@ import {
   fetchTransactionsBySettlementId,
   fetchTransactionsByPaymentId,
   fetchCredits,
-  fetchCreditTransactions
+  fetchCreditTransactions,
+  fetchAllDebitTransactions
 } from '../../controllers/admin/accountsManagement.controller.js';
 import catchAsync from '../../utils/CatchAsync.js';
 
@@ -28,6 +29,7 @@ router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_ACCOUNTS_ADMIN, ROLE_PRA_ACCOUN
 router.get('/fetchcompleted', CatchAsync(fetchCompletedTransactions));
 router.get('/fetchpending', CatchAsync(fetchPendingTransactions));
 router.get('/fetchcredits', CatchAsync(fetchAllCreditTransactions));
+router.get('/fetchdebits', CatchAsync(fetchAllDebitTransactions));
 router.post('/setrep', upload.single('file'), CatchAsync(uploadRazorpaySettlementExcel));
 router.post('/updateset', upload.single('file'), CatchAsync(updateSettlementFieldsFromExcel));
 router.get('/fetchset', CatchAsync(fetchAllSettlements));

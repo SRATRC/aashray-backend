@@ -12,7 +12,8 @@ import {
   ERR_INVALID_DATE,
   STATUS_AWAITING_CONFIRMATION,
   MSG_BOOKING_WAITING,
-  BOOKING_STATUS_PENDING
+  BOOKING_STATUS_PENDING,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
@@ -27,8 +28,8 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  createGroupFoodRequest,
-  validateFood
+  checkFoodAvailabilityForMumumkshus,
+  createGroupFoodRequest
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
@@ -107,12 +108,7 @@ export const unifiedBooking = async (req, res) => {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(
-        cardno,
-        bookings,
-        req.user,
-        BOOKING_STATUS_PENDING
-      );
+      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
     }
   }
 
@@ -263,9 +259,9 @@ async function validate(body, user, data, response, utsav) {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
-        user,
         body,
         data,
+        user,
         utsav
       );
       // food charges are not added for Mumukshus
@@ -344,7 +340,8 @@ async function bookFood(body, user, data, t) {
     body.primary_booking,
     body.addons,
     user.cardno,
-    t
+    t,
+    user.cardno
   );
 
   return t;
@@ -473,37 +470,42 @@ async function checkRoomAvailability(user, data, utsav) {
   }
 }
 
-async function checkFoodAvailability(user, body, data, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date } = data.details;
 
-  if (!end_date) {
-    end_date = start_date;
-  }
-
-  validateDate(start_date, end_date);
-  await validateFood(
+  const result = await checkFoodAvailabilityForMumumkshus(
     start_date,
     end_date,
+    [
+      {
+        mumukshus: [user.cardno],
+      }
+    ],
     body.primary_booking,
     body.addons,
+    utsav,
     user
   );
 
-  return {
-    status: STATUS_AVAILABLE,
-    charge: 0
-  };
+  return result;
 }
 
 async function checkTravelAvailability(user, data) {
-  const { date } = data.details;
+  const { date, pickup_point, drop_point } = data.details;
 
   const today = moment().format('YYYY-MM-DD');
-  if (date <= today) {
+  if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
-  await checkTravelAlreadyBooked(date, [user.cardno]);
+  if (pickup_point !== RESEARCH_CENTRE && drop_point !== RESEARCH_CENTRE) {
+    throw new ApiError(400, 'Travel must be either to or from Research Centre');
+  }
+
+  await checkTravelAlreadyBooked(date, {
+    mumukshus: [user.cardno],
+    drop_point
+  });
 
   return {
     status: STATUS_AWAITING_CONFIRMATION,

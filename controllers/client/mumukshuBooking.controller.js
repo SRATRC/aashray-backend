@@ -1,11 +1,8 @@
 import {
-  STATUS_AVAILABLE,
   TYPE_ROOM,
-  STATUS_WAITING,
   TYPE_FOOD,
   TYPE_ADHYAYAN,
   ERR_INVALID_BOOKING_TYPE,
-  ERR_ROOM_ALREADY_BOOKED,
   ERR_CARD_NOT_FOUND,
   TYPE_TRAVEL,
   ERR_INVALID_DATE,
@@ -14,17 +11,14 @@ import {
   STATUS_RESIDENT,
   STATUS_MUMUKSHU,
   TYPE_UTSAV,
-  STATUS_GUEST,
   STATUS_AWAITING_CONFIRMATION,
   BOOKING_STATUS_PENDING,
-  STATUS_SEVA_KUTIR
+  STATUS_SEVA_KUTIR,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
-  checkRoomAlreadyBooked,
-  findRoom,
-  roomCharge,
-  checkRoomAvailabilityDuringUtsav
+  checkRoomAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import { UtsavDb } from '../../models/associations.js';
 import {
@@ -37,7 +31,7 @@ import {
 } from '../../helpers/travelBooking.helper.js';
 import {
   bookFoodForMumukshus,
-  validateFood
+  checkFoodAvailabilityForMumumkshus
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
@@ -47,12 +41,9 @@ import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions,
-  usableCredits
+  updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
 import {
-  calculateNights,
-  validateDate,
   setBookingIdMap,
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
@@ -110,12 +101,7 @@ export const mumukshuBooking = async (req, res) => {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(
-        cardno,
-        bookings,
-        req.user,
-        BOOKING_STATUS_PENDING
-      );
+      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
     }
   }
   let message =
@@ -269,7 +255,7 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data, utsav);
+      response.foodDetails = await checkFoodAvailability(body, data, user, utsav);
       break;
 
     case TYPE_ADHYAYAN:
@@ -322,10 +308,6 @@ async function bookRoom(body, data, t, user) {
 
 async function bookFood(body, data, t, user) {
   let { start_date, end_date, mumukshuGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
-
   await bookFoodForMumukshus(
     start_date,
     end_date,
@@ -333,7 +315,8 @@ async function bookFood(body, data, t, user) {
     body.primary_booking,
     body.addons,
     user.cardno,
-    t
+    t,
+    user.cardno
   );
 
   return t;
@@ -359,112 +342,58 @@ async function bookUtsav(data, t, user) {
 
 async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
-  validateDate(checkin_date, checkout_date);
+  const result = await checkRoomAvailabilityForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshuGroup,
+    user,
+    utsav
+  );
 
-  let nights = await calculateNights(checkin_date, checkout_date);
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  const cardDb = await validateCards(mumukshus);
-
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
-    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
-  }
-
-  var roomDetails = [];
-  for (const group of mumukshuGroup) {
-    const { roomType, floorType, mumukshus } = group;
-
-    for (const mumukshu of mumukshus) {
-      const card = cardDb.filter(
-        (item) => item.dataValues.cardno == mumukshu
-      )[0];
-
-      const gender = floorType
-        ? floorType + card.dataValues.gender
-        : card.dataValues.gender;
-
-      if (utsav) {
-        roomDetails.push(
-          ...(await checkRoomAvailabilityDuringUtsav(
-            checkin_date,
-            checkout_date,
-            roomType,
-            gender,
-            utsav,
-            mumukshu,
-            user
-          ))
-        );
-      } else {
-        var status = STATUS_WAITING;
-        var charge = 0;
-        var availableCredits = 0;
-
-        if (nights > 0) {
-          const roomno = await findRoom(
-            checkin_date,
-            checkout_date,
-            roomType,
-            gender
-          );
-          if (roomno) {
-            status = STATUS_AVAILABLE;
-            charge = roomCharge(roomType) * nights;
-            availableCredits = usableCredits(user, TYPE_ROOM, charge);
-          }
-        } else {
-          status = STATUS_AVAILABLE;
-        }
-
-        roomDetails.push({
-          mumukshu,
-          status,
-          charge,
-          availableCredits
-        });
-      }
-    }
-  }
-
-  return roomDetails;
+  return result;
 }
 
-async function checkFoodAvailability(body, data, utsav) {
+async function checkFoodAvailability(body, data, user, utsav) {
   let { start_date, end_date, mumukshuGroup } = data.details;
-  if (!end_date) {
-    end_date = start_date;
-  }
 
-  validateDate(start_date, end_date);
+  const result = await checkFoodAvailabilityForMumumkshus(
+    start_date,
+    end_date,
+    mumukshuGroup,
+    body.primary_booking,
+    body.addons,
+    utsav,
+    user
+  );
 
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-
-  const cards = await validateCards(mumukshus);
-  for (const card of cards) {
-    await validateFood(
-      start_date,
-      end_date,
-      body.primary_booking,
-      body.addons,
-      card
-    );
-  }
-
-  return {
-    status: STATUS_AVAILABLE,
-    charge: 0
-  };
+  return result;
 }
 
 async function checkTravelAvailability(data) {
   const { date, mumukshuGroup } = data.details;
   const today = moment().format('YYYY-MM-DD');
-  if (date <= today) {
+  if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
 
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
-  await checkTravelAlreadyBooked(date, mumukshus);
+
+  for (const group of mumukshuGroup) {
+    const { pickup_point, drop_point, mumukshus: groupMumukshus } = group;
+
+    if (pickup_point !== RESEARCH_CENTRE && drop_point !== RESEARCH_CENTRE) {
+      throw new ApiError(
+        400,
+        'Travel must be either to or from Research Centre'
+      );
+    }
+
+    await checkTravelAlreadyBooked(date, {
+      mumukshus: groupMumukshus,
+      drop_point
+    });
+  }
 
   return {
     status: STATUS_AWAITING_CONFIRMATION,
