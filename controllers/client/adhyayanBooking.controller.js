@@ -7,7 +7,8 @@ import {
   TYPE_GUEST_ADHYAYAN,
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
-  ERR_BOOKING_ALREADY_CANCELLED
+  ERR_BOOKING_ALREADY_CANCELLED,
+  STATUS_DELETED
 } from '../../config/constants.js';
 import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
@@ -30,6 +31,9 @@ export const FetchAllShibir = async (req, res) => {
     where: {
       start_date: {
         [Sequelize.Op.gt]: today
+      },
+      status: {
+        [Sequelize.Op.ne]: STATUS_DELETED
       }
     },
     offset,
