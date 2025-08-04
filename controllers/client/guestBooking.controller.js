@@ -55,104 +55,31 @@ export const guestBooking = async (req, res) => {
   var t = await database.transaction();
   req.transaction = t;
 
-  let amount = 0;
   const userBookingIdMap = {};
   const waitingBookingCountMap = {};
   const transactionIds = [];
 
-  switch (primary_booking.booking_type) {
-    case TYPE_ROOM:
-      const roomResult = await bookRoom(primary_booking, t, req.user);
-      amount += roomResult.amount;
-      setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
-      break;
-
-    case TYPE_FOOD:
-      const foodResult = await bookFood(
-        req.body,
-        primary_booking,
-        t,
-        req.user
-      );
-      amount += foodResult.amount;
-      transactionIds.push(...foodResult.transactionIds);
-      break;
-
-    case TYPE_ADHYAYAN:
-      const adhyayanResult = await bookAdhyayan(primary_booking, t, req.user);
-      amount += adhyayanResult.amount;
-      setBookingIdMap(
-        userBookingIdMap,
-        TYPE_ADHYAYAN,
-        adhyayanResult.userBookingIds
-      );
-      setWaitingBookingCountMap(
-        waitingBookingCountMap,
-        TYPE_ADHYAYAN,
-        adhyayanResult.waitingBookingCount,
-        adhyayanResult.userBookingIds
-      );
-      break;
-
-    case TYPE_UTSAV:
-      const utsavResult = await bookUtsav(primary_booking, t, req.user);
-      amount += utsavResult.amount;
-      setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
-      setWaitingBookingCountMap(
-        waitingBookingCountMap,
-        TYPE_UTSAV,
-        utsavResult.waitingBookingCount,
-        utsavResult.userBookingIds
-      );
-      break;
-
-    default:
-      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
-  }
+  let amount = await book(
+    req.body,
+    primary_booking,
+    t,
+    req.user,
+    userBookingIdMap,
+    waitingBookingCountMap,
+    transactionIds
+  );
 
   if (addons) {
     for (const addon of addons) {
-      switch (addon.booking_type) {
-        case TYPE_ROOM:
-          const roomResult = await bookRoom(addon, t, req.user);
-          amount += roomResult.amount;
-          setBookingIdMap(
-            userBookingIdMap,
-            TYPE_ROOM,
-            roomResult.userBookingIds
-          );
-          break;
-
-        case TYPE_FOOD:
-          const foodResult = await bookFood(
-            req.body,
-            addon,
-            t,
-            req.user
-          );
-          amount += foodResult.amount;
-          transactionIds.push(...foodResult.transactionIds);
-          break;
-
-        case TYPE_ADHYAYAN:
-          const adhyayanResult = await bookAdhyayan(addon, t, req.user);
-          amount += adhyayanResult.amount;
-          setBookingIdMap(
-            userBookingIdMap,
-            TYPE_ADHYAYAN,
-            adhyayanResult.userBookingIds
-          );
-          setWaitingBookingCountMap(
-            waitingBookingCountMap,
-            TYPE_ADHYAYAN,
-            adhyayanResult.waitingBookingCount,
-            adhyayanResult.userBookingIds
-          );
-          break;
-
-        default:
-          throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
-      }
+      amount += await book(
+        req.body,
+        addon,
+        t,
+        req.user,
+        userBookingIdMap,
+        waitingBookingCountMap,
+        transactionIds
+      );
     }
   }
 
@@ -213,14 +140,84 @@ export const validateBooking = async (req, res) => {
       }
     });
   }
-  switch (primary_booking.booking_type) {
+
+  await validate(req.body, req.user, primary_booking, utsav, response);
+
+  if (addons) {
+    for (const addon of addons) {
+      await validate(req.body, req.user, addon, utsav, response);
+    }
+  }
+
+  return res.status(200).send({ data: response });
+};
+async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMap, transactionIds) {
+  let amount = 0;
+
+  switch (data.booking_type) {
+    case TYPE_ROOM:
+      const roomResult = await bookRoom(data, t, user);
+      amount += roomResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
+      break;
+
+    case TYPE_FOOD:
+      const foodResult = await bookFood(
+        body,
+        data,
+        t,
+        user
+      );
+      amount += foodResult.amount;
+      transactionIds.push(...foodResult.transactionIds);
+      break;
+
+    case TYPE_ADHYAYAN:
+      const adhyayanResult = await bookAdhyayan(data, t, user);
+      amount += adhyayanResult.amount;
+      setBookingIdMap(
+        userBookingIdMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.userBookingIds
+      );
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
+        TYPE_ADHYAYAN,
+        adhyayanResult.waitingBookingCount,
+        adhyayanResult.userBookingIds
+      );
+      break;
+
+    case TYPE_UTSAV:
+      const utsavResult = await bookUtsav(data, t, user);
+      amount += utsavResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_UTSAV, utsavResult.userBookingIds);
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
+        TYPE_UTSAV,
+        utsavResult.waitingBookingCount,
+        utsavResult.userBookingIds
+      );
+      break;
+
+    default:
+      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
+  }
+
+  return amount;
+}
+
+async function validate(body, user, data, utsav, response) {
+  let totalCharge = 0;
+
+  switch (data.booking_type) {
     case TYPE_ROOM:
       response.roomDetails = await checkRoomAvailability(
-        req.body.primary_booking,
-        req.user,
+        data,
+        user,
         utsav
       );
-      response.totalCharge += response.roomDetails.reduce(
+      totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
       );
@@ -228,20 +225,20 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_FOOD:
       response.foodDetails = await checkFoodAvailability(
-        req.body,
-        req.body.primary_booking,
-        req.user,
+        body,
+        data,
+        user,
         utsav
       );
-      response.totalCharge += response.foodDetails.charge;
+      totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
       response.adhyayanDetails = await checkAdhyayanAvailabilityForMumukshus(
-        primary_booking.details.shibir_ids,
-        primary_booking.details.guests
+        data.details.shibir_ids,
+        data.details.guests
       );
-      response.totalCharge += response.adhyayanDetails.reduce(
+      totalCharge += response.adhyayanDetails.reduce(
         (partialSum, adhyayan) => partialSum + adhyayan.charge,
         0
       );
@@ -249,11 +246,11 @@ export const validateBooking = async (req, res) => {
 
     case TYPE_UTSAV:
       response.utsavDetails = await validateUtsavs(
-        req.user,
-        req.body.primary_booking.details.utsavid,
-        req.body.primary_booking.details.guests
+        user,
+        data.details.utsavid,
+        data.details.guests
       );
-      response.totalCharge += response.utsavDetails.reduce(
+      totalCharge += response.utsavDetails.reduce(
         (partialSum, utsav) => partialSum + utsav.charge,
         0
       );
@@ -262,55 +259,10 @@ export const validateBooking = async (req, res) => {
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
+  response.totalCharge += totalCharge;
 
-  if (addons) {
-    for (const addon of addons) {
-      switch (addon.booking_type) {
-        case TYPE_ROOM:
-          response.roomDetails = await checkRoomAvailability(
-            addon,
-            req.user,
-            utsav
-          );
-          response.totalCharge += response.roomDetails.reduce(
-            (partialSum, room) => partialSum + room.charge,
-            0
-          );
-          break;
-
-        case TYPE_FOOD:
-          response.foodDetails = await checkFoodAvailability(
-            req.body,
-            addon,
-            req.user,
-            utsav
-          );
-          response.totalCharge += response.foodDetails.charge;
-          break;
-
-        case TYPE_ADHYAYAN:
-          response.adhyayanDetails = await checkAdhyayanAvailabilityForMumukshus(
-            addon.details.shibir_ids,
-            addon.details.guests
-          );
-          response.totalCharge += response.adhyayanDetails.reduce(
-            (partialSum, adhyayan) => partialSum + adhyayan.charge,
-            0
-          );
-          break;
-
-        //TODO: add travel for utsavs
-
-        default:
-          throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
-      }
-    }
-  }
-
-  return res.status(200).send({
-    data: response
-  });
-};
+  return response;
+}
 
 async function checkRoomAvailability(data, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
