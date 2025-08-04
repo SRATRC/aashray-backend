@@ -555,6 +555,8 @@ export async function checkRoomAvailabilityForMumukshus(
     checkout_date
   );
 
+  console.log("UTSAV OVERLAPPING:" + utsavOverlapping);
+
   const existingUtsavBookings = !utsavOverlapping
     ? await overlappingUtsavBookingsByCardno(
         mumukshus,
@@ -563,7 +565,7 @@ export async function checkRoomAvailabilityForMumukshus(
       )
     : {};
   
-  
+    console.log("EXISTING UTSAV BOOKING:" + JSON.stringify(existingUtsavBookings));
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
@@ -581,8 +583,9 @@ export async function checkRoomAvailabilityForMumukshus(
 
       const utsavBooking = utsavOverlapping 
         ? utsav 
-        : existingUtsavBookings[mumukshu];
+        : existingUtsavBookings[mumukshu]?.at(0).UtsavDb;
 
+      console.log("UTSAV BOOKING: " + JSON.stringify(utsavBooking));
 
       const dateRanges = [];
       if (utsavBooking) {

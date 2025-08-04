@@ -322,13 +322,13 @@ export async function overlappingUtsavBookings(cardnos, startDate, endDate) {
               // utsav starts between start and end date
               [Sequelize.Op.and]: [
                 { start_date: { [Sequelize.Op.gte]: startDate } },
-                { start_date: { [Sequelize.Op.lt]: endDate } }
+                { start_date: { [Sequelize.Op.lte]: endDate } }
               ]
             },
             {
               // utsav ends between start and end date
               [Sequelize.Op.and]: [
-                { end_date: { [Sequelize.Op.gt]: startDate } },
+                { end_date: { [Sequelize.Op.gte]: startDate } },
                 { end_date: { [Sequelize.Op.lte]: endDate } }
               ]
             },
