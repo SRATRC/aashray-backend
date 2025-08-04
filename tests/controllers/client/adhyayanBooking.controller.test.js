@@ -25,8 +25,8 @@ describe('Adhyayan Booking Controller', () => {
       expect(await booking.reload()).toHaveProperty('status', STATUS_CANCELLED);
     });
 
-    test.todo('should cancel guest or mumukshu booking successfully');
 
+    test.todo('should cancel guest or mumukshu booking successfully');
     test.todo('should return an error when cancelling a cancelled booking');
     test.todo('should open a seat when cancelling a confirmed booking');
     test.todo('should open a seat when cancelling a payment pending booking');

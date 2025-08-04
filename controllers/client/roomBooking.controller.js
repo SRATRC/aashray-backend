@@ -131,7 +131,7 @@ export const CancelBooking = async (req, res) => {
 
   sendMail({
     email: req.user.email,
-    subject: 'Vitraag Vigyaan Aashray: Raj Sharan Booking Cancelled',
+    subject: 'Raj Sharan - Room Booking Cancelled',
     template: 'rajSharanCancellation',
     context: {
       name: req.user.issuedto,
