@@ -23,13 +23,15 @@ import {
   FlatBooking,
   FlatDb
 } from '../models/associations.js';
-import { createPendingTransaction, generateOrderId, updateRazorpayTransactions } from './transactions.helper.js';
+import {
+  createPendingTransaction,
+  generateOrderId,
+  updateRazorpayTransactions
+} from './transactions.helper.js';
 import {
   calculateNights,
-  getBlockedDates,
   checkFlatAlreadyBooked,
-  validateDate,
-  isDateBlocked
+  validateDate
 } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
@@ -37,11 +39,9 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
 import {
-  isUtsavOverlapping,
-  overlappingUtsavBookingsByCardno,
+  getDateRangesDuringUtsav,
   splitDateRanges
 } from './utsavBooking.helper.js';
-import moment from 'moment';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -545,27 +545,16 @@ export async function checkRoomAvailabilityForMumukshus(
   );
   const cardDb = await validateCards(mumukshus);
 
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
+  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
-  const utsavOverlapping = isUtsavOverlapping(
-    utsav,
+  const dateRangesByMumukshu = await getDateRangesDuringUtsav(
+    mumukshus,
     checkin_date,
-    checkout_date
+    checkout_date,
+    utsav
   );
-
-  console.log("UTSAV OVERLAPPING:" + utsavOverlapping);
-
-  const existingUtsavBookings = !utsavOverlapping
-    ? await overlappingUtsavBookingsByCardno(
-        mumukshus,
-        checkin_date,
-        checkout_date
-      )
-    : {};
-  
-    console.log("EXISTING UTSAV BOOKING:" + JSON.stringify(existingUtsavBookings));
 
   var roomDetails = [];
   for (const group of mumukshuGroup) {
@@ -573,83 +562,24 @@ export async function checkRoomAvailabilityForMumukshus(
     const mumukshus = group.mumukshus || group.guests;
 
     for (const mumukshu of mumukshus) {
-      const card = cardDb.filter(
-        (item) => item.dataValues.cardno == mumukshu
-      )[0];
+      const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
 
-      const gender = floorType
-        ? floorType + card.dataValues.gender
-        : card.dataValues.gender;
+      const gender = floorType ? floorType + card.gender : card.gender;
 
-      const utsavBooking = utsavOverlapping 
-        ? utsav 
-        : existingUtsavBookings[mumukshu]?.at(0).UtsavDb;
-
-      console.log("UTSAV BOOKING: " + JSON.stringify(utsavBooking));
-
-      const dateRanges = [];
-      if (utsavBooking) {
-        dateRanges.push(
-          ...splitDateRanges(
-            utsavBooking.start_date,
-            utsavBooking.end_date,
-            checkin_date,
-            checkout_date
-          )
-        );
-      } else {
-        dateRanges.push(
-          {
-            start: checkin_date,
-            end: checkout_date,
-            touchingUtsav: false
-          }
-        )
-      }
-
-      const blockedDates = await getBlockedDates(checkin_date, checkout_date);
-
-      console.log("ORIGINAL RANGE: " + checkin_date + " to " + checkout_date);
-      console.log("RANGES: " + JSON.stringify(dateRanges));
-      console.log("BLOCKED DATES: " + JSON.stringify(blockedDates));
-
-      // check dates against block dates
-      const conflictingBlocks = [];
-      for (const range of dateRanges) {
-        for (const blockedDate of blockedDates) {
-          if (isDateBlocked(blockedDate, range.start, range.end, range.touchingUtsav)) {
-            conflictingBlocks.push(
-              `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
-                blockedDate.checkout).format('Do MMMM, YYYY')}`
-            );
-          }
-        }
-      }
-
-      if (conflictingBlocks.length > 0) {
-        const blockingInfo = conflictingBlocks.join(', ');
-        throw new ApiError(
-          400,
-          `Dates are blocked during following periods: ${blockingInfo}`
-        );
-      }
+      const dateRanges = dateRangesByMumukshu[mumukshu];
 
       for (const range of dateRanges) {
         var status = STATUS_WAITING;
         var charge = 0;
         var availableCredits = 0;
 
-        const minNights = utsavBooking ? 2 : 1;
+        const nights = await calculateNights(range.start, range.end);
 
-        const nights = await calculateNights(
-          range.start,
-          range.end
-        );
-
+        const minNights = range.overlappingWithUtsav ? 1 : 0;
         if (nights == 0) {
           // 1 day visit
           status = STATUS_AVAILABLE;
-        } else if (nights >= minNights) {
+        } else if (nights > minNights) {
           // around utsav, 2+ nights are confirmed
           // but 1 night is in waitlist
           const roomno = await findRoom(
@@ -664,7 +594,7 @@ export async function checkRoomAvailabilityForMumukshus(
             availableCredits = usableCredits(user, TYPE_ROOM, charge);
           }
         }
-        
+
         roomDetails.push({
           mumukshu,
           status,

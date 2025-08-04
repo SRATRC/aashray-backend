@@ -22,7 +22,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
-import { groupByCardno, isDateRangeOverlapping } from '../controllers/helper.js';
+import { getBlockedDates, isDateRangeOverlapping, validateBlockedDates } from '../controllers/helper.js';
 import database from '../config/database.js';
 
 const SAMVATSARI_PACKAGE_ID = 21;
@@ -295,17 +295,22 @@ export function isUtsavOverlapping(utsav, startDate, endDate) {
   );
 }
 
-export async function overlappingUtsavBookingsByCardno(cardnos, startDate, endDate) {
-  const utsavBookings = await overlappingUtsavBookings(
+export async function getUtsavBookingsByCardno(cardnos, startDate, endDate) {
+  const bookings = await getUtsavBookings(
     cardnos,
     startDate,
     endDate
   );
 
-  return groupByCardno(utsavBookings);
+  const grouped = bookings.reduce((acc, booking) => {
+    acc[booking.cardno] = booking;
+    return acc;
+  }, {});
+
+  return grouped;
 }
 
-export async function overlappingUtsavBookings(cardnos, startDate, endDate) {
+export async function getUtsavBookings(cardnos, startDate, endDate) {
   const utsavBookings = await UtsavBooking.findAll({
     where: {
       cardno: cardnos,
@@ -360,7 +365,7 @@ export function splitDateRanges(
     ranges.push({
       start: bookingStart,
       end: utsavStart,
-      touchingUtsav: true
+      overlappingWithUtsav: true
     });
   }
 
@@ -368,9 +373,63 @@ export function splitDateRanges(
     ranges.push({
       start: utsavEnd,
       end: bookingEnd,
-      touchingUtsav: true
+      overlappingWithUtsav: true
     });
   }
 
   return ranges;
 }
+
+export async function getDateRangesDuringUtsav(
+  mumukshus,
+  startDate,
+  endDate,
+  utsav
+) {
+  const inProgressUtsavOverlapping = isUtsavOverlapping(
+    utsav,
+    startDate,
+    endDate
+  );
+  
+  const existingUtsavBookings = inProgressUtsavOverlapping
+    ? {}
+    : await getUtsavBookingsByCardno(mumukshus, startDate, endDate);
+
+  const blockedDates = await getBlockedDates(startDate, endDate);
+
+  const dateRangesByMumukshu = {};
+  for (const mumukshu of mumukshus) {
+    const utsavBooking = inProgressUtsavOverlapping 
+      ? utsav
+      : existingUtsavBookings[mumukshu]?.UtsavDb;
+    
+    const dateRanges = [];
+    if (utsavBooking) {
+      dateRanges.push(
+        ...splitDateRanges(
+          utsavBooking.start_date,
+          utsavBooking.end_date,
+          startDate,
+          endDate
+        )
+      );
+    } else {
+      dateRanges.push(
+        {
+          start: startDate,
+          end: endDate,
+          overlappingWithUtsav: false
+        }
+      )
+    }
+
+    // validate blockedDates
+    validateBlockedDates(blockedDates, dateRanges);
+    
+    dateRangesByMumukshu[mumukshu] = dateRanges;
+  }
+
+  return dateRangesByMumukshu;
+}
+

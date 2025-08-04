@@ -743,28 +743,11 @@ export async function createCardIds(count) {
   return newIds;
 }
 
-export function groupByCardno(arr) {
-  const grouped = arr.reduce((acc, obj) => {
-    const cardno = obj.cardno;
-    acc[cardno] = acc[cardno] || [];
-    acc[cardno].push(obj);
-    return acc;
-  }, {});
-
-  return grouped;
-}
-
 export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllowed = true) {
   const startDate1 = new Date(start1);
   const endDate1 = new Date(end1);
   const startDate2 = new Date(start2);
   const endDate2 = new Date(end2);
-
-  // log all dates
-  console.log('Start Date 1:', startDate1);
-  console.log('End Date 1:', endDate1);
-  console.log('Start Date 2:', startDate2);
-  console.log('End Date 2:', endDate2);
 
   // No overlap if one range ends before the other starts
   const noOverlap = boundaryAllowed
@@ -782,4 +765,26 @@ export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) 
     endDate,
     boundaryAllowed
   );
+}
+
+export function validateBlockedDates(blockedDates, dateRanges) {
+  const conflictingBlocks = [];
+  for (const range of dateRanges) {
+    for (const blockedDate of blockedDates) {
+      if (isDateBlocked(blockedDate, range.start, range.end, range.overlappingWithUtsav)) {
+        conflictingBlocks.push(
+          `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
+            blockedDate.checkout).format('Do MMMM, YYYY')}`
+        );
+      }
+    }
+  }
+
+  if (conflictingBlocks.length > 0) {
+    const blockingInfo = conflictingBlocks.join(',');
+    throw new ApiError(
+      400,
+      `Dates are blocked during following periods: ${blockingInfo}`
+    );
+  }
 }
