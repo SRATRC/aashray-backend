@@ -5,12 +5,12 @@ import {
   mumukshuBooking,
   validateBooking
 } from '../../controllers/client/mumukshuBooking.controller.js';
-import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
+import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(validateCard);
 router.get('/', CatchAsync(checkMumukshuOrGuest));
-router.post('/booking', CheckDatesBlocked, CatchAsync(mumukshuBooking));
+router.post('/booking', CatchAsync(mumukshuBooking));
 router.post('/validate', CatchAsync(validateBooking));
 
 export default router;

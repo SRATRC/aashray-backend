@@ -1,18 +1,10 @@
-import { CardDb, UtsavBooking, UtsavDb } from '../models/associations.js';
+import { CardDb } from '../models/associations.js';
 import {
   ERR_CARD_NOT_FOUND,
-  ERR_CARD_NOT_PROVIDED,
-  STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED,
-  TYPE_UTSAV,
-  TYPE_ROOM,
-  TYPE_TRAVEL
+  ERR_CARD_NOT_PROVIDED
 } from '../config/constants.js';
-import { getBlockedDates } from '../controllers/helper.js';
-import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/CatchAsync.js';
-import moment from 'moment';
 
 export const validateCard = catchAsync(async (req, res, next) => {
   const cardno = req.params.cardno || req.body.cardno || req.query.cardno;
@@ -25,83 +17,3 @@ export const validateCard = catchAsync(async (req, res, next) => {
   next();
 });
 
-export const CheckDatesBlocked = catchAsync(async (req, res, next) => {
-  /*
-    This middleware now supports validation for all booking types (room, utsav, travel)
-    present in both primary_booking and addons array. It scans every relevant date
-    range and throws an error if the range clashes with blocked dates.
-  */
-
-  // 1. Collect all booking objects from the request
-  const bookings = [];
-  if (req.body.primary_booking) bookings.push(req.body.primary_booking);
-  if (Array.isArray(req.body.addons)) bookings.push(...req.body.addons);
-
-  // Fallback for legacy formats where primary_booking is not sent
-  if (bookings.length === 0 && req.body) {
-    bookings.push({ booking_type: null, details: req.body });
-  }
-
-  // 2. Extract date ranges of interest from each booking
-  const dateRanges = [];
-  for (const booking of bookings) {
-    if (!booking || !booking.details) continue;
-    const { booking_type, details } = booking;
-    let checkin = null;
-    let checkout = null;
-
-    switch (booking_type) {
-      case TYPE_ROOM:
-      case TYPE_UTSAV:
-        checkin = details.checkin_date;
-        checkout = details.checkout_date;
-        break;
-      default:
-        break;
-    }
-
-    if (checkin && checkout) {
-      dateRanges.push({
-        checkin,
-        checkout,
-        isUtsav: booking_type === TYPE_UTSAV
-      });
-    }
-  }
-
-  if (dateRanges.length === 0) return next();
-
-  // 3. Validate every extracted date range against blocked dates
-  const conflictingBlocks = [];
-  for (const { checkin, checkout } of dateRanges) {
-    const blockedDates = await getBlockedDates(checkin, checkout);
-    if (blockedDates.length === 0) continue;
-
-    const hasOverlapBeyondBoundary = blockedDates.some((block) => {
-      const touchesOnlyBoundary =
-        checkout === block.checkin || checkin === block.checkout;
-      return !touchesOnlyBoundary;
-    });
-    if (!hasOverlapBeyondBoundary) continue;
-
-    // Aggregate blocking information
-    conflictingBlocks.push(
-      ...blockedDates.map(
-        (block) =>
-          `${moment(block.checkin).format('Do MMMM, YYYY')} to ${moment(
-            block.checkout
-          ).format('Do MMMM, YYYY')} for ${block.comments}`
-      )
-    );
-  }
-
-  if (conflictingBlocks.length > 0) {
-    const blockingInfo = conflictingBlocks.join(', ');
-    throw new ApiError(
-      400,
-      `Dates are blocked during following periods: ${blockingInfo}`
-    );
-  }
-
-  next();
-});
