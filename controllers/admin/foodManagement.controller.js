@@ -247,12 +247,81 @@ export const cancelBooking = async (req, res) => {
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
+export const cancelMultipleMeals = async (req, res) => {
+  const { meals } = req.body;
+
+  if (!Array.isArray(meals) || meals.length === 0) {
+    throw new ApiError(400, "No meals provided");
+  }
+
+  const t = await database.transaction();
+
+  try {
+    for (const { bookingid, mealType } of meals) {
+      const booking = await FoodDb.findOne({
+        where: {
+          id: bookingid,
+          [mealType]: true
+        },
+        transaction: t
+      });
+
+      if (!booking) continue; // Skip invalid ones
+
+      await cancelMeal(req.user, bookingid, mealType, t);
+
+      const transaction = await Transactions.findOne({
+        where: {
+          bookingid: booking.id,
+          category: mealType
+        },
+        transaction: t
+      });
+
+      if (transaction) {
+        const card = await validateCard(transaction.cardno);
+        await adminCancelTransaction(req.user, card, transaction, t);
+      }
+    }
+
+    await t.commit();
+    return res.status(200).send({ message: "Selected meals cancelled successfully" });
+
+  } catch (err) {
+    await t.rollback();
+    console.error('Bulk cancel failed:', err);
+    throw new ApiError(500, "Failed to cancel selected meals");
+  }
+};
+
 export const bulkBooking = async (req, res) => {
   const { cardno, mobno, date, guestCount, breakfast, lunch, dinner, department } = req.body;
 
   // Ensure at least cardno or mobno is provided
   if (!cardno && !mobno) {
     return res.status(400).send({ message: 'Either cardno or mobno is required.' });
+  }
+
+  // Time restriction for smilesAdmin role
+  if (req.roles?.includes('smilesAdmin')) {
+    const bookingDate = new Date(date);
+    const now = new Date();
+
+    const tomorrow = new Date();
+    tomorrow.setDate(now.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+
+    const cutoff = new Date();
+    cutoff.setHours(11, 0, 0, 0); // today 11:00 AM
+
+    if (
+      bookingDate.toDateString() === tomorrow.toDateString() &&
+      now > cutoff
+    ) {
+      return res.status(403).send({
+        message: "You can't book food for tomorrow after 11:00 AM today.",
+      });
+    }
   }
 
   // Find the card
@@ -296,7 +365,15 @@ export const fetchBulkBookings = async (req, res) => {
     if (cardno) cardWhereClause.cardno = cardno;
     if (mobno) cardWhereClause.mobno = mobno;
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // ensure only date part is considered
+
     const bookings = await BulkFoodBooking.findAll({
+      where: {
+        date: {
+          [Op.gte]: today, // 👉 date >= today
+        },
+      },
       include: [
         {
           model: CardDb,
@@ -327,7 +404,29 @@ export const editBulkBooking = async (req, res) => {
   const booking = await BulkFoodBooking.findOne({ where: { bookingid } });
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
-  const maxCount = Math.max(breakfast, lunch, dinner, guestCount); // include guestCount from request
+  // Time restriction logic for smilesAdmin
+  if (req.roles?.includes('smilesAdmin')) {
+    const bookingDate = new Date(booking.date); // date stored in DB
+    const now = new Date();
+
+    const tomorrow = new Date();
+    tomorrow.setDate(now.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0); // reset to midnight
+
+    const cutoff = new Date();
+    cutoff.setHours(20, 0, 0, 0); // today 8:00 PM
+
+    if (
+      bookingDate.toDateString() === tomorrow.toDateString() &&
+      now > cutoff
+    ) {
+      return res.status(403).send({
+        message: "You can't edit tomorrow's booking after 8:00 PM today.",
+      });
+    }
+  }
+
+  const maxCount = Math.max(breakfast, lunch, dinner, guestCount);
 
   await booking.update({
     breakfast,
@@ -354,7 +453,21 @@ export const updatePlateIssued = async (req, res) => {
       return res.status(404).json({ message: 'Booking not found' });
     }
 
-    const bookedCount = booking[mealType]; // breakfast, lunch, or dinner count
+    // Ensure booking.date is treated as a Date object
+    const bookingDate = new Date(booking.date);
+    const today = new Date();
+
+    // Compare only dates (ignoring time)
+    const bookingDateStr = bookingDate.toISOString().slice(0, 10);
+    const todayStr = today.toISOString().slice(0, 10);
+
+    if (bookingDateStr !== todayStr) {
+      return res.status(403).json({
+        message: 'Plates can only be issued for today\'s bookings.',
+      });
+    }
+
+    const bookedCount = booking[mealType]; // e.g., breakfast, lunch, dinner count
 
     if (plateIssued > bookedCount) {
       return res.status(400).json({
@@ -377,75 +490,6 @@ export const updatePlateIssued = async (req, res) => {
   }
 };
 
-// export const foodReport = async (req, res) => {
-//   const start_date = req.query.start_date;
-//   const end_date = req.query.end_date;
-
-//   const report = await database.query(
-//     `WITH all_dates AS (
-//       SELECT DISTINCT date FROM food_db
-//       WHERE date >= :start_date AND date <= :end_date
-//       UNION
-//       SELECT DISTINCT date FROM bulk_food_booking
-//       WHERE date >= :start_date AND date <= :end_date
-//     )
-//     SELECT
-//       d.date,
-//       -- food_db counts
-//       COALESCE(SUM(CASE WHEN f.breakfast = 1 THEN 1 ELSE 0 END), 0) AS breakfast,
-//       COALESCE(SUM(CASE WHEN f.lunch = 1 THEN 1 ELSE 0 END), 0) AS lunch,
-//       COALESCE(SUM(CASE WHEN f.dinner = 1 THEN 1 ELSE 0 END), 0) AS dinner,
-//       COALESCE(SUM(CASE WHEN f.breakfast_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS breakfast_plate_issued,
-//       COALESCE(SUM(CASE WHEN f.lunch_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS lunch_plate_issued,
-//       COALESCE(SUM(CASE WHEN f.dinner_plate_issued = 1 THEN 1 ELSE 0 END), 0) AS dinner_plate_issued,
-//       COALESCE(SUM(CASE WHEN f.breakfast = 1 AND f.breakfast_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS breakfast_noshow,
-//       COALESCE(SUM(CASE WHEN f.lunch = 1 AND f.lunch_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS lunch_noshow,
-//       COALESCE(SUM(CASE WHEN f.dinner = 1 AND f.dinner_plate_issued = 0 THEN 1 ELSE 0 END), 0) AS dinner_noshow,
-//       COALESCE(SUM(CASE WHEN f.hightea = 'COFFEE' THEN 1 ELSE 0 END), 0) AS coffee,
-//       COALESCE(SUM(CASE WHEN f.hightea = 'TEA' THEN 1 ELSE 0 END), 0) AS tea,
-//       COALESCE(SUM(CASE WHEN f.spicy = 0 THEN 1 ELSE 0 END), 0) AS non_spicy,
-//       -- physical plate counts
-//       COALESCE(x.breakfast_physical_plates, 0) AS breakfast_physical_plates,
-//       COALESCE(x.lunch_physical_plates, 0) AS lunch_physical_plates,
-//       COALESCE(x.dinner_physical_plates, 0) AS dinner_physical_plates,
-//       -- bulk food guest counts
-//       COALESCE(b.breakfast_guest_count, 0) AS breakfast_guest_count,
-//       COALESCE(b.lunch_guest_count, 0) AS lunch_guest_count,
-//       COALESCE(b.dinner_guest_count, 0) AS dinner_guest_count
-//     FROM all_dates d
-//     LEFT JOIN food_db f ON f.date = d.date
-//     LEFT JOIN (
-//         SELECT date,
-//           SUM(CASE WHEN type = 'breakfast' THEN count ELSE 0 END) AS breakfast_physical_plates,
-//           SUM(CASE WHEN type = 'lunch' THEN count ELSE 0 END) AS lunch_physical_plates,
-//           SUM(CASE WHEN type = 'dinner' THEN count ELSE 0 END) AS dinner_physical_plates
-//         FROM food_physical_plate
-//         WHERE date >= :start_date AND date <= :end_date
-//         GROUP BY date
-//     ) AS x ON d.date = x.date
-//     LEFT JOIN (
-//         SELECT date,
-//           SUM(breakfast) AS breakfast_guest_count,
-//           SUM(lunch) AS lunch_guest_count,
-//           SUM(dinner) AS dinner_guest_count
-//         FROM bulk_food_booking
-//         WHERE date >= :start_date AND date <= :end_date
-//         GROUP BY date
-//     ) AS b ON d.date = b.date
-//     GROUP BY d.date, x.breakfast_physical_plates, x.lunch_physical_plates, x.dinner_physical_plates,
-//              b.breakfast_guest_count, b.lunch_guest_count, b.dinner_guest_count
-//     ORDER BY d.date ASC;`,
-//     {
-//       replacements: {
-//         start_date,
-//         end_date
-//       },
-//       type: Sequelize.QueryTypes.SELECT
-//     }
-//   );
-
-//   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
-// };
 
 export const foodReport = async (req, res) => {
   const start_date = req.query.start_date;
@@ -562,6 +606,72 @@ export const foodReportDetails = async (req, res) => {
   });
 
   return res.status(200).send({ data: bookings });
+};
+
+export const foodReportDetailsGuests = async (req, res) => {
+  const { meal, date, is_issued } = req.query;
+
+  if (!meal || !date) {
+    return res.status(400).json({ message: 'Missing meal or date parameter' });
+  }
+
+  const mealField = Sequelize.col(`BulkFoodBooking.${meal}`);
+  const plateIssuedField = Sequelize.col(`BulkFoodBooking.${meal}_plate_issued`);
+
+  const whereConditions = {
+    date,
+    [Op.and]: Sequelize.where(mealField, '>', 0),
+  };
+
+  if (is_issued === '1') {
+    // Show only if plates were issued
+    whereConditions[Op.and] = [
+      whereConditions[Op.and],
+      Sequelize.where(plateIssuedField, '>', 0)
+    ];
+  } else if (is_issued === '0') {
+    // Show only if plates were NOT issued
+    whereConditions[Op.and] = [
+      whereConditions[Op.and],
+      Sequelize.where(plateIssuedField, '<', Sequelize.col(meal))
+    ];
+  }
+
+  try {
+    const bookings = await BulkFoodBooking.findAll({
+  attributes: [
+    'bookingid',
+    'cardno',
+    'date',
+    'breakfast',
+    'lunch',
+    'dinner',
+    'breakfast_plate_issued',
+    'lunch_plate_issued',
+    'dinner_plate_issued',
+    'department',
+    [
+      // Calculate pending plates dynamically
+      Sequelize.literal(`BulkFoodBooking.${meal} - BulkFoodBooking.${meal}_plate_issued`),
+      'pending_plates'
+    ]
+  ],
+  include: [
+    {
+      model: CardDb,
+      attributes: ['issuedto', 'mobno'],
+      required: true
+    }
+  ],
+  where: whereConditions,
+  order: [[CardDb, 'issuedto', 'ASC']]
+});
+
+    return res.status(200).send({ data: bookings });
+  } catch (error) {
+    console.error('Error fetching guest report:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 export const fetchMenu = async (req, res) => {
