@@ -10,7 +10,9 @@ import {
   STATUS_INACTIVE,
   STATUS_PENDING,
   STATUS_APPROVED,
-  STATUS_MUMUKSHU
+  STATUS_MUMUKSHU,
+  STATUS_RESIDENT,
+  STATUS_RESET
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -126,7 +128,7 @@ export const requestPermanentCode = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  if (req.user.res_status !== STATUS_MUMUKSHU) {
+  if (![STATUS_MUMUKSHU, STATUS_RESIDENT].includes(req.user.res_status)) {
     throw new APIError(
       403,
       'You are not eligible to request a permanent WiFi code'
@@ -142,7 +144,7 @@ export const requestPermanentCode = async (req, res) => {
     transaction: t
   });
 
-  if (existingRequest) {
+  if (existingRequest && req.user.res_status !== STATUS_RESIDENT) {
     let message = 'You have already requested a permanent WiFi code';
     if (existingRequest.status === STATUS_APPROVED) {
       message = 'You already have an approved permanent WiFi code';
@@ -154,7 +156,7 @@ export const requestPermanentCode = async (req, res) => {
     throw new APIError(400, message);
   }
 
-  const newRequest = await PermanentWifiCodes.create(
+  await PermanentWifiCodes.create(
     {
       cardno: req.user.cardno,
       status: STATUS_PENDING,
@@ -167,18 +169,16 @@ export const requestPermanentCode = async (req, res) => {
 
   return res.status(201).send({
     message:
-      'Permanent WiFi code request submitted successfully. It will be reviewed by the admin.',
-    data: {
-      id: newRequest.id,
-      status: newRequest.status,
-      requested_at: newRequest.requested_at
-    }
+      'Permanent WiFi code request submitted successfully. It will be reviewed by the admin.'
   });
 };
 
-export const getPermanentCodeStatus = async (req, res) => {
+export const fetchPermanentCodes = async (req, res) => {
   const permanentCodeRequest = await PermanentWifiCodes.findAll({
-    where: { cardno: req.user.cardno },
+    where: {
+      cardno: req.user.cardno,
+      status: { [Sequelize.Op.ne]: STATUS_RESET }
+    },
     attributes: [
       'id',
       'code',
@@ -192,5 +192,56 @@ export const getPermanentCodeStatus = async (req, res) => {
   return res.status(200).send({
     message: 'Permanent WiFi code status',
     data: permanentCodeRequest
+  });
+};
+
+export const resetPermanentCode = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const { id } = req.body;
+
+  if (![STATUS_MUMUKSHU, STATUS_RESIDENT].includes(req.user.res_status)) {
+    throw new APIError(
+      403,
+      'You are not eligible to request a permanent WiFi code reset'
+    );
+  }
+
+  const existingCode = await PermanentWifiCodes.findOne({
+    where: {
+      id,
+      cardno: req.user.cardno,
+      status: STATUS_APPROVED
+    },
+    transaction: t
+  });
+
+  if (!existingCode) {
+    throw new APIError(404, 'No approved permanent WiFi code found to reset');
+  }
+
+  await existingCode.update(
+    {
+      status: STATUS_RESET,
+      reviewed_at: new Date()
+    },
+    { transaction: t }
+  );
+
+  await PermanentWifiCodes.create(
+    {
+      cardno: req.user.cardno,
+      status: STATUS_PENDING,
+      requested_at: new Date()
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+
+  return res.status(200).send({
+    message:
+      'Your permanent WiFi code reset request has been submitted successfully'
   });
 };
