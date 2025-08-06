@@ -201,6 +201,10 @@ export const resetPermanentCode = async (req, res) => {
 
   const { id } = req.body;
 
+  if (!id) {
+    throw new APIError(400, 'Permanent WiFi code ID is required for reset');
+  }
+
   if (![STATUS_MUMUKSHU, STATUS_RESIDENT].includes(req.user.res_status)) {
     throw new APIError(
       403,
@@ -223,8 +227,7 @@ export const resetPermanentCode = async (req, res) => {
 
   await existingCode.update(
     {
-      status: STATUS_RESET,
-      reviewed_at: new Date()
+      status: STATUS_RESET
     },
     { transaction: t }
   );
