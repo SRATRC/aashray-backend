@@ -3,13 +3,15 @@ import {
   STATUS_CREDITED,
   STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
-import { Op } from 'sequelize';
-import { QueryTypes } from 'sequelize';
+import {
+  Transactions,
+  RazorpaySettlement,
+  RazorpaySettlementRecon
+} from '../../models/associations.js';
+import { Op, QueryTypes, fn, col } from 'sequelize';
 import database from '../../config/database.js';
 import XLSX from 'xlsx';
-import RazorpaySettlement from '../../models/razorpay_settlement.model.js'; // adjust path if needed
-import RazorpaySettlementRecon from '../../models/razorpay_settlement_recon.model.js'; // adjust path if needed
-import  Transactions from '../../models/transactions.model.js'; // adjust path as per your setup
+import moment from 'moment';
 
 const FOOD_CATEGORIES = ['food', 'breakfast', 'lunch', 'dinner'];
 
@@ -298,98 +300,73 @@ export const fetchAllCreditTransactions = async (req, res) => {
   });
 };
 
-// 📥 2. Upload Excel and Insert into razorpay_settlement
-import moment from 'moment';
-
 export const uploadRazorpaySettlementExcel = async (req, res) => {
-  try {
-    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheet = XLSX.utils.sheet_to_json(
-      workbook.Sheets[workbook.SheetNames[0]],
-      { defval: '' }
-    );
+  const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+  const sheet = XLSX.utils.sheet_to_json(
+    workbook.Sheets[workbook.SheetNames[0]],
+    { defval: '' }
+  );
 
-    const formattedRows = [];
+  const formattedRows = [];
 
-    for (const row of sheet) {
-      const rawDate = row.created_at; // ✅ FIXED: Use correct column from Excel
+  for (const row of sheet) {
+    const rawDate = row.created_at;
 
-      if (!rawDate) {
-        console.warn(`Missing 'created_at' in row with ID ${row.id}`);
-        continue;
-      }
-
-      const parsedDate = moment(rawDate, 'DD/MM/YYYY HH:mm:ss', true);
-
-      if (!parsedDate.isValid()) {
-        console.warn(
-          `Invalid date format in row with ID ${row.id}: ${rawDate}`
-        );
-        continue;
-      }
-
-      formattedRows.push({
-        id: String(row.id),
-        amount: parseFloat(row.amount),
-        status: row.status,
-        fees: parseFloat(row.fees),
-        tax: parseFloat(row.tax),
-        utr: row.utr,
-        cerated_at: parsedDate.toDate() // ✅ your DB expects this name
-      });
+    if (!rawDate) {
+      console.warn(`Missing 'created_at' in row with ID ${row.id}`);
+      continue;
     }
 
-    if (formattedRows.length === 0) {
-      return res
-        .status(400)
-        .json({ error: 'No valid rows found with correct date format.' });
+    const parsedDate = moment(rawDate, 'DD/MM/YYYY HH:mm:ss', true);
+
+    if (!parsedDate.isValid()) {
+      console.warn(`Invalid date format in row with ID ${row.id}: ${rawDate}`);
+      continue;
     }
 
-    const incomingIds = formattedRows.map((row) => row.id);
-
-    const existingRecords = await RazorpaySettlement.findAll({
-      where: { id: incomingIds },
-      attributes: ['id'],
-      raw: true
+    formattedRows.push({
+      id: String(row.id),
+      amount: parseFloat(row.amount),
+      status: row.status,
+      fees: parseFloat(row.fees),
+      tax: parseFloat(row.tax),
+      utr: row.utr,
+      cerated_at: parsedDate.toDate()
     });
-
-    const existingIds = new Set(existingRecords.map((r) => r.id));
-
-    const uniqueRows = formattedRows.filter((row) => !existingIds.has(row.id));
-
-    if (uniqueRows.length === 0) {
-      return res
-        .status(200)
-        .json({ message: 'No new rows to insert. All IDs were duplicates.' });
-    }
-
-    await RazorpaySettlement.bulkCreate(uniqueRows);
-
-    res.status(200).json({
-      message: `${uniqueRows.length} new record(s) inserted. ${
-        formattedRows.length - uniqueRows.length
-      } duplicate(s) ignored.`
-    });
-  } catch (err) {
-    console.error('Error processing Excel upload:', err);
-    res
-      .status(500)
-      .json({
-        error: 'Failed to process and store Excel data: ' + err.message
-      });
   }
-};
 
-function safeParseFloat(val) {
-  if (val === null || val === undefined) return 0;
-  if (typeof val === 'number') return val;
-  // Remove commas, currency symbols etc.
-  let cleaned = String(val)
-    .replace(/[^0-9.-]/g, '')
-    .trim();
-  let num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
-}
+  if (formattedRows.length === 0) {
+    return res
+      .status(400)
+      .json({ error: 'No valid rows found with correct date format.' });
+  }
+
+  const incomingIds = formattedRows.map((row) => row.id);
+
+  const existingRecords = await RazorpaySettlement.findAll({
+    where: { id: incomingIds },
+    attributes: ['id'],
+    raw: true
+  });
+
+  const existingIds = new Set(existingRecords.map((r) => r.id));
+
+  const uniqueRows = formattedRows.filter((row) => !existingIds.has(row.id));
+
+  if (uniqueRows.length === 0) {
+    return res
+      .status(200)
+      .json({ message: 'No new rows to insert. All IDs were duplicates.' });
+  }
+
+  await RazorpaySettlement.bulkCreate(uniqueRows);
+
+  res.status(200).json({
+    message: `${uniqueRows.length} new record(s) inserted. ${
+      formattedRows.length - uniqueRows.length
+    } duplicate(s) ignored.`
+  });
+};
 
 export const updateSettlementFieldsFromExcel = async (req, res) => {
   try {
@@ -455,11 +432,9 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating settlements from Excel:', err);
-    res
-      .status(500)
-      .json({
-        error: 'Failed to process and update Excel data: ' + err.message
-      });
+    res.status(500).json({
+      error: 'Failed to process and update Excel data: ' + err.message
+    });
   }
 };
 
@@ -523,14 +498,11 @@ export const fetchAllSettlements = async (req, res) => {
   }
 };
 
-import { fn, col } from 'sequelize';
-
 export const fetchTransactionsBySettlementId = async (req, res) => {
   const { settlementId } = req.params;
 
-  try {
-    const transactions = await database.query(
-      `
+  const transactions = await database.query(
+    `
       -- 1. Matched transactions + recon
       SELECT 
         t.razorpay_order_id,
@@ -571,25 +543,20 @@ WHERE r.settlement_id = :settlementId
 
 GROUP BY r.order_id
 `,
-      {
-        type: QueryTypes.SELECT,
-        replacements: { settlementId }
-      }
-    );
+    {
+      type: QueryTypes.SELECT,
+      replacements: { settlementId }
+    }
+  );
 
-    res.json({ data: transactions || [] });
-  } catch (err) {
-    console.error('Error fetching transactions:', err);
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
+  res.json({ data: transactions || [] });
 };
 
 export const fetchTransactionsByPaymentId = async (req, res) => {
   const { razorpay_order_id } = req.params;
 
-  try {
-    const results = await database.query(
-      `
+  const results = await database.query(
+    `
       -- 1. Regular Transactions
       SELECT 
         t.bookingid,
@@ -717,27 +684,22 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
           WHERE BINARY TRIM(t2.razorpay_order_id) = BINARY TRIM(rw.order_id)
         )
       `,
-      {
-        type: QueryTypes.SELECT,
-        raw: true,
-        replacements: {
-          status: ['completed', 'cash completed', 'credited'],
-          razorpay_order_id
-        }
+    {
+      type: QueryTypes.SELECT,
+      raw: true,
+      replacements: {
+        status: ['completed', 'cash completed', 'credited'],
+        razorpay_order_id
       }
-    );
+    }
+  );
 
-    return res.json({ data: results });
-  } catch (err) {
-    console.error('Error fetching transactions by payment id:', err);
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
+  return res.json({ data: results });
 };
 
 export const fetchCredits = async (req, res) => {
-  try {
-    const cardholders = await database.query(
-      `
+  const cardholders = await database.query(
+    `
       SELECT 
         cardno,
         issuedto,
@@ -751,219 +713,136 @@ export const fetchCredits = async (req, res) => {
         AND credits != '{}'
       ORDER BY issuedto
       `,
-      {
-        type: QueryTypes.SELECT,
-        raw: true
-      }
-    );
+    {
+      type: QueryTypes.SELECT,
+      raw: true
+    }
+  );
 
-    // Optional: parse credits JSON and attach separate fields
-    const formattedData = cardholders.map((card) => {
-      let creditValues = {};
+  // Optional: parse credits JSON and attach separate fields
+  const formattedData = cardholders.map((card) => {
+    let creditValues = {};
 
-      try {
-        creditValues = JSON.parse(card.credits || '{}');
-      } catch (e) {
-        console.warn(`Invalid credits JSON for cardno ${card.cardno}`);
-      }
+    try {
+      creditValues = JSON.parse(card.credits || '{}');
+    } catch (e) {
+      console.warn(`Invalid credits JSON for cardno ${card.cardno}`);
+    }
 
-      return {
-        ...card,
-        roomCredits: creditValues.room || 0,
-        foodCredits: creditValues.food || 0,
-        travelCredits: creditValues.travel || 0,
-        utsavCredits: creditValues.utsav || 0
-      };
-    });
+    return {
+      ...card,
+      roomCredits: creditValues.room || 0,
+      foodCredits: creditValues.food || 0,
+      travelCredits: creditValues.travel || 0,
+      utsavCredits: creditValues.utsav || 0
+    };
+  });
 
-    return res.status(200).json({
-      message: 'Fetched credit details',
-      data: formattedData
-    });
-  } catch (err) {
-    console.error('Error fetching credit details:', err);
-    return res.status(500).json({
-      message: 'Error fetching credit details',
-      error: err.message
-    });
-  }
+  return res.status(200).json({
+    message: 'Fetched credit details',
+    data: formattedData
+  });
 };
-
-// export const fetchCreditTransactions = async (req, res) => {
-//   try {
-//     const { cardno, category } = req.query;
-
-//     if (!cardno || !category) {
-//       return res.status(400).json({
-//         message: 'cardno and category are required'
-//       });
-//     }
-
-//     const creditAndDebitTransactions = await database.query(
-//       `
-//       SELECT 
-//         t.cardno,
-//         t.bookingid,
-//         t.razorpay_order_id,
-//         t.amount AS credited_amount,
-//         NULL AS discount_used,
-//         t.updatedAt AS date,
-//         'CREDITED' AS transaction_type
-//       FROM transactions t
-//       WHERE t.status = 'credited'
-//         AND t.cardno = :cardno
-//         AND t.category = :category
-
-//       UNION ALL
-
-//       SELECT 
-//         t.cardno,
-//         t.bookingid,
-//         t.razorpay_order_id,
-//         NULL AS credited_amount,
-//         t.discount AS discount_used,
-//         t.createdAt AS date,
-//         'DEBITED' AS transaction_type
-//       FROM transactions t
-//       WHERE t.discount > 0
-//         AND t.cardno = :cardno
-//         AND t.category = :category
-
-//       ORDER BY date ASC
-//       `,
-//       {
-//         replacements: { cardno, category },
-//         type: QueryTypes.SELECT,
-//         raw: true
-//       }
-//     );
-
-//     return res.status(200).json({
-//       message: 'Fetched credit/debit transactions successfully',
-//       data: creditAndDebitTransactions
-//     });
-//   } catch (err) {
-//     console.error('Error in fetchCreditTransactions:', err);
-//     return res.status(500).json({
-//       message: 'Internal server error',
-//       error: err.message
-//     });
-//   }
-// };
-
-// import { Op } from 'sequelize';
-// import { Transaction } from '../../models'; // adjust path as per your setup
-
-// import { Op } from 'sequelize';
-// import { Transaction } from '../../models'; // adjust path
 
 export const fetchCreditTransactions = async (req, res) => {
-  try {
-    const { cardno, category } = req.query;
+  const { cardno, category } = req.query;
 
-    if (!cardno || !category) {
-      return res.status(400).json({
-        message: 'cardno and category are required'
+  if (!cardno || !category) {
+    return res.status(400).json({
+      message: 'cardno and category are required'
+    });
+  }
+
+  // Fetch all transactions relevant to this cardno (from all categories)
+  const allTransactions = await Transactions.findAll({
+    where: {
+      cardno,
+      [Op.or]: [
+        { status: 'credited' },
+        {
+          status: 'completed',
+          description: { [Op.like]: '%credits used:%' }
+        }
+      ]
+    },
+    order: [['createdAt', 'ASC']],
+    raw: true
+  });
+
+  let remainingCredits = 0;
+  const formatted = [];
+
+  for (const t of allTransactions) {
+    // Get base category and any flat-specific redirection
+    const actualCategory = t.category;
+    const isUsed =
+      t.status === 'completed' &&
+      t.description?.toLowerCase().includes('credits used');
+    console.log({
+      bookingid: t.bookingid,
+      status: t.status,
+      category: t.category,
+      description: t.description,
+      actualCategory
+    });
+
+    // Case 1: Credited entry
+    // const mealCategories = ['breakfast', 'lunch', 'dinner'];
+
+    const isMeal = (cat) => ['breakfast', 'lunch', 'dinner'].includes(cat);
+
+    const categoryMatch = (actualCategory, queryCategory) => {
+      if (queryCategory === 'food') return isMeal(actualCategory);
+      return actualCategory === queryCategory;
+    };
+
+    if (t.status === 'credited' && categoryMatch(actualCategory, category)) {
+      console.log('CREDIT MATCH FOUND:', t);
+      remainingCredits += t.amount;
+
+      formatted.push({
+        cardno: t.cardno,
+        bookingid: t.bookingid,
+        razorpay_order_id: t.razorpay_order_id || null,
+        date: t.updatedAt || t.createdAt,
+        credited_amount: t.amount,
+        credits_used: null,
+        amount_paid: 0,
+        transaction_type: 'CREDITED',
+        remaining_credit: remainingCredits
       });
     }
+    // Case 2: Used credits
+    else if (isUsed) {
+      const match = t.description?.match(/credits used:\s*(\d+)/i);
+      const used = match ? parseInt(match[1]) : 0;
 
-    // Fetch all transactions relevant to this cardno (from all categories)
-    const allTransactions = await Transactions.findAll({
-      where: {
-        cardno,
-        [Op.or]: [
-          { status: 'credited' },
-          {
-            status: 'completed',
-            description: { [Op.like]: '%credits used:%' }
-          }
-        ]
-      },
-      order: [['createdAt', 'ASC']],
-      raw: true
-    });
+      const isFlatBooking = actualCategory === 'flat';
+      const deductFromCategory = isFlatBooking ? 'room' : actualCategory;
 
-    let remainingCredits = 0;
-    const formatted = [];
+      if (categoryMatch(deductFromCategory, category)) {
+        remainingCredits -= used;
 
-    for (const t of allTransactions) {
-      // Get base category and any flat-specific redirection
-      const actualCategory = t.category;
-      const isUsed = t.status === 'completed' && t.description?.toLowerCase().includes('credits used');
-console.log({
-  bookingid: t.bookingid,
-  status: t.status,
-  category: t.category,
-  description: t.description,
-  actualCategory
-});
-
-      // Case 1: Credited entry
-      // const mealCategories = ['breakfast', 'lunch', 'dinner'];
-
-const isMeal = (cat) => ['breakfast', 'lunch', 'dinner'].includes(cat);
-
-const categoryMatch = (actualCategory, queryCategory) => {
-  if (queryCategory === 'food') return isMeal(actualCategory);
-  return actualCategory === queryCategory;
-};
-
-if (t.status === 'credited' && categoryMatch(actualCategory, category)) {
-  console.log('CREDIT MATCH FOUND:', t);
-  remainingCredits += t.amount;
-
-  formatted.push({
-    cardno: t.cardno,
-    bookingid: t.bookingid,
-    razorpay_order_id: t.razorpay_order_id || null,
-    date: t.updatedAt || t.createdAt,
-    credited_amount: t.amount,
-    credits_used: null,
-    amount_paid: 0,
-    transaction_type: 'CREDITED',
-    remaining_credit: remainingCredits
-  });
-}
-// Case 2: Used credits
-      else if (isUsed) {
-  const match = t.description?.match(/credits used:\s*(\d+)/i);
-  const used = match ? parseInt(match[1]) : 0;
-
-  const isFlatBooking = actualCategory === 'flat';
-  const deductFromCategory = isFlatBooking ? 'room' : actualCategory;
-
-  if (categoryMatch(deductFromCategory, category)) {
-    remainingCredits -= used;
-
-    formatted.push({
-      cardno: t.cardno,
-      bookingid: t.bookingid,
-      razorpay_order_id: t.razorpay_order_id || null,
-      date: t.createdAt,
-      credited_amount: null,
-      credits_used: used,
-      amount_paid: t.amount || 0,
-      transaction_type: 'USED',
-      remaining_credit: remainingCredits
-    });
-  }
-}
+        formatted.push({
+          cardno: t.cardno,
+          bookingid: t.bookingid,
+          razorpay_order_id: t.razorpay_order_id || null,
+          date: t.createdAt,
+          credited_amount: null,
+          credits_used: used,
+          amount_paid: t.amount || 0,
+          transaction_type: 'USED',
+          remaining_credit: remainingCredits
+        });
+      }
     }
-
-    return res.status(200).json({
-      message: 'Fetched credit usage history successfully',
-      data: formatted
-    });
-
-  } catch (err) {
-    console.error('Error in fetchCreditTransactions:', err);
-    return res.status(500).json({
-      message: 'Internal server error',
-      error: err.message
-    });
   }
-};
 
+  return res.status(200).json({
+    message: 'Fetched credit usage history successfully',
+    data: formatted
+  });
+};
 
 export const fetchAllDebitTransactions = async (req, res) => {
   const { startDate, endDate } = req.query;

@@ -1,4 +1,9 @@
-import { ShibirDb } from '../../models/associations.js';
+import {
+  AdhyayanFeedback,
+  CardDb,
+  ShibirDb,
+  Transactions
+} from '../../models/associations.js';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -10,7 +15,7 @@ import {
   STATUS_CASH_PENDING,
   TYPE_ADHYAYAN,
   ERR_BOOKING_ALREADY_CANCELLED,
-  RESEARCH_CENTRE
+  MSG_FETCH_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
@@ -22,12 +27,12 @@ import {
   validateAdhyayanBooking,
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
+import { validateCard } from '../../helpers/card.helper.js';
 import database from '../../config/database.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
-import Transactions from '../../models/transactions.model.js';
-import { validateCard } from '../../helpers/card.helper.js';
+import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -322,12 +327,7 @@ export const updateAdhyayan = async (req, res) => {
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
 
-export const adhyayanReport = async (req, res) => {
-  res.status(200).send({ message: 'Fetched Adhyayan Report' });
-};
-
 export const adhyayanWaitlist = async (req, res) => {
-  const { shibir_id, bookingid, status, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -522,44 +522,86 @@ export const activateAdhyayan = async (req, res) => {
 };
 
 export const fetchAllAdhyayanList = async (req, res) => {
-  try {
-    const adhyayans = await database.query(
-      `SELECT id, name FROM shibir_db ORDER BY id ASC`,
-      {
-        type: QueryTypes.SELECT,
-        raw: true
-      }
-    );
+  const adhyayans = await database.query(
+    `SELECT id, name FROM shibir_db ORDER BY id ASC`,
+    {
+      type: QueryTypes.SELECT,
+      raw: true
+    }
+  );
 
-    return res.status(200).json({
-      message: 'Fetched adhyayan list',
-      data: adhyayans
-    });
-  } catch (error) {
-    console.error('Error fetching adhyayans:', error);
-    return res.status(500).json({
-      message: 'Failed to fetch adhyayan list',
-      error: error.message
-    });
-  }
+  return res.status(200).json({
+    message: 'Fetched adhyayan list',
+    data: adhyayans
+  });
 };
 
 export const softDeleteShibir = async (req, res) => {
   const { id } = req.params;
 
-  try {
-    const updated = await ShibirDb.update(
-      { status: 'deleted' },
-      { where: { id } }
-    );
+  const updated = await ShibirDb.update(
+    { status: 'deleted' },
+    { where: { id } }
+  );
 
-    if (updated[0] === 0) {
-      return res.status(404).json({ message: 'Shibir not found' });
-    }
-
-    res.status(200).json({ message: 'Shibir marked as deleted' });
-  } catch (error) {
-    console.error('Soft delete error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+  if (updated[0] === 0) {
+    return res.status(404).json({ message: 'Shibir not found' });
   }
+
+  res.status(200).json({ message: 'Shibir marked as deleted' });
+};
+
+export const getAdhyayanFeedback = async (req, res) => {
+  const { shibir_id } = req.params;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 20;
+  const offset = (page - 1) * pageSize;
+
+  if (!shibir_id) {
+    throw new ApiError(400, 'Adhyayan ID is required');
+  }
+
+  const feedback = await AdhyayanFeedback.findAll({
+    where: { shibir_id: parseInt(shibir_id) },
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'center', 'res_status']
+      },
+      {
+        model: ShibirDb,
+        attributes: [
+          'id',
+          'name',
+          'speaker',
+          'start_date',
+          'end_date',
+          'location'
+        ]
+      }
+    ],
+    order: [['submitted_at', 'DESC']],
+    offset,
+    limit: pageSize
+  });
+
+  const totalCount = await AdhyayanFeedback.count({
+    where: { shibir_id: parseInt(shibir_id) }
+  });
+
+  const stats = await getFeedbackStats(parseInt(shibir_id));
+
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    data: {
+      feedback,
+      stats,
+      pagination: {
+        page,
+        pageSize,
+        totalCount,
+        totalPages: Math.ceil(totalCount / pageSize)
+      }
+    }
+  });
 };
