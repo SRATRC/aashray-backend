@@ -352,8 +352,8 @@ export const fetchBookingForDriver = async (req, res) => {
 
       FROM travel_db t1
       LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-      WHERE t1.status IN ('confirmed', 'awaiting confirmation')
-        AND t1.date = :fetchDate
+      WHERE t1.status = 'confirmed'
+      AND t1.date = :fetchDate
 
       ORDER BY
         Travelling_From ASC,

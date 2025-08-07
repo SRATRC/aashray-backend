@@ -85,16 +85,23 @@ export const createAdmin = async (req, res) => {
 export const resetPassword = async (req, res) => {
   const { username, newPassword } = req.body;
 
-  if (!username || !newPassword) {
+    if (!username || !newPassword) {
     return res.status(400).json({ message: 'Username and new password are required' });
   }
 
+  if (newPassword.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters long' });
+  }
+
   try {
-    const user = await AdminUsers.findOne({ where: { username } });
+        const user = await AdminUsers.findOne({ where: { username } });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    if (user.dataValues.status === STATUS_INACTIVE) {
+      return res.status(403).json({ message: 'Account is deactivated' });
+    }
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await user.update({ password: hashedPassword });
 
