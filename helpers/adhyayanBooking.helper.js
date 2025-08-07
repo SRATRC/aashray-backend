@@ -267,7 +267,6 @@ export async function getAdhyayanBookings(bookingIds) {
 }
 
 export async function validateFeedbackEligibility(cardno, shibir_id) {
-  // Check if adhyayan exists
   const adhyayan = await ShibirDb.findOne({
     where: { id: shibir_id }
   });
@@ -285,7 +284,7 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
   // Check if user has a confirmed booking for this adhyayan
   const booking = await ShibirBookingDb.findOne({
     where: {
-      [Sequelize.Op.or]: [{ cardno: cardno }, { bookedBy: cardno }],
+      cardno,
       shibir_id: shibir_id,
       status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED]
     }
