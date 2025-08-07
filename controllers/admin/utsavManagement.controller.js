@@ -28,7 +28,8 @@ import {
   STATUS_CANCELLED,
   ROOM_STATUS_CHECKEDIN,
   RESEARCH_CENTRE,
-  STATUS_OPEN
+  STATUS_OPEN,
+  STATUS_PAYMENT_COMPLETED
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
@@ -413,7 +414,7 @@ export const utsavStatusUpdate = async (req, res) => {
 } else if (transaction.status === STATUS_PAYMENT_PENDING) {
   await transaction.update(
     {
-      status: STATUS_CONFIRMED,  // ✅ add this line
+      status: STATUS_PAYMENT_COMPLETED,  // ✅ add this line
       description: description,
       updatedBy: req.user.username
     },
