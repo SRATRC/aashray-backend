@@ -23,7 +23,7 @@ const SupportTickets = sequelize.define(
       allowNull: false
     },
     issue: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: false
     }
   },
