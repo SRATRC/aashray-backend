@@ -13,7 +13,12 @@ import {
   STATUS_CASH_COMPLETED,
   ERR_FEEDBACK_ALREADY_SUBMITTED
 } from '../config/constants.js';
-import { ShibirBookingDb, ShibirDb, UtsavDb } from '../models/associations.js';
+import {
+  AdhyayanFeedback,
+  ShibirBookingDb,
+  ShibirDb,
+  UtsavDb
+} from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCard, validateCards } from './card.helper.js';
