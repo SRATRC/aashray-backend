@@ -1,3 +1,4 @@
+import { MSG_FETCH_SUCCESSFUL } from '../../config/constants.js';
 import { Updates } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 
@@ -17,9 +18,12 @@ export const checkForUpdates = async (req, res) => {
     throw new ApiError(404, 'No version information found');
   }
 
-  res.status(200).json({
-    latestVersion: latestUpdate.version,
-    mandatory: latestUpdate.mandatory,
-    releaseNotes: latestUpdate.releaseNotes
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    data: {
+      latestVersion: latestUpdate.version,
+      mandatory: latestUpdate.mandatory,
+      releaseNotes: latestUpdate.releaseNotes
+    }
   });
 };
