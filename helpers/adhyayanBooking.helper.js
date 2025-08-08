@@ -73,10 +73,14 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
 }
 
 export async function validateAdhyayans(...shibirIds) {
+  const sevenDaysAgo = moment().subtract(7, 'days').format('YYYY-MM-DD');
+
   const shibirs = await ShibirDb.findAll({
     where: {
       id: shibirIds,
-      start_date: { [Sequelize.Op.gte]: moment().format('YYYY-MM-DD') }
+      start_date: {
+        [Sequelize.Op.gte]: sevenDaysAgo
+      }
     }
   });
 

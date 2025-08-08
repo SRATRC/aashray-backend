@@ -15,15 +15,18 @@ import {
   fetchFoodBookings,
   cancelBooking,
   bulkBooking,
-  cancelBulkBooking,
   fetchBulkBookings,
-  addBulkMenu
-} from '../../controllers/admin/foodManagement.controller.js';
-import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN } from '../../config/constants.js';
+  addBulkMenu,
+  editBulkBooking,
+  updatePlateIssued,
+  foodReportDetailsGuests,
+  cancelMultipleMeals
+  } from '../../controllers/admin/foodManagement.controller.js';
+import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
-router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN));
+router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN));
 
 router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));
@@ -32,13 +35,16 @@ router.get('/fetch_food_bookings', CatchAsync(fetchFoodBookings));
 
 router.post('/book', CatchAsync(bookFood));
 router.put('/cancel/:bookingid', CatchAsync(cancelBooking));
+router.put('/cancel_multiple', CatchAsync(cancelMultipleMeals));
 
 router.post('/bulk_booking', CatchAsync(bulkBooking));
 router.get('/bulk_booking', CatchAsync(fetchBulkBookings));
-router.put('/cancel_bulk_booking/:bookingid', CatchAsync(cancelBulkBooking));
+router.put('/edit_bulk_booking/:bookingid', CatchAsync(editBulkBooking));
+router.put('/update_plate_issued/:bookingid', CatchAsync(updatePlateIssued));
 
 router.get('/report', CatchAsync(foodReport));
 router.get('/report_details', CatchAsync(foodReportDetails));
+router.get('/report_details_guests', CatchAsync(foodReportDetailsGuests));
 
 router.get('/menu', CatchAsync(fetchMenu));
 router.post('/menu', CatchAsync(addMenu));

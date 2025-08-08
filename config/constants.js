@@ -97,6 +97,7 @@ export const ROLE_ELECTRICAL_ADMIN = 'electricalAdmin';
 export const ROLE_AVT_ADMIN = 'avtAdmin';
 export const ROLE_WIFI_ADMIN = 'wifiAdmin';
 export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
+export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
