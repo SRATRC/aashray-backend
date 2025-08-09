@@ -277,3 +277,17 @@ export const submitFeedback = async (req, res) => {
     message: 'Feedback submitted successfully'
   });
 };
+
+export const feedbackValidation = async (req, res) => {
+  const { shibir_id } = req.query;
+
+  if (!shibir_id) {
+    throw new ApiError(400, 'Adhyayan ID is required');
+  }
+
+  await validateFeedbackEligibility(req.user.cardno, shibir_id);
+
+  return res.status(200).send({
+    message: 'Feedback is allowed'
+  });
+};
