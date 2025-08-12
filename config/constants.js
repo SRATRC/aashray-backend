@@ -16,6 +16,7 @@ export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
+export const FEEDBACK_ELIGIBILITY_HOUR = 19;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
@@ -135,6 +136,13 @@ export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
 export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
+
+export const ERR_FEEDBACK_ALREADY_SUBMITTED =
+  'Feedback already submitted for this adhyayan';
+export const ERR_FEEDBACK_NOT_ALLOWED =
+  'You are not eligible to submit feedback for this adhyayan';
+export const ERR_ADHYAYAN_NOT_COMPLETED =
+  'Cannot submit feedback for ongoing or future adhyayan';
 
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
