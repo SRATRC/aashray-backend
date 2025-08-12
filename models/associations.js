@@ -32,6 +32,7 @@ import RazorpaySettlement from './razorpay_settlement.model.js';
 import SupportTickets from './support_tickets.model.js';
 import BlockDates from './block_dates.model.js';
 import PermanentWifiCodes from './permanent_wifi_codes.model.js';
+import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 
@@ -496,6 +497,7 @@ export {
   RazorpaySettlement,
   SupportTickets,
   BlockDates,
+  Updates
   AdhyayanFeedback,
   RazorpaySettlementRecon
 };
