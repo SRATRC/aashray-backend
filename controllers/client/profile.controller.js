@@ -4,11 +4,11 @@ import {
   DeleteObjectCommand
 } from '@aws-sdk/client-s3';
 import { CardDb, FlatDb } from '../../models/associations.js';
-import { Expo } from 'expo-server-sdk';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
+import notificationService from '../../services/notification.service.js';
 
 export const updateProfile = async (req, res) => {
   const {
@@ -242,79 +242,18 @@ export const transactions = async (req, res) => {
 export const sendNotification = async (req, res) => {
   const { tokenData } = req.body;
 
-  let expo = new Expo();
-  let messages = [];
-
-  for (let singleData of tokenData) {
-    if (!Expo.isExpoPushToken(singleData.token)) {
-      console.error(
-        `Push token ${singleData.token} is not a valid Expo push token`
-      );
-      continue;
-    }
-
-    // Include screen navigation data in the notification
-    messages.push({
-      to: singleData.token,
-      sound: singleData.sound || 'default',
-      title: singleData.title || 'Notification',
-      body: singleData.body || 'This is a test notification',
-      data: {
-        screen: singleData.screen || '/', // Add the screen route you want to navigate to
-        ...singleData.data // Include any additional data
-      }
-    });
+  if (!tokenData || !Array.isArray(tokenData) || tokenData.length === 0) {
+    throw new ApiError(400, 'Invalid request: tokenData must be a non-empty');
   }
 
-  let chunks = expo.chunkPushNotifications(messages);
-  let tickets = [];
+  const result = await notificationService.sendPushNotifications(tokenData);
 
-  try {
-    // Send notifications and wait for the results
-    for (let chunk of chunks) {
-      try {
-        let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-        tickets.push(...ticketChunk);
-      } catch (error) {
-        console.error('Error sending notification chunk:', error);
-      }
-    }
-
-    // Process receipts
-    let receiptIds = tickets
-      .filter((ticket) => ticket.id)
-      .map((ticket) => ticket.id);
-    let receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
-
-    // Check receipts
-    for (let chunk of receiptIdChunks) {
-      try {
-        let receipts = await expo.getPushNotificationReceiptsAsync(chunk);
-        for (let receiptId in receipts) {
-          let { status, message, details } = receipts[receiptId];
-          if (status === 'error') {
-            console.error(`Notification error: ${message}`);
-            if (details && details.error) {
-              console.error(`Error code: ${details.error}`);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error checking receipts:', error);
-      }
-    }
-
-    return res.status(200).json({
-      message: 'Notifications sent successfully',
-      tickets
-    });
-  } catch (error) {
-    console.error('Error in notification process:', error);
-    return res.status(500).json({
-      message: 'Error sending notifications',
-      error: error.message
-    });
-  }
+  return res.status(200).json({
+    message: 'Notifications sent successfully',
+    tickets: result.tickets,
+    sentCount: result.sentCount,
+    totalRequested: result.totalRequested
+  });
 };
 
 export const fetchProfile = async (req, res) => {

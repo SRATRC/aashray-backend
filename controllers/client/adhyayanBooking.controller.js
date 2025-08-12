@@ -18,12 +18,13 @@ import {
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
 import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { sendNotification } from '../../utils/sendNotification.js';
+import notificationService from '../../services/notification.service.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
+import logger from '../../config/logger.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -170,20 +171,17 @@ export const CancelShibir = async (req, res) => {
     }
   });
 
-  // Call the refactored utility function
-  if (req.user.pushToken) {
-    await sendNotification([
-      {
-        token: req.user.pushToken,
-        title: 'Booking Cancelled',
-        body: `Your booking for "${adhyayan.name}" has been cancelled.`,
-        screen: 'CancelledBookings',
-        data: {
-          shibir_id: adhyayan.id,
-          status: 'cancelled'
-        }
+  // Send push notification using the notification service
+  if (req.user.token) {
+    await notificationService.sendSingleNotification(req.user.token, {
+      title: 'Booking Cancelled',
+      body: `Your booking for "${adhyayan.name}" has been cancelled.`,
+      screen: 'CancelledBookings',
+      data: {
+        shibir_id: adhyayan.id,
+        status: 'cancelled'
       }
-    ]);
+    });
   }
 
   return res.status(200).send({ message: 'Shibir booking cancelled' });

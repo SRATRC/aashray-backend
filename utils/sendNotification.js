@@ -1,39 +1,24 @@
-import { Expo } from 'expo-server-sdk';
+import notificationService from '../services/notification.service.js';
 
-const expo = new Expo();
-
+/**
+ * @deprecated This utility function is deprecated.
+ * Use notificationService.sendPushNotifications() directly instead.
+ * This wrapper is maintained for backward compatibility only.
+ *
+ * @param {Array} tokenData - Array of notification objects with token, title, body, etc.
+ * @returns {Promise<Array>} - Returns array of tickets (for backward compatibility)
+ */
 export const sendNotification = async (tokenData) => {
-  let messages = [];
+  console.warn(
+    'DEPRECATED: utils/sendNotification.js is deprecated. Use notificationService from services/notification.service.js instead.'
+  );
 
-  for (let singleData of tokenData) {
-    if (!Expo.isExpoPushToken(singleData.token)) {
-      console.error(`Invalid Expo token: ${singleData.token}`);
-      continue;
-    }
-
-    messages.push({
-      to: singleData.token,
-      sound: singleData.sound || 'default',
-      title: singleData.title || 'Notification',
-      body: singleData.body || '',
-      data: {
-        screen: singleData.screen || '/',
-        ...singleData.data
-      }
-    });
+  try {
+    const result = await notificationService.sendPushNotifications(tokenData);
+    // Return just tickets for backward compatibility
+    return result.tickets;
+  } catch (error) {
+    console.error('Error in deprecated sendNotification:', error);
+    throw error;
   }
-
-  const chunks = expo.chunkPushNotifications(messages);
-  const tickets = [];
-
-  for (let chunk of chunks) {
-    try {
-      const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
-      tickets.push(...ticketChunk);
-    } catch (error) {
-      console.error('Error sending notification chunk:', error);
-    }
-  }
-
-  return tickets;
 };
