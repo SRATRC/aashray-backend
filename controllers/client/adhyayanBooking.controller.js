@@ -111,9 +111,16 @@ export const FetchBookedShibir = async (req, res) => {
   const currentDate = new Date();
   shibirs.forEach((shibir) => {
     const endDate = new Date(shibir.end_date);
-    endDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
-    shibir.showFeedback =
-      currentDate >= endDate && shibir.status === STATUS_CONFIRMED;
+    const feedbackStartDate = new Date(endDate);
+    feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
+    
+    const feedbackEndDate = new Date(endDate);
+    feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
+    
+    shibir.showFeedback = 
+      currentDate >= feedbackStartDate && 
+      currentDate <= feedbackEndDate && 
+      shibir.status === STATUS_CONFIRMED;
   });
 
   return res.status(200).send({ data: shibirs });
@@ -191,7 +198,7 @@ export const FetchShibirInRange = async (req, res) => {
   if (!end_date) {
     const endDateObj = new Date(startDateObj);
     endDateObj.setDate(startDateObj.getDate() + 15); // Add 15 days
-    end_date = endDateObj.toISOString().split('T')[0]; // Format the new end_date as YYYY-MM-DD
+    end_date = endDateObj.toISOString().split('T')[0];
   }
 
   const whereCondition = {

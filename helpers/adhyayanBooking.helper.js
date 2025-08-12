@@ -280,10 +280,18 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
     throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
   }
 
+  const today = moment();
+  const endDate = moment(adhyayan.end_date);
+  
   // Check if adhyayan has ended
-  const today = moment().format('YYYY-MM-DD');
-  if (moment(adhyayan.end_date).isAfter(today)) {
+  if (endDate.isAfter(today)) {
     throw new ApiError(400, ERR_ADHYAYAN_NOT_COMPLETED);
+  }
+  
+  // Check if more than 15 days have passed since adhyayan ended
+  const daysSinceEnd = today.diff(endDate, 'days');
+  if (daysSinceEnd > 15) {
+    throw new ApiError(400, 'Feedback submission is only allowed within 15 days after the adhyayan ends');
   }
 
   // Check if user has a confirmed booking for this adhyayan
