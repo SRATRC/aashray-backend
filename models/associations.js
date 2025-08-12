@@ -497,7 +497,7 @@ export {
   RazorpaySettlement,
   SupportTickets,
   BlockDates,
-  Updates
+  Updates,
   AdhyayanFeedback,
   RazorpaySettlementRecon
 };
