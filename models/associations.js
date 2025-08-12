@@ -33,6 +33,8 @@ import SupportTickets from './support_tickets.model.js';
 import BlockDates from './block_dates.model.js';
 import PermanentWifiCodes from './permanent_wifi_codes.model.js';
 import Updates from './updates.model.js';
+import AdhyayanFeedback from './adhyayan_feedback.model.js';
+import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -166,6 +168,12 @@ CardDb.hasMany(SupportTickets, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+CardDb.hasMany(AdhyayanFeedback, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 
 // Transactions
 Transactions.belongsTo(CardDb, {
@@ -254,6 +262,12 @@ ShibirDb.hasMany(ShibirBookingDb, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+ShibirDb.hasMany(AdhyayanFeedback, {
+  foreignKey: 'shibir_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 ShibirBookingDb.belongsTo(ShibirDb, {
   foreignKey: 'shibir_id',
   targetKey: 'id'
@@ -266,6 +280,16 @@ ShibirBookingDb.belongsTo(CardDb, {
   foreignKey: 'bookedBy',
   targetKey: 'cardno',
   as: 'shibirBookedByCard'
+});
+
+// AdhyayanFeedback
+AdhyayanFeedback.belongsTo(ShibirDb, {
+  foreignKey: 'shibir_id',
+  targetKey: 'id'
+});
+AdhyayanFeedback.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
 });
 
 // Maintenance
@@ -474,4 +498,6 @@ export {
   SupportTickets,
   BlockDates,
   Updates
+  AdhyayanFeedback,
+  RazorpaySettlementRecon
 };

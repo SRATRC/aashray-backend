@@ -5,7 +5,9 @@ import {
   FetchBookedShibir,
   CancelShibir,
   FetchShibirInRange,
-  FetchShibirById
+  FetchShibirById,
+  submitFeedback,
+  feedbackValidation
 } from '../../controllers/client/adhyayanBooking.controller.js';
 import { validateCard } from '../../middleware/validate.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -17,5 +19,7 @@ router.get('/getbooked', CatchAsync(FetchBookedShibir));
 router.delete('/cancel', CatchAsync(CancelShibir));
 router.get('/getrange', CatchAsync(FetchShibirInRange));
 router.get('/:id', CatchAsync(FetchShibirById));
+router.post('/feedback', CatchAsync(submitFeedback));
+router.get('/feedback/validate', CatchAsync(feedbackValidation));
 
 export default router;
