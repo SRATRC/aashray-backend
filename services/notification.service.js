@@ -183,7 +183,7 @@ class NotificationService {
               }
             }
           } else if (status === 'ok') {
-            logger.info(`Notification delivered successfully: ${receiptId}`);
+            logger.debug(`Notification delivered successfully: ${receiptId}`);
           }
         }
       } catch (error) {
