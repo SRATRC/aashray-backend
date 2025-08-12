@@ -12,7 +12,8 @@ import {
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
   ERR_BOOKING_ALREADY_CANCELLED,
-  STATUS_DELETED
+  STATUS_DELETED,
+  FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
 import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
@@ -23,8 +24,6 @@ import Sequelize from 'sequelize';
 import moment from 'moment';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
-
-const FEEDBACK_ELIGIBILITY_HOUR = 19; // 7 PM
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -113,13 +112,13 @@ export const FetchBookedShibir = async (req, res) => {
     const endDate = new Date(shibir.end_date);
     const feedbackStartDate = new Date(endDate);
     feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
-    
+
     const feedbackEndDate = new Date(endDate);
     feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
-    
-    shibir.showFeedback = 
-      currentDate >= feedbackStartDate && 
-      currentDate <= feedbackEndDate && 
+
+    shibir.showFeedback =
+      currentDate >= feedbackStartDate &&
+      currentDate <= feedbackEndDate &&
       shibir.status === STATUS_CONFIRMED;
   });
 

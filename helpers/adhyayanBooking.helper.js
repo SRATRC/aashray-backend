@@ -11,7 +11,8 @@ import {
   STATUS_WAITING,
   TYPE_ADHYAYAN,
   STATUS_CASH_COMPLETED,
-  ERR_FEEDBACK_ALREADY_SUBMITTED
+  ERR_FEEDBACK_ALREADY_SUBMITTED,
+  FEEDBACK_ELIGIBILITY_HOUR
 } from '../config/constants.js';
 import {
   AdhyayanFeedback,
@@ -280,18 +281,23 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
     throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
   }
 
-  const today = moment();
-  const endDate = moment(adhyayan.end_date);
-  
-  // Check if adhyayan has ended
-  if (endDate.isAfter(today)) {
+  const now = moment();
+  const feedbackStartDate = moment(adhyayan.end_date)
+    .hour(FEEDBACK_ELIGIBILITY_HOUR)
+    .minute(0)
+    .second(0);
+  // Check if feedback period has started
+  if (now.isBefore(feedbackStartDate)) {
     throw new ApiError(400, ERR_ADHYAYAN_NOT_COMPLETED);
   }
-  
+
   // Check if more than 15 days have passed since adhyayan ended
-  const daysSinceEnd = today.diff(endDate, 'days');
+  const daysSinceEnd = now.diff(feedbackStartDate, 'days');
   if (daysSinceEnd > 15) {
-    throw new ApiError(400, 'Feedback submission is only allowed within 15 days after the adhyayan ends');
+    throw new ApiError(
+      400,
+      'Feedback submission is only allowed within 15 days after the adhyayan ends'
+    );
   }
 
   // Check if user has a confirmed booking for this adhyayan
