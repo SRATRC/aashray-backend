@@ -1,4 +1,4 @@
-import { ShibirDb, ShibirBookingDb } from '../../models/associations.js';
+import { ShibirDb, ShibirBookingDb , CardDb} from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
@@ -133,12 +133,14 @@ export const CancelShibir = async (req, res) => {
     where: { id: booking.shibir_id }
   });
 
+  let newBooking = null;
   if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
-    await openAdhyayanSeat(adhyayan, req.user.username, t);
+    newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
   }
 
   await userCancelBooking(req.user, booking, t);
   await t.commit();
+
 
   sendMail({
     email: req.user.email,
@@ -150,6 +152,36 @@ export const CancelShibir = async (req, res) => {
     }
   });
 
+  if (newBooking) {
+    //sending email to user who got moved from waiting to pending and cc to the bookedBy user if any.
+    const card = await CardDb.findOne({
+      where: {
+        cardno: newBooking.cardno
+      }
+    });
+    let bookedByCard = null;
+    if(newBooking.bookedBy){
+       bookedByCard = await CardDb.findOne({
+        where: {
+          cardno: newBooking.bookedBy
+        }
+      });
+    }
+  sendMail({
+    email: card.email,
+    cc: bookedByCard ? bookedByCard.email : null,
+    subject: 'Raj Adhyayan Booking Updated',
+    template: 'rajAdhyayanUpdate',
+    context: {
+      name: card.issuedto,
+      bookingid: newBooking.bookingid,
+      status: newBooking.status,
+      adhyayanName: adhyayan.name,
+      adhyayanStartDate: adhyayan.start_date,
+      adhyayanEndDate: adhyayan.end_date
+      }
+    });
+  }
   // Call the refactored utility function
   if (req.user.pushToken) {
     await sendNotification([

@@ -16,6 +16,7 @@ import { validateCard, validateCards } from './card.helper.js';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
+import sendMail from '../utils/sendMail.js';
 
 export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   await validateCards(mumukshus);
@@ -201,7 +202,8 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
       t
     );
 
-    // TODO: send notification and email to user
+    return booking;
+    
   } else {
     await adhyayan.update(
       {
@@ -209,6 +211,8 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
       },
       { transaction: t }
     );
+
+    return null;
   }
 }
 
