@@ -36,6 +36,7 @@ export const STATUS_INACTIVE = 'inactive';
 export const STATUS_PENDING = 'pending';
 export const STATUS_APPROVED = 'approved';
 export const STATUS_AVAILABLE = 'available';
+export const STATUS_RESET = 'reset';
 export const STATUS_TAKEN = 'taken';
 export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
