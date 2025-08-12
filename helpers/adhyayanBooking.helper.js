@@ -1,15 +1,25 @@
 import {
   ERR_ADHYAYAN_ALREADY_BOOKED,
   ERR_ADHYAYAN_NO_SEATS_AVAILABLE,
+  ERR_ADHYAYAN_NOT_COMPLETED,
   ERR_ADHYAYAN_NOT_FOUND,
   ERR_BOOKING_NOT_FOUND,
+  ERR_FEEDBACK_NOT_ALLOWED,
   STATUS_CONFIRMED,
   STATUS_OPEN,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
-  TYPE_ADHYAYAN
+  TYPE_ADHYAYAN,
+  STATUS_CASH_COMPLETED,
+  ERR_FEEDBACK_ALREADY_SUBMITTED,
+  FEEDBACK_ELIGIBILITY_HOUR
 } from '../config/constants.js';
-import { ShibirBookingDb, ShibirDb, UtsavDb } from '../models/associations.js';
+import {
+  AdhyayanFeedback,
+  ShibirBookingDb,
+  ShibirDb,
+  UtsavDb
+} from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCard, validateCards } from './card.helper.js';
@@ -264,4 +274,90 @@ export async function getAdhyayanBookings(bookingIds) {
   });
 
   return adhyanBookings;
+}
+
+export async function validateFeedbackEligibility(cardno, shibir_id) {
+  const adhyayan = await ShibirDb.findOne({
+    where: { id: shibir_id }
+  });
+
+  if (!adhyayan) {
+    throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
+  }
+
+  const now = moment();
+  const feedbackStartDate = moment(adhyayan.end_date)
+    .hour(FEEDBACK_ELIGIBILITY_HOUR)
+    .minute(0)
+    .second(0);
+  // Check if feedback period has started
+  if (now.isBefore(feedbackStartDate)) {
+    throw new ApiError(400, ERR_ADHYAYAN_NOT_COMPLETED);
+  }
+
+  // Check if more than 15 days have passed since adhyayan ended
+  const daysSinceEnd = now.diff(feedbackStartDate, 'days');
+  if (daysSinceEnd > 15) {
+    throw new ApiError(
+      400,
+      'Feedback submission is only allowed within 15 days after the adhyayan ends'
+    );
+  }
+
+  // Check if user has a confirmed booking for this adhyayan
+  const booking = await ShibirBookingDb.findOne({
+    where: {
+      cardno,
+      shibir_id: shibir_id,
+      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED]
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(403, ERR_FEEDBACK_NOT_ALLOWED);
+  }
+
+  const existingFeedback = await AdhyayanFeedback.findOne({
+    where: {
+      cardno: cardno,
+      shibir_id: shibir_id
+    }
+  });
+
+  if (existingFeedback) {
+    throw new ApiError(400, ERR_FEEDBACK_ALREADY_SUBMITTED);
+  }
+
+  return { adhyayan, booking };
+}
+
+export async function getFeedbackStats(shibir_id) {
+  const stats = await AdhyayanFeedback.findAll({
+    where: { shibir_id },
+    attributes: [
+      [Sequelize.fn('COUNT', Sequelize.col('id')), 'total_responses'],
+      [
+        Sequelize.fn('AVG', Sequelize.col('swadhay_karta_rating')),
+        'avg_swadhay_karta_rating'
+      ],
+      [
+        Sequelize.fn('AVG', Sequelize.col('personal_interaction_rating')),
+        'avg_personal_interaction_rating'
+      ],
+      [Sequelize.fn('AVG', Sequelize.col('food_rating')), 'avg_food_rating'],
+      [Sequelize.fn('AVG', Sequelize.col('stay_rating')), 'avg_stay_rating'],
+      [
+        Sequelize.fn(
+          'SUM',
+          Sequelize.literal(
+            'CASE WHEN raj_adhyayan_interest = 1 THEN 1 ELSE 0 END'
+          )
+        ),
+        'interested_in_future'
+      ]
+    ],
+    raw: true
+  });
+
+  return stats[0];
 }

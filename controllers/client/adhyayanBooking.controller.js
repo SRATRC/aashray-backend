@@ -1,4 +1,8 @@
-import { ShibirDb, ShibirBookingDb } from '../../models/associations.js';
+import {
+  ShibirDb,
+  ShibirBookingDb,
+  AdhyayanFeedback
+} from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
@@ -8,17 +12,18 @@ import {
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
   ERR_BOOKING_ALREADY_CANCELLED,
-  STATUS_DELETED
+  STATUS_DELETED,
+  FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
+import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
 import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { sendNotification } from '../../utils/sendNotification.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
-import { sendNotification } from '../../helpers/sendNotification.helper.js';
-// import { sendNotification } from '../../utils/sendNotification.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -84,10 +89,10 @@ export const FetchBookedShibir = async (req, res) => {
     FROM shibir_booking_db t1
     JOIN shibir_db t2 ON t1.shibir_id = t2.id
     LEFT JOIN transactions t3 ON t1.bookingid = t3.bookingid
-    AND t3.category IN (:category)
+      AND t3.category IN (:category)
     LEFT JOIN card_db t4 ON t4.cardno = t1.cardno
-    WHERE t1.cardno = :cardno OR t1.bookedBy = :cardno
-    ORDER BY start_date DESC
+    WHERE (t1.cardno = :cardno OR t1.bookedBy = :cardno)
+    ORDER BY t2.start_date DESC
     LIMIT :limit
     OFFSET :offset;
     `,
@@ -101,6 +106,21 @@ export const FetchBookedShibir = async (req, res) => {
       type: Sequelize.QueryTypes.SELECT
     }
   );
+
+  const currentDate = new Date();
+  shibirs.forEach((shibir) => {
+    const endDate = new Date(shibir.end_date);
+    const feedbackStartDate = new Date(endDate);
+    feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
+
+    const feedbackEndDate = new Date(endDate);
+    feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
+
+    shibir.showFeedback =
+      currentDate >= feedbackStartDate &&
+      currentDate <= feedbackEndDate &&
+      shibir.status === STATUS_CONFIRMED;
+  });
 
   return res.status(200).send({ data: shibirs });
 };
@@ -177,7 +197,7 @@ export const FetchShibirInRange = async (req, res) => {
   if (!end_date) {
     const endDateObj = new Date(startDateObj);
     endDateObj.setDate(startDateObj.getDate() + 15); // Add 15 days
-    end_date = endDateObj.toISOString().split('T')[0]; // Format the new end_date as YYYY-MM-DD
+    end_date = endDateObj.toISOString().split('T')[0];
   }
 
   const whereCondition = {
@@ -214,4 +234,66 @@ export const FetchShibirById = async (req, res) => {
   if (!shibir) throw new ApiError(404, 'Shibir not found');
 
   return res.status(200).send({ data: shibir });
+};
+
+export const submitFeedback = async (req, res) => {
+  const {
+    shibir_id,
+    swadhay_karta_rating,
+    personal_interaction_rating,
+    swadhay_karta_suggestions,
+    raj_adhyayan_interest,
+    future_topics,
+    loved_most,
+    improvement_suggestions,
+    food_rating,
+    stay_rating
+  } = req.body;
+
+  if (!shibir_id) {
+    throw new ApiError(400, 'Adhyayan ID is required');
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  await validateFeedbackEligibility(req.user.cardno, shibir_id);
+
+  await AdhyayanFeedback.create(
+    {
+      cardno: req.user.cardno,
+      shibir_id,
+      swadhay_karta_rating,
+      personal_interaction_rating,
+      swadhay_karta_suggestions,
+      raj_adhyayan_interest,
+      future_topics,
+      loved_most,
+      improvement_suggestions,
+      food_rating,
+      stay_rating,
+      updatedBy: req.user.cardno
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+
+  return res.status(201).send({
+    message: 'Feedback submitted successfully'
+  });
+};
+
+export const feedbackValidation = async (req, res) => {
+  const { shibir_id } = req.query;
+
+  if (!shibir_id) {
+    throw new ApiError(400, 'Adhyayan ID is required');
+  }
+
+  await validateFeedbackEligibility(req.user.cardno, shibir_id);
+
+  return res.status(200).send({
+    message: 'Feedback is allowed'
+  });
 };
