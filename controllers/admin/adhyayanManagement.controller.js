@@ -551,6 +551,61 @@ export const softDeleteShibir = async (req, res) => {
   res.status(200).json({ message: 'Shibir marked as deleted' });
 };
 
+// export const getAdhyayanFeedback = async (req, res) => {
+//   const { shibir_id } = req.params;
+//   const page = parseInt(req.query.page) || 1;
+//   const pageSize = parseInt(req.query.page_size) || 20;
+//   const offset = (page - 1) * pageSize;
+
+//   if (!shibir_id) {
+//     throw new ApiError(400, 'Adhyayan ID is required');
+//   }
+
+//   const feedback = await AdhyayanFeedback.findAll({
+//     where: { shibir_id: parseInt(shibir_id) },
+//     include: [
+//       {
+//         model: CardDb,
+//         attributes: ['cardno', 'issuedto', 'center', 'res_status']
+//       },
+//       {
+//         model: ShibirDb,
+//         attributes: [
+//           'id',
+//           'name',
+//           'speaker',
+//           'start_date',
+//           'end_date',
+//           'location'
+//         ]
+//       }
+//     ],
+//     order: [['submitted_at', 'DESC']],
+//     offset,
+//     limit: pageSize
+//   });
+
+//   const totalCount = await AdhyayanFeedback.count({
+//     where: { shibir_id: parseInt(shibir_id) }
+//   });
+
+//   const stats = await getFeedbackStats(parseInt(shibir_id));
+
+//   return res.status(200).send({
+//     message: MSG_FETCH_SUCCESSFUL,
+//     data: {
+//       feedback,
+//       stats,
+//       pagination: {
+//         page,
+//         pageSize,
+//         totalCount,
+//         totalPages: Math.ceil(totalCount / pageSize)
+//       }
+//     }
+//   });
+// };
+
 export const getAdhyayanFeedback = async (req, res) => {
   const { shibir_id } = req.params;
   const page = parseInt(req.query.page) || 1;
@@ -563,21 +618,28 @@ export const getAdhyayanFeedback = async (req, res) => {
 
   const feedback = await AdhyayanFeedback.findAll({
     where: { shibir_id: parseInt(shibir_id) },
+    attributes: [
+      'shibir_id',
+      'cardno',
+      'swadhay_karta_rating',
+      'personal_interaction_rating',
+      'swadhay_karta_suggestions',
+      'raj_adhyayan_interest',
+      'future_topics',
+      'loved_most',
+      'improvement_suggestions',
+      'food_rating',
+      'stay_rating',
+      'submitted_at'
+    ],
     include: [
       {
         model: CardDb,
-        attributes: ['cardno', 'issuedto', 'center', 'res_status']
+        attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'res_status', 'center'] // added res_status and center
       },
       {
         model: ShibirDb,
-        attributes: [
-          'id',
-          'name',
-          'speaker',
-          'start_date',
-          'end_date',
-          'location'
-        ]
+        attributes: ['id', 'name'] // just the name
       }
     ],
     order: [['submitted_at', 'DESC']],
