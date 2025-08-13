@@ -16,7 +16,8 @@ import {
   fetchAllUtsavList,
   utsavCheckin,
   utsavCheckinReport,
-  fetchUtsavBookingsVolunteer
+  fetchUtsavBookingsVolunteer,
+  uploadRoomNoExcel
 } from '../../controllers/admin/utsavManagement.controller.js';
 
 import {
@@ -26,6 +27,9 @@ import {
   ROLE_ACCOUNTS_ADMIN,
   ROLE_UTSAV_READ_ONLY
 } from '../../config/constants.js';
+import multer from 'multer';
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 // ✅ Public router (NO auth required)
 const utsavPublicRouter = express.Router();
@@ -59,6 +63,7 @@ utsavAdminRouter.put('/:id/:activate', CatchAsync(activateUtsav));
 utsavAdminRouter.put('/status', CatchAsync(utsavStatusUpdate));
 utsavAdminRouter.get('/fetchList', CatchAsync(fetchAllUtsavList));
 utsavAdminRouter.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
+utsavAdminRouter.post('/uploadRoomNo', upload.single('file'), CatchAsync(uploadRoomNoExcel));
 
 // ✅ Export both routers
 export { utsavPublicRouter, utsavAdminRouter };

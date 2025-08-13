@@ -36,6 +36,8 @@ import Transactions from '../../models/transactions.model.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
+import XLSX from 'xlsx';
+
 
 export const createUtsav = async (req, res) => {
   const {
@@ -199,7 +201,7 @@ export const fetchUtsavBookings = async (req, res) => {
 
   const utsavData = await database.query(
     `SELECT 
-      t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
+      t1.bookingid, t1.utsavid, t1.cardno, t1.bookedby, t1.status, t1.packageid, t1.roomno, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
       t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t2.dob,
       TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
       t3.location, t3.name AS utsav_name,
@@ -795,4 +797,73 @@ export const utsavCheckinReport = async (req, res) => {
     message: 'Filtered Utsav Bookings',
     data: utsavData
   });
+};
+
+
+
+export const uploadRoomNoExcel = async (req, res) => {
+  const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+  const sheet = XLSX.utils.sheet_to_json(
+    workbook.Sheets[workbook.SheetNames[0]],
+    { defval: '' }
+  );
+
+  const formattedRows = [];
+
+  for (const row of sheet) {
+    if (!row.bookingid || !row.roomno) {
+      console.warn(`Skipping row: missing bookingid or roomno`, row);
+      continue;
+    }
+
+    formattedRows.push({
+      bookingid: String(row.bookingid).trim(),
+      roomno: String(row.roomno).trim()
+    });
+  }
+
+  if (formattedRows.length === 0) {
+    return res.status(400).json({ error: 'No valid rows found in the file.' });
+  }
+
+  let updatedCount = 0; // ✅ track actual updates
+
+  const transaction = await database.transaction();
+  try {
+    for (const { bookingid, roomno } of formattedRows) {
+      // ✅ Fetch current value
+      const [existing] = await database.query(
+        `SELECT roomno FROM utsav_booking WHERE bookingid = :bookingid`,
+        {
+          replacements: { bookingid },
+          type: QueryTypes.SELECT,
+          transaction
+        }
+      );
+
+      if (!existing) continue;
+
+      // ✅ Update only if different
+      if (existing.roomno !== roomno) {
+        await database.query(
+          `UPDATE utsav_booking SET roomno = :roomno WHERE bookingid = :bookingid`,
+          {
+            replacements: { roomno, bookingid },
+            type: QueryTypes.UPDATE,
+            transaction
+          }
+        );
+        updatedCount++;
+      }
+    }
+
+    await transaction.commit();
+    res.status(200).json({
+      message: `${updatedCount} record(s) updated successfully.`
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error(error);
+    res.status(500).json({ error: 'Error updating room numbers.' });
+  }
 };
