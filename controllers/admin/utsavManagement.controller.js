@@ -799,55 +799,6 @@ export const utsavCheckinReport = async (req, res) => {
   });
 };
 
-// export const uploadRoomNoExcel = async (req, res) => {
-//   if (!req.file) {
-//     return res.status(400).json({ error: 'No file uploaded.' });
-//   }
-
-//   const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-//   const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
-
-//   const formattedRows = sheet
-//     .filter(row => row.bookingid && row.roomno)
-//     .map(row => ({
-//       bookingid: String(row.bookingid).trim(),
-//       roomno: String(row.roomno).trim()
-//     }));
-
-//   if (formattedRows.length === 0) {
-//     return res.status(400).json({ error: 'No valid rows found in the file.' });
-//   }
-
-//   const transaction = await database.transaction();
-//   try {
-//     // Build CASE statement dynamically
-//     const caseStatements = [];
-//     const bookingIds = [];
-
-//     for (const { bookingid, roomno } of formattedRows) {
-//       caseStatements.push(`WHEN '${bookingid}' THEN '${roomno}'`);
-//       bookingIds.push(`'${bookingid}'`);
-//     }
-
-//     const query = `
-//       UPDATE utsav_booking
-//       SET roomno = CASE bookingid
-//         ${caseStatements.join('\n')}
-//       END
-//       WHERE bookingid IN (${bookingIds.join(', ')});
-//     `;
-
-//     const [result] = await database.query(query, { transaction });
-//     await transaction.commit();
-
-//     res.status(200).json({ message: `${formattedRows.length} record(s) processed successfully.` });
-//   } catch (error) {
-//     await transaction.rollback();
-//     console.error(error);
-//     res.status(500).json({ error: 'Error updating room numbers.' });
-//   }
-// };
-
 export const uploadRoomNoExcel = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded.' });
