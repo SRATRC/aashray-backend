@@ -6,6 +6,7 @@ import CatchAsync from '../../utils/CatchAsync.js';
 import { fetchMaintenanceReport } from '../../controllers/admin/maintenanceManagement.controller.js';
 // import { getMaintenanceById } from '../../controllers/admin/maintenanceManagement.controller.js';
 import { updateMaintenanceRequest } from '../../controllers/admin/maintenanceManagement.controller.js';
+import { fetchAllSupportTickets } from '../../controllers/admin/maintenanceManagement.controller.js';
 
 router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_MAINTENANCE_ADMIN, ROLE_HOUSEKEEPING_ADMIN, ROLE_ELECTRICAL_ADMIN));
@@ -15,5 +16,6 @@ router.get('/fetch/:department', CatchAsync(fetchMaintenanceReport));
 // router.post('/request/:id', CatchAsync(updateMaintenanceStatus));
 // router.put('/update/:bookingid', CatchAsync(updateMaintenanceStatus));
 router.put('/update', CatchAsync(updateMaintenanceRequest));
+router.get('/fetchSupport', CatchAsync(fetchAllSupportTickets));
 
 export default router;

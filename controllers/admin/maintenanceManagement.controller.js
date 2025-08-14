@@ -99,3 +99,41 @@ export const updateMaintenanceRequest = async (req, res) => {
     data: maintenance
   });
 }
+
+
+export const fetchAllSupportTickets = async (req, res) => {
+  try {
+    const tickets = await database.query(
+      `SELECT 
+        st.id,
+        st.issued_by,
+        st.service,
+        st.issue,
+        st.createdAt,
+        cb.issuedto,
+        cb.mobno,
+        cb.gender,
+        cb.dob,
+        cb.center,
+        cb.res_status
+      FROM 
+        support_tickets st
+      LEFT JOIN 
+        card_db cb ON st.issued_by = cb.cardno
+      ORDER BY 
+        st.createdAt DESC;`,
+      {
+        type: QueryTypes.SELECT
+      }
+    );
+
+    return res
+      .status(200)
+      .send({ message: 'Fetched Support Tickets', data: tickets });
+  } catch (error) {
+    console.error('Error fetching support tickets:', error);
+    return res
+      .status(500)
+      .send({ message: 'Failed to fetch support tickets', error });
+  }
+};
