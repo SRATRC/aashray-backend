@@ -1,6 +1,7 @@
 import {
+  CardDb,
   RoomBooking,
-  Transactions,
+  Transactions
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_CHECKEDIN,
@@ -11,20 +12,12 @@ import {
   TYPE_ROOM,
   MSG_CANCEL_SUCCESSFUL
 } from '../../config/constants.js';
-import {
-  checkFlatAlreadyBooked,
-  calculateNights,
-  validateDate,
-  getBlockedDates,
-  sendUnifiedEmail
-} from '../helper.js';
-
-import Sequelize, { where } from 'sequelize';
+import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
+import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
+import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import {
-  adminCancelTransaction
-} from '../../helpers/transactions.helper.js';
+import moment from 'moment';
 
 export const cancelBooking = async (req, res) => {
   const { type, bookingid } = req.params;
@@ -33,9 +26,15 @@ export const cancelBooking = async (req, res) => {
   req.transaction = t;
 
   var booking = null;
-  switch(type) {
+  switch (type) {
     case TYPE_ROOM:
       booking = await RoomBooking.findOne({
+        include: [
+          {
+            model: CardDb,
+            attributes: ['issuedto']
+          }
+        ],
         where: {
           bookingid,
           status: {
@@ -53,7 +52,7 @@ export const cancelBooking = async (req, res) => {
     default:
       throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
-  
+
   if (!booking) {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
@@ -76,6 +75,28 @@ export const cancelBooking = async (req, res) => {
   );
 
   await t.commit();
+
+  sendDualUserNotifications({
+    primary: {
+      cardno: booking.cardno,
+      title: 'Raj Sharan Booking Cancelled by Admin',
+      body: `Your stay from ${moment(booking.checkin).format(
+        'Do MMM, YYYY'
+      )} to ${moment(booking.checkout).format(
+        'Do MMM, YYYY'
+      )} has been cancelled by admin.`
+    },
+    bookedBy: booking.bookedBy && {
+      cardno: booking.bookedBy,
+      title: 'Raj Sharan Booking Cancelled by Admin',
+      body: `Stay for ${booking.CardDb.issuedto.split(' ')[0]} from ${moment(
+        booking.checkin
+      ).format('Do MMM, YYYY')} to ${moment(booking.checkout).format(
+        'Do MMM, YYYY'
+      )} has been cancelled by admin.`
+    },
+    screen: '/bookings'
+  });
 
   return res
     .status(200)

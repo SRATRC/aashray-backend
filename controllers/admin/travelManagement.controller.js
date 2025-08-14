@@ -1,9 +1,4 @@
 import { TravelDb, CardDb, Transactions } from '../../models/associations.js';
-import database from '../../config/database.js';
-import Sequelize from 'sequelize';
-import sendMail from '../../utils/sendMail.js';
-import ApiError from '../../utils/ApiError.js';
-import moment from 'moment';
 import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
@@ -20,16 +15,27 @@ import {
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_SEATSFULL_CANCELLED,
   STATUS_WRONGFORM_CANCELLED,
-  RAJ_PRAVAS_EMAIL,
   STATUS_PAYMENT_PENDING
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
+import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
-function getAdditionalConditions(whereClauses, pickupRC, dropRC, replacementMap) {
+import Sequelize, { QueryTypes } from 'sequelize';
+import database from '../../config/database.js';
+import sendMail from '../../utils/sendMail.js';
+import ApiError from '../../utils/ApiError.js';
+import moment from 'moment';
+
+function getAdditionalConditions(
+  whereClauses,
+  pickupRC,
+  dropRC,
+  replacementMap
+) {
   let additionalWhereClause = '';
 
   console.log('🔍 getAdditionalConditions called with:', {
@@ -62,15 +68,20 @@ export const fetchSummary = async (req, res) => {
   console.log('🚀 fetchSummary triggered');
 
   try {
-    const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
+    const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
+      req.query;
 
     const normalizedStatuses = Array.isArray(statuses)
       ? statuses
-      : statuses ? [statuses] : [];
+      : statuses
+      ? [statuses]
+      : [];
 
     const adminCommentFilters = Array.isArray(adminComments)
       ? adminComments
-      : adminComments ? [adminComments] : [];
+      : adminComments
+      ? [adminComments]
+      : [];
 
     const replacements = {
       startDate: start_date,
@@ -87,7 +98,9 @@ export const fetchSummary = async (req, res) => {
 
     adminCommentFilters.forEach((c, i) => {
       replacements[`adminComment${i}`] = c;
-      conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
+      conditions.push(
+        `(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`
+      );
     });
 
     // Build WHERE clause
@@ -179,7 +192,6 @@ export const fetchSummary = async (req, res) => {
 
     console.log('📊 fetchSummary data:', data);
     return res.status(200).send({ message: 'Fetched data', data });
-
   } catch (error) {
     console.error('❌ fetchSummary error:', error);
     return res.status(500).send({
@@ -190,16 +202,20 @@ export const fetchSummary = async (req, res) => {
   }
 };
 
-
 export const fetchUpcomingBookings = async (req, res) => {
-  const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } = req.query;
+  const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
+    req.query;
 
   const normalizedStatuses = statuses
-    ? Array.isArray(statuses) ? statuses : [statuses]
+    ? Array.isArray(statuses)
+      ? statuses
+      : [statuses]
     : [];
 
   const adminCommentFilters = adminComments
-    ? Array.isArray(adminComments) ? adminComments : [adminComments]
+    ? Array.isArray(adminComments)
+      ? adminComments
+      : [adminComments]
     : [];
 
   const replacementMap = {
@@ -220,10 +236,17 @@ export const fetchUpcomingBookings = async (req, res) => {
 
   adminCommentFilters.forEach((c, i) => {
     replacementMap[`adminComment${i}`] = c;
-    conditions.push(`(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`);
+    conditions.push(
+      `(t1.status = 'admin cancelled' AND t1.admin_comments = :adminComment${i})`
+    );
   });
 
-  const additionalWhereClause = getAdditionalConditions(conditions, pickupRC, dropRC, replacementMap);
+  const additionalWhereClause = getAdditionalConditions(
+    conditions,
+    pickupRC,
+    dropRC,
+    replacementMap
+  );
 
   // Replace pickup and drop point if user selected "other"
   const pickupSelect = `
@@ -233,7 +256,7 @@ export const fetchUpcomingBookings = async (req, res) => {
     ELSE t1.pickup_point
   END AS pickup_point`;
 
-const dropSelect = `
+  const dropSelect = `
   CASE
     WHEN t1.drop_point IN ('Other', 'Other (enter location in comments)')
       THEN t1.comments
@@ -261,13 +284,13 @@ const dropSelect = `
   return res.status(200).send({ message: 'Fetched data', data });
 };
 
-import { QueryTypes } from 'sequelize'; // Make sure you import this if you're using Sequelize
-
 export const fetchBookingForDriver = async (req, res) => {
   try {
     // --- Get current IST time ---
     const now = new Date();
-    const istNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const istNow = new Date(
+      now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })
+    );
 
     // --- Decide date to fetch based on 8PM IST cutoff ---
     const fetchDate =
@@ -372,26 +395,31 @@ export const fetchBookingForDriver = async (req, res) => {
       `,
       {
         type: QueryTypes.SELECT,
-        replacements: { fetchDate },
+        replacements: { fetchDate }
       }
     );
 
     return res.status(200).send({ message: 'Fetched data', data });
   } catch (error) {
-    console.error("Error fetching data for driver:", error);
+    console.error('Error fetching data for driver:', error);
     return res.status(500).send({ message: 'Something went wrong', error });
   }
 };
 
-
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments,  description, charges } = req.body;
+  const { bookingid, status, adminComments, description, charges } = req.body;
   let newBookingStatus = status;
 
   const t = await database.transaction();
   req.transaction = t;
 
   const booking = await TravelDb.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto']
+      }
+    ],
     where: {
       bookingid
       // status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED, STATUS_PAYMENT_PENDING, STATUS_PROCEED_FOR_PAYMENT]
@@ -413,14 +441,16 @@ export const updateBookingStatus = async (req, res) => {
   switch (status) {
     case STATUS_PROCEED_FOR_PAYMENT:
       if (!transaction) {
-        transaction = (await createPendingTransaction(
-          bookedByCard,
-          booking,
-          TYPE_TRAVEL,
-          charges,
-          req.user.username,
-          t
-        )).transaction;
+        transaction = (
+          await createPendingTransaction(
+            bookedByCard,
+            booking,
+            TYPE_TRAVEL,
+            charges,
+            req.user.username,
+            t
+          )
+        ).transaction;
       }
 
       if (transaction.status === STATUS_PAYMENT_COMPLETED) {
@@ -435,14 +465,14 @@ export const updateBookingStatus = async (req, res) => {
       }
       break;
 
-      case STATUS_SEATSFULL_CANCELLED:
+    case STATUS_SEATSFULL_CANCELLED:
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);
         updateWaitingTravelBooking(booking.date);
       }
       break;
 
-      case STATUS_WRONGFORM_CANCELLED:
+    case STATUS_WRONGFORM_CANCELLED:
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);
         updateWaitingTravelBooking(booking.date);
@@ -450,27 +480,32 @@ export const updateBookingStatus = async (req, res) => {
       break;
 
     case STATUS_CONFIRMED:
-  if (transaction && ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-    let newTransactionStatus;
+      if (
+        transaction &&
+        ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
+          transaction.status
+        )
+      ) {
+        let newTransactionStatus;
 
-    if (transaction.status === STATUS_CASH_PENDING) {
-      newTransactionStatus = STATUS_PAYMENT_COMPLETED;
-    } else if (transaction.status === STATUS_PAYMENT_PENDING) {
-      newTransactionStatus = STATUS_PAYMENT_COMPLETED;
-    }
+        if (transaction.status === STATUS_CASH_PENDING) {
+          newTransactionStatus = STATUS_PAYMENT_COMPLETED;
+        } else if (transaction.status === STATUS_PAYMENT_PENDING) {
+          newTransactionStatus = STATUS_PAYMENT_COMPLETED;
+        }
 
-    if (newTransactionStatus) {
-      await transaction.update(
-        {
-          status: newTransactionStatus,
-          description,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
-    }
-  }
-  break;
+        if (newTransactionStatus) {
+          await transaction.update(
+            {
+              status: newTransactionStatus,
+              description,
+              updatedBy: req.user.username
+            },
+            { transaction: t }
+          );
+        }
+      }
+      break;
 
     case STATUS_WAITING:
     default:
@@ -488,14 +523,14 @@ export const updateBookingStatus = async (req, res) => {
 
   const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
   if (newBookingStatus === STATUS_ADMIN_CANCELLED) {
-  if (booking.admin_comments === 'admin_cancel_seats_full') {
-    newBookingStatus = 'Cancelled because all seats were booked';
-  } else if (booking.admin_comments === 'admin_cancel_wrong_form') {
-    newBookingStatus = 'Cancelled because of wrong form filled';
-  } else {
-    newBookingStatus = 'Cancelled by admin';
+    if (booking.admin_comments === 'admin_cancel_seats_full') {
+      newBookingStatus = 'Cancelled because all seats were booked';
+    } else if (booking.admin_comments === 'admin_cancel_wrong_form') {
+      newBookingStatus = 'Cancelled because of wrong form filled';
+    } else {
+      newBookingStatus = 'Cancelled by admin';
+    }
   }
-}
   sendMail({
     email: card.email,
     subject: 'Raj Pravas - Travel Booking Updated',
@@ -510,12 +545,28 @@ export const updateBookingStatus = async (req, res) => {
     }
   });
 
+  sendDualUserNotifications({
+    primary: {
+      cardno: booking.cardno,
+      title: 'Raj Pravas Booking status update',
+      body: `Your travel booking status has been changed to "${newBookingStatus}"`
+    },
+    bookedBy: booking.bookedBy && {
+      cardno: booking.bookedBy,
+      title: 'Raj Pravas Booking Cancelled',
+      body: `Travel booking for ${
+        booking.CardDb.issuedto.split(' ')[0]
+      } has been updated to "${newBookingStatus}"`
+    },
+    screen: '/bookings'
+  });
+
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateTransactionStatus = async (req, res) => {
-  const { cardno, bookingid, type, payment_status, amount } = req.body;
+  const { cardno, bookingid, type } = req.body;
 
   const booking = await TravelDb.findOne({
     where: {
@@ -536,6 +587,8 @@ export const updateTransactionStatus = async (req, res) => {
   if (!transaction) throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
 
   await adminCancelTransaction(req.user, null, transaction, t);
+
+  //TODO: send notification
 
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });

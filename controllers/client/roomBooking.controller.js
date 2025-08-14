@@ -6,28 +6,22 @@ import {
   MSG_BOOKING_SUCCESSFUL,
   TYPE_GUEST_ROOM,
   TYPE_FLAT,
-  ERR_FLAT_ALREADY_BOOKED,
   STATUS_PAYMENT_PENDING,
   BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
+import { sendUnifiedEmail, sendUnifiedEmailForBookedBy } from '../helper.js';
+import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { RoomBooking, FlatBooking } from '../../models/associations.js';
+import { bookFlatForMumukshus } from '../../helpers/roomBooking.helper.js';
 import {
-  validateDate,
-  calculateNights,
-  checkFlatAlreadyBooked,
-  sendUnifiedEmail,
-  sendUnifiedEmailForBookedBy
-} from '../helper.js';
-import {
-  updateRazorpayTransactions,
-  userCancelBooking
-} from '../../helpers/transactions.helper.js';
-import { RoomBooking, FlatDb, FlatBooking } from '../../models/associations.js';
-import { bookFlatForMumukshus, createFlatBooking } from '../../helpers/roomBooking.helper.js';
-import { generateOrderId } from '../../helpers/transactions.helper.js';
+  getOtherBookingUser,
+  notifyCardno
+} from '../../helpers/notification.helper.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
+import moment from 'moment';
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -140,6 +134,26 @@ export const CancelBooking = async (req, res) => {
       checkout: booking.checkout
     }
   });
+
+  if (booking.bookedBy) {
+    const other = getOtherBookingUser(booking, req.user.cardno);
+    if (other) {
+      const title = 'Raj Sharan Booking Cancelled';
+      const body =
+        req.user.cardno === booking.cardno
+          ? `Room booking for ${req.user.issuedto} from ${moment(
+              booking.checkin
+            ).format('Do MMM, YYYY')} to ${moment(booking.checkout).format(
+              'Do MMM, YYYY'
+            )} has been cancelled.`
+          : `Your room booking from ${moment(booking.checkin).format(
+              'Do MMM, YYYY'
+            )} to ${moment(booking.checkout).format(
+              'Do MMM, YYYY'
+            )} has been cancelled.`;
+      notifyCardno(other, { title, body, screen: '/bookings' });
+    }
+  }
 
   res.status(200).send({ message: 'Room booking cancelled' });
 };

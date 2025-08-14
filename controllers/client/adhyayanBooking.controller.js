@@ -18,13 +18,15 @@ import {
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
 import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import notificationService from '../../services/notification.service.js';
+import {
+  getOtherBookingUser,
+  notifyCardno
+} from '../../helpers/notification.helper.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
-import logger from '../../config/logger.js';
 
 export const FetchAllShibir = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -171,17 +173,16 @@ export const CancelShibir = async (req, res) => {
     }
   });
 
-  // Send push notification using the notification service
-  if (req.user.token) {
-    await notificationService.sendSingleNotification(req.user.token, {
-      title: 'Booking Cancelled',
-      body: `Your booking for "${adhyayan.name}" has been cancelled.`,
-      screen: 'CancelledBookings',
-      data: {
-        shibir_id: adhyayan.id,
-        status: 'cancelled'
-      }
-    });
+  if (booking.bookedBy) {
+    const other = getOtherBookingUser(booking, req.user.cardno);
+    if (other) {
+      const title = 'Adhyayan Booking Cancelled';
+      const body =
+        req.user.cardno === booking.cardno
+          ? `booking of "${adhyayan.name}" has been cancelled for ${req.user.issuedto}.`
+          : `Your booking of "${adhyayan.name}" has been cancelled.`;
+      notifyCardno(other, { title, body, screen: '/bookings' });
+    }
   }
 
   return res.status(200).send({ message: 'Shibir booking cancelled' });

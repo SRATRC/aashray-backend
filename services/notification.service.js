@@ -11,6 +11,13 @@ import logger from '../config/logger.js';
 class NotificationService {
   constructor() {
     this.expo = new Expo();
+    this.config = {
+      defaultSound: 'default',
+      defaultTitle: 'Notification',
+      defaultBody: 'This is a notification',
+      receiptCheckDelay: 15000,
+      maxRetries: 3
+    };
   }
 
   /**
@@ -77,7 +84,7 @@ class NotificationService {
         token,
         title: options.title,
         body: options.body,
-        sound: options.sound,
+        sound: options.sound || this.config.defaultSound,
         screen: options.screen,
         data: options.data
       }
@@ -129,13 +136,16 @@ class NotificationService {
 
       messages.push({
         to: singleData.token,
-        sound: singleData.sound || 'default',
-        title: singleData.title || 'Notification',
-        body: singleData.body || 'This is a notification',
-        data: {
-          screen: singleData.screen || '/',
-          ...singleData.data
-        }
+        sound: singleData.sound || this.config.defaultSound,
+        title: singleData.title || this.config.defaultTitle,
+        body: singleData.body || this.config.defaultBody,
+        data: { screen: singleData.screen || '/', ...singleData.data },
+        priority: singleData.priority || 'default', // 'default' | 'normal' | 'high'
+        badge: singleData.badge, // iOS badge number
+        channelId: singleData.channelId, // Android channel
+        categoryId: singleData.categoryId, // iOS category for actions
+        mutableContent: singleData.mutableContent, // iOS mutable content
+        ttl: singleData.ttl // Time to live in seconds
       });
     }
 
