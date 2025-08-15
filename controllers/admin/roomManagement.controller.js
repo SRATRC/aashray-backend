@@ -759,7 +759,7 @@ export const updateFlatBooking = async (req, res) => {
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
-  const booking = await FlatBooking.findByPk({
+  const booking = await FlatBooking.findOne({
     include: [
       {
         model: CardDb,
