@@ -823,12 +823,17 @@ export const uploadRoomNoExcel = async (req, res) => {
     const utsavid = [...utsavidSet][0];
 
     // Fetch existing bookings for this utsavid (no transaction yet)
-    const existingBookings = await database.query(
-      `SELECT bookingid, cardno, packageid, utsavid
-       FROM utsav_booking
-       WHERE utsavid = :utsavid`,
-      { replacements: { utsavid }, type: database.QueryTypes.SELECT }
-    );
+    // Fetch existing bookings for this utsavid but ONLY confirmed ones
+const existingBookings = await database.query(
+  `SELECT bookingid, cardno, packageid, utsavid, status
+   FROM utsav_booking
+   WHERE utsavid = :utsavid
+   AND status IN ('confirmed', 'checkedin')`,   
+  { 
+    replacements: { utsavid }, 
+    type: database.QueryTypes.SELECT 
+  }
+);
 
     const bookingMap = new Map();
     existingBookings.forEach(b => {
@@ -874,12 +879,15 @@ export const uploadRoomNoExcel = async (req, res) => {
     try {
       const caseStatements = validRows.map(r => `WHEN '${r.bookingid}' THEN '${r.roomno}'`);
       const bookingIds = validRows.map(r => `'${r.bookingid}'`);
-
+    // define updatedBy and updatedAt
+    const updatedBy = req.user?.username || "system"; // adjust based on your auth
+    
       const query = `
         UPDATE utsav_booking
         SET roomno = CASE bookingid
           ${caseStatements.join('\n')}
-        END
+        END,
+        updatedBy = '${updatedBy}'
         WHERE bookingid IN (${bookingIds.join(', ')});
       `;
 
@@ -898,5 +906,41 @@ export const uploadRoomNoExcel = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error processing file.' });
+  }
+};
+
+
+
+// Update room number for a booking
+export const updateRoomNo = async (req, res) => {
+  try {
+    const { bookingid, roomno } = req.body;
+
+    // assuming you’re attaching logged-in user info in req.user
+    const updatedBy = req.user?.username || req.user?.id || "system";  
+
+    if (!bookingid || !roomno) {
+      return res.status(400).json({ error: "bookingid and roomno are required" });
+    }
+
+    // Check if booking exists
+    const booking = await UtsavBooking.findOne({ where: { bookingid } });
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // Update fields
+    booking.roomno = roomno;
+    booking.updatedBy = updatedBy;
+    await booking.save();
+
+    return res.status(200).json({ 
+      message: "Room number updated successfully", 
+      booking 
+    });
+  } catch (error) {
+    console.error("Error updating room number:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
