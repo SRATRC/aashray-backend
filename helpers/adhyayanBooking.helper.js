@@ -24,7 +24,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCard, validateCards } from './card.helper.js';
 import ApiError from '../utils/ApiError.js';
-import moment from 'moment';
+import moment from "moment-timezone";
 import Sequelize from 'sequelize';
 
 export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
