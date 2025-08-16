@@ -16,7 +16,7 @@ export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
-export const FEEDBACK_ELIGIBILITY_HOUR = 19;
+export const FEEDBACK_ELIGIBILITY_HOUR = 18;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
