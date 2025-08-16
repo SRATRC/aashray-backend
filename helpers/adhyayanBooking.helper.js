@@ -18,7 +18,8 @@ import {
   AdhyayanFeedback,
   ShibirBookingDb,
   ShibirDb,
-  UtsavDb
+  UtsavDb,
+  CardDb
 } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
@@ -26,6 +27,7 @@ import { validateCard, validateCards } from './card.helper.js';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
+import { sendDualUserNotifications } from './notification.helper.js';
 
 export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   await validateCards(mumukshus);
@@ -188,6 +190,12 @@ export async function reserveAdhyayanSeat(adhyayan, t) {
 
 export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
   const booking = await ShibirBookingDb.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['token', 'issuedto']
+      }
+    ],
     where: {
       shibir_id: adhyayan.id,
       status: STATUS_WAITING
@@ -206,7 +214,7 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
     // for a booking in waiting status, there should be no existing transaction
     const bookedBy = booking.bookedBy || booking.cardno;
     const card = await validateCard(bookedBy);
-    const transaction = await createPendingTransaction(
+    await createPendingTransaction(
       card,
       booking,
       TYPE_ADHYAYAN,
@@ -215,7 +223,21 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
       t
     );
 
-    // TODO: send notification and email to user
+    sendDualUserNotifications({
+      primary: {
+        cardno: booking.CardDb.token,
+        title: 'Adhyayan Booking Confirmed',
+        body: 'Your adhyayan booking has been confirmed from waitlist and you are requested to make payment within 24 hours to secure your spot.'
+      },
+      bookedBy: booking.bookedBy && {
+        token: card.token,
+        title: 'Adhyayan Booking Confirmed',
+        body: `adhyayan booking for ${
+          booking.CardDb.issuedto.split(' ')[0]
+        } has been confirmed from waitlist and you are requested to make payment within 24 hours to secure your spot.`
+      },
+      screen: '/bookings'
+    });
   } else {
     await adhyayan.update(
       {

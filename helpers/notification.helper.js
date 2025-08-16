@@ -212,6 +212,16 @@ export async function notifyCardno(cardno, notificationData = {}) {
   }
 }
 
+/**
+ * Bulk notify all users with bookings for a given adhyayan (shibir) that it was cancelled by admin.
+ * - Finds all ShibirBookingDb rows for the shibir_id with active-like statuses
+ * - Collects unique cardnos for both primary and bookedBy users
+ * - Looks up tokens and sends a uniform message with rate limiting
+ *
+ * @param {number} shibirId
+ * @returns {Promise<{success: boolean, sentCount?: number, totalRecipients?: number}>}
+ */
+
 export default {
   sendDualUserNotifications
 };

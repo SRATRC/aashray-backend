@@ -16,7 +16,9 @@ class NotificationService {
       defaultTitle: 'Notification',
       defaultBody: 'This is a notification',
       receiptCheckDelay: 15000,
-      maxRetries: 3
+      maxRetries: 3,
+      ratePerSecond: 600,
+      chunkSize: 100
     };
   }
 
@@ -94,22 +96,111 @@ class NotificationService {
   }
 
   /**
-   * Send the same notification to multiple recipients
-   * @param {Array} tokens - Array of push tokens
-   * @param {Object} notification - Notification content (title, body, sound, screen, data)
-   * @returns {Promise<Object>} - Returns success status and tickets/error info
+   * Send notifications (bulk or pre-built) with rate limiting by default
+   * Backward compatible: accepts either (tokens, notification, options?) or (tokenData, options?)
+   * @param {Array} arg1 - Array of tokens OR array of pre-built tokenData objects
+   * @param {Object} [arg2] - Notification content if arg1 is tokens OR options if arg1 is tokenData
+   * @param {Object} [arg3] - Options when arg1 is tokens
+   * @returns {Promise<Object>} - Result object with success, tickets, counts
    */
-  async sendBulkNotification(tokens, notification) {
-    if (!Array.isArray(tokens) || tokens.length === 0) {
-      throw new Error('tokens must be a non-empty array');
+  async sendBulkNotification(arg1, arg2 = undefined, arg3 = undefined) {
+    let tokenData;
+    let options;
+
+    if (
+      Array.isArray(arg1) &&
+      (arg1.length === 0 || typeof arg1[0] === 'string')
+    ) {
+      // Signature: (tokens, notification, options?)
+      const tokens = arg1;
+      const notification = arg2 || {};
+      options = arg3 || {};
+
+      if (!Array.isArray(tokens) || tokens.length === 0) {
+        throw new Error('tokens must be a non-empty array');
+      }
+
+      tokenData = tokens.map((token) => ({ token, ...notification }));
+    } else if (Array.isArray(arg1)) {
+      // Signature: (tokenData, options?)
+      tokenData = arg1;
+      options = arg2 || {};
+      if (!Array.isArray(tokenData) || tokenData.length === 0) {
+        throw new Error('tokenData must be a non-empty array');
+      }
+    } else {
+      throw new Error('Invalid arguments to sendBulkNotification');
     }
 
-    const tokenData = tokens.map((token) => ({
-      token,
-      ...notification
-    }));
+    // Default to rate limited sending
+    return await this.sendPushNotificationsRateLimited(tokenData, options);
+  }
 
-    return await this.sendPushNotifications(tokenData);
+  /**
+   * Core send with rate limiting (per-second throttle) and retries
+   * @param {Array} tokenData - Array of notification objects with token, title, body, etc.
+   * @param {Object} options - { ratePerSecond?: number, retries?: number, delayMs?: number }
+   */
+  async sendPushNotificationsRateLimited(tokenData, options = {}) {
+    const ratePerSecond = options.ratePerSecond || this.config.ratePerSecond;
+    const retries = options.retries || this.config.maxRetries;
+
+    if (!Array.isArray(tokenData) || tokenData.length === 0) {
+      throw new Error('tokenData must be a non-empty array');
+    }
+
+    const messages = this._buildMessages(tokenData);
+    if (messages.length === 0) {
+      throw new Error('No valid push tokens found');
+    }
+
+    // Group messages into per-second buckets respecting rate limit
+    const buckets = [];
+    for (let i = 0; i < messages.length; i += ratePerSecond) {
+      buckets.push(messages.slice(i, i + ratePerSecond));
+    }
+
+    const allTickets = [];
+
+    // Helper to send a chunk with basic retry
+    const sendChunkWithRetry = async (chunk) => {
+      let attempt = 0;
+      while (attempt <= retries) {
+        try {
+          const ticketChunk = await this.expo.sendPushNotificationsAsync(chunk);
+          return ticketChunk;
+        } catch (err) {
+          attempt += 1;
+          logger.error(`Rate-limited send failed (attempt ${attempt}):`, err);
+          if (attempt > retries) throw err;
+          await new Promise((res) => setTimeout(res, 1000 * attempt));
+        }
+      }
+    };
+
+    for (let b = 0; b < buckets.length; b++) {
+      const bucket = buckets[b];
+      // Expo recommends chunking for payload size; chunk into ~100
+      const chunks = this.expo.chunkPushNotifications(bucket);
+      for (const chunk of chunks) {
+        const tickets = await sendChunkWithRetry(chunk);
+        allTickets.push(...tickets);
+        logger.info(`Sent ${chunk.length} notifications in throttled mode`);
+      }
+      if (b < buckets.length - 1) {
+        // Wait 1 second between buckets to respect 600/sec limit
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+    }
+
+    await this._processReceipts(allTickets);
+
+    return {
+      success: true,
+      tickets: allTickets,
+      sentCount: messages.length,
+      totalRequested: tokenData.length
+    };
   }
 
   /**
