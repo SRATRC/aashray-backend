@@ -63,6 +63,10 @@ const UtsavBooking = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
+    roomno: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     other: {
       type: DataTypes.STRING,
       allowNull: true

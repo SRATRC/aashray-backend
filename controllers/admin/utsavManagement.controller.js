@@ -36,6 +36,8 @@ import Transactions from '../../models/transactions.model.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
+import XLSX from 'xlsx';
+
 
 export const createUtsav = async (req, res) => {
   const {
@@ -199,7 +201,7 @@ export const fetchUtsavBookings = async (req, res) => {
 
   const utsavData = await database.query(
     `SELECT 
-      t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
+      t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.roomno, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
       t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t2.dob,
       TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
       t3.location, t3.name AS utsav_name,
@@ -795,4 +797,150 @@ export const utsavCheckinReport = async (req, res) => {
     message: 'Filtered Utsav Bookings',
     data: utsavData
   });
+};
+
+export const uploadRoomNoExcel = async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded.' });
+  }
+
+  const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+  const sheet = XLSX.utils.sheet_to_json(
+    workbook.Sheets[workbook.SheetNames[0]],
+    { defval: '' }
+  );
+
+  if (sheet.length === 0) {
+    return res.status(400).json({ error: 'Excel file is empty.' });
+  }
+
+  try {
+    // Ensure all rows have same utsavid
+    const utsavidSet = new Set(sheet.map(r => String(r.utsavid || '').trim()));
+    if (utsavidSet.size !== 1) {
+      return res.status(400).json({ error: 'All rows must have the same UtsavID.' });
+    }
+    const utsavid = [...utsavidSet][0];
+
+    // Fetch existing bookings for this utsavid (no transaction yet)
+    // Fetch existing bookings for this utsavid but ONLY confirmed ones
+const existingBookings = await database.query(
+  `SELECT bookingid, cardno, packageid, utsavid, status
+   FROM utsav_booking
+   WHERE utsavid = :utsavid
+   AND status IN ('confirmed', 'checkedin')`,   
+  { 
+    replacements: { utsavid }, 
+    type: database.QueryTypes.SELECT 
+  }
+);
+
+    const bookingMap = new Map();
+    existingBookings.forEach(b => {
+      bookingMap.set(`${b.cardno}||${b.utsavid}||${b.packageid}`, b.bookingid);
+    });
+
+    const validRows = [];
+    const skippedRows = [];
+
+    for (const row of sheet) {
+      const bookingid = String(row.bookingid || '').trim();
+      const roomno = String(row.roomno || '').trim();
+      const cardno = String(row.cardno || '').trim();
+      const packageid = String(row.packageid || '').trim();
+
+      if (!bookingid || !roomno || !cardno || !utsavid || !packageid) {
+        skippedRows.push({ row, reason: 'Missing required fields' });
+        continue;
+      }
+
+      const key = `${cardno}||${utsavid}||${packageid}`;
+      const expectedBookingId = bookingMap.get(key);
+
+      if (!expectedBookingId) {
+        skippedRows.push({ row, reason: 'CardNo / UtsavID / PackageID combination does not match existing booking' });
+        continue;
+      }
+
+      if (bookingid !== expectedBookingId) {
+        skippedRows.push({ row, reason: `BookingID mismatch (expected: ${expectedBookingId})` });
+        continue;
+      }
+
+      validRows.push({ bookingid, roomno });
+    }
+
+    if (validRows.length === 0) {
+      return res.status(400).json({ error: 'No valid rows to update.', skippedRows });
+    }
+
+    // Start transaction only for update
+    const transaction = await database.transaction();
+    try {
+      const caseStatements = validRows.map(r => `WHEN '${r.bookingid}' THEN '${r.roomno}'`);
+      const bookingIds = validRows.map(r => `'${r.bookingid}'`);
+    // define updatedBy and updatedAt
+    const updatedBy = req.user?.username || "system"; // adjust based on your auth
+    
+      const query = `
+        UPDATE utsav_booking
+        SET roomno = CASE bookingid
+          ${caseStatements.join('\n')}
+        END,
+        updatedBy = '${updatedBy}'
+        WHERE bookingid IN (${bookingIds.join(', ')});
+      `;
+
+      await database.query(query, { transaction });
+      await transaction.commit();
+
+      res.status(200).json({
+        message: `${validRows.length} record(s) updated successfully.`,
+        skippedRows
+      });
+    } catch (err) {
+      await transaction.rollback();
+      console.error(err);
+      res.status(500).json({ error: 'Error updating room numbers.' });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error processing file.' });
+  }
+};
+
+
+
+// Update room number for a booking
+export const updateRoomNo = async (req, res) => {
+  try {
+    const { bookingid, roomno } = req.body;
+
+    // assuming you’re attaching logged-in user info in req.user
+    const updatedBy = req.user?.username || req.user?.id || "system";  
+
+    if (!bookingid || !roomno) {
+      return res.status(400).json({ error: "bookingid and roomno are required" });
+    }
+
+    // Check if booking exists
+    const booking = await UtsavBooking.findOne({ where: { bookingid } });
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // Update fields
+    booking.roomno = roomno;
+    booking.updatedBy = updatedBy;
+    await booking.save();
+
+    return res.status(200).json({ 
+      message: "Room number updated successfully", 
+      booking 
+    });
+  } catch (error) {
+    console.error("Error updating room number:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 };
