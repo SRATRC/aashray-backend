@@ -805,13 +805,15 @@ export const uploadRoomNoExcel = async (req, res) => {
   }
 
   const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-  const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+  const sheet = XLSX.utils.sheet_to_json(
+    workbook.Sheets[workbook.SheetNames[0]],
+    { defval: '' }
+  );
 
   if (sheet.length === 0) {
     return res.status(400).json({ error: 'Excel file is empty.' });
   }
 
-  const transaction = await database.transaction();
   try {
     // Ensure all rows have same utsavid
     const utsavidSet = new Set(sheet.map(r => String(r.utsavid || '').trim()));
@@ -820,15 +822,16 @@ export const uploadRoomNoExcel = async (req, res) => {
     }
     const utsavid = [...utsavidSet][0];
 
-    // Fetch existing bookings for this utsavid
+    // Fetch existing bookings for this utsavid (no transaction yet)
     const existingBookings = await database.query(
-      `SELECT bookingid, cardno, packageid, utsavid FROM utsav_booking WHERE utsavid = :utsavid`,
-      { replacements: { utsavid }, type: database.QueryTypes.SELECT, transaction }
+      `SELECT bookingid, cardno, packageid, utsavid
+       FROM utsav_booking
+       WHERE utsavid = :utsavid`,
+      { replacements: { utsavid }, type: database.QueryTypes.SELECT }
     );
 
     const bookingMap = new Map();
     existingBookings.forEach(b => {
-      // key includes cardno + utsavid + packageid
       bookingMap.set(`${b.cardno}||${b.utsavid}||${b.packageid}`, b.bookingid);
     });
 
@@ -863,31 +866,37 @@ export const uploadRoomNoExcel = async (req, res) => {
     }
 
     if (validRows.length === 0) {
-      await transaction.rollback();
       return res.status(400).json({ error: 'No valid rows to update.', skippedRows });
     }
 
-    const caseStatements = validRows.map(r => `WHEN '${r.bookingid}' THEN '${r.roomno}'`);
-    const bookingIds = validRows.map(r => `'${r.bookingid}'`);
+    // Start transaction only for update
+    const transaction = await database.transaction();
+    try {
+      const caseStatements = validRows.map(r => `WHEN '${r.bookingid}' THEN '${r.roomno}'`);
+      const bookingIds = validRows.map(r => `'${r.bookingid}'`);
 
-    const query = `
-      UPDATE utsav_booking
-      SET roomno = CASE bookingid
-        ${caseStatements.join('\n')}
-      END
-      WHERE bookingid IN (${bookingIds.join(', ')});
-    `;
+      const query = `
+        UPDATE utsav_booking
+        SET roomno = CASE bookingid
+          ${caseStatements.join('\n')}
+        END
+        WHERE bookingid IN (${bookingIds.join(', ')});
+      `;
 
-    await database.query(query, { transaction });
-    await transaction.commit();
+      await database.query(query, { transaction });
+      await transaction.commit();
 
-    res.status(200).json({ 
-      message: `${validRows.length} record(s) updated successfully.`,
-      skippedRows
-    });
+      res.status(200).json({
+        message: `${validRows.length} record(s) updated successfully.`,
+        skippedRows
+      });
+    } catch (err) {
+      await transaction.rollback();
+      console.error(err);
+      res.status(500).json({ error: 'Error updating room numbers.' });
+    }
   } catch (err) {
-    await transaction.rollback();
     console.error(err);
-    res.status(500).json({ error: 'Error updating room numbers.' });
+    res.status(500).json({ error: 'Error processing file.' });
   }
 };
