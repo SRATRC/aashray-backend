@@ -372,6 +372,7 @@ export async function cancelMeal(user, bookingId, mealType, t) {
 }
 
 export async function cancelFood(user, cardno, food_data, t, admin = false) {
+  const now = moment();
   const today = moment().format('YYYY-MM-DD');
   const validDate = admin ? today : today + 1;
 
@@ -380,15 +381,13 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
       return item.date >= validDate;
     }
 
-    const now = moment();
-
     const mealCutoffTime = moment(item.date)
       .subtract(1, 'day')
-      .hour(20)
+      .hour(20) // 8:00 PM
       .minute(0)
       .second(0);
 
-    return now.isBefore(mealCutoffTime) || now.isSame(mealCutoffTime);
+    return now.isSameOrBefore(mealCutoffTime);
   });
 
   if (food_data.length > 0 && validFoodData.length === 0 && !admin) {
