@@ -762,7 +762,7 @@ export const utsavCheckinReport = async (req, res) => {
   await validateUtsav(utsavid);
 
   const utsavData = await database.query(
-    `SELECT 
+  `SELECT 
       t1.cardno,
       t1.bookingid,
       t1.bookedby,
@@ -771,6 +771,7 @@ export const utsavCheckinReport = async (req, res) => {
       t2.center,
       t2.mobno,
       TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
+      t3.name AS package_name,   -- Correct package name
       CASE 
         WHEN t1.status = '${ROOM_STATUS_CHECKEDIN}' THEN 'yes'
         WHEN t1.status = '${STATUS_CONFIRMED}' THEN 'no'
@@ -778,20 +779,22 @@ export const utsavCheckinReport = async (req, res) => {
         ELSE 'unknown'
       END AS checkin_status
     FROM utsav_booking AS t1
-    LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
-    WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
-    `,
-    {
-      replacements: {
-        utsavid,
-        status: statusToBeIncluded,
-        pageSize,
-        offset
-      },
-      raw: true,
-      type: QueryTypes.SELECT
-    }
-  );
+    LEFT JOIN card_db AS t2 
+      ON t1.cardno = t2.cardno
+    LEFT JOIN utsav_packages_db AS t3 
+      ON t1.packageid = t3.id   -- 👈 join on packageid instead of utsavid
+    WHERE t1.utsavid = :utsavid 
+      AND t1.status IN (:status)
+  `,
+  {
+    replacements: {
+      utsavid,
+      status: statusToBeIncluded
+    },
+    raw: true,
+    type: QueryTypes.SELECT
+  }
+);
 
   return res.status(200).send({
     message: 'Filtered Utsav Bookings',
