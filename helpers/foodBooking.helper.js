@@ -357,7 +357,6 @@ export function createGroupFoodRequest(
 }
 
 export async function cancelMeal(user, bookingId, mealType, t) {
-  // Create the update object: setting the specific meal to 0 (cancelled)
   const updateFields = {};
 
   if (mealType === 'breakfast') updateFields.breakfast = 0;
@@ -366,7 +365,6 @@ export async function cancelMeal(user, bookingId, mealType, t) {
 
   updateFields.updatedBy = user.username;
 
-  // Update the meal booking
   await FoodDb.update(updateFields, {
     where: { id: bookingId },
     transaction: t
@@ -374,16 +372,36 @@ export async function cancelMeal(user, bookingId, mealType, t) {
 }
 
 export async function cancelFood(user, cardno, food_data, t, admin = false) {
+  const now = moment();
   const today = moment().format('YYYY-MM-DD');
   const validDate = admin ? today : today + 1;
-  const validFoodData = food_data.filter((item) => item.date >= validDate);
+
+  const validFoodData = food_data.filter((item) => {
+    if (admin) {
+      return item.date >= validDate;
+    }
+
+    const mealCutoffTime = moment(item.date)
+      .subtract(1, 'day')
+      .hour(20) // 8:00 PM
+      .minute(0)
+      .second(0);
+
+    return now.isSameOrBefore(mealCutoffTime);
+  });
+
+  if (food_data.length > 0 && validFoodData.length === 0 && !admin) {
+    throw new ApiError(
+      400,
+      'Bookings can only be cancelled up to 8:00 PM of the previous day'
+    );
+  }
 
   const transactions = [];
 
   for (const item of validFoodData) {
     const { date, mealType, bookedFor } = item;
 
-    // Fetch the booking from the database to get the id
     const booking = await FoodDb.findOne({
       where: {
         cardno: bookedFor || cardno,
@@ -392,14 +410,13 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
     });
 
     if (!booking) {
-      continue; // Skip if no matching booking found
+      continue;
     }
 
     await cancelMeal(user, booking.id, mealType, t);
 
-    // Handle guest meal transaction cancellation
+    // FIXME: guests can book self meals too
     if (bookedFor) {
-      // Find and update the transaction to mark it as credited
       const transaction = await Transactions.findOne({
         where: {
           bookingid: booking.id,
