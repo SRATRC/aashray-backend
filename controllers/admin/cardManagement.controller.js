@@ -286,6 +286,32 @@ export const fetchTotalTransactions = async (req, res) => {
 
 import bcrypt from 'bcryptjs';
 
+// export const resetPasswordDefault = async (req, res) => {
+//   const { cardno } = req.body;
+
+//   if (!cardno) {
+//     throw new ApiError(400, 'cardno is required');
+//   }
+
+//   const card = await CardDb.findOne({ where: { cardno } });
+
+//   if (!card) {
+//     throw new ApiError(404, 'Card not found');
+//   }
+
+//   // ✅ Hash the default password
+//   const salt = bcrypt.genSaltSync(10);
+//   const hash = bcrypt.hashSync('vitraag', salt);
+
+//   await CardDb.update(
+//     { password: hash },
+//     { where: { cardno } }
+//   );
+
+//   return res.status(200).json({ message: 'Password reset successfully to default.' });
+// };
+
+
 export const resetPasswordDefault = async (req, res) => {
   const { cardno } = req.body;
 
@@ -299,14 +325,15 @@ export const resetPasswordDefault = async (req, res) => {
     throw new ApiError(404, 'Card not found');
   }
 
-  // ✅ Hash the default password
-  const salt = bcrypt.genSaltSync(10);
-  const hash = bcrypt.hashSync('vitraag', salt);
+  // ✅ Use the same default value defined in the model
+  const defaultPasswordHash = CardDb.rawAttributes.password.defaultValue;
 
   await CardDb.update(
-    { password: hash },
+    { password: defaultPasswordHash },
     { where: { cardno } }
   );
 
-  return res.status(200).json({ message: 'Password reset successfully to default.' });
+  return res
+    .status(200)
+    .json({ message: 'Password reset successfully to default.' });
 };
