@@ -540,3 +540,4 @@ export const updateTransactionStatus = async (req, res) => {
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
+
