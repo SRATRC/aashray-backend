@@ -399,6 +399,8 @@ export const updateBookingStatus = async (req, res) => {
     }
   });
 
+  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+
   if (status == booking.status)
   throw new ApiError(400, 'Status is same as before');
 

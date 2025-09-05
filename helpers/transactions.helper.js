@@ -166,7 +166,6 @@ export async function cancelTransaction(
   if (admin) {
     // ✅ force credits to full amount if admin chooses to issue credits
     const creditAmount = transaction.amount + transaction.discount;
-
     if (creditAmount > 0) {
       await addCredit(user, card, bookingType, creditAmount, t);
       status = STATUS_CREDITED;
@@ -174,10 +173,11 @@ export async function cancelTransaction(
     } else {
       status = STATUS_ADMIN_CANCELLED;
     }
-    break;
+  } else {
+    throw new ApiError(400, 'Cannot cancel already cancelled transaction');
   }
-  throw new ApiError(400, 'Cannot cancel already cancelled transaction');
-
+  break;
+  
   case STATUS_ADMIN_CANCELLED:
   case STATUS_CREDITED:
     throw new ApiError(
