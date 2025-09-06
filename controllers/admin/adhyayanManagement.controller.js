@@ -30,9 +30,11 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
-import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
+import {
+  sendDualUserNotifications,
+  sendPushNotifications
+} from '../../helpers/notification.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
-import notificationService from '../../services/notification.service.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
@@ -606,15 +608,11 @@ export const softDeleteShibir = async (req, res) => {
 
       const tokens = cards.map((c) => c.token).filter(Boolean);
       if (tokens.length > 0) {
-        notificationService.sendBulkNotification(
-          tokens,
-          {
-            title: 'Adhyayan Cancelled by Admin',
-            body: 'Your adhyayan booking has been cancelled by admin. We apologize for any inconvenience.',
-            screen: '/bookings'
-          },
-          { rateLimit: true }
-        );
+        sendPushNotifications(tokens, {
+          title: 'Adhyayan Cancelled by Admin',
+          body: 'Your adhyayan booking has been cancelled by admin. We apologize for any inconvenience.',
+          screen: '/bookings'
+        });
       }
     }
   } catch (notifyErr) {

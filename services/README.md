@@ -12,6 +12,7 @@ The `NotificationService` provides a centralized, robust solution for sending pu
 - **Error Handling**: Comprehensive error handling and logging
 - **Token Validation**: Automatic validation of Expo push tokens
 - **Receipt Processing**: Automatic processing of notification receipts
+- **Rate Limiting by Default**: Per-second throttling to avoid service overload
 - **Chunking**: Automatic chunking of large notification batches
 - **Logging**: Detailed logging for monitoring and debugging
 - **Health Monitoring**: Built-in health status reporting
@@ -89,7 +90,11 @@ const notification = {
 };
 
 try {
-  const result = await notificationService.sendBulkNotification(tokens, notification);
+  // Unified API: tokens signature
+  const result = await notificationService.sendPushNotifications(
+    tokens,
+    notification
+  );
   console.log(`Sent notification to ${result.sentCount} users`);
 } catch (error) {
   console.error('Failed to send bulk notification:', error);
@@ -98,14 +103,21 @@ try {
 
 ### API Reference
 
-#### `sendPushNotifications(tokenData)`
+#### `sendPushNotifications(...)` (Unified bulk sender, rate-limited by default)
 
-Sends push notifications to multiple recipients with individual customization.
+Sends push notifications in bulk with automatic per-second rate limiting and payload chunking.
+
+Supported signatures:
+
+- `sendPushNotifications(tokenData, options?)`
+- `sendPushNotifications(tokens, notification, options?)`
 
 **Parameters:**
+
 - `tokenData` (Array): Array of notification objects
 
 **Notification Object Structure:**
+
 ```javascript
 {
   token: 'ExponentPushToken[...]',    // Required: Expo push token
@@ -117,13 +129,17 @@ Sends push notifications to multiple recipients with individual customization.
 }
 ```
 
+- or `tokens` (Array<string>): array of tokens + one shared `notification` object
+- `options` (Object): { ratePerSecond?: number, retries?: number }
+
 **Returns:**
+
 ```javascript
 {
   success: true,
-  tickets: [...],           // Array of Expo tickets
-  sentCount: 5,            // Number of notifications sent
-  totalRequested: 6        // Number of notifications requested
+  tickets: [...],
+  sentCount: 5,
+  totalRequested: 6
 }
 ```
 
@@ -132,18 +148,9 @@ Sends push notifications to multiple recipients with individual customization.
 Sends a single notification to one recipient.
 
 **Parameters:**
+
 - `token` (String): Expo push token
 - `options` (Object): Notification options
-
-**Returns:** Same as `sendPushNotifications`
-
-#### `sendBulkNotification(tokens, notification)`
-
-Sends the same notification to multiple recipients.
-
-**Parameters:**
-- `tokens` (Array): Array of Expo push tokens
-- `notification` (Object): Notification content
 
 **Returns:** Same as `sendPushNotifications`
 
@@ -152,6 +159,7 @@ Sends the same notification to multiple recipients.
 Validates an Expo push token.
 
 **Parameters:**
+
 - `token` (String): Token to validate
 
 **Returns:** Boolean
@@ -161,6 +169,7 @@ Validates an Expo push token.
 Returns service health information.
 
 **Returns:**
+
 ```javascript
 {
   service: 'NotificationService',
@@ -187,30 +196,30 @@ The service handles various error scenarios:
 #### From `utils/sendNotification.js`
 
 **Old:**
+
 ```javascript
 import { sendNotification } from '../utils/sendNotification.js';
 const tickets = await sendNotification(tokenData);
 ```
 
 **New:**
+
 ```javascript
 import notificationService from '../services/notification.service.js';
 const result = await notificationService.sendPushNotifications(tokenData);
 const tickets = result.tickets; // If you need just tickets
 ```
 
-#### From `helpers/notification.helper.js`
+### Migration from Legacy Code
 
-**Old:**
-```javascript
-import { sendPushNotifications } from '../helpers/notification.helper.js';
-const result = await sendPushNotifications(tokenData);
-```
+All legacy helper wrappers and alternative bulk methods have been removed. Use only the unified API:
 
-**New:**
 ```javascript
 import notificationService from '../services/notification.service.js';
-const result = await notificationService.sendPushNotifications(tokenData);
+// Either pass pre-built tokenData
+await notificationService.sendPushNotifications(tokenData);
+// Or pass tokens + shared notification content
+await notificationService.sendPushNotifications(tokens, notification);
 ```
 
 ### Best Practices
@@ -219,7 +228,7 @@ const result = await notificationService.sendPushNotifications(tokenData);
 2. **Don't fail operations**: If notifications fail, log the error but don't fail the main operation
 3. **Validate tokens**: Use `isValidPushToken()` if you need to validate tokens beforehand
 4. **Monitor health**: Use `getHealthStatus()` for health checks
-5. **Use appropriate method**: Choose between `sendPushNotifications`, `sendSingleNotification`, and `sendBulkNotification` based on your use case
+5. **Use appropriate method**: Choose between `sendPushNotifications` (bulk) and `sendSingleNotification` (single) based on your use case
 
 ### Testing
 
@@ -237,7 +246,3 @@ The service uses the application's logger and provides detailed logs:
 - **Error**: Failed operations and invalid tokens
 - **Debug**: Receipt processing details
 - **Warn**: Non-critical issues
-
-### Backward Compatibility
-
-Legacy helper functions in `helpers/notification.helper.js` and `utils/sendNotification.js` have been updated to use this service internally, ensuring backward compatibility while providing deprecation warnings.

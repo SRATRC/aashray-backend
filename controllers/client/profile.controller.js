@@ -4,11 +4,11 @@ import {
   DeleteObjectCommand
 } from '@aws-sdk/client-s3';
 import { CardDb, FlatDb } from '../../models/associations.js';
+import { sendPushNotifications } from '../../helpers/notification.helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
-import notificationService from '../../services/notification.service.js';
 
 export const updateProfile = async (req, res) => {
   const {
@@ -243,10 +243,13 @@ export const sendNotification = async (req, res) => {
   const { tokenData } = req.body;
 
   if (!tokenData || !Array.isArray(tokenData) || tokenData.length === 0) {
-    throw new ApiError(400, 'Invalid request: tokenData must be a non-empty');
+    throw new ApiError(
+      400,
+      'Invalid request: tokenData must be a non-empty array'
+    );
   }
 
-  const result = await notificationService.sendPushNotifications(tokenData);
+  const result = await sendPushNotifications(tokenData);
 
   return res.status(200).json({
     message: 'Notifications sent successfully',

@@ -23,16 +23,49 @@ class NotificationService {
   }
 
   /**
-   * Send push notifications to multiple recipients
-   * @param {Array} tokenData - Array of notification objects with token, title, body, etc.
-   * @returns {Promise<Object>} - Returns success status, tickets, and sent count
+   * Unified bulk push notifications sender with default rate limiting
+   *
+   * @param {Array} arg1 - Array of tokens OR array of pre-built tokenData objects
+   * @param {Object} [arg2] - Notification content if arg1 is tokens OR options if arg1 is tokenData
+   * @param {Object} [arg3] - Options when arg1 is tokens
+   * @returns {Promise<Object>} - Result object with success, tickets, counts
    */
-  async sendPushNotifications(tokenData) {
-    if (!Array.isArray(tokenData) || tokenData.length === 0) {
-      throw new Error('tokenData must be a non-empty array');
+  async sendPushNotifications(arg1, arg2 = undefined, arg3 = undefined) {
+    // Normalize arguments
+    let tokenData;
+    let options;
+
+    // Treat as (tokens, notification, options?) only when arg2/arg3 provided
+    const isTokensSignature =
+      Array.isArray(arg1) &&
+      (arg2 !== undefined || arg3 !== undefined) &&
+      (arg1.length === 0 || typeof arg1[0] === 'string');
+
+    if (isTokensSignature) {
+      const tokens = arg1;
+      const notification = arg2 || {};
+      options = arg3 || {};
+
+      if (!Array.isArray(tokens) || tokens.length === 0) {
+        throw new Error('tokens must be a non-empty array');
+      }
+
+      tokenData = tokens.map((token) => ({ token, ...notification }));
+    } else {
+      // Signature: (tokenData, options?)
+      tokenData = arg1;
+      options = arg2 || {};
+      if (!Array.isArray(tokenData) || tokenData.length === 0) {
+        throw new Error('tokenData must be a non-empty array');
+      }
     }
 
-    logger.info(`Attempting to send ${tokenData.length} push notifications`);
+    const ratePerSecond = options.ratePerSecond || this.config.ratePerSecond;
+    const retries = options.retries || this.config.maxRetries;
+
+    logger.info(
+      `Attempting to send ${tokenData.length} push notifications (rate-limited)`
+    );
 
     const messages = this._buildMessages(tokenData);
 
@@ -43,116 +76,6 @@ class NotificationService {
     logger.info(
       `Built ${messages.length} valid messages from ${tokenData.length} token data entries`
     );
-
-    const chunks = this.expo.chunkPushNotifications(messages);
-    const tickets = [];
-
-    // Send notifications in chunks
-    for (let chunk of chunks) {
-      try {
-        const ticketChunk = await this.expo.sendPushNotificationsAsync(chunk);
-        tickets.push(...ticketChunk);
-        logger.info(`Successfully sent chunk of ${chunk.length} notifications`);
-      } catch (error) {
-        logger.error('Error sending notification chunk:', error);
-        throw error;
-      }
-    }
-
-    // Process receipts for error checking
-    await this._processReceipts(tickets);
-
-    logger.info(
-      `Successfully sent ${messages.length} notifications with ${tickets.length} tickets`
-    );
-
-    return {
-      success: true,
-      tickets,
-      sentCount: messages.length,
-      totalRequested: tokenData.length
-    };
-  }
-
-  /**
-   * Send a single notification to one recipient
-   * @param {string} token - Push token
-   * @param {Object} options - Notification options (title, body, sound, screen, data)
-   * @returns {Promise<Object>} - Returns success status and tickets/error info
-   */
-  async sendSingleNotification(token, options = {}) {
-    const tokenData = [
-      {
-        token,
-        title: options.title,
-        body: options.body,
-        sound: options.sound || this.config.defaultSound,
-        screen: options.screen,
-        data: options.data
-      }
-    ];
-
-    return await this.sendPushNotifications(tokenData);
-  }
-
-  /**
-   * Send notifications (bulk or pre-built) with rate limiting by default
-   * Backward compatible: accepts either (tokens, notification, options?) or (tokenData, options?)
-   * @param {Array} arg1 - Array of tokens OR array of pre-built tokenData objects
-   * @param {Object} [arg2] - Notification content if arg1 is tokens OR options if arg1 is tokenData
-   * @param {Object} [arg3] - Options when arg1 is tokens
-   * @returns {Promise<Object>} - Result object with success, tickets, counts
-   */
-  async sendBulkNotification(arg1, arg2 = undefined, arg3 = undefined) {
-    let tokenData;
-    let options;
-
-    if (
-      Array.isArray(arg1) &&
-      (arg1.length === 0 || typeof arg1[0] === 'string')
-    ) {
-      // Signature: (tokens, notification, options?)
-      const tokens = arg1;
-      const notification = arg2 || {};
-      options = arg3 || {};
-
-      if (!Array.isArray(tokens) || tokens.length === 0) {
-        throw new Error('tokens must be a non-empty array');
-      }
-
-      tokenData = tokens.map((token) => ({ token, ...notification }));
-    } else if (Array.isArray(arg1)) {
-      // Signature: (tokenData, options?)
-      tokenData = arg1;
-      options = arg2 || {};
-      if (!Array.isArray(tokenData) || tokenData.length === 0) {
-        throw new Error('tokenData must be a non-empty array');
-      }
-    } else {
-      throw new Error('Invalid arguments to sendBulkNotification');
-    }
-
-    // Default to rate limited sending
-    return await this.sendPushNotificationsRateLimited(tokenData, options);
-  }
-
-  /**
-   * Core send with rate limiting (per-second throttle) and retries
-   * @param {Array} tokenData - Array of notification objects with token, title, body, etc.
-   * @param {Object} options - { ratePerSecond?: number, retries?: number, delayMs?: number }
-   */
-  async sendPushNotificationsRateLimited(tokenData, options = {}) {
-    const ratePerSecond = options.ratePerSecond || this.config.ratePerSecond;
-    const retries = options.retries || this.config.maxRetries;
-
-    if (!Array.isArray(tokenData) || tokenData.length === 0) {
-      throw new Error('tokenData must be a non-empty array');
-    }
-
-    const messages = this._buildMessages(tokenData);
-    if (messages.length === 0) {
-      throw new Error('No valid push tokens found');
-    }
 
     // Group messages into per-second buckets respecting rate limit
     const buckets = [];
@@ -185,15 +108,24 @@ class NotificationService {
       for (const chunk of chunks) {
         const tickets = await sendChunkWithRetry(chunk);
         allTickets.push(...tickets);
-        logger.info(`Sent ${chunk.length} notifications in throttled mode`);
+        logger.info(
+          `Successfully sent chunk of ${chunk.length} notifications (bucket ${
+            b + 1
+          }/${buckets.length})`
+        );
       }
       if (b < buckets.length - 1) {
-        // Wait 1 second between buckets to respect 600/sec limit
+        // Wait 1 second between buckets to respect per-second limit
         await new Promise((res) => setTimeout(res, 1000));
       }
     }
 
+    // Process receipts for error checking
     await this._processReceipts(allTickets);
+
+    logger.info(
+      `Successfully sent ${messages.length} notifications with ${allTickets.length} tickets`
+    );
 
     return {
       success: true,
@@ -201,6 +133,27 @@ class NotificationService {
       sentCount: messages.length,
       totalRequested: tokenData.length
     };
+  }
+
+  /**
+   * Send a single notification to one recipient
+   * @param {string} token - Push token
+   * @param {Object} options - Notification options (title, body, sound, screen, data)
+   * @returns {Promise<Object>} - Returns success status and tickets/error info
+   */
+  async sendSingleNotification(token, options = {}) {
+    const tokenData = [
+      {
+        token,
+        title: options.title,
+        body: options.body,
+        sound: options.sound || this.config.defaultSound,
+        screen: options.screen,
+        data: options.data
+      }
+    ];
+
+    return await this.sendPushNotifications(tokenData);
   }
 
   /**

@@ -3,14 +3,15 @@ import notificationService from '../services/notification.service.js';
 import logger from '../config/logger.js';
 
 /**
- * Reusable function to send push notifications
- * Array of {token, title, body, ...}
- * @param {Array} tokenData - Array of notification objects with token, title, body, etc.
- * @returns {Promise<Object>} - Returns success status and tickets/error info
- * @deprecated Use notificationService.sendPushNotifications() directly instead
+ * Unified bulk push notifications sender with default rate limiting
+ *
+ * @param {Array} arg1 - Array of tokens OR array of pre-built tokenData objects
+ * @param {Object} [arg2] - Notification content if arg1 is tokens OR options if arg1 is tokenData
+ * @param {Object} [arg3] - Options when arg1 is tokens
+ * @returns {Promise<Object>} - Result object with success, tickets, counts
  */
-export const sendPushNotifications = async (tokenData) => {
-  return await notificationService.sendPushNotifications(tokenData);
+export const sendPushNotifications = async (arg1, arg2, arg3) => {
+  return await notificationService.sendPushNotifications(arg1, arg2, arg3);
 };
 
 /**
@@ -19,22 +20,9 @@ export const sendPushNotifications = async (tokenData) => {
  * @param {string} token - Push token
  * @param {Object} options - Notification options (title, body, sound, screen, data)
  * @returns {Promise<Object>} - Returns success status and tickets/error info
- * @deprecated Use notificationService.sendSingleNotification() directly instead
  */
 export const sendSingleNotification = async (token, options = {}) => {
   return await notificationService.sendSingleNotification(token, options);
-};
-
-/**
- * Helper function to send notifications to multiple users with the same message
- * Array of tokens + one message
- * @param {Array} tokens - Array of push tokens
- * @param {Object} notification - Notification content (title, body, sound, screen, data)
- * @returns {Promise<Object>} - Returns success status and tickets/error info
- * @deprecated Use notificationService.sendBulkNotification() directly instead
- */
-export const sendBulkNotification = async (tokens, notification) => {
-  return await notificationService.sendBulkNotification(tokens, notification);
 };
 
 /**
@@ -164,9 +152,6 @@ export function getOtherBookingUser(booking, cancellerCardno) {
 
 /**
  * Notify a single user identified by cardno.
- * - Looks up CardDb for a push token
- * - Uses the non-deprecated notificationService APIs
- * - Handles errors and logs appropriately
  *
  * @param {string} cardno
  * @param {{ title: string, body: string, screen?: string, data?: object, sound?: string }} notificationData

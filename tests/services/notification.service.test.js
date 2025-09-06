@@ -11,7 +11,7 @@ describe('NotificationService', () => {
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
-    
+
     // Create mock Expo instance
     mockExpo = {
       chunkPushNotifications: jest.fn(),
@@ -29,15 +29,15 @@ describe('NotificationService', () => {
 
   describe('sendPushNotifications', () => {
     it('should throw error for empty tokenData', async () => {
-      await expect(notificationService.sendPushNotifications([])).rejects.toThrow(
-        'tokenData must be a non-empty array'
-      );
+      await expect(
+        notificationService.sendPushNotifications([])
+      ).rejects.toThrow('tokenData must be a non-empty array');
     });
 
     it('should throw error for non-array tokenData', async () => {
-      await expect(notificationService.sendPushNotifications(null)).rejects.toThrow(
-        'tokenData must be a non-empty array'
-      );
+      await expect(
+        notificationService.sendPushNotifications(null)
+      ).rejects.toThrow('tokenData must be a non-empty array');
     });
 
     it('should successfully send notifications with valid tokens', async () => {
@@ -66,7 +66,9 @@ describe('NotificationService', () => {
       mockExpo.sendPushNotificationsAsync.mockResolvedValue([
         { id: 'ticket-id-1', status: 'ok' }
       ]);
-      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([['ticket-id-1']]);
+      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([
+        ['ticket-id-1']
+      ]);
       mockExpo.getPushNotificationReceiptsAsync.mockResolvedValue({
         'ticket-id-1': { status: 'ok' }
       });
@@ -80,7 +82,9 @@ describe('NotificationService', () => {
         totalRequested: 1
       });
 
-      expect(Expo.isExpoPushToken).toHaveBeenCalledWith('ExponentPushToken[valid-token-1]');
+      expect(Expo.isExpoPushToken).toHaveBeenCalledWith(
+        'ExponentPushToken[valid-token-1]'
+      );
       expect(mockExpo.sendPushNotificationsAsync).toHaveBeenCalled();
     });
 
@@ -99,9 +103,7 @@ describe('NotificationService', () => {
       ];
 
       // Mock first token as invalid, second as valid
-      Expo.isExpoPushToken
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(true);
+      Expo.isExpoPushToken.mockReturnValueOnce(false).mockReturnValueOnce(true);
 
       mockExpo.chunkPushNotifications.mockReturnValue([
         [
@@ -117,7 +119,9 @@ describe('NotificationService', () => {
       mockExpo.sendPushNotificationsAsync.mockResolvedValue([
         { id: 'ticket-id-1', status: 'ok' }
       ]);
-      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([['ticket-id-1']]);
+      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([
+        ['ticket-id-1']
+      ]);
       mockExpo.getPushNotificationReceiptsAsync.mockResolvedValue({
         'ticket-id-1': { status: 'ok' }
       });
@@ -140,9 +144,9 @@ describe('NotificationService', () => {
 
       Expo.isExpoPushToken.mockReturnValue(false);
 
-      await expect(notificationService.sendPushNotifications(tokenData)).rejects.toThrow(
-        'No valid push tokens found'
-      );
+      await expect(
+        notificationService.sendPushNotifications(tokenData)
+      ).rejects.toThrow('No valid push tokens found');
     });
   });
 
@@ -170,21 +174,29 @@ describe('NotificationService', () => {
       mockExpo.sendPushNotificationsAsync.mockResolvedValue([
         { id: 'ticket-id-1', status: 'ok' }
       ]);
-      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([['ticket-id-1']]);
+      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([
+        ['ticket-id-1']
+      ]);
       mockExpo.getPushNotificationReceiptsAsync.mockResolvedValue({
         'ticket-id-1': { status: 'ok' }
       });
 
-      const result = await notificationService.sendSingleNotification(token, options);
+      const result = await notificationService.sendSingleNotification(
+        token,
+        options
+      );
 
       expect(result.sentCount).toBe(1);
       expect(result.totalRequested).toBe(1);
     });
   });
 
-  describe('sendBulkNotification', () => {
+  describe('sendPushNotifications (tokens signature)', () => {
     it('should send same notification to multiple recipients', async () => {
-      const tokens = ['ExponentPushToken[token-1]', 'ExponentPushToken[token-2]'];
+      const tokens = [
+        'ExponentPushToken[token-1]',
+        'ExponentPushToken[token-2]'
+      ];
       const notification = {
         title: 'Bulk Test',
         body: 'Bulk Body',
@@ -214,40 +226,49 @@ describe('NotificationService', () => {
         { id: 'ticket-id-1', status: 'ok' },
         { id: 'ticket-id-2', status: 'ok' }
       ]);
-      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([['ticket-id-1', 'ticket-id-2']]);
+      mockExpo.chunkPushNotificationReceiptIds.mockReturnValue([
+        ['ticket-id-1', 'ticket-id-2']
+      ]);
       mockExpo.getPushNotificationReceiptsAsync.mockResolvedValue({
         'ticket-id-1': { status: 'ok' },
         'ticket-id-2': { status: 'ok' }
       });
 
-      const result = await notificationService.sendBulkNotification(tokens, notification);
+      const result = await notificationService.sendPushNotifications(
+        tokens,
+        notification
+      );
 
       expect(result.sentCount).toBe(2);
       expect(result.totalRequested).toBe(2);
     });
 
     it('should throw error for empty tokens array', async () => {
-      await expect(notificationService.sendBulkNotification([], {})).rejects.toThrow(
-        'tokens must be a non-empty array'
-      );
+      await expect(
+        notificationService.sendPushNotifications([], {})
+      ).rejects.toThrow('tokens must be a non-empty array');
     });
   });
 
   describe('isValidPushToken', () => {
     it('should validate push tokens correctly', () => {
       Expo.isExpoPushToken.mockReturnValue(true);
-      
-      const result = notificationService.isValidPushToken('ExponentPushToken[valid]');
-      
+
+      const result = notificationService.isValidPushToken(
+        'ExponentPushToken[valid]'
+      );
+
       expect(result).toBe(true);
-      expect(Expo.isExpoPushToken).toHaveBeenCalledWith('ExponentPushToken[valid]');
+      expect(Expo.isExpoPushToken).toHaveBeenCalledWith(
+        'ExponentPushToken[valid]'
+      );
     });
   });
 
   describe('getHealthStatus', () => {
     it('should return health status', () => {
       const status = notificationService.getHealthStatus();
-      
+
       expect(status).toHaveProperty('service', 'NotificationService');
       expect(status).toHaveProperty('status', 'healthy');
       expect(status).toHaveProperty('expo');
