@@ -79,6 +79,7 @@ export const createUtsav = async (req, res) => {
     { transaction: t }
   );
 
+  if((location || RESEARCH_CENTRE) === RESEARCH_CENTRE){
   await BlockDates.create(
     {
       checkin: start_date,
@@ -87,7 +88,7 @@ export const createUtsav = async (req, res) => {
       updatedBy: req.user.username
     },
     { transaction: t }
-  );
+  );}
 
   await t.commit();
 
