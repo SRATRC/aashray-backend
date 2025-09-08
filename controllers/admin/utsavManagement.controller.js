@@ -49,6 +49,12 @@ export const createUtsav = async (req, res) => {
     registration_deadline
   } = req.body;
 
+   if (!moment(registration_deadline).isBefore(moment(start_date, 'day'))) {
+    return res.status(400).send({
+      message: 'Registration deadline must be before the start date'
+    });
+  }
+
   const alreadyExists = await UtsavDb.findOne({
     where: {
       name: { [Sequelize.Op.like]: name },
