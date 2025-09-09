@@ -9,7 +9,7 @@ import {
   STATUS_WAITING,
   TYPE_ADHYAYAN
 } from '../config/constants.js';
-import { ShibirBookingDb, ShibirDb, UtsavDb } from '../models/associations.js';
+import { ShibirBookingDb, ShibirDb, UtsavDb, CardDb } from '../models/associations.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCard, validateCards } from './card.helper.js';
@@ -213,6 +213,40 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
 
     return null;
   }
+}
+
+export async function sendAdhyayanBookingUpdateEmail(newBooking, adhyayan) {
+  const cardNumbers = [newBooking.cardno];
+    if (newBooking.bookedBy) {
+      cardNumbers.push(newBooking.bookedBy);
+    }
+    const cards = await CardDb.findAll({
+      where: {
+        cardno: cardNumbers
+      }
+    });
+
+    const card = cards.find(c => c.cardno === newBooking.cardno);
+    const bookedByCard = newBooking.bookedBy
+      ? cards.find(c => c.cardno === newBooking.bookedBy)
+      : null;
+
+    if (card && card.email) {
+      sendMail({
+        email: card.email,
+        cc: bookedByCard ? bookedByCard.email : null,
+        subject: 'Raj Adhyayan Booking Updated',
+        template: 'rajAdhyayanUpdate',
+        context: {
+          name: card.issuedto,
+          bookingid: newBooking.bookingid,
+          status: newBooking.status,
+          adhyayanName: adhyayan.name,
+          adhyayanStartDate: adhyayan.start_date,
+          adhyayanEndDate: adhyayan.end_date
+        }
+      });
+    }
 }
 
 export async function checkAdhyayanAvailabilityForMumukshus(

@@ -154,37 +154,7 @@ export const CancelShibir = async (req, res) => {
 
   if (newBooking) {
     //sending email to user who got moved from waiting to pending and cc to the bookedBy user if any.
-    const cardNumbers = [newBooking.cardno];
-    if (newBooking.bookedBy) {
-      cardNumbers.push(newBooking.bookedBy);
-    }
-    const cards = await CardDb.findAll({
-      where: {
-        cardno: cardNumbers
-      }
-    });
-
-    const card = cards.find(c => c.cardno === newBooking.cardno);
-    const bookedByCard = newBooking.bookedBy
-      ? cards.find(c => c.cardno === newBooking.bookedBy)
-      : null;
-
-    if (card && card.email) {
-      sendMail({
-        email: card.email,
-        cc: bookedByCard ? bookedByCard.email : null,
-        subject: 'Raj Adhyayan Booking Updated',
-        template: 'rajAdhyayanUpdate',
-        context: {
-          name: card.issuedto,
-          bookingid: newBooking.bookingid,
-          status: newBooking.status,
-          adhyayanName: adhyayan.name,
-          adhyayanStartDate: adhyayan.start_date,
-          adhyayanEndDate: adhyayan.end_date
-        }
-      });
-    }
+    await sendAdhyayanBookingUpdateEmail(newBooking, adhyayan);
   }
   // Call the refactored utility function
   if (req.user.pushToken) {
