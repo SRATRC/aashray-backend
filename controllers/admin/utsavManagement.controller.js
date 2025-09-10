@@ -104,6 +104,32 @@ export const createUtsav = async (req, res) => {
 export const addUtsavPackage = async (req, res) => {
   const { utsavid, name, start_date, end_date, amount } = req.body;
 
+  // 1. Get the Utsav details first
+  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
+
+  if (!utsav) {
+    return res.status(404).send({ message: 'Utsav not found' });
+  }
+
+  // Convert dates to moment objects
+  const packageStart = moment(start_date);
+  const packageEnd = moment(end_date);
+  const utsavStart = moment(utsav.start_date);
+  const utsavEnd = moment(utsav.end_date);
+
+  // 2. Check if package dates fall within Utsav dates
+  if (packageStart.isBefore(utsavStart, 'day') || packageEnd.isAfter(utsavEnd, 'day')) {
+    return res.status(400).send({
+      message: 'Package dates must be within the Utsav start and end dates'
+    });
+  }
+  // 3. Check if package start is before or same as package end
+  if (packageEnd.isBefore(packageStart, 'day')) {
+    return res.status(400).send({
+      message: 'Package end date cannot be before start date'
+    });
+  }
+  // 4. Check for duplicate package name in the same Utsav
   const alreadyExists = await UtsavPackagesDb.findOne({
     where: {
       utsavid,
@@ -111,12 +137,11 @@ export const addUtsavPackage = async (req, res) => {
     }
   });
 
-  if (alreadyExists)
-    throw new ApiError(
-      400,
-      'Package with this name already exists for the Utsav'
-    );
+  if (alreadyExists) {
+    throw new ApiError(400, 'Package with this name already exists for the Utsav');
+  }
 
+  // 5. Create the package
   const packageData = await UtsavPackagesDb.create({
     utsavid,
     name,
@@ -126,10 +151,9 @@ export const addUtsavPackage = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  return res
-    .status(200)
-    .send({ message: 'Package Created', data: packageData });
+  return res.status(200).send({ message: 'Package Created', data: packageData });
 };
+
 
 const validateUtsav = async (id) => {
   const utsav = await UtsavDb.findByPk(id);
