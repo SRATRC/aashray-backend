@@ -1,4 +1,9 @@
-import { ShibirDb } from '../../models/associations.js';
+import {
+  AdhyayanFeedback,
+  CardDb,
+  ShibirDb,
+  Transactions
+} from '../../models/associations.js';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -10,7 +15,7 @@ import {
   STATUS_CASH_PENDING,
   TYPE_ADHYAYAN,
   ERR_BOOKING_ALREADY_CANCELLED,
-  RESEARCH_CENTRE
+  MSG_FETCH_SUCCESSFUL
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
@@ -22,12 +27,12 @@ import {
   validateAdhyayanBooking,
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
+import { validateCard } from '../../helpers/card.helper.js';
 import database from '../../config/database.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
-import Transactions from '../../models/transactions.model.js';
-import { validateCard } from '../../helpers/card.helper.js';
+import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -140,6 +145,8 @@ export const fetchAdhyayanByLocation = async (req, res) => {
       COUNT(CASE WHEN shibir_booking_db.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_CANCELLED}' THEN 1 END) AS selfcancel_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admin_cancelled_count,
       shibir_db.food_allowed,
       shibir_db.comments,
       shibir_db.status,
@@ -246,11 +253,15 @@ export const fetchAdhyayanBookings = async (req, res) => {
   }
   let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED];
 
-  if (status === 'waiting') {
-    statusToBeIncluded = [STATUS_WAITING];
-  } else if (status === 'pending') {
-    statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
-  }
+if (status === 'waiting') {
+  statusToBeIncluded = [STATUS_WAITING];
+} else if (status === 'pending') {
+  statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
+} else if (status === 'cancelled') {
+  statusToBeIncluded = [STATUS_CANCELLED];
+} else if (status === 'admin cancelled' || status === 'admin_cancelled') {
+  statusToBeIncluded = [STATUS_ADMIN_CANCELLED];
+}
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
@@ -258,26 +269,42 @@ export const fetchAdhyayanBookings = async (req, res) => {
   await validateAdhyayans(shibir_id);
 
   const adhyayanData = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status,t3.name
-    FROM shibir_booking_db AS t1
-    LEFT JOIN card_db AS t2 
-    ON t1.cardno = t2.cardno 
-    LEFT JOIN shibir_db AS t3 
-    ON t1.shibir_id = t3.id 
-    WHERE 
-    t1.shibir_id = :shibirId And
-    t1.status in  (:status);`,
-    {
-      replacements: {
-        shibirId: shibir_id,
-        status: statusToBeIncluded,
-        pageSize: pageSize,
-        page: offset
-      },
-      raw: true,
-      type: QueryTypes.SELECT
-    }
-  );
+  `SELECT 
+      t1.bookingid, 
+      t1.shibir_id, 
+      t1.bookedby, 
+      t1.status, 
+      t2.cardno, 
+      t2.issuedto, 
+      t2.mobno, 
+      t2.gender, 
+      t2.center, 
+      t2.res_status,
+      t3.name,
+      t4.status AS transaction_status
+   FROM shibir_booking_db AS t1
+   LEFT JOIN card_db AS t2 
+      ON t1.cardno = t2.cardno 
+   LEFT JOIN shibir_db AS t3 
+      ON t1.shibir_id = t3.id 
+   LEFT JOIN transactions AS t4
+      ON t1.bookingid = t4.bookingid
+   WHERE 
+      t1.shibir_id = :shibirId 
+      AND t1.status IN (:status)
+   `,
+  {
+    replacements: {
+      shibirId: shibir_id,
+      status: statusToBeIncluded,
+      pageSize,
+      page: offset
+    },
+    raw: true,
+    type: QueryTypes.SELECT
+  }
+);
+
 
   return res
     .status(200)
@@ -322,12 +349,7 @@ export const updateAdhyayan = async (req, res) => {
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
 
-export const adhyayanReport = async (req, res) => {
-  res.status(200).send({ message: 'Fetched Adhyayan Report' });
-};
-
 export const adhyayanWaitlist = async (req, res) => {
-  const { shibir_id, bookingid, status, description } = req.body;
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -522,44 +544,148 @@ export const activateAdhyayan = async (req, res) => {
 };
 
 export const fetchAllAdhyayanList = async (req, res) => {
-  try {
-    const adhyayans = await database.query(
-      `SELECT id, name FROM shibir_db ORDER BY id ASC`,
-      {
-        type: QueryTypes.SELECT,
-        raw: true
-      }
-    );
+  const adhyayans = await database.query(
+    `SELECT id, name FROM shibir_db ORDER BY id ASC`,
+    {
+      type: QueryTypes.SELECT,
+      raw: true
+    }
+  );
 
-    return res.status(200).json({
-      message: 'Fetched adhyayan list',
-      data: adhyayans
-    });
-  } catch (error) {
-    console.error('Error fetching adhyayans:', error);
-    return res.status(500).json({
-      message: 'Failed to fetch adhyayan list',
-      error: error.message
-    });
-  }
+  return res.status(200).json({
+    message: 'Fetched adhyayan list',
+    data: adhyayans
+  });
 };
 
 export const softDeleteShibir = async (req, res) => {
   const { id } = req.params;
 
-  try {
-    const updated = await ShibirDb.update(
-      { status: 'deleted' },
-      { where: { id } }
-    );
+  const updated = await ShibirDb.update(
+    { status: 'deleted' },
+    { where: { id } }
+  );
 
-    if (updated[0] === 0) {
-      return res.status(404).json({ message: 'Shibir not found' });
-    }
-
-    res.status(200).json({ message: 'Shibir marked as deleted' });
-  } catch (error) {
-    console.error('Soft delete error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+  if (updated[0] === 0) {
+    return res.status(404).json({ message: 'Shibir not found' });
   }
+
+  res.status(200).json({ message: 'Shibir marked as deleted' });
+};
+
+// export const getAdhyayanFeedback = async (req, res) => {
+//   const { shibir_id } = req.params;
+//   const page = parseInt(req.query.page) || 1;
+//   const pageSize = parseInt(req.query.page_size) || 20;
+//   const offset = (page - 1) * pageSize;
+
+//   if (!shibir_id) {
+//     throw new ApiError(400, 'Adhyayan ID is required');
+//   }
+
+//   const feedback = await AdhyayanFeedback.findAll({
+//     where: { shibir_id: parseInt(shibir_id) },
+//     include: [
+//       {
+//         model: CardDb,
+//         attributes: ['cardno', 'issuedto', 'center', 'res_status']
+//       },
+//       {
+//         model: ShibirDb,
+//         attributes: [
+//           'id',
+//           'name',
+//           'speaker',
+//           'start_date',
+//           'end_date',
+//           'location'
+//         ]
+//       }
+//     ],
+//     order: [['submitted_at', 'DESC']],
+//     offset,
+//     limit: pageSize
+//   });
+
+//   const totalCount = await AdhyayanFeedback.count({
+//     where: { shibir_id: parseInt(shibir_id) }
+//   });
+
+//   const stats = await getFeedbackStats(parseInt(shibir_id));
+
+//   return res.status(200).send({
+//     message: MSG_FETCH_SUCCESSFUL,
+//     data: {
+//       feedback,
+//       stats,
+//       pagination: {
+//         page,
+//         pageSize,
+//         totalCount,
+//         totalPages: Math.ceil(totalCount / pageSize)
+//       }
+//     }
+//   });
+// };
+
+export const getAdhyayanFeedback = async (req, res) => {
+  const { shibir_id } = req.params;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 20;
+  const offset = (page - 1) * pageSize;
+
+  if (!shibir_id) {
+    throw new ApiError(400, 'Adhyayan ID is required');
+  }
+
+  const feedback = await AdhyayanFeedback.findAll({
+    where: { shibir_id: parseInt(shibir_id) },
+    attributes: [
+      'shibir_id',
+      'cardno',
+      'swadhay_karta_rating',
+      'personal_interaction_rating',
+      'swadhay_karta_suggestions',
+      'raj_adhyayan_interest',
+      'future_topics',
+      'loved_most',
+      'improvement_suggestions',
+      'food_rating',
+      'stay_rating',
+      'submitted_at'
+    ],
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'res_status', 'center'] // added res_status and center
+      },
+      {
+        model: ShibirDb,
+        attributes: ['id', 'name'] // just the name
+      }
+    ],
+    order: [['submitted_at', 'DESC']],
+    offset,
+    limit: pageSize
+  });
+
+  const totalCount = await AdhyayanFeedback.count({
+    where: { shibir_id: parseInt(shibir_id) }
+  });
+
+  const stats = await getFeedbackStats(parseInt(shibir_id));
+
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    data: {
+      feedback,
+      stats,
+      pagination: {
+        page,
+        pageSize,
+        totalCount,
+        totalPages: Math.ceil(totalCount / pageSize)
+      }
+    }
+  });
 };

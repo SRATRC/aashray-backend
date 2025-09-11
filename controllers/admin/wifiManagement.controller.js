@@ -244,70 +244,53 @@ export const updatePermanentCodeRequest = async (req, res) => {
   });
 };
 
+
+function formatDateForMySQL(date) {
+  const pad = (n) => n.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+         `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 export const uploadPerWiFiCodes = async (req, res) => {
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheet = XLSX.utils.sheet_to_json(
-      workbook.Sheets[workbook.SheetNames[0]],
-      { defval: '' }
-    );
+    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
 
-    const formattedRows = [];
+    const updates = sheet
+      .map(row => ({
+        cardno: row.cardno?.toString().trim(),
+        code: row.code?.toString().trim()
+      }))
+      .filter(row => row.cardno && row.code);
 
-    for (const row of sheet) {
-      const timestamp = new Date();
-
-      const cardno = row.cardno?.toString().trim();
-      const code = row.code?.toString().trim();
-
-      if (!cardno || !code) continue; // skip incomplete rows
-
-      formattedRows.push({
-        cardno,
-        code,
-        roombookingid: null,
-        status: 'approved',
-        updated_at: timestamp,
-        reviewed_at: timestamp,
-        reviewed_by: req.user?.username || 'wifiAdmin'
-      });
-    }
-
-    if (formattedRows.length === 0) {
+    if (updates.length === 0) {
       return res.status(400).json({ error: 'No valid rows found.' });
     }
 
-    const incomingCodes = formattedRows.map((row) => row.code);
+    const cases = updates.map(u => `WHEN cardno = '${u.cardno}' THEN '${u.code}'`).join(' ');
+    const cardnos = updates.map(u => `'${u.cardno}'`).join(', ');
 
-    const existingRecords = await PermanentWifiCodes.findAll({
-      where: { code: incomingCodes },
-      attributes: ['code'],
-      raw: true
-    });
+    const now = formatDateForMySQL(new Date());
 
-    const existingCodeSet = new Set(existingRecords.map((r) => r.code));
+    const query = `
+      UPDATE permanent_wifi_codes
+      SET code = CASE ${cases} END,
+          status = 'approved',
+          updatedAt = '${now}',
+          reviewed_at = '${now}',
+          reviewed_by = '${req.user?.username || 'wifiAdmin'}'
+      WHERE cardno IN (${cardnos}) AND status = 'pending' AND code IS NULL
+    `;
 
-    const uniqueRows = formattedRows.filter(
-      (row) => !existingCodeSet.has(row.code)
-    );
-
-    if (uniqueRows.length === 0) {
-      return res.status(200).json({
-        message: 'No new rows to insert. All codes were duplicates.'
-      });
-    }
-
-    await PermanentWifiCodes.bulkCreate(uniqueRows);
+    await PermanentWifiCodes.sequelize.query(query);
 
     res.status(200).json({
-      message: `${uniqueRows.length} new record(s) inserted. ${
-        formattedRows.length - uniqueRows.length
-      } duplicate(s) ignored.`
+      message: `${updates.length} record(s) processed.`
     });
   } catch (err) {
     console.error('Error processing Excel upload:', err);
     res.status(500).json({
-      error: 'Failed to process and store Excel data: ' + err.message
+      error: 'Failed to process and update Excel data: ' + err.message
     });
   }
 };

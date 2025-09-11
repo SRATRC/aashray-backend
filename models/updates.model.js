@@ -1,8 +1,8 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
 
-const SupportTickets = sequelize.define(
-  'SupportTickets',
+const Updates = sequelize.define(
+  'updates',
   {
     id: {
       type: DataTypes.INTEGER,
@@ -10,27 +10,28 @@ const SupportTickets = sequelize.define(
       primaryKey: true,
       autoIncrement: true
     },
-    issued_by: {
+    os: {
+      type: DataTypes.ENUM('android', 'ios'),
+      allowNull: false
+    },
+    version: {
       type: DataTypes.STRING,
+      allowNull: false
+    },
+    mandatory: {
+      type: DataTypes.BOOLEAN,
       allowNull: false,
-      references: {
-        model: 'card_db',
-        key: 'cardno'
-      }
+      defaultValue: false
     },
-    service: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    issue: {
+    releaseNotes: {
       type: DataTypes.TEXT,
-      allowNull: false
+      allowNull: true
     }
   },
   {
-    tableName: 'support_tickets',
+    tableName: 'updates',
     timestamps: true
   }
 );
 
-export default SupportTickets;
+export default Updates;

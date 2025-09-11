@@ -40,8 +40,7 @@ export const FetchUpcoming = async (req, res) => {
        ) AS packages
     FROM utsav_db t1
     JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
-    WHERE t1.start_date > :today
-      AND (t1.registration_deadline IS NULL OR t1.registration_deadline >= :today)
+    WHERE t1.registration_deadline IS NULL OR t1.registration_deadline >= :today
     GROUP BY t1.id
     ORDER BY t1.start_date ASC
     LIMIT :limit
@@ -99,6 +98,7 @@ export const ViewUtsavBookings = async (req, res) => {
        t1.volunteer,
        t1.cardno,
        t1.bookedBy,
+       t1.roomno as stay,
        t5.issuedto AS user_name,
        t1.status,
        t4.status AS transaction_status,
