@@ -14,7 +14,8 @@ import {
   TYPE_FLAT,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_FAILED,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  TYPE_TRAVEL
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
@@ -118,6 +119,19 @@ export async function cancelTransaction(
     card = await validateCard(transaction.cardno);
   }
 
+  if (!admin && getBookingType(transaction) === TYPE_TRAVEL) {
+  // user cancelling travel booking → no credits
+  await transaction.update(
+    {
+      status: STATUS_CANCELLED,
+      updatedBy: user.username,
+    },
+    { transaction: t }
+  );
+  return { credits: 0 };
+}
+
+
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
   var description = transaction.description;
 
@@ -131,34 +145,49 @@ export async function cancelTransaction(
   const bookingType = getBookingType(transaction);
 
   switch (transaction.status) {
-    case STATUS_PAYMENT_COMPLETED:
-    case STATUS_CASH_COMPLETED:
-    case STATUS_PAYMENT_PENDING:
-    case STATUS_CASH_PENDING:
-    case STATUS_PAYMENT_FAILED:
-      if ([TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) || ifMigrated(transaction)) {
-        // for bookings that are not credited, keep txn status as completed for reports
-        if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-          status = transaction.status;
-        }
-      } else if (credits > 0) {
-        await addCredit(user, card, bookingType, credits, t);
-        status = STATUS_CREDITED;
-        description = `credits added: ${credits}`;
+  case STATUS_PAYMENT_COMPLETED:
+  case STATUS_CASH_COMPLETED:
+  case STATUS_PAYMENT_PENDING:
+  case STATUS_CASH_PENDING:
+  case STATUS_PAYMENT_FAILED:
+    if ([TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) || ifMigrated(transaction)) {
+      // for bookings that are not credited, keep txn status as completed for reports
+      if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+        status = transaction.status;
       }
-      break;
+    } else if (credits > 0) {
+      await addCredit(user, card, bookingType, credits, t);
+      status = STATUS_CREDITED;
+      description = `credits added: ${credits}`;
+    }
+    break;
 
-    case STATUS_CANCELLED:
-    case STATUS_ADMIN_CANCELLED:
-    case STATUS_CREDITED:
-      throw new ApiError(
-        400,
-        'Cannot cancel already cancelled or credited transaction'
-      );
-
-    default:
-      throw new ApiError(400, 'Invalid status provided');
+  case STATUS_CANCELLED:
+  if (admin) {
+    // ✅ force credits to full amount if admin chooses to issue credits
+    const creditAmount = transaction.amount + transaction.discount;
+    if (creditAmount > 0) {
+      await addCredit(user, card, bookingType, creditAmount, t);
+      status = STATUS_CREDITED;
+      description = `credits added: ${creditAmount}`;
+    } else {
+      status = STATUS_ADMIN_CANCELLED;
+    }
+  } else {
+    throw new ApiError(400, 'Cannot cancel already cancelled transaction');
   }
+  break;
+  
+  case STATUS_ADMIN_CANCELLED:
+  case STATUS_CREDITED:
+    throw new ApiError(
+      400,
+      'Cannot cancel already admin cancelled or credited transaction'
+    );
+
+  default:
+    throw new ApiError(400, 'Invalid status provided');
+}
 
   await transaction.update(
     {
