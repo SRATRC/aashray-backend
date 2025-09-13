@@ -14,7 +14,8 @@ import {
 import Sequelize, { QueryTypes } from 'sequelize';
 import {
   adminCancelTransaction,
-  createPendingTransaction
+  createPendingTransaction,
+  cancelTransaction
 } from '../../helpers/transactions.helper.js';
 import {
   STATUS_WAITING,
@@ -347,7 +348,7 @@ export const activateUtsav = async (req, res) => {
 };
 
 export const utsavStatusUpdate = async (req, res) => {
-  const { utsav_id, bookingid, status, description } = req.body;
+  const { utsav_id, bookingid, status, description, issueCredits } = req.body;
 
   let newBookingStatus = status;
   console.log('Received status:', status);
@@ -367,87 +368,79 @@ export const utsavStatusUpdate = async (req, res) => {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
-  let transaction = await Transactions.findOne({
-    where: { bookingid: bookingid }
-  });
+  let transaction = await Transactions.findOne({ where: { bookingid } });
 
   switch (status) {
     case STATUS_CONFIRMED:
-  // Confirmed allowed from payment pending or cancelled
-  if (
-    booking.status !== STATUS_PAYMENT_PENDING &&
-    booking.status !== STATUS_CANCELLED
-  ) {
-    throw new ApiError(
-      400,
-      'Confirmed status can only be set from payment pending or cancelled'
-    );
-  }
+      if (
+        booking.status !== STATUS_PAYMENT_PENDING &&
+        booking.status !== STATUS_CANCELLED
+      ) {
+        throw new ApiError(
+          400,
+          'Confirmed status can only be set from payment pending or cancelled'
+        );
+      }
 
-  if (booking.status === STATUS_WAITING) {
-    await reserveUtsavSeat(utsav, t);
-  }
+      if (booking.status === STATUS_WAITING) {
+        await reserveUtsavSeat(utsav, t);
+      }
 
-  if (!transaction) {
-    const cardno = booking.bookedBy || booking.cardno;
-    const card = await validateCard(cardno);
+      if (!transaction) {
+        const cardno = booking.bookedBy || booking.cardno;
+        const card = await validateCard(cardno);
 
-    transaction = await createPendingTransaction(
-      card,
-      booking,
-      TYPE_UTSAV,
-      utsav.amount,
-      req.user.username,
-      t,
-      true
-    );
-  } else {
-    if (transaction.status === STATUS_CANCELLED) {
-  await transaction.update(
-    {
-      status: STATUS_PAYMENT_PENDING,
-      updatedBy: req.user.username,
-      description: description || 'Reopened after cancellation'
-    },
-    { transaction: t }
-  );
-} else if (transaction.status === STATUS_CONFIRMED) {
-  console.log('Transaction already confirmed. No action needed.');
-} else if (transaction.status === STATUS_PAYMENT_PENDING) {
-  await transaction.update(
-    {
-      status: STATUS_PAYMENT_COMPLETED,  // ✅ add this line
-      description: description,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-}
-
-  }
-  break;
+        transaction = await createPendingTransaction(
+          card,
+          booking,
+          TYPE_UTSAV,
+          utsav.amount,
+          req.user.username,
+          t,
+          true
+        );
+      } else {
+        if (transaction.status === STATUS_CANCELLED) {
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_PENDING,
+              updatedBy: req.user.username,
+              description: description || 'Reopened after cancellation'
+            },
+            { transaction: t }
+          );
+        } else if (transaction.status === STATUS_CONFIRMED) {
+          console.log('Transaction already confirmed. No action needed.');
+        } else if (transaction.status === STATUS_PAYMENT_PENDING) {
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_COMPLETED,
+              description: description,
+              updatedBy: req.user.username
+            },
+            { transaction: t }
+          );
+        }
+      }
+      break;
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status !== STATUS_WAITING) {
         throw new ApiError(400, 'Payment Pending can only be set from waiting');
       }
 
-      // Refresh transaction from DB just in case (to avoid stale object)
-      transaction = await Transactions.findOne({
+          await reserveUtsavSeat(utsav, t);
+
+          transaction = await Transactions.findOne({
         where: { bookingid: booking.bookingid },
         transaction: t
       });
 
-      if (
-        !transaction ||
-        ['credited', 'cancelled'].includes(transaction.status)
-      ) {
-        const packageData = await UtsavPackagesDb.findByPk(booking.packageid, {
-          transaction: t
-        });
+      if (!transaction || ['credited', 'cancelled'].includes(transaction.status)) {
+        const packageData = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
         if (!packageData) throw new Error('Utsav Package not found');
 
-        const cardnoToUse = booking.bookedBy || booking.cardno; // 👈 Use bookedBy if present
+        const cardnoToUse = booking.bookedBy || booking.cardno;
 
         const [existingTransaction, created] = await Transactions.findOrCreate({
           where: { bookingid: booking.bookingid },
@@ -457,109 +450,62 @@ export const utsavStatusUpdate = async (req, res) => {
             amount: packageData.amount,
             discount: 0,
             razorpay_order_id: null,
-            description: req.body.description || 'Payment pending for Utsav',
+            description: description || 'Payment pending for Utsav',
             status: STATUS_PAYMENT_PENDING,
             updatedBy: req.user.username || 'admin'
           },
           transaction: t
         });
 
-        if (!created) {
-          if (['credited', 'cancelled'].includes(existingTransaction.status)) {
-            transaction = await Transactions.create(
-              {
-                bookingid: booking.bookingid,
-                cardno: cardnoToUse,
-                category: TYPE_UTSAV,
-                amount: packageData.amount,
-                discount: 0,
-                razorpay_order_id: null,
-                description:
-                  req.body.description || 'Payment pending for Utsav',
-                status: STATUS_PAYMENT_PENDING,
-                updatedBy: req.user.username || 'admin'
-              },
-              { transaction: t }
-            );
-          } else {
-            console.warn(
-              'Duplicate transaction avoided: already exists and active.'
-            );
-            transaction = existingTransaction;
-          }
-        } else {
-          transaction = existingTransaction;
-        }
-      } else {
-        console.warn('Valid transaction already exists. Skipping creation.');
+        transaction = created ? existingTransaction : existingTransaction;
       }
-
       newBookingStatus = STATUS_PAYMENT_PENDING;
       break;
 
     case STATUS_ADMIN_CANCELLED:
-      console.log('>> Admin cancelling booking');
+  console.log('>> Admin cancelling booking');
 
-      // Admin Cancelled allowed from waiting, payment pending, or confirmed only
-      if (
-        booking.status !== STATUS_WAITING &&
-        booking.status !== STATUS_PAYMENT_PENDING &&
-        booking.status !== STATUS_CONFIRMED
-      ) {
-        throw new ApiError(
-          400,
-          'Admin Cancelled can only be set from waiting, payment pending or confirmed'
-        );
-      }
+  if (
+    booking.status !== STATUS_WAITING &&
+    booking.status !== STATUS_PAYMENT_PENDING &&
+    booking.status !== STATUS_CONFIRMED &&
+    booking.status !== STATUS_CANCELLED
+    ) {
+    throw new ApiError(
+      400,
+      'Admin Cancelled can only be set from waiting, payment pending, confirmed or completed'
+    );
+  }
 
-      if (
-        booking.status === STATUS_CONFIRMED ||
-        booking.status === STATUS_PAYMENT_PENDING
-      ) {
-        console.log('Booking.utsav_id:', booking.utsavid);
-        const utsav = await UtsavDb.findByPk(booking.utsavid, {
-          transaction: t
-        });
-        if (!utsav) {
-          throw new ApiError(404, 'Utsav not found');
-        }
+  if (
+    booking.status === STATUS_CONFIRMED ||
+    booking.status === STATUS_PAYMENT_PENDING 
+    ) {
+    const utsavRecord = await UtsavDb.findByPk(booking.utsavid, { transaction: t });
+    if (!utsavRecord) throw new ApiError(404, 'Utsav not found');
+    await openUtsavSeat(utsavRecord, booking.cardno, req.user.username, t);
+  }
 
-        await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
-      }
-
-      //       if (transaction && !['admin cancelled'].includes(transaction.status)) {
-      //   await adminCancelTransaction(req.user, transaction, t);
-      // } else {
-      //   console.warn('Skipping transaction cancellation - already cancelled or credited');
-      // }
-      console.log(
-        '>> Transaction object:',
-        transaction?.toJSON?.() || transaction
+  if (transaction && ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(transaction.status)) {
+    if (issueCredits) {
+      // ✅ Issue credits only if admin selected yes
+      await cancelTransaction(req.user, null, transaction, t, true);
+      console.log('>> Credits issued for admin cancellation');
+    } else {
+      await transaction.update(
+        { status: STATUS_ADMIN_CANCELLED, updatedBy: req.user.username },
+        { transaction: t }
       );
-      console.log(
-        '>> Transaction status before admin cancel check:',
-        transaction?.status
-      );
+      console.log('>> Transaction marked admin cancelled without credits');
+    }
+  } else {
+    console.log('>> Transaction already credited/cancelled/admin-cancelled, skipping');
+  }
 
-      if (
-        transaction &&
-        ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(
-          transaction.status
-        )
-      ) {
-        await adminCancelTransaction(req.user, null, transaction, t);
-        console.log('>> Cancelling transaction...');
-      } else {
-        console.warn(
-          'Skipping transaction cancellation - already credited or cancelled'
-        );
-      }
-
-      newBookingStatus = STATUS_ADMIN_CANCELLED;
-      break;
+  newBookingStatus = STATUS_ADMIN_CANCELLED;
+  break;
 
     case STATUS_WAITING:
-      // No direct transitions back to waiting allowed
       throw new ApiError(400, 'Invalid status transition to waiting');
 
     default:
@@ -567,10 +513,7 @@ export const utsavStatusUpdate = async (req, res) => {
   }
 
   await booking.update(
-    {
-      status: newBookingStatus,
-      updatedBy: req.user.username
-    },
+    { status: newBookingStatus, updatedBy: req.user.username },
     { transaction: t }
   );
 
