@@ -4,71 +4,6 @@ import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 
-//FIXME: Add validations and throw informative error messages
-// export const createCard = async (req, res) => {
-//   const {
-//     cardno,
-//     issuedto,
-//     gender,
-//     dob,
-//     mobno,
-//     email,
-//     idType,
-//     idNo,
-//     address,
-//     country,
-//     state,
-//     city,
-//     pin,
-//     centre,
-//     res_status
-//   } = req.body;
-
-//   const alreadyExists = await CardDb.findOne({
-//     where: { cardno: cardno }
-//   });
-
-//   if (alreadyExists) {
-//     throw new ApiError(400, 'Card already exists');
-//   }
-
-
-// try {
-//   const user = await CardDb.create({
-//     cardno: cardno,
-//     issuedto: issuedto,
-//     gender: gender,
-//     dob: dob,
-//     mobno: mobno,
-//     email: email,
-//     idType: idType,
-//     idNo: idNo,
-//     address: address,
-//     country: country,
-//     state: state,
-//     city: city,
-//     pin: pin,
-//     center: centre,
-//     status: STATUS_OFFPREM,
-//     res_status: res_status,
-//     updatedBy: req.user.username
-//   });
-
-//   if (!user)
-//     throw new ApiError(500, 'Error occurred while registering the card');
-
-//   return res
-//     .status(200)
-//     .send({ message: 'Successfully registered card', data: user });
-
-// } catch (error) {
-//   console.error("Sequelize Validation Error:", error.errors || error);
-//   return res
-//     .status(500)
-//     .json({ message: "Validation error", details: error.errors || error.message });
-// }}
-
-
 export const createCard = async (req, res) => {
   const {
     cardno,
@@ -347,4 +282,58 @@ export const fetchTotalTransactions = async (req, res) => {
   return res
     .status(200)
     .send({ message: 'fetched all user transactions', data: results });
+};
+
+import bcrypt from 'bcryptjs';
+
+// export const resetPasswordDefault = async (req, res) => {
+//   const { cardno } = req.body;
+
+//   if (!cardno) {
+//     throw new ApiError(400, 'cardno is required');
+//   }
+
+//   const card = await CardDb.findOne({ where: { cardno } });
+
+//   if (!card) {
+//     throw new ApiError(404, 'Card not found');
+//   }
+
+//   // ✅ Hash the default password
+//   const salt = bcrypt.genSaltSync(10);
+//   const hash = bcrypt.hashSync('vitraag', salt);
+
+//   await CardDb.update(
+//     { password: hash },
+//     { where: { cardno } }
+//   );
+
+//   return res.status(200).json({ message: 'Password reset successfully to default.' });
+// };
+
+
+export const resetPasswordDefault = async (req, res) => {
+  const { cardno } = req.body;
+
+  if (!cardno) {
+    throw new ApiError(400, 'cardno is required');
+  }
+
+  const card = await CardDb.findOne({ where: { cardno } });
+
+  if (!card) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  // ✅ Use the same default value defined in the model
+  const defaultPasswordHash = CardDb.rawAttributes.password.defaultValue;
+
+  await CardDb.update(
+    { password: defaultPasswordHash },
+    { where: { cardno } }
+  );
+
+  return res
+    .status(200)
+    .json({ message: 'Password reset successfully to default.' });
 };
