@@ -83,7 +83,7 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
 }
 
 export async function validateAdhyayans(...shibirIds) {
-  const sevenDaysAgo = moment().subtract(7, 'days').format('YYYY-MM-DD');
+  const sevenDaysAgo = moment().subtract(15, 'days').format('YYYY-MM-DD');
 
   const shibirs = await ShibirDb.findAll({
     where: {
