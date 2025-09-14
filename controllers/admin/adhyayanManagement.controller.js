@@ -156,7 +156,7 @@ export const fetchAdhyayanByLocation = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 15 DAY
       AND shibir_db.location = :location
     GROUP BY 
       shibir_db.id,
