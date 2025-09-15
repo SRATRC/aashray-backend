@@ -150,6 +150,8 @@ export const fetchAdhyayanByLocation = async (req, res) => {
       COUNT(CASE WHEN shibir_booking_db.status IN ('confirmed', 'cash completed') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_CANCELLED}' THEN 1 END) AS selfcancel_count,
+      COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admin_cancelled_count,
       shibir_db.food_allowed,
       shibir_db.comments,
       shibir_db.status,
@@ -159,7 +161,7 @@ export const fetchAdhyayanByLocation = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 15 DAY
       AND shibir_db.location = :location
     GROUP BY 
       shibir_db.id,
@@ -256,11 +258,15 @@ export const fetchAdhyayanBookings = async (req, res) => {
   }
   let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED];
 
-  if (status === 'waiting') {
-    statusToBeIncluded = [STATUS_WAITING];
-  } else if (status === 'pending') {
-    statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
-  }
+if (status === 'waiting') {
+  statusToBeIncluded = [STATUS_WAITING];
+} else if (status === 'pending') {
+  statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
+} else if (status === 'cancelled') {
+  statusToBeIncluded = [STATUS_CANCELLED];
+} else if (status === 'admin cancelled' || status === 'admin_cancelled') {
+  statusToBeIncluded = [STATUS_ADMIN_CANCELLED];
+}
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
@@ -268,26 +274,42 @@ export const fetchAdhyayanBookings = async (req, res) => {
   await validateAdhyayans(shibir_id);
 
   const adhyayanData = await database.query(
-    `SELECT t1.bookingid, t1.shibir_id, t1.bookedby, t1.status, t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status,t3.name
-    FROM shibir_booking_db AS t1
-    LEFT JOIN card_db AS t2 
-    ON t1.cardno = t2.cardno 
-    LEFT JOIN shibir_db AS t3 
-    ON t1.shibir_id = t3.id 
-    WHERE 
-    t1.shibir_id = :shibirId And
-    t1.status in  (:status);`,
-    {
-      replacements: {
-        shibirId: shibir_id,
-        status: statusToBeIncluded,
-        pageSize: pageSize,
-        page: offset
-      },
-      raw: true,
-      type: QueryTypes.SELECT
-    }
-  );
+  `SELECT 
+      t1.bookingid, 
+      t1.shibir_id, 
+      t1.bookedby, 
+      t1.status, 
+      t2.cardno, 
+      t2.issuedto, 
+      t2.mobno, 
+      t2.gender, 
+      t2.center, 
+      t2.res_status,
+      t3.name,
+      t4.status AS transaction_status
+   FROM shibir_booking_db AS t1
+   LEFT JOIN card_db AS t2 
+      ON t1.cardno = t2.cardno 
+   LEFT JOIN shibir_db AS t3 
+      ON t1.shibir_id = t3.id 
+   LEFT JOIN transactions AS t4
+      ON t1.bookingid = t4.bookingid
+   WHERE 
+      t1.shibir_id = :shibirId 
+      AND t1.status IN (:status)
+   `,
+  {
+    replacements: {
+      shibirId: shibir_id,
+      status: statusToBeIncluded,
+      pageSize,
+      page: offset
+    },
+    raw: true,
+    type: QueryTypes.SELECT
+  }
+);
+
 
   return res
     .status(200)
@@ -622,6 +644,61 @@ export const softDeleteShibir = async (req, res) => {
   res.status(200).json({ message: 'Shibir marked as deleted' });
 };
 
+// export const getAdhyayanFeedback = async (req, res) => {
+//   const { shibir_id } = req.params;
+//   const page = parseInt(req.query.page) || 1;
+//   const pageSize = parseInt(req.query.page_size) || 20;
+//   const offset = (page - 1) * pageSize;
+
+//   if (!shibir_id) {
+//     throw new ApiError(400, 'Adhyayan ID is required');
+//   }
+
+//   const feedback = await AdhyayanFeedback.findAll({
+//     where: { shibir_id: parseInt(shibir_id) },
+//     include: [
+//       {
+//         model: CardDb,
+//         attributes: ['cardno', 'issuedto', 'center', 'res_status']
+//       },
+//       {
+//         model: ShibirDb,
+//         attributes: [
+//           'id',
+//           'name',
+//           'speaker',
+//           'start_date',
+//           'end_date',
+//           'location'
+//         ]
+//       }
+//     ],
+//     order: [['submitted_at', 'DESC']],
+//     offset,
+//     limit: pageSize
+//   });
+
+//   const totalCount = await AdhyayanFeedback.count({
+//     where: { shibir_id: parseInt(shibir_id) }
+//   });
+
+//   const stats = await getFeedbackStats(parseInt(shibir_id));
+
+//   return res.status(200).send({
+//     message: MSG_FETCH_SUCCESSFUL,
+//     data: {
+//       feedback,
+//       stats,
+//       pagination: {
+//         page,
+//         pageSize,
+//         totalCount,
+//         totalPages: Math.ceil(totalCount / pageSize)
+//       }
+//     }
+//   });
+// };
+
 export const getAdhyayanFeedback = async (req, res) => {
   const { shibir_id } = req.params;
   const page = parseInt(req.query.page) || 1;
@@ -634,21 +711,28 @@ export const getAdhyayanFeedback = async (req, res) => {
 
   const feedback = await AdhyayanFeedback.findAll({
     where: { shibir_id: parseInt(shibir_id) },
+    attributes: [
+      'shibir_id',
+      'cardno',
+      'swadhay_karta_rating',
+      'personal_interaction_rating',
+      'swadhay_karta_suggestions',
+      'raj_adhyayan_interest',
+      'future_topics',
+      'loved_most',
+      'improvement_suggestions',
+      'food_rating',
+      'stay_rating',
+      'submitted_at'
+    ],
     include: [
       {
         model: CardDb,
-        attributes: ['cardno', 'issuedto', 'center', 'res_status']
+        attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'res_status', 'center'] // added res_status and center
       },
       {
         model: ShibirDb,
-        attributes: [
-          'id',
-          'name',
-          'speaker',
-          'start_date',
-          'end_date',
-          'location'
-        ]
+        attributes: ['id', 'name'] // just the name
       }
     ],
     order: [['submitted_at', 'DESC']],

@@ -16,7 +16,7 @@ export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
-export const FEEDBACK_ELIGIBILITY_HOUR = 19;
+export const FEEDBACK_ELIGIBILITY_HOUR = 18;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
@@ -100,6 +100,7 @@ export const ROLE_AVT_ADMIN = 'avtAdmin';
 export const ROLE_WIFI_ADMIN = 'wifiAdmin';
 export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
+export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

@@ -19,7 +19,8 @@ import {
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
-  createPendingTransaction
+  createPendingTransaction,
+  cancelTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
@@ -407,7 +408,7 @@ export const fetchBookingForDriver = async (req, res) => {
 };
 
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments, description, charges } = req.body;
+  const { bookingid, status, adminComments,  description, charges, issueCredits } = req.body;
   let newBookingStatus = status;
 
   const t = await database.transaction();
@@ -427,11 +428,15 @@ export const updateBookingStatus = async (req, res) => {
   });
 
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+
   if (status == booking.status)
-    throw new ApiError(400, 'Status is same as before');
-  if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
+  throw new ApiError(400, 'Status is same as before');
+
+if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
+  if (!(booking.status === STATUS_CANCELLED && status === STATUS_ADMIN_CANCELLED)) {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
+}
 
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
@@ -458,12 +463,38 @@ export const updateBookingStatus = async (req, res) => {
       }
       break;
 
-    case STATUS_ADMIN_CANCELLED:
-      if (transaction) {
-        await adminCancelTransaction(req.user, bookedByCard, transaction, t);
-        updateWaitingTravelBooking(booking.date);
+  case STATUS_ADMIN_CANCELLED:
+  if (transaction) {
+    if (transaction.status === STATUS_CANCELLED) {
+      // user had cancelled, now admin upgrades it
+      if (issueCredits === 'yes') {
+        await cancelTransaction(req.user, bookedByCard, transaction, t, true);
+      } else {
+        await transaction.update(
+          {
+            status: STATUS_ADMIN_CANCELLED,
+            updatedBy: req.user.username,
+          },
+          { transaction: t }
+        );
       }
-      break;
+    } else {
+      // normal admin cancel flow
+      if (issueCredits === 'yes') {
+        await cancelTransaction(req.user, bookedByCard, transaction, t, true);
+      } else {
+        await transaction.update(
+          {
+            status: STATUS_ADMIN_CANCELLED,
+            updatedBy: req.user.username,
+          },
+          { transaction: t }
+        );
+      }
+    }
+    updateWaitingTravelBooking(booking.date);
+  }
+  break;
 
     case STATUS_SEATSFULL_CANCELLED:
       if (transaction) {
@@ -593,3 +624,4 @@ export const updateTransactionStatus = async (req, res) => {
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
+

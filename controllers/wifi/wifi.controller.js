@@ -2,7 +2,9 @@ import {
   FlatBooking,
   RoomBooking,
   WifiDb,
-  PermanentWifiCodes
+  PermanentWifiCodes,
+  UtsavBooking,
+  UtsavPackagesDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_CHECKEDIN,
@@ -112,16 +114,33 @@ const fetchBookings = async (cardno) => {
     status: ROOM_STATUS_CHECKEDIN
   };
 
-  const [isRoomCheckedin, isFlatCheckedin] = await Promise.all([
-    RoomBooking.findOne({ where: commonWhereClause }),
-    FlatBooking.findOne({ where: commonWhereClause })
-  ]);
+  const [isRoomCheckedin, isFlatCheckedin, isUtsavCheckedin] =
+    await Promise.all([
+      RoomBooking.findOne({ where: commonWhereClause }),
+      FlatBooking.findOne({ where: commonWhereClause }),
+      UtsavBooking.findOne({
+        include: [
+          {
+            model: UtsavPackagesDb,
+            attributes: ['start_date', 'end_date'],
+            where: {
+              end_date: { [Sequelize.Op.gte]: today }
+            },
+            required: true
+          }
+        ],
+        where: {
+          cardno: cardno,
+          status: ROOM_STATUS_CHECKEDIN
+        }
+      })
+    ]);
 
-  if (!isRoomCheckedin && !isFlatCheckedin) {
+  if (!isRoomCheckedin && !isFlatCheckedin && !isUtsavCheckedin) {
     return null;
   }
 
-  return isRoomCheckedin || isFlatCheckedin;
+  return isRoomCheckedin || isFlatCheckedin || isUtsavCheckedin;
 };
 
 export const requestPermanentCode = async (req, res) => {

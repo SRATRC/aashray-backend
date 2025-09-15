@@ -25,7 +25,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCard, validateCards } from './card.helper.js';
 import ApiError from '../utils/ApiError.js';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import { sendDualUserNotifications } from './notification.helper.js';
 
@@ -85,7 +85,7 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
 }
 
 export async function validateAdhyayans(...shibirIds) {
-  const sevenDaysAgo = moment().subtract(7, 'days').format('YYYY-MM-DD');
+  const sevenDaysAgo = moment().subtract(15, 'days').format('YYYY-MM-DD');
 
   const shibirs = await ShibirDb.findAll({
     where: {
@@ -307,11 +307,13 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
     throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
   }
 
-  const now = moment();
+  const now = moment().tz('Asia/Kolkata');
   const feedbackStartDate = moment(adhyayan.end_date)
+    .tz('Asia/Kolkata')
     .hour(FEEDBACK_ELIGIBILITY_HOUR)
     .minute(0)
     .second(0);
+
   // Check if feedback period has started
   if (now.isBefore(feedbackStartDate)) {
     throw new ApiError(400, ERR_ADHYAYAN_NOT_COMPLETED);
