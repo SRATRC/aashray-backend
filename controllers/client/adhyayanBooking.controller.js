@@ -18,7 +18,10 @@ import {
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
 import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { sendNotification } from '../../utils/sendNotification.js';
+import {
+  getOtherBookingUser,
+  notifyCardno
+} from '../../helpers/notification.helper.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
@@ -170,20 +173,16 @@ export const CancelShibir = async (req, res) => {
     }
   });
 
-  // Call the refactored utility function
-  if (req.user.pushToken) {
-    await sendNotification([
-      {
-        token: req.user.pushToken,
-        title: 'Booking Cancelled',
-        body: `Your booking for "${adhyayan.name}" has been cancelled.`,
-        screen: 'CancelledBookings',
-        data: {
-          shibir_id: adhyayan.id,
-          status: 'cancelled'
-        }
-      }
-    ]);
+  if (booking.bookedBy) {
+    const other = getOtherBookingUser(booking, req.user.cardno);
+    if (other) {
+      const title = 'Adhyayan Booking Cancelled';
+      const body =
+        req.user.cardno === booking.cardno
+          ? `booking of "${adhyayan.name}" has been cancelled for ${req.user.issuedto}.`
+          : `Your booking of "${adhyayan.name}" has been cancelled.`;
+      notifyCardno(other, { title, body, screen: '/bookings' });
+    }
   }
 
   return res.status(200).send({ message: 'Shibir booking cancelled' });
