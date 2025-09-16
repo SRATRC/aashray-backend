@@ -19,25 +19,22 @@
             <div class="details">
                 <p class="section-title"><strong>Raj Utsav Booking:</strong></p>
                 <table>
-                    <thead> <tr>
-                            <th>BookingId</th>
-                            <th>Utsav Name</th>
-                            <th>Name</th>     
-                            <th>Start Date</th>
-                            <th>End Date</th> 
-                            <th>Package</th> 
-                            <th>Status</th>
-                            </tr>
-                    </thead>
                     <tbody> {{#each utsavBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{utsavname}}</td>
-                            <td>{{name}}</td>
-                            <td>{{startdate}}</td>
-                            <td>{{enddate}}</td>
-                            <td>{{package}}</td>
-                            <td><b><span style="color: blue;">{{status}}</span></b></td>
+                            <td><strong>BookingId:</strong> {{bookingid}}
+                                <br>
+                                <strong>Utsav Name:</strong> {{utsavname}}
+                                <br>
+                                <strong>Name:</strong> {{name}}
+                                <br>
+                                <strong>tart Date:</strong> {{startdate}}
+                                <br>
+                                <strong>End Date:</strong> {{enddate}}
+                                <br>
+                                <strong>Package:</strong> {{package}}
+                                <br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                            </td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -50,21 +47,19 @@
             <div class="details">
                 <p class="section-title"><strong>Raj Sharan - Room Booking:</strong></p>
                 <table>
-                    <thead> <tr>
-                            <th>BookingId</th>
-                            <th>Name</th>
-                            <th>Checkin</th>
-                            <th>Checkout</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
+                    
                     <tbody> {{#each roomBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{checkin}}</td>
-                            <td>{{checkout}}</td>
-                            <td><span style="color: blue;">{{status}}</span></td>
+                            <td><strong></strong>BookingId:</strong> {{bookingid}}
+                                <br>
+                                <strong>Name:</strong> {{name}}
+                                <br>
+                                <strong>Checkin:</strong> {{checkin}}
+                                <br>
+                                <strong>Checkout:</strong> {{checkout}}
+                                <br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                                </td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -76,25 +71,22 @@
             <div class="details">
                  <p class="section-title"><strong>Raj Sharan - Flat Booking:</strong></p>
                  <table>
-                     <thead>
-                        <tr>
-                            <th>BookingId</th>
-                            <th>Name</th>
-                            <th>Flat No.</th>
-                            <th>Checkin</th>
-                            <th>Checkout</th>
-                            <th>Status</th>
-                        </tr>
-                     </thead>
+                     
                      <tbody>
                         {{#each flatBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{flatno}}</td>
-                            <td>{{checkin}}</td>
-                            <td>{{checkout}}</td>
-                            <td><span style="color: blue;">{{status}}</span></td>
+                            <td><strong>BookingId:</strong> {{bookingid}}
+                                <br>
+                                <strong>Name:</strong> {{name}}
+                                <br>
+                                <strong>Flat No.:</strong> {{flatno}}
+                                <br>
+                                <strong>Checkin:</strong> {{checkin}}
+                                <br>
+                                <strong>Checkout:</strong> {{checkout}}
+                                <br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                                </td>
                         </tr>
                         {{/each}}
                      </tbody>
@@ -106,27 +98,23 @@
              <div class="details" >
                 <p class="section-title"><strong>Raj Adhyayan Booking:</strong></p>
                 <table>
-                   <thead>
-                        <tr>
-                           <th>BookingId</th>
-                           <th>Name</th>
-                           <th>Adhyayan Name</th>
-                           <th>Speaker</th>
-                           <th>Start Date</th>
-                           <th>End Date</th>
-                           <th>Status</th>
-                        </tr>
-                   </thead>
                    <tbody>
                      {{#each adhyanBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{adhyayanname}}</td>
-                            <td>{{speaker}}</td>
-                            <td>{{startdate}}</td>
-                            <td>{{enddate}}</td>
-                            <td><span style="color: blue;">{{status}}</span></td>
+                            <td><strong>BookingId:</strong> {{bookingid}}
+                                <br>
+                                <strong>Name:</strong> {{name}}
+                                <br>
+                                <strong>Adhyayan Name:</strong> {{adhyayanname}}
+                                <br>
+                                <strong>Speaker:</strong> {{speaker}}
+                                <br>
+                                <strong>Start Date:</strong> {{startdate}}
+                                <br>
+                                <strong>End Date:</strong> {{enddate}}
+                                <br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                                </td>
                         </tr>
                     {{/each}}
                    </tbody>
@@ -142,25 +130,21 @@
              <div class="details" >
                 <p class="section-title"><strong>Raj Pravas - Travel Booking:</strong></p>
                 <table>
-                   <thead>
-                       <tr>
-                           <th>BookingId</th>
-                           <th>Name</th>
-                           <th>Date</th>
-                           <th>Pickup Point</th>
-                           <th>Dropoff Point</th>
-                           <th>Status</th>
-                       </tr>
-                   </thead>
                    <tbody>
                      {{#each travelBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{date}}</td>
-                            <td>{{pickuppoint}}</td>
-                            <td>{{dropoffpoint}}</td>
-                            <td><b><span style="color: blue;">{{status}}</span></b></td>
+                            <td><strong>BookingId:</strong> {{bookingid}}
+                                <br>
+                                <strong>Name:</strong> {{name}}
+                                <br>
+                                <strong>Date:</strong> {{date}}
+                                <br>
+                                <strong>Pickup Point:</strong> {{pickuppoint}}
+                                <br>
+                                <strong>Dropoff Point:</strong> {{dropoffpoint}}
+                                <br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                                </td>
                         </tr>
                     {{/each}}
                    </tbody>
