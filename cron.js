@@ -20,6 +20,7 @@ import FlatBooking from './models/flat_booking.model.js';
 import { Sequelize } from 'sequelize';
 import Transactions from './models/transactions.model.js';
 import ShibirDb from './models/shibir_db.model.js';
+import UtsavDb from './models/utsav_db.model.js';
 import { sendCancellationEmail } from './helpers/mailer.helper.js';
 import {
   getBooking,
@@ -27,7 +28,7 @@ import {
   getBookingTypeFromBooking
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
-
+import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -123,6 +124,12 @@ async function cancelBookings(systemUser, bookings, userBookingIds, t) {
           where: { id: booking.shibir_id }
         });
         await openAdhyayanSeat(adhyayan, systemUser.username, t);
+        break;
+        case TYPE_UTSAV:
+        const utsav = await UtsavDb.findOne({
+          where: { id: booking.utsavid }
+        });
+        await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
         break;
     }
 
