@@ -125,7 +125,7 @@ async function cancelBookings(systemUser, bookings, userBookingIds, t) {
         });
         await openAdhyayanSeat(adhyayan, systemUser.username, t);
         break;
-        case TYPE_UTSAV:
+      case TYPE_UTSAV:
         const utsav = await UtsavDb.findOne({
           where: { id: booking.utsavid }
         });
