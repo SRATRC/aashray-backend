@@ -11,7 +11,8 @@ import {
 import {
   UtsavDb,
   UtsavPackagesDb,
-  UtsavBooking
+  UtsavBooking,
+  CardDb
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -21,7 +22,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import database from '../config/database.js';
-
+import sendMail from '../utils/sendMail.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
@@ -278,4 +279,29 @@ export async function validateUtsavPackage(packageId, utsavId) {
   }
 
   return packageData;
+}
+
+export async function sendUtsavBookingUpdateEmail(booking, utsav) {
+  
+  const bookedByCard = booking.bookedBy ? await validateCard(booking.bookedBy) : null;
+  const card = await CardDb.findOne({
+    where: { cardno: booking.cardno }
+  });
+
+  if (card && card.email) {
+    sendMail({
+      email: card.email,
+      cc: bookedByCard ? bookedByCard.email : null,
+      subject: 'Utsav Booking Updated',
+      template: 'utsavUpdate',    
+      context: {
+        name: card.issuedto,
+        bookingid: booking.bookingid,
+        status: booking.status,
+        utsavName: utsav.name,
+        utsavStartDate: utsav.start_date,
+        utsavEndDate: utsav.end_date
+      }
+    });
+  }
 }

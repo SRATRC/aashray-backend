@@ -11,6 +11,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
+  TYPE_UTSAV,
   TYPE_FOOD
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
@@ -20,7 +21,9 @@ import FlatBooking from './models/flat_booking.model.js';
 import { Sequelize } from 'sequelize';
 import Transactions from './models/transactions.model.js';
 import ShibirDb from './models/shibir_db.model.js';
+import UtsavDb from './models/utsav_db.model.js';
 import { sendCancellationEmail } from './helpers/mailer.helper.js';
+import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
 import {
   getBooking,
   getBookingType,
@@ -123,6 +126,12 @@ async function cancelBookings(systemUser, bookings, userBookingIds, t) {
           where: { id: booking.shibir_id }
         });
         await openAdhyayanSeat(adhyayan, systemUser.username, t);
+        break;
+      case TYPE_UTSAV:
+        const utsav = await UtsavDb.findOne({
+          where: { id: booking.utsavid }
+        });
+        await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
         break;
     }
 
