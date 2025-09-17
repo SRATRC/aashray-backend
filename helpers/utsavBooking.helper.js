@@ -282,8 +282,14 @@ export async function validateUtsavPackage(packageId, utsavId) {
 }
 
 export async function sendUtsavBookingUpdateEmail(booking, utsav) {
+  let bookedByCard = null;
   
-  const bookedByCard = booking.bookedBy ? await validateCard(booking.bookedBy) : null;
+  if (booking.bookedBy) {
+  bookedByCard = await CardDb.findOne({
+    where: { cardno: booking.bookedBy }
+  });
+  }
+
   const card = await CardDb.findOne({
     where: { cardno: booking.cardno }
   });
