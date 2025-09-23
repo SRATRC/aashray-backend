@@ -48,7 +48,10 @@ import {
   validateUtsavs,
   bookUtsavForMumukshus
 } from '../../helpers/utsavBooking.helper.js';
-import { bookAdhyayanForMumukshus, checkAdhyayanAvailabilityForMumukshus } from '../../helpers/adhyayanBooking.helper.js';
+import {
+  bookAdhyayanForMumukshus,
+  checkAdhyayanAvailabilityForMumukshus
+} from '../../helpers/adhyayanBooking.helper.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -84,7 +87,9 @@ export const guestBooking = async (req, res) => {
   }
 
   var order = null;
-  if (req.user.country == 'India' && amount > 0) {
+  const payLater = req.body.pay_later === true;
+
+  if (amount > 0 && !payLater) {
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
@@ -102,12 +107,7 @@ export const guestBooking = async (req, res) => {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(
-        cardno,
-        bookings,
-        req.user,
-        BOOKING_STATUS_PENDING
-      );
+      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
     }
   }
   let message = MSG_BOOKING_SUCCESSFUL;
@@ -151,7 +151,15 @@ export const validateBooking = async (req, res) => {
 
   return res.status(200).send({ data: response });
 };
-async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMap, transactionIds) {
+async function book(
+  body,
+  data,
+  t,
+  user,
+  userBookingIdMap,
+  waitingBookingCountMap,
+  transactionIds
+) {
   let amount = 0;
 
   switch (data.booking_type) {
@@ -162,12 +170,7 @@ async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMa
       break;
 
     case TYPE_FOOD:
-      const foodResult = await bookFood(
-        body,
-        data,
-        t,
-        user
-      );
+      const foodResult = await bookFood(body, data, t, user);
       amount += foodResult.amount;
       transactionIds.push(...foodResult.transactionIds);
       break;
@@ -212,11 +215,7 @@ async function validate(body, user, data, utsav, response) {
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(
-        data,
-        user,
-        utsav
-      );
+      response.roomDetails = await checkRoomAvailability(data, user, utsav);
       totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -350,11 +349,7 @@ export const guestBookingFlat = async (req, res) => {
 
   await t.commit();
 
-  sendUnifiedEmailForBookedBy(
-    userBookingIds,
-    req.user,
-    BOOKING_STATUS_PENDING
-  );
+  sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
 
   Object.entries(userBookingIds)
     .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
