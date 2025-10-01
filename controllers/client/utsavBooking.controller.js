@@ -8,6 +8,7 @@ import {
   UtsavPackagesDb
 } from '../../models/associations.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { openUtsavSeat, sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -157,7 +158,13 @@ export const CancelUtsavBooking = async (req, res) => {
 
   await userCancelBooking(req.user, booking, t);
 
+  const utsav = await UtsavDb.findOne({
+    where: { id: booking.utsavid }
+  });
+  await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
+  
   await t.commit();
+  
 
   if (booking.bookedBy) {
     const other = getOtherBookingUser(booking, req.user.cardno);
@@ -174,6 +181,9 @@ export const CancelUtsavBooking = async (req, res) => {
       });
     }
   }
+  
+
+  await sendUtsavBookingUpdateEmail(booking, utsav);
 
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
