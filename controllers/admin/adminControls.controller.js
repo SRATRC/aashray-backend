@@ -2,9 +2,17 @@ import { AdminUsers, AdminRoles, Roles } from '../../models/associations.js';
 import { STATUS_ACTIVE, STATUS_INACTIVE } from '../../config/constants.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import { Sequelize } from 'sequelize';
+
 
 export const fetchAllAdmins = async (req, res) => {
-  const admins = await AdminUsers.findAll();
+  const admins = await AdminUsers.findAll({
+    order: [
+      [Sequelize.literal("status = 'active'"), 'DESC'], // Put active first
+      ['username', 'ASC']                              // Then sort alphabetically
+    ]
+  });
+
   res.status(200).send({ message: 'fetched admins', data: admins });
 };
 

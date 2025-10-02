@@ -27,6 +27,7 @@ import guestRoutes from './routes/client/guestBooking.routes.js';
 import mumukshuRoutes from './routes/client/mumukshuBooking.routes.js';
 import paymentRoutes from './routes/client/payment.routes.js';
 import supportRoutes from './routes/client/support.routes.js';
+import updateRoutes from './routes/client/updates.routes.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -155,6 +156,8 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+app.use('/api/v1/updates', updateRoutes);
+
 app.use('/api/v1/client', clientAuthRoutes);
 app.use('/api/v1/wifi', wifiRoutes);
 app.use('/api/v1/stay', roomRoutes);
@@ -180,7 +183,7 @@ app.use('/api/v1/admin/travel', travelManagementRoutes);
 app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
 app.use('/api/v1/admin/bookings', bookingManagementRoutes);
-// app.use('/api/v1/admin/utsav', utsavManagementRoutes);
+app.use('/api/v1/admin/location', locationRoutes);
 app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
 app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);

@@ -8,9 +8,15 @@ import {
   UtsavPackagesDb
 } from '../../models/associations.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { openUtsavSeat, sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+
+import {
+  getOtherBookingUser,
+  notifyCardno
+} from '../../helpers/notification.helper.js';
 
 export const FetchUpcoming = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -40,8 +46,7 @@ export const FetchUpcoming = async (req, res) => {
        ) AS packages
     FROM utsav_db t1
     JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
-    WHERE t1.start_date > :today
-      AND (t1.registration_deadline IS NULL OR t1.registration_deadline >= :today)
+    WHERE t1.registration_deadline IS NULL OR t1.registration_deadline >= :today
     GROUP BY t1.id
     ORDER BY t1.start_date ASC
     LIMIT :limit
@@ -99,6 +104,7 @@ export const ViewUtsavBookings = async (req, res) => {
        t1.volunteer,
        t1.cardno,
        t1.bookedBy,
+       t1.roomno as stay,
        t5.issuedto AS user_name,
        t1.status,
        t4.status AS transaction_status,
@@ -135,6 +141,12 @@ export const CancelUtsavBooking = async (req, res) => {
   req.transaction = t;
 
   const booking = await UtsavBooking.findOne({
+    include: [
+      {
+        model: UtsavDb,
+        as: 'UtsavDb'
+      }
+    ],
     where: {
       bookingid: bookingid
     }
@@ -146,7 +158,33 @@ export const CancelUtsavBooking = async (req, res) => {
 
   await userCancelBooking(req.user, booking, t);
 
+  const utsav = await UtsavDb.findOne({
+    where: { id: booking.utsavid }
+  });
+  await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
+  
   await t.commit();
+  
+
+  if (booking.bookedBy) {
+    const other = getOtherBookingUser(booking, req.user.cardno);
+    if (other) {
+      const title = 'Utsav Booking Cancelled';
+      const body =
+        req.user.cardno === booking.cardno
+          ? `Booking of "${booking.UtsavDb.name}" for ${req.user.issuedto} has been cancelled.`
+          : `Your booking of "${booking.UtsavDb.name}" has been cancelled.`;
+      notifyCardno(other, {
+        title,
+        body,
+        screen: '/bookings'
+      });
+    }
+  }
+  
+
+  await sendUtsavBookingUpdateEmail(booking, utsav);
+
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 

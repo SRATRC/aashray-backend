@@ -47,6 +47,7 @@ export class ConnectionMonitor {
         available: pool.available,
         using: pool.using,
         waiting: pool.waiting,
+        max_uses_per_resource: pool.maxUsesPerResource,
         timestamp: new Date().toISOString()
       };
 

@@ -26,6 +26,20 @@ const sequelize = new Sequelize(
       evict: 1000, // Time interval (ms) to run eviction to free idle connections
       handleDisconnects: true // Automatically handle disconnects
     },
+    retry: {
+      max: 3,
+      backoffExponent: 1.5,
+      backoffBase: 1000,
+      match: [
+        /SequelizeConnectionError/,
+        /SequelizeConnectionRefusedError/,
+        /SequelizeHostNotFoundError/,
+        /SequelizeHostNotReachableError/,
+        /SequelizeInvalidConnectionError/,
+        /SequelizeConnectionTimedOutError/,
+        /SequelizeConnectionAcquireTimeoutError/
+      ]
+    },
     language: 'en'
   }
 );

@@ -14,7 +14,8 @@ import {
   fetchAllAdhyayanList,
   adhyayanPendinglist,
   fetchALLAdhyayan,
-  softDeleteShibir
+  softDeleteShibir,
+  getAdhyayanFeedback
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -23,13 +24,26 @@ import {
   ROLE_KOL_ADHYAYAN_ADMIN,
   ROLE_RAJ_ADHYAYAN_ADMIN,
   ROLE_DHU_ADHYAYAN_ADMIN,
-  ROLE_ACCOUNTS_ADMIN, 
-  ROLE_PRA_ACCOUNTS_ADMIN
+  ROLE_ACCOUNTS_ADMIN,
+  ROLE_PRA_ACCOUNTS_ADMIN,
+  ROLE_ADHYAYAN_READ_ONLY
 } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
-router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_ADHYAYAN_ADMIN, ROLE_SUPER_ADMIN, ROLE_DHU_ADHYAYAN_ADMIN, ROLE_RAJ_ADHYAYAN_ADMIN, ROLE_KOL_ADHYAYAN_ADMIN, ROLE_ACCOUNTS_ADMIN, ROLE_PRA_ACCOUNTS_ADMIN));
+router.use(
+  authorizeRoles(
+    ROLE_OFFICE_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_SUPER_ADMIN,
+    ROLE_DHU_ADHYAYAN_ADMIN,
+    ROLE_RAJ_ADHYAYAN_ADMIN,
+    ROLE_KOL_ADHYAYAN_ADMIN,
+    ROLE_ACCOUNTS_ADMIN,
+    ROLE_PRA_ACCOUNTS_ADMIN,
+    ROLE_ADHYAYAN_READ_ONLY
+  )
+);
 
 router.post('/create', CatchAsync(createAdhyayan));
 router.get('/fetchALLadhyayan', CatchAsync(fetchALLAdhyayan));
@@ -44,5 +58,6 @@ router.put('/status', CatchAsync(adhyayanStatusUpdate));
 router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 router.get('/fetchList', CatchAsync(fetchAllAdhyayanList));
 router.delete('/:id', CatchAsync(softDeleteShibir));
+router.get('/feedback/:shibir_id', CatchAsync(getAdhyayanFeedback));
 
 export default router;
