@@ -21,7 +21,7 @@ import { Sequelize } from 'sequelize';
 import Transactions from './models/transactions.model.js';
 import ShibirDb from './models/shibir_db.model.js';
 import UtsavDb from './models/utsav_db.model.js';
-import { sendCancellationEmail } from './helpers/mailer.helper.js';
+import { sendCancellationEmail, sendOpenBookingEmail } from './helpers/mailer.helper.js';
 import {
   getBooking,
   getBookingType,
@@ -75,6 +75,7 @@ async function cancelMeals(systemUser, transactions, t) {
 
 async function runJob(systemUser, t) {
   const userBookingIds = {};
+  const openBookingIds = {};
   const transactions = [];
   const bookings = [];
 
@@ -84,7 +85,7 @@ async function runJob(systemUser, t) {
   logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings)}`);
   logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions)}`);
 
-  await cancelBookings(systemUser, bookings, userBookingIds, t);
+  await cancelBookings(systemUser, bookings, userBookingIds, openBookingIds, t);
   await cancelTransactions(systemUser, transactions, t, true);
   await cancelMeals(systemUser, transactions, t);
   await t.commit();
@@ -92,6 +93,10 @@ async function runJob(systemUser, t) {
   for (const cardno in userBookingIds) {
     const bookingIds = userBookingIds[cardno];
     await sendCancellationEmail(cardno, bookingIds, null);
+  }
+  for (const bookingType in openBookingIds) {
+    const bookingIds = openBookingIds[bookingType];
+    await sendOpenBookingEmail(bookingType, bookingIds, null);
   }
 }
 
@@ -114,7 +119,7 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
   }
 }
 
-async function cancelBookings(systemUser, bookings, userBookingIds, t) {
+async function cancelBookings(systemUser, bookings, userBookingIds, openBookingIds, t) {
   for (const booking of bookings) {
     const bookingType = getBookingTypeFromBooking(booking);
 
@@ -123,13 +128,21 @@ async function cancelBookings(systemUser, bookings, userBookingIds, t) {
         const adhyayan = await ShibirDb.findOne({
           where: { id: booking.shibir_id }
         });
-        await openAdhyayanSeat(adhyayan, systemUser.username, t);
+        let newBooking = await openAdhyayanSeat(adhyayan, systemUser.username, t);
+
+        if(newBooking){
+          addToOpenBookingIds(openBookingIds, newBooking);
+        }
         break;
       case TYPE_UTSAV:
         const utsav = await UtsavDb.findOne({
           where: { id: booking.utsavid }
         });
-        await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
+        let newUtsavBooking = await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
+
+        if(newUtsavBooking){
+          addToOpenBookingIds(openBookingIds, newUtsavBooking);
+        }
         break;
     }
 
@@ -154,6 +167,13 @@ function addToUserBookingIdMap(userBookingIds, booking) {
   bookingIds.push(booking.bookingid);
   bookingIdsByType[bookingType] = bookingIds;
   userBookingIds[cardno] = bookingIdsByType;
+}
+
+function addToOpenBookingIds(openBookingIds, booking) {
+  const bookingType = getBookingTypeFromBooking(booking);
+  const bookingIdsByType = openBookingIds[bookingType] || {};
+  bookingIdsByType.push(booking.bookingid);
+  openBookingIds[bookingType] = bookingIdsByType;
 }
 
 async function getUnpaidPastBookingsAndTransactions(bookings, transactions) {
