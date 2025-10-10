@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Status Update</title>
+    {{> styles }}
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
+        </div>
+        <div class="content">
+            <h1>Booking Status Updated</h1>
+            <p>Dear {{name}},</p>
+            <p>Jai Sadguru Dev Vandan! The status of your Utsav - booking request has been updated to <strong>{{status}}</strong>:</p>
+            <div class="details">
+                <p><strong>Booking id: </strong>{{bookingid}}</p>
+                <p><strong>Utsav Name: </strong>{{utsavName}}</p>
+                <p><strong>Utsav Start Date: </strong>{{utsavStartDate}}</p>
+                <p><strong>Utsav End Date: </strong>{{utsavEndDate}}</p>
+            </div>
+
+            <div class="details">
+                <p class="section-title"><strong>Booking Status Definitions</strong></p>
+                <p><b>pending:</b> This means you need to complete your payment within 24 hours to secure your adhyayan booking on the Vitraag Vigyaan Aashray mobile app.</p>
+                <p><b>waiting:</b> All Utsav spots are currently booked. You've been placed on the waiting list and will be notified if a spot becomes available.</p>
+                <p><b>confirmed:</b> Great news! Your Utsav booking has been successfully confirmed.</p>
+                <p><b>cancelled:</b> Your adhyayan booking has been self cancelled.</p>
+                <p><b>admin cancelled:</b> Your adhyayan booking has been cancelled by the administrator.</p>
+            </div>
+            <p>If you have any further questions or need assistance, please feel free to contact us at <b>+91-7875432613 / +91-9004273512</b>.</p>
+        </div>
+
+        {{> _footer}}
+    </div>
+</body>
+</html>

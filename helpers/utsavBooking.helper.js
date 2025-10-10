@@ -13,7 +13,8 @@ import {
 import {
   UtsavDb,
   UtsavPackagesDb,
-  UtsavBooking
+  UtsavBooking,
+  CardDb
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -24,7 +25,7 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { getBlockedDates, isDateRangeOverlapping, validateBlockedDates } from '../controllers/helper.js';
 import database from '../config/database.js';
-
+import sendMail from '../utils/sendMail.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
@@ -433,3 +434,33 @@ export async function getDateRangesDuringUtsav(
   return dateRangesByMumukshu;
 }
 
+export async function sendUtsavBookingUpdateEmail(booking, utsav) {
+  let bookedByCard = null;
+  
+  if (booking.bookedBy) {
+  bookedByCard = await CardDb.findOne({
+    where: { cardno: booking.bookedBy }
+  });
+  }
+
+  const card = await CardDb.findOne({
+    where: { cardno: booking.cardno }
+  });
+
+  if (card && card.email) {
+    sendMail({
+      email: card.email,
+      cc: bookedByCard ? bookedByCard.email : null,
+      subject: 'Utsav Booking Updated',
+      template: 'utsavStatusUpdate',    
+      context: {
+        name: card.issuedto,
+        bookingid: booking.bookingid,
+        status: booking.status,
+        utsavName: utsav.name,
+        utsavStartDate: utsav.start_date,
+        utsavEndDate: utsav.end_date
+      }
+    });
+  }
+}

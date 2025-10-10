@@ -135,37 +135,36 @@ describe('Mumukshu Booking Controller', () => {
 
         it('should book room in waiting status if checking out on Utsav begining date', async () => {
           try {
-          const utsavStart = nDaysFromToday(7);
-          const utsavEnd = nDaysFromToday(8);
-          await UtsavFactory.create(utsavStart, utsavEnd);
+            const utsavStart = nDaysFromToday(7);
+            const utsavEnd = nDaysFromToday(8);
+            await UtsavFactory.create(utsavStart, utsavEnd);
 
-          const checkin = nDaysFromToday(6);
-          const checkout = utsavStart;
-          const res = await request(app)
-            .post('/api/v1/mumukshu/booking')
-            .send({
-              cardno: MUMUKSHU_1,
-              primary_booking: createRoomJson(MUMUKSHU_1, checkin, checkout)
+            const checkin = nDaysFromToday(6);
+            const checkout = utsavStart;
+            const res = await request(app)
+              .post('/api/v1/mumukshu/booking')
+              .send({
+                cardno: MUMUKSHU_1,
+                primary_booking: createRoomJson(MUMUKSHU_1, checkin, checkout)
+              });
+
+            const booking = await RoomBooking.findOne({
+              where: {
+                cardno: MUMUKSHU_1,
+                status: STATUS_WAITING,
+                bookedBy: null,
+                checkin: checkin,
+                checkout: checkout,
+                nights: 1,
+                updatedBy: MUMUKSHU_1
+              }
             });
 
-          const booking = await RoomBooking.findOne({
-            where: {
-              cardno: MUMUKSHU_1,
-              status: STATUS_WAITING,
-              bookedBy: null,
-              checkin: checkin,
-              checkout: checkout,
-              nights: 1,
-              updatedBy: MUMUKSHU_1
-            }
-          });
-          
-
-          expect(booking).not.toBeNull();
-          expect(res.status).toBe(200);
-        } catch (error) {
-          console.log(error);
-        }
+            expect(booking).not.toBeNull();
+            expect(res.status).toBe(200);
+          } catch (error) {
+            console.log(error);
+          }
         });
 
         test.todo('should book room in waiting status if checking out on Utsav end + 1 date');

@@ -2,6 +2,7 @@ import {
   AdhyayanFeedback,
   CardDb,
   ShibirDb,
+  ShibirBookingDb,
   Transactions
 } from '../../models/associations.js';
 import {
@@ -28,11 +29,15 @@ import {
   validateAdhyayans
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
-import database from '../../config/database.js';
-import Sequelize, { QueryTypes } from 'sequelize';
-import moment from 'moment';
-import ApiError from '../../utils/ApiError.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
+import {
+  sendDualUserNotifications,
+  sendPushNotifications
+} from '../../helpers/notification.helper.js';
+import Sequelize, { QueryTypes } from 'sequelize';
+import database from '../../config/database.js';
+import ApiError from '../../utils/ApiError.js';
+import moment from 'moment';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -156,7 +161,7 @@ export const fetchAdhyayanByLocation = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 15 DAY
       AND shibir_db.location = :location
     GROUP BY 
       shibir_db.id,
@@ -426,8 +431,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const bookedByCard = await validateCard(cardno);
 
   switch (status) {
-    // Only Waiting & Payment Pending booking can be changed to
-    // Confirmed
+    // Only Waiting & Payment Pending booking can be changed to Confirmed
     case STATUS_CONFIRMED:
       if (booking.status == STATUS_WAITING) {
         await reserveAdhyayanSeat(adhyayan, t);
@@ -445,7 +449,6 @@ export const adhyayanStatusUpdate = async (req, res) => {
         );
       }
 
-      // ✅ Update transaction status if pending or cash pending
       if (
         transaction.status === STATUS_PAYMENT_PENDING ||
         transaction.status === STATUS_CASH_PENDING
@@ -459,6 +462,22 @@ export const adhyayanStatusUpdate = async (req, res) => {
           { transaction: t }
         );
       }
+
+      sendDualUserNotifications({
+        primary: {
+          token: bookedByCard.token,
+          title: 'Adhyayan Booking Confirmed',
+          body: 'Your adhyayan booking has been confirmed by admin'
+        },
+        bookedBy: booking.bookedBy && {
+          cardno: booking.bookedBy,
+          title: 'Adhyayan Booking Confirmed',
+          body: `Adhyayan booking for ${
+            booking.CardDb.issuedto.split(' ')[0]
+          } has been confirmed by admin`
+        },
+        screen: '/bookings'
+      });
 
       break;
 
@@ -490,6 +509,22 @@ export const adhyayanStatusUpdate = async (req, res) => {
         // then confirm the booking.
         if (transaction.status == STATUS_PAYMENT_COMPLETED) {
           newBookingStatus = STATUS_CONFIRMED;
+
+          sendDualUserNotifications({
+            primary: {
+              cardno: booking.cardno,
+              title: 'Adhyayan Booking Confirmed',
+              body: 'Admin has requested you to make payment for your adhyayan booking to secure your spot.'
+            },
+            bookedBy: booking.bookedBy && {
+              token: bookedByCard.token,
+              title: 'Adhyayan Booking Confirmed',
+              body: `Admin has requested you to make payment for ${
+                booking.CardDb.issuedto.split(' ')[0]
+              }'s adhyayan booking to secure your spot.`
+            },
+            screen: '/bookings'
+          });
         }
       }
 
@@ -568,6 +603,42 @@ export const softDeleteShibir = async (req, res) => {
 
   if (updated[0] === 0) {
     return res.status(404).json({ message: 'Shibir not found' });
+  }
+
+  // Notify all users who have bookings for this adhyayan (rate-limited)
+  try {
+    const shibirId = parseInt(id);
+    const bookings = await ShibirBookingDb.findAll({
+      where: {
+        shibir_id: shibirId,
+        status: { [Sequelize.Op.in]: ['waiting', 'confirmed', 'pending'] }
+      },
+      attributes: ['cardno', 'bookedBy']
+    });
+
+    const recipients = new Set();
+    for (const b of bookings) {
+      if (b.cardno) recipients.add(b.cardno);
+      if (b.bookedBy) recipients.add(b.bookedBy);
+    }
+
+    if (recipients.size > 0) {
+      const cards = await CardDb.findAll({
+        where: { cardno: { [Sequelize.Op.in]: Array.from(recipients) } },
+        attributes: ['token']
+      });
+
+      const tokens = cards.map((c) => c.token).filter(Boolean);
+      if (tokens.length > 0) {
+        sendPushNotifications(tokens, {
+          title: 'Adhyayan Cancelled by Admin',
+          body: 'Your adhyayan booking has been cancelled by admin. We apologize for any inconvenience.',
+          screen: '/bookings'
+        });
+      }
+    }
+  } catch (notifyErr) {
+    console.error('Bulk adhyayan cancel notification failed:', notifyErr);
   }
 
   res.status(200).json({ message: 'Shibir marked as deleted' });

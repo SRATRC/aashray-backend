@@ -1,10 +1,11 @@
 import { CardDb,GuestRelationship } from '../../models/associations.js';
 import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
 import Sequelize from 'sequelize';
+import bcrypt from 'bcryptjs';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
+import { Op } from 'sequelize';
 
-//FIXME: Add validations and throw informative error messages
 // export const createCard = async (req, res) => {
 //   const {
 //     cardno,
@@ -21,53 +22,72 @@ import database from '../../config/database.js';
 //     city,
 //     pin,
 //     centre,
-//     res_status
+//     res_status,
+//     referenceCardno,  // New: cardno of mumukshu
+//     guestType         // New: guest type (Driver, VIP, Friend, Family)
 //   } = req.body;
 
-//   const alreadyExists = await CardDb.findOne({
-//     where: { cardno: cardno }
-//   });
-
+//   const alreadyExists = await CardDb.findOne({ where: { cardno } });
 //   if (alreadyExists) {
 //     throw new ApiError(400, 'Card already exists');
 //   }
 
+//   const t = await CardDb.sequelize.transaction();
 
-// try {
-//   const user = await CardDb.create({
-//     cardno: cardno,
-//     issuedto: issuedto,
-//     gender: gender,
-//     dob: dob,
-//     mobno: mobno,
-//     email: email,
-//     idType: idType,
-//     idNo: idNo,
-//     address: address,
-//     country: country,
-//     state: state,
-//     city: city,
-//     pin: pin,
-//     center: centre,
-//     status: STATUS_OFFPREM,
-//     res_status: res_status,
-//     updatedBy: req.user.username
-//   });
+//   try {
+//     const user = await CardDb.create({
+//       cardno,
+//       issuedto,
+//       gender,
+//       dob,
+//       mobno,
+//       email,
+//       idType,
+//       idNo,
+//       address,
+//       country,
+//       state,
+//       city,
+//       pin,
+//       center: centre,
+//       status: STATUS_OFFPREM,
+//       res_status,
+//       updatedBy: req.user.username
+//     }, { transaction: t });
 
-//   if (!user)
-//     throw new ApiError(500, 'Error occurred while registering the card');
+//     if (!user) {
+//       throw new ApiError(500, 'Error occurred while registering the card');
+//     }
 
-//   return res
-//     .status(200)
-//     .send({ message: 'Successfully registered card', data: user });
+//     // 🔄 If the person is a guest, add an entry in guest_relationship table
+//     if (res_status === 'GUEST') {
+//       if (!referenceCardno || !guestType) {
+//         throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
+//       }
 
-// } catch (error) {
-//   console.error("Sequelize Validation Error:", error.errors || error);
-//   return res
-//     .status(500)
-//     .json({ message: "Validation error", details: error.errors || error.message });
-// }}
+//       await GuestRelationship.create({
+//         cardno: referenceCardno,
+//         guest: cardno,
+//         type: guestType,
+//         updatedBy: req.user.username
+//       }, { transaction: t });
+//     }
 
+//     await t.commit();
+
+//     return res
+//       .status(200)
+//       .send({ message: 'Successfully registered card', data: user });
+
+//   } catch (error) {
+//     await t.rollback();
+//     console.error("Sequelize Validation Error:", error.errors || error);
+//     return res.status(500).json({
+//       message: "Validation error",
+//       details: error.errors || error.message
+//     });
+//   }
+// };
 
 export const createCard = async (req, res) => {
   const {
@@ -86,19 +106,22 @@ export const createCard = async (req, res) => {
     pin,
     centre,
     res_status,
-    referenceCardno,  // New: cardno of mumukshu
-    guestType         // New: guest type (Driver, VIP, Friend, Family)
+    referenceCardno,  // parent card for guest
+    guestType         // guest type: Driver, VIP, Friend, Family
   } = req.body;
 
-  const alreadyExists = await CardDb.findOne({ where: { cardno } });
-  if (alreadyExists) {
-    throw new ApiError(400, 'Card already exists');
+  // --- Check if cardno already exists ---
+  const existingCard = await CardDb.findOne({ where: { cardno } });
+  if (existingCard) {
+    return res.status(400).json({ message: `Card number ${cardno} already exists` });
   }
 
+  // --- Start a transaction ---
   const t = await CardDb.sequelize.transaction();
 
   try {
-    const user = await CardDb.create({
+    // --- Create the main card ---
+    const newCard = await CardDb.create({
       cardno,
       issuedto,
       gender,
@@ -118,14 +141,18 @@ export const createCard = async (req, res) => {
       updatedBy: req.user.username
     }, { transaction: t });
 
-    if (!user) {
-      throw new ApiError(500, 'Error occurred while registering the card');
-    }
+    if (!newCard) throw new ApiError(500, 'Failed to create card');
 
-    // 🔄 If the person is a guest, add an entry in guest_relationship table
+    // --- If this is a guest card, validate and insert relationship ---
     if (res_status === 'GUEST') {
       if (!referenceCardno || !guestType) {
-        throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
+        throw new ApiError(400, 'Missing referenceCardno or guestType for GUEST');
+      }
+
+      // Check that parent card exists
+      const parentCard = await CardDb.findOne({ where: { cardno: referenceCardno } });
+      if (!parentCard) {
+        throw new ApiError(400, `Reference card ${referenceCardno} does not exist`);
       }
 
       await GuestRelationship.create({
@@ -136,19 +163,24 @@ export const createCard = async (req, res) => {
       }, { transaction: t });
     }
 
+    // --- Commit everything ---
     await t.commit();
 
-    return res
-      .status(200)
-      .send({ message: 'Successfully registered card', data: user });
+    return res.status(200).json({
+      message: 'Card created successfully',
+      data: newCard
+    });
 
   } catch (error) {
+    // --- Rollback on any error ---
     await t.rollback();
-    console.error("Sequelize Validation Error:", error.errors || error);
-    return res.status(500).json({
-      message: "Validation error",
-      details: error.errors || error.message
-    });
+
+    console.error('Error creating card:', error);
+    const message = error.name === 'SequelizeUniqueConstraintError'
+      ? 'Card number must be unique'
+      : error.message || 'Internal server error';
+
+    return res.status(400).json({ message });
   }
 };
 
@@ -160,66 +192,27 @@ export const fetchAllCards = async (req, res) => {
   return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
 
+
 export const searchCardsByName = async (req, res) => {
-  
-  const data = await CardDb.findAll({
-    where: {
-      issuedto: { [Sequelize.Op.like]: `%${req.params.name}%` }
-    },
-  });
+  try {
+    const term = req.params.name;
 
-  return res.status(200).send({ message: 'Fetched all cards', data: data });
+    const data = await CardDb.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { issuedto: { [Sequelize.Op.like]: `%${term}%` } },
+          { mobno: { [Sequelize.Op.like]: `%${term}%` } },
+          { cardno: { [Sequelize.Op.like]: `%${term}%` } } // ✅ added this
+        ]
+      }
+    });
+
+    return res.status(200).send({ message: 'Fetched all cards', data });
+  } catch (err) {
+    console.error('Error in searchCardsByName:', err);
+    return res.status(500).send({ message: 'Internal server error' });
+  }
 };
-
-// export const updateCard = async (req, res) => {
-//   const {
-//     cardno,
-//     issuedto,
-//     gender,
-//     dob,
-//     mobno,
-//     email,
-//     idType,
-//     idNo,
-//     address,
-//     city,
-//     state,
-//     pin,
-//     centre,
-//     status,
-//     res_status
-//   } = req.body;
-
-//   const card = await CardDb.findOne({
-//     where: { cardno: cardno }
-//   });
-
-//   if (!card) {
-//     throw new ApiError(400, ERR_CARD_NOT_FOUND);
-//   }
-
-//   await card.update(
-//     {
-//       issuedto: issuedto,
-//       gender: gender,
-//       dob: dob,
-//       mobno: mobno,
-//       email: email,
-//       idType: idType,
-//       idNo: idNo,
-//       address: address,
-//       city: city,
-//       state: state,
-//       pin: pin,
-//       center: centre,
-//       status: status,
-//       res_status: res_status,
-//       updatedBy: req.user.username
-//     }
-//   );
-
-//   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
-// };
 
 
 export const updateCard = async (req, res) => {
@@ -233,10 +226,11 @@ export const updateCard = async (req, res) => {
     idType,
     idNo,
     address,
+    country,
     city,
     state,
     pin,
-    centre,
+    center: centre,
     status,
     res_status,
     referenceCardno,
@@ -265,6 +259,7 @@ export const updateCard = async (req, res) => {
     idType,
     idNo,
     address,
+    country,
     city,
     state,
     pin,
@@ -347,4 +342,32 @@ export const fetchTotalTransactions = async (req, res) => {
   return res
     .status(200)
     .send({ message: 'fetched all user transactions', data: results });
+};
+
+
+
+export const resetPasswordDefault = async (req, res) => {
+  const { cardno } = req.body;
+
+  if (!cardno) {
+    throw new ApiError(400, 'cardno is required');
+  }
+
+  const card = await CardDb.findOne({ where: { cardno } });
+
+  if (!card) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  // ✅ Use the same default value defined in the model
+  const defaultPasswordHash = CardDb.rawAttributes.password.defaultValue;
+
+  await CardDb.update(
+    { password: defaultPasswordHash },
+    { where: { cardno } }
+  );
+
+  return res
+    .status(200)
+    .json({ message: 'Password reset successfully to default.' });
 };

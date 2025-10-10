@@ -6,7 +6,8 @@ import {
   searchCardsByName,
   updateCard,
   transferCard,
-  fetchTotalTransactions
+  fetchTotalTransactions,
+  resetPasswordDefault
 } from '../../controllers/admin/cardManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_CARD_ADMIN, ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN } from '../../config/constants.js';
@@ -21,4 +22,8 @@ router.get('/search/:name', CatchAsync(searchCardsByName));
 router.put('/update', CatchAsync(updateCard));
 router.put('/transfer', CatchAsync(transferCard));
 router.get('/transactions/:cardno', CatchAsync(fetchTotalTransactions));
+router.post('/reset-pwd', CatchAsync(resetPasswordDefault));
+
 export default router;
+
+
