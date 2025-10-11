@@ -108,7 +108,10 @@ export const CancelBooking = async (req, res) => {
     booking = await FlatBooking.findOne({
       where: {
         bookingid: bookingid,
-        cardno: req.user.cardno,
+        [Sequelize.Op.or]: [
+          { cardno: req.user.cardno },
+          { bookedBy: req.user.cardno }
+        ],
         status: [
           STATUS_WAITING,
           STATUS_PAYMENT_PENDING,
