@@ -11,6 +11,7 @@ import {
   STATUS_RESIDENT,
   STATUS_MUMUKSHU,
   TYPE_UTSAV,
+  TYPE_FLAT,
   STATUS_AWAITING_CONFIRMATION,
   BOOKING_STATUS_PENDING,
   STATUS_SEVA_KUTIR,
@@ -18,9 +19,11 @@ import {
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
-  checkRoomAvailabilityForMumukshus
+  checkRoomAvailabilityForMumukshus,
+  bookFlatForMumukshus,
+  roomCharge
 } from '../../helpers/roomBooking.helper.js';
-import { UtsavDb } from '../../models/associations.js';
+import { UtsavDb, FlatDb } from '../../models/associations.js';
 import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
@@ -48,7 +51,10 @@ import {
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
   sendUnifiedEmail,
-  setWaitingBookingCountMap
+  setWaitingBookingCountMap,
+  validateDate,
+  calculateNights,
+  checkFlatAlreadyBooked
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -56,6 +62,9 @@ import moment from 'moment';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
+
+  validateFlatBookingConstraints(primary_booking, addons);
+
   var t = await database.transaction();
   req.transaction = t;
 
@@ -125,6 +134,7 @@ export const validateBooking = async (req, res) => {
     foodDetails: {},
     travelDetails: {},
     utsavDetails: [],
+    flatDetails: [],
     totalCharge: 0
   };
 
@@ -228,6 +238,12 @@ async function book(
 
       break;
 
+    case TYPE_FLAT:
+      const flatResult = await bookFlat(data, t, user);
+      amount += flatResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
@@ -255,7 +271,12 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data, user, utsav);
+      response.foodDetails = await checkFoodAvailability(
+        body,
+        data,
+        user,
+        utsav
+      );
       break;
 
     case TYPE_ADHYAYAN:
@@ -282,6 +303,14 @@ async function validate(body, user, data, response) {
       );
       totalCharge += response.utsavDetails.reduce(
         (partialSum, utsav) => partialSum + utsav.charge,
+        0
+      );
+      break;
+
+    case TYPE_FLAT:
+      response.flatDetails = await checkFlatAvailability(data, user);
+      totalCharge += response.flatDetails.reduce(
+        (partialSum, flat) => partialSum + flat.charge,
         0
       );
       break;
@@ -399,4 +428,103 @@ async function checkTravelAvailability(data) {
     status: STATUS_AWAITING_CONFIRMATION,
     charge: 0
   };
+}
+
+async function bookFlat(data, t, user) {
+  const { startDay, endDay, mumukshus } = data.details;
+  const result = await bookFlatForMumukshus(
+    startDay,
+    endDay,
+    mumukshus,
+    user,
+    t
+  );
+  return {
+    amount: result.order.amount,
+    userBookingIds: result.userBookingIds
+  };
+}
+
+async function checkFlatAvailability(data, user) {
+  const { startDay, endDay, mumukshus } = data.details;
+
+  // Check if user owns a flat
+  const flat = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: user.cardno
+    }
+  });
+
+  if (!flat) {
+    throw new ApiError(404, `Flat not found for ${user.cardno}`);
+  }
+
+  validateDate(startDay, endDay);
+  await validateCards(mumukshus);
+
+  // Check if any mumukshu already has a flat booking for these dates
+  for (const mumukshu of mumukshus) {
+    if (await checkFlatAlreadyBooked(startDay, endDay, mumukshu)) {
+      throw new ApiError(
+        400,
+        `Flat already booked for ${mumukshu} during selected dates`
+      );
+    }
+  }
+
+  const nights = await calculateNights(startDay, endDay);
+  const flatDetails = [];
+
+  for (const mumukshu of mumukshus) {
+    // Check if this mumukshu is the flat owner
+    const isFlatOwner = await FlatDb.findOne({
+      where: {
+        owner: mumukshu,
+        flatno: flat.flatno
+      }
+    });
+
+    const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+
+    flatDetails.push({
+      mumukshu: mumukshu,
+      flatno: flat.flatno,
+      nights: nights,
+      charge: charge,
+      status: 'available'
+    });
+  }
+
+  return flatDetails;
+}
+
+function validateFlatBookingConstraints(primary_booking, addons) {
+  // Check if TYPE_FLAT is in addons (not allowed)
+  if (addons && addons.length > 0) {
+    const flatAddon = addons.find((addon) => addon.booking_type === TYPE_FLAT);
+    if (flatAddon) {
+      throw new ApiError(
+        400,
+        'Flat booking cannot be added as an addon. It must be the primary booking type.'
+      );
+    }
+  }
+
+  // Check if TYPE_FLAT is primary booking with other primary booking types
+  if (primary_booking && primary_booking.booking_type === TYPE_FLAT) {
+    // Flat booking should be standalone - no addons of accommodation types allowed
+    if (addons && addons.length > 0) {
+      const accommodationAddons = addons.filter(
+        (addon) =>
+          addon.booking_type === TYPE_ROOM || addon.booking_type === TYPE_UTSAV
+      );
+      if (accommodationAddons.length > 0) {
+        throw new ApiError(
+          400,
+          'Flat booking cannot be combined with other accommodation types (room or utsav bookings).'
+        );
+      }
+    }
+  }
 }
