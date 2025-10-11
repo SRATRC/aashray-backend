@@ -431,10 +431,22 @@ async function checkTravelAvailability(data) {
 }
 
 async function bookFlat(data, t, user) {
-  const { startDay, endDay, mumukshus } = data.details;
+  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
+
+  // Handle missing checkout_date
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout_date is required for flat booking');
+  }
+
+  // Extract mumukshus from mumukshuGroup (similar to room booking)
+  // If mumukshuGroup is not provided, default to the current user
+  const mumukshus = mumukshuGroup
+    ? mumukshuGroup.flatMap((group) => group.mumukshus || [])
+    : [user.cardno];
+
   const result = await bookFlatForMumukshus(
-    startDay,
-    endDay,
+    checkin_date,
+    checkout_date,
     mumukshus,
     user,
     t
@@ -446,7 +458,18 @@ async function bookFlat(data, t, user) {
 }
 
 async function checkFlatAvailability(data, user) {
-  const { startDay, endDay, mumukshus } = data.details;
+  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
+
+  // Handle missing checkout_date
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout_date is required for flat booking');
+  }
+
+  // Extract mumukshus from mumukshuGroup (similar to room booking)
+  // If mumukshuGroup is not provided, default to the current user
+  const mumukshus = mumukshuGroup
+    ? mumukshuGroup.flatMap((group) => group.mumukshus || [])
+    : [user.cardno];
 
   // Check if user owns a flat
   const flat = await FlatDb.findOne({
@@ -460,12 +483,12 @@ async function checkFlatAvailability(data, user) {
     throw new ApiError(404, `Flat not found for ${user.cardno}`);
   }
 
-  validateDate(startDay, endDay);
+  validateDate(checkin_date, checkout_date);
   await validateCards(mumukshus);
 
   // Check if any mumukshu already has a flat booking for these dates
   for (const mumukshu of mumukshus) {
-    if (await checkFlatAlreadyBooked(startDay, endDay, mumukshu)) {
+    if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshu)) {
       throw new ApiError(
         400,
         `Flat already booked for ${mumukshu} during selected dates`
@@ -473,7 +496,7 @@ async function checkFlatAvailability(data, user) {
     }
   }
 
-  const nights = await calculateNights(startDay, endDay);
+  const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
 
   for (const mumukshu of mumukshus) {
