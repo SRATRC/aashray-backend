@@ -742,12 +742,15 @@ export async function checkFlatAvailabilityForMumukshus(
     );
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+    const availableCredits =
+      charge > 0 ? usableCredits(user, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       mumukshu: mumukshu,
       flatno: flat.flatno,
       nights: nights,
       charge: charge,
+      availableCredits: availableCredits,
       status: STATUS_AVAILABLE
     });
   }

@@ -21,7 +21,7 @@ describe('Flat Booking Integration Tests', () => {
     await FlatBooking.truncate();
     await FlatDb.truncate();
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
-    
+
     // Create a flat for testing
     await FlatFactory.create(MUMUKSHU_1, 101);
   });
@@ -34,7 +34,7 @@ describe('Flat Booking Integration Tests', () => {
     it('should book flat successfully as primary booking', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/mumukshu/booking')
         .send({
@@ -62,7 +62,7 @@ describe('Flat Booking Integration Tests', () => {
     it('should validate flat booking successfully', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/mumukshu/validate')
         .send({
@@ -75,12 +75,13 @@ describe('Flat Booking Integration Tests', () => {
       expect(res.body.data.flatDetails).toHaveLength(1);
       expect(res.body.data.flatDetails[0].flatno).toBe(101);
       expect(res.body.data.flatDetails[0].charge).toBe(0); // Flat owner gets free booking
+      expect(res.body.data.flatDetails[0].availableCredits).toBe(0); // No credits needed for free booking
     });
 
     it('should reject flat booking as addon', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/mumukshu/booking')
         .send({
@@ -90,13 +91,15 @@ describe('Flat Booking Integration Tests', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toContain('Flat booking cannot be added as an addon');
+      expect(res.body.message).toContain(
+        'Flat booking cannot be added as an addon'
+      );
     });
 
     it('should reject flat booking with room addon', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/mumukshu/booking')
         .send({
@@ -106,13 +109,15 @@ describe('Flat Booking Integration Tests', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toContain('Flat booking cannot be combined with other accommodation types');
+      expect(res.body.message).toContain(
+        'Flat booking cannot be combined with other accommodation types'
+      );
     });
 
     it('should reject flat booking without flat ownership', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/mumukshu/booking')
         .send({
@@ -133,12 +138,16 @@ describe('Flat Booking Integration Tests', () => {
     it('should book flat successfully for guest as primary booking', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/guest/booking')
         .send({
           cardno: MUMUKSHU_1, // Flat owner booking for guest
-          primary_booking: createGuestFlatBookingJson(['Guest_1'], startDay, endDay)
+          primary_booking: createGuestFlatBookingJson(
+            ['Guest_1'],
+            startDay,
+            endDay
+          )
         });
 
       expect(res.status).toBe(200);
@@ -161,18 +170,49 @@ describe('Flat Booking Integration Tests', () => {
     it('should validate guest flat booking successfully', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/guest/validate')
         .send({
           cardno: MUMUKSHU_1,
-          primary_booking: createGuestFlatBookingJson(['Guest_1'], startDay, endDay)
+          primary_booking: createGuestFlatBookingJson(
+            ['Guest_1'],
+            startDay,
+            endDay
+          )
         });
 
       expect(res.status).toBe(200);
       expect(res.body.data.flatDetails).toBeDefined();
       expect(res.body.data.flatDetails).toHaveLength(1);
       expect(res.body.data.flatDetails[0].flatno).toBe(101);
+      expect(res.body.data.flatDetails[0]).toHaveProperty('availableCredits');
+    });
+
+    it('should validate flat booking with credit information for non-owner', async () => {
+      const startDay = nDaysFromToday(1);
+      const endDay = nDaysFromToday(3);
+
+      const res = await request(app)
+        .post('/api/v1/mumukshu/validate')
+        .send({
+          cardno: MUMUKSHU_1,
+          primary_booking: createFlatBookingJson(
+            'Non_Owner_1',
+            startDay,
+            endDay
+          )
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.flatDetails).toBeDefined();
+      expect(res.body.data.flatDetails).toHaveLength(1);
+      expect(res.body.data.flatDetails[0].flatno).toBe(101);
+      expect(res.body.data.flatDetails[0].charge).toBeGreaterThan(0); // Non-owner pays charge
+      expect(res.body.data.flatDetails[0]).toHaveProperty('availableCredits');
+      expect(typeof res.body.data.flatDetails[0].availableCredits).toBe(
+        'number'
+      );
     });
   });
 
@@ -184,7 +224,7 @@ describe('Flat Booking Integration Tests', () => {
     it('should still work with deprecated mumukshu flat booking endpoint', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/room/flat')
         .send({
@@ -211,7 +251,7 @@ describe('Flat Booking Integration Tests', () => {
     it('should still work with deprecated guest flat booking endpoint', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
-      
+
       const res = await request(app)
         .post('/api/v1/guest/flat')
         .send({
