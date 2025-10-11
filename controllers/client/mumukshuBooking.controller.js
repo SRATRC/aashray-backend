@@ -21,9 +21,9 @@ import {
   bookRoomForMumukshus,
   checkRoomAvailabilityForMumukshus,
   bookFlatForMumukshus,
-  roomCharge
+  checkFlatAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
-import { UtsavDb, FlatDb } from '../../models/associations.js';
+import { CardDb, UtsavDb } from '../../models/associations.js';
 import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
@@ -40,7 +40,6 @@ import {
   bookUtsavForMumukshus,
   validateUtsavs
 } from '../../helpers/utsavBooking.helper.js';
-import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
   generateOrderId,
@@ -51,10 +50,7 @@ import {
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
   sendUnifiedEmail,
-  setWaitingBookingCountMap,
-  validateDate,
-  calculateNights,
-  checkFlatAlreadyBooked
+  setWaitingBookingCountMap
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -431,18 +427,11 @@ async function checkTravelAvailability(data) {
 }
 
 async function bookFlat(data, t, user) {
-  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
+  const { checkin_date, checkout_date, mumukshus } = data.details;
 
-  // Handle missing checkout_date
   if (!checkout_date) {
-    throw new ApiError(400, 'checkout_date is required for flat booking');
+    throw new ApiError(400, 'checkout date is required for flat booking');
   }
-
-  // Extract mumukshus from mumukshuGroup (similar to room booking)
-  // If mumukshuGroup is not provided, default to the current user
-  const mumukshus = mumukshuGroup
-    ? mumukshuGroup.flatMap((group) => group.mumukshus || [])
-    : [user.cardno];
 
   const result = await bookFlatForMumukshus(
     checkin_date,
@@ -458,68 +447,19 @@ async function bookFlat(data, t, user) {
 }
 
 async function checkFlatAvailability(data, user) {
-  const { checkin_date, checkout_date, mumukshuGroup } = data.details;
+  const { checkin_date, checkout_date, mumukshus } = data.details;
 
-  // Handle missing checkout_date
   if (!checkout_date) {
     throw new ApiError(400, 'checkout_date is required for flat booking');
   }
 
-  // Extract mumukshus from mumukshuGroup (similar to room booking)
-  // If mumukshuGroup is not provided, default to the current user
-  const mumukshus = mumukshuGroup
-    ? mumukshuGroup.flatMap((group) => group.mumukshus || [])
-    : [user.cardno];
-
-  // Check if user owns a flat
-  const flat = await FlatDb.findOne({
-    attributes: ['flatno'],
-    where: {
-      owner: user.cardno
-    }
-  });
-
-  if (!flat) {
-    throw new ApiError(404, `Flat not found for ${user.cardno}`);
-  }
-
-  validateDate(checkin_date, checkout_date);
-  await validateCards(mumukshus);
-
-  // Check if any mumukshu already has a flat booking for these dates
-  for (const mumukshu of mumukshus) {
-    if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshu)) {
-      throw new ApiError(
-        400,
-        `Flat already booked for ${mumukshu} during selected dates`
-      );
-    }
-  }
-
-  const nights = await calculateNights(checkin_date, checkout_date);
-  const flatDetails = [];
-
-  for (const mumukshu of mumukshus) {
-    // Check if this mumukshu is the flat owner
-    const isFlatOwner = await FlatDb.findOne({
-      where: {
-        owner: mumukshu,
-        flatno: flat.flatno
-      }
-    });
-
-    const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
-
-    flatDetails.push({
-      mumukshu: mumukshu,
-      flatno: flat.flatno,
-      nights: nights,
-      charge: charge,
-      status: 'available'
-    });
-  }
-
-  return flatDetails;
+  const result = await checkFlatAvailabilityForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshus,
+    user
+  );
+  return result;
 }
 
 function validateFlatBookingConstraints(primary_booking, addons) {
