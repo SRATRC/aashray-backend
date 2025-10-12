@@ -308,16 +308,16 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
   }
 
   const now = moment().tz('Asia/Kolkata');
-  const feedbackStartDate = moment(adhyayan.end_date)
+  const feedbackStartDate = moment(adhyayan.start_date)
     .tz('Asia/Kolkata')
     .hour(FEEDBACK_ELIGIBILITY_HOUR)
     .minute(0)
     .second(0);
 
-  // Check if feedback period has started
-  if (now.isBefore(feedbackStartDate)) {
-    throw new ApiError(400, ERR_ADHYAYAN_NOT_COMPLETED);
-  }
+  // // Check if feedback period has started
+  // if (now.isBefore(feedbackStartDate)) {
+  //   throw new ApiError(400, ERR_ADHYAYAN_NOT_COMPLETED);
+  // }
 
   // Check if more than 15 days have passed since adhyayan ended
   const daysSinceEnd = now.diff(feedbackStartDate, 'days');

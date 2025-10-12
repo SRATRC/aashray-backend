@@ -112,11 +112,11 @@ export const FetchBookedShibir = async (req, res) => {
 
   const currentDate = new Date();
   shibirs.forEach((shibir) => {
-    const endDate = new Date(shibir.end_date);
-    const feedbackStartDate = new Date(endDate);
+    const startDate = new Date(shibir.start_date);
+    const feedbackStartDate = new Date(startDate);
     feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
 
-    const feedbackEndDate = new Date(endDate);
+    const feedbackEndDate = new Date(shibir.end_date);
     feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
 
     shibir.showFeedback =
