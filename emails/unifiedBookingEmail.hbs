@@ -1,38 +1,36 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Booking Confirmation</title>
-
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Booking Confirmation - Vitraag Vigyaan Aashray</title>
     {{> styles }}
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
+            <img src="https://i.imgur.com/SkOGGbd.png" alt="Vitraag Vigyaan Aashray Logo">
         </div>
-        <div class="content" >
-            <p class="intro">Dear {{name}},</p> <p class="intro"> {{welcomeMessage}} Here are the details of your bookings:</p>
+        <div class="content">
+            <p class="intro">Dear {{name}},</p>
+            <p class="intro">{{welcomeMessage}}</p>
+            <p class="intro">Here are the details of your bookings:</p>
            
-         {{#if showUtsavDetail}}
+            {{#if showUtsavDetail}}
             <div class="details">
-                <p class="section-title"><strong>Raj Utsav Booking:</strong></p>
+                <p class="section-title"><strong>Raj Utsav Booking</strong></p>
                 <table>
-                    <tbody> {{#each utsavBookingDetails}}
+                    <tbody>
+                        {{#each utsavBookingDetails}}
                         <tr>
-                            <td><strong>BookingId:</strong> {{bookingid}}
-                                <br>
-                                <strong>Utsav Name:</strong> {{utsavname}}
-                                <br>
-                                <strong>Name:</strong> {{name}}
-                                <br>
-                                <strong>Start Date:</strong> {{startdate}}
-                                <br>
-                                <strong>End Date:</strong> {{enddate}}
-                                <br>
-                                <strong>Package:</strong> {{package}}
-                                <br>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Utsav Name:</strong> {{utsavname}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Start Date:</strong> {{startdate}}<br>
+                                <strong>End Date:</strong> {{enddate}}<br>
+                                <strong>Package:</strong> {{package}}<br>
                                 <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
                             </td>
                         </tr>
@@ -43,23 +41,20 @@
             {{/if}}
 
 
-             {{#if showRoomDetail}}
+            {{#if showRoomDetail}}
             <div class="details">
-                <p class="section-title"><strong>Raj Sharan - Room Booking:</strong></p>
+                <p class="section-title"><strong>Raj Sharan - Room Booking</strong></p>
                 <table>
-                    
-                    <tbody> {{#each roomBookingDetails}}
+                    <tbody>
+                        {{#each roomBookingDetails}}
                         <tr>
-                            <td><strong></strong>BookingId:</strong> {{bookingid}}
-                                <br>
-                                <strong>Name:</strong> {{name}}
-                                <br>
-                                <strong>Checkin:</strong> {{checkin}}
-                                <br>
-                                <strong>Checkout:</strong> {{checkout}}
-                                <br>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Check-in:</strong> {{checkin}}<br>
+                                <strong>Check-out:</strong> {{checkout}}<br>
                                 <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
-                                </td>
+                            </td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -69,85 +64,71 @@
 
             {{#if showFlatDetail}}
             <div class="details">
-                 <p class="section-title"><strong>Raj Sharan - Flat Booking:</strong></p>
-                 <table>
-                     
-                     <tbody>
+                <p class="section-title"><strong>Raj Sharan - Flat Booking</strong></p>
+                <table>
+                    <tbody>
                         {{#each flatBookingDetails}}
                         <tr>
-                            <td><strong>BookingId:</strong> {{bookingid}}
-                                <br>
-                                <strong>Name:</strong> {{name}}
-                                <br>
-                                <strong>Flat No.:</strong> {{flatno}}
-                                <br>
-                                <strong>Checkin:</strong> {{checkin}}
-                                <br>
-                                <strong>Checkout:</strong> {{checkout}}
-                                <br>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Flat No.:</strong> {{flatno}}<br>
+                                <strong>Check-in:</strong> {{checkin}}<br>
+                                <strong>Check-out:</strong> {{checkout}}<br>
                                 <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
-                                </td>
+                            </td>
                         </tr>
                         {{/each}}
-                     </tbody>
+                    </tbody>
                 </table>
             </div>
             {{/if}}
 
             {{#if showAdhyanDetail}}
-             <div class="details" >
-                <p class="section-title"><strong>Raj Adhyayan Booking:</strong></p>
+            <div class="details">
+                <p class="section-title"><strong>Raj Adhyayan Booking</strong></p>
                 <table>
-                   <tbody>
-                     {{#each adhyanBookingDetails}}
+                    <tbody>
+                        {{#each adhyanBookingDetails}}
                         <tr>
-                            <td><strong>BookingId:</strong> {{bookingid}}
-                                <br>
-                                <strong>Name:</strong> {{name}}
-                                <br>
-                                <strong>Adhyayan Name:</strong> {{adhyayanname}}
-                                <br>
-                                <strong>Speaker:</strong> {{speaker}}
-                                <br>
-                                <strong>Start Date:</strong> {{startdate}}
-                                <br>
-                                <strong>End Date:</strong> {{enddate}}
-                                <br>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Adhyayan Name:</strong> {{adhyayanname}}<br>
+                                <strong>Speaker:</strong> {{speaker}}<br>
+                                <strong>Start Date:</strong> {{startdate}}<br>
+                                <strong>End Date:</strong> {{enddate}}<br>
                                 <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
-                                </td>
+                            </td>
                         </tr>
-                    {{/each}}
-                   </tbody>
+                        {{/each}}
+                    </tbody>
                 </table>
 
                 <div class="note">
-                    <p><strong>Please note</strong> that the adhyayan committee reserves the right to cancel your booking within 7 days if you do not meet the adhyayan criteria.</p>
+                    <p><strong>Please note:</strong> The adhyayan committee reserves the right to cancel your booking within 7 days if you do not meet the adhyayan criteria.</p>
                 </div>
             </div>
-           {{/if}}
+            {{/if}}
 
-           {{#if showTravelDetail}}
-             <div class="details" >
-                <p class="section-title"><strong>Raj Pravas - Travel Booking:</strong></p>
+            {{#if showTravelDetail}}
+            <div class="details">
+                <p class="section-title"><strong>Raj Pravas - Travel Booking</strong></p>
                 <table>
-                   <tbody>
-                     {{#each travelBookingDetails}}
+                    <tbody>
+                        {{#each travelBookingDetails}}
                         <tr>
-                            <td><strong>BookingId:</strong> {{bookingid}}
-                                <br>
-                                <strong>Name:</strong> {{name}}
-                                <br>
-                                <strong>Date:</strong> {{date}}
-                                <br>
-                                <strong>Pickup Point:</strong> {{pickuppoint}}
-                                <br>
-                                <strong>Dropoff Point:</strong> {{dropoffpoint}}
-                                <br>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Date:</strong> {{date}}<br>
+                                <strong>Pickup Point:</strong> {{pickuppoint}}<br>
+                                <strong>Drop-off Point:</strong> {{dropoffpoint}}<br>
                                 <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
-                                </td>
+                            </td>
                         </tr>
-                    {{/each}}
-                   </tbody>
+                        {{/each}}
+                    </tbody>
                 </table>
             </div>
             
@@ -156,24 +137,22 @@
 
             <div class="details">
                 <p class="section-title"><strong>Booking Status Definitions</strong></p>
-                <p><b>pending:</b> This means you need to complete your payment within 24 hours to secure your booking on the Vitraag Vigyaan Aashray mobile app.</p>
-                <p><b>waiting:</b> This indicates that your booking has been received and is awaiting confirmation from the administrator.</p>
-                <p><b>awaiting confirmation:</b> Your travel booking details have been submitted and are being reviewed by the administrator. 
-                          Once reviewed, the status will change to <b>proceed for payment.</b></p>
-                <p><b>proceed for payment:</b> Your travel booking is approved and payment need to be made on the Vitraag Vigyaan Aashray mobile app.</p>
-                <p><b>confirmed:</b> Great news! Your booking has been successfully confirmed.</p>
-                <p><b>cancelled:</b> Your booking has been cancelled by you.</p>
-                <p><b>cancelled as wrong form filled:</b> Your travel booking has been cancelled by the administrator because of wrong form filled.</p>
-                <p><b>admin cancelled:</b> Your travel booking has been cancelled by the administrator because of non payment.</p>
+                <p><strong>Pending:</strong> You need to complete your payment within 24 hours to secure your booking on the Vitraag Vigyaan Aashray mobile app.</p>
+                <p><strong>Waiting:</strong> Your booking has been received and is awaiting confirmation from the administrator.</p>
+                <p><strong>Awaiting Confirmation:</strong> Your travel booking details have been submitted and are being reviewed by the administrator. Once reviewed, the status will change to <strong>proceed for payment</strong>.</p>
+                <p><strong>Proceed for Payment:</strong> Your travel booking is approved and payment needs to be made on the Vitraag Vigyaan Aashray mobile app.</p>
+                <p><strong>Confirmed:</strong> Great news! Your booking has been successfully confirmed.</p>
+                <p><strong>Cancelled:</strong> Your booking has been cancelled by you.</p>
+                <p><strong>Cancelled as Wrong Form Filled:</strong> Your travel booking has been cancelled by the administrator because the wrong form was filled.</p>
+                <p><strong>Admin Cancelled:</strong> Your booking has been cancelled by the administrator due to non-payment.</p>
             </div>
 
-
             <div class="steps">
-              <p>You can view all your bookings, booking statuses and make any pending payments on the <a href="https://aashray.vitraagvigyaan.org">Vitraag Vigyaan Aashray mobile app</a>.</p>
-              <p> <a href='https://drive.google.com/file/d/1nTqWPlsiFZUc_rulepkbo7eLYaM3MidM/view' target='_blank' class="link">Please click here</a> to read the guidelines for your stay at the Research Center. We hope you have a spiritually blissful stay.</p>
-              <p>If you have any questions or need further assistance, please feel free to contact us at <b>+91-7875432613 / +91-9004273512</b>.</p>
-           </div>
-       </div>
+                <p>You can view all your bookings, booking statuses, and make any pending payments on the <a href="https://aashray.vitraagvigyaan.org" class="link">Vitraag Vigyaan Aashray mobile app</a>.</p>
+                <p><a href="https://drive.google.com/file/d/1nTqWPlsiFZUc_rulepkbo7eLYaM3MidM/view" target="_blank" class="link">Please click here</a> to read the guidelines for your stay at the Research Center. We hope you have a spiritually blissful stay.</p>
+                <p>If you have any questions or need further assistance, please feel free to contact us at <strong>+91-7875432613</strong> / <strong>+91-9004273512</strong>.</p>
+            </div>
+        </div>
 
         {{> _footer}}
     </div>
