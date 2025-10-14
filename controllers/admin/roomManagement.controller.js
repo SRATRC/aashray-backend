@@ -6,7 +6,6 @@ import {
   Transactions,
   FlatDb
 } from '../../models/associations.js';
-import BlockDates from '../../models/block_dates.model.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
   ROOM_STATUS_CHECKEDIN,
@@ -46,20 +45,22 @@ import {
   checkRoomAlreadyBooked,
   createFlatBooking,
   createRoomBooking,
-  findAllRooms,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
   adminCancelTransaction,
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
+import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
+import { v4 as uuidv4 } from 'uuid';
+import Sequelize, { Op } from 'sequelize';
+import logger from '../../config/logger.js';
+import BlockDates from '../../models/block_dates.model.js';
 import getDates from '../../utils/getDates.js';
-import Sequelize from 'sequelize';
-import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import { v4 as uuidv4 } from 'uuid';
+import moment from 'moment';
 
 const CHECKOUT_DEADLINE = '11:00:00';
 const LATE_CHECKOUT_HALF = '15:00:00';
@@ -88,15 +89,16 @@ const handleSameDayCheckout = async ({
 
   // Late checkout ⇒ add fee (half-day if before 3 PM, full-day otherwise).
   const isHalfDay = checkoutTime <= LATE_CHECKOUT_HALF;
+  const lateCheckoutAmount = calcLateCheckoutFee(
+    booking.roomtype || booking.roomType,
+    isHalfDay
+  );
   await Transactions.create(
     {
-      cardno: booking.cardno,
+      cardno: booking.cardno, //TODO: should this be booking.cardno or booking.bookedBy?
       bookingid: uuidv4(),
       category: TYPE_ROOM,
-      amount: calcLateCheckoutFee(
-        booking.roomtype || booking.roomType,
-        isHalfDay
-      ),
+      amount: lateCheckoutAmount,
       status: STATUS_CASH_PENDING,
       description: `Late checkout fee for booking ${booking.bookingid}`,
       updatedBy: user.username
@@ -108,6 +110,15 @@ const handleSameDayCheckout = async ({
     { status: ROOM_STATUS_CHECKEDOUT, updatedBy: user.username },
     { transaction: dbTransaction }
   );
+
+  sendDualUserNotifications({
+    primary: {
+      token: booking.CardDb.token,
+      title: 'Late checkout fee',
+      body: `You have been charged for late checkout. Please pay ₹${lateCheckoutAmount}`
+    },
+    screen: '/pendingPayments'
+  });
 };
 
 /**
@@ -237,6 +248,15 @@ const handleEarlyCheckout = async ({
       transaction: dbTransaction
     }
   );
+
+  sendDualUserNotifications({
+    primary: {
+      token: card.token,
+      title: 'Raj Sharan early checkout',
+      body: 'We noticed you checked out early. Adjustment amount has been credited to payer’s account.'
+    },
+    screen: '/bookings'
+  });
 };
 
 export const manualCheckin = async (req, res) => {
@@ -290,11 +310,18 @@ export const manualCheckin = async (req, res) => {
     .send({ message: 'Successfully checked in', data: booking });
 };
 
+// TODO: send notifications for additional payments
 export const manualCheckout = async (req, res) => {
   const dbTransaction = await database.transaction();
   req.transaction = dbTransaction;
 
   const booking = await RoomBooking.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'token']
+      }
+    ],
     where: {
       bookingid: req.params.bookingid,
       status: ROOM_STATUS_CHECKEDIN
@@ -358,6 +385,12 @@ export const cancelFlatBooking = async (req, res) => {
   req.transaction = t;
 
   const booking = await FlatBooking.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'token']
+      }
+    ],
     where: {
       bookingid: req.params.bookingid,
       status: {
@@ -384,6 +417,29 @@ export const cancelFlatBooking = async (req, res) => {
   );
 
   await t.commit();
+
+  sendDualUserNotifications({
+    primary: {
+      token: booking.CardDb.token,
+      title: 'Flat Booking Cancelled by Admin',
+      body: `Your flat booking from ${moment(booking.checkin).format(
+        'Do MMM, YYYY'
+      )} to ${moment(booking.checkout).format(
+        'Do MMM, YYYY'
+      )} has been cancelled by admin.`
+    },
+    bookedBy: booking.bookedBy && {
+      cardno: booking.bookedBy,
+      title: 'Flat Booking Cancelled by Admin',
+      body: `Flat booking for ${
+        booking.CardDb.issuedto.split(' ')[0]
+      } from ${moment(booking.checkin).format('Do MMM, YYYY')} to ${moment(
+        booking.checkout
+      ).format('Do MMM, YYYY')} has been cancelled by admin.`
+    },
+    screen: '/bookings'
+  });
+
   return res
     .status(200)
     .send({ message: MSG_CANCEL_SUCCESSFUL, data: booking });
@@ -520,6 +576,20 @@ export const roomBooking = async (req, res) => {
     bookingIds[TYPE_ROOM] = [booking.bookingId];
     sendUnifiedEmail(card.cardno, bookingIds, card);
   }
+
+  sendDualUserNotifications({
+    primary: {
+      token: card.token,
+      title: 'Raj Sharan Booking by Admin',
+      body:
+        'Your stay has been booked from ' +
+        moment(checkin_date).format('Do MMM, YYYY') +
+        ' to ' +
+        moment(checkout_date).format('Do MMM, YYYY') +
+        ' by admin.'
+    },
+    screen: '/bookings'
+  });
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
@@ -536,7 +606,8 @@ export const flatBooking = async (req, res) => {
       'gender',
       'mobno',
       'email',
-      'credits'
+      'credits',
+      'token'
     ],
     where: {
       mobno: req.params.mobno
@@ -584,6 +655,22 @@ export const flatBooking = async (req, res) => {
     sendUnifiedEmail(card.cardno, bookingIds, card);
   }
 
+  sendDualUserNotifications({
+    primary: {
+      token: card.token,
+      title: 'Flat Booking by Admin',
+      body:
+        'Your flat booking for flat no. ' +
+        req.body.flat_no +
+        ' has been confirmed from ' +
+        moment(booking.checkin).format('Do MMM, YYYY') +
+        ' to ' +
+        moment(booking.checkout).format('Do MMM, YYYY') +
+        ' by admin.'
+    },
+    screen: '/bookings'
+  });
+
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
@@ -629,6 +716,12 @@ export const updateRoomBooking = async (req, res) => {
   const { bookingid, roomno } = req.body;
 
   const booking = await RoomBooking.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'token']
+      }
+    ],
     where: { bookingid }
   });
 
@@ -647,18 +740,34 @@ export const updateRoomBooking = async (req, res) => {
     { transaction: t }
   );
 
+  sendDualUserNotifications({
+    primary: {
+      token: booking.CardDb.token,
+      title: 'Room number changed',
+      body: `Your room number has been changed to ${roomno}`
+    },
+    screen: '/bookings'
+  });
+
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateFlatBooking = async (req, res) => {
-  const { bookingid, cardno, flatno, checkin_date, checkout_date, status } =
-    req.body;
+  const { bookingid, flatno, checkin_date, checkout_date, status } = req.body;
 
   validateDate(checkin_date, checkout_date);
 
   const nights = await calculateNights(checkin_date, checkout_date);
-  const booking = await FlatBooking.findByPk(bookingid);
+  const booking = await FlatBooking.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'token']
+      }
+    ],
+    where: { bookingid }
+  });
   if (!booking) {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
@@ -670,6 +779,15 @@ export const updateFlatBooking = async (req, res) => {
     nights,
     status,
     updatedBy: req.user.username
+  });
+
+  sendDualUserNotifications({
+    primary: {
+      token: booking.CardDb.token,
+      title: 'Flat booking updated',
+      body: 'Your flat booking has been updated by admin. Please check your bookings.'
+    },
+    screen: '/bookings'
   });
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
@@ -869,10 +987,6 @@ export const unblockRC = async (req, res) => {
   return res.status(200).send({ message: 'Unblocked RC successfully' });
 };
 
-import { Op } from 'sequelize';
-import logger from '../../config/logger.js';
-// import moment from 'moment';
-
 export const occupancyReport = async (req, res) => {
   const today = moment().startOf('day').toDate(); // today's 00:00
   const tomorrow = moment().add(1, 'day').startOf('day').toDate(); // tomorrow 00:00
@@ -1056,7 +1170,15 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status, description } = req.body;
 
-  const booking = await RoomBooking.findOne({ where: { bookingid } });
+  const booking = await RoomBooking.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'token']
+      }
+    ],
+    where: { bookingid }
+  });
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
   const t = await database.transaction();
@@ -1233,6 +1355,65 @@ export const updateBookingStatus = async (req, res) => {
       throw new ApiError(400, 'Invalid status provided');
   }
 
+  switch (newStatus) {
+    case STATUS_ADMIN_CANCELLED: {
+      sendDualUserNotifications({
+        primary: {
+          token: booking.CardDb.token,
+          title: 'Raj Sharan Cancelled',
+          body: 'Your room booking has been cancelled by admin.'
+        },
+        bookedBy: booking.bookedBy && {
+          cardno: booking.bookedBy,
+          title: 'Raj Sharan Cancelled',
+          body: `Stay for ${
+            booking.CardDb.issuedto.split(' ')[0]
+          } has been cancelled by admin.`
+        },
+        screen: '/bookings'
+      });
+      break;
+    }
+    case STATUS_PAYMENT_PENDING: {
+      sendDualUserNotifications({
+        primary: {
+          token: booking.CardDb.token,
+          title: 'Raj Sharan booking status update',
+          body: 'Raj Sharan status has been updated to payment pending. Please complete payment within 24 hours.'
+        },
+        bookedBy: booking.bookedBy && {
+          cardno: booking.bookedBy,
+          title: 'Raj Sharan booking status update',
+          body: `Payment is required for stay of ${
+            booking.CardDb.issuedto.split(' ')[0]
+          }. Please complete payment within 24 hours.`
+        },
+        screen: '/bookings'
+      });
+      break;
+    }
+    case ROOM_STATUS_PENDING_CHECKIN: {
+      sendDualUserNotifications({
+        primary: {
+          token: booking.CardDb.token,
+          title: 'Raj Sharan booking confirmed',
+          body: 'Your room booking has been confirmed and is ready for check-in.'
+        },
+        bookedBy: booking.bookedBy && {
+          cardno: booking.bookedBy,
+          title: 'Raj Sharan booking confirmed',
+          body: `Room booking for ${
+            booking.CardDb.issuedto.split(' ')[0]
+          } has been confirmed by admin.`
+        },
+        screen: '/bookings'
+      });
+      break;
+    }
+    default:
+      break;
+  }
+
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
@@ -1328,7 +1509,15 @@ export async function findAllRoomsUnfiltered(room_type, gender) {
 export const updateFlatBookingStatus = async (req, res) => {
   const { bookingid, status, description } = req.body;
 
-  const booking = await FlatBooking.findOne({ where: { bookingid } });
+  const booking = await FlatBooking.findOne({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'token']
+      }
+    ],
+    where: { bookingid }
+  });
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
   const t = await database.transaction();
@@ -1502,6 +1691,65 @@ export const updateFlatBookingStatus = async (req, res) => {
 
     default:
       throw new ApiError(400, 'Invalid status provided');
+  }
+
+  switch (newStatus) {
+    case STATUS_ADMIN_CANCELLED: {
+      sendDualUserNotifications({
+        primary: {
+          token: booking.CardDb.token,
+          title: 'Flat Booking Cancelled',
+          body: 'Your flat booking has been cancelled by admin.'
+        },
+        bookedBy: booking.bookedBy && {
+          cardno: booking.bookedBy,
+          title: 'Flat Booking Cancelled by Admin',
+          body: `Flat booking for ${
+            booking.CardDb.issuedto.split(' ')[0]
+          } has been cancelled by admin.`
+        },
+        screen: '/bookings'
+      });
+      break;
+    }
+    case STATUS_PAYMENT_PENDING: {
+      sendDualUserNotifications({
+        primary: {
+          token: booking.CardDb.token,
+          title: 'Flat Booking status update',
+          body: 'Flat booking status has been updated to payment pending. Please complete payment within 24 hours.'
+        },
+        bookedBy: booking.bookedBy && {
+          cardno: booking.bookedBy,
+          title: 'Flat Booking status update',
+          body: `Payment is required for stay of ${
+            booking.CardDb.issuedto.split(' ')[0]
+          }. Please complete payment within 24 hours.`
+        },
+        screen: '/bookings'
+      });
+      break;
+    }
+    case ROOM_STATUS_PENDING_CHECKIN: {
+      sendDualUserNotifications({
+        primary: {
+          token: booking.CardDb.token,
+          title: 'Flat Booking confirmed',
+          body: 'Your flat booking has been confirmed and is ready for check-in.'
+        },
+        bookedBy: booking.bookedBy && {
+          cardno: booking.bookedBy,
+          title: 'Flat Booking confirmed',
+          body: `Flat booking for ${
+            booking.CardDb.issuedto.split(' ')[0]
+          } has been confirmed and is ready for check-in.`
+        },
+        screen: '/bookings'
+      });
+      break;
+    }
+    default:
+      break;
   }
 
   await t.commit();

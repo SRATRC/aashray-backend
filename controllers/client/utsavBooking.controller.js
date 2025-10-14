@@ -8,9 +8,15 @@ import {
   UtsavPackagesDb
 } from '../../models/associations.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { openUtsavSeat, sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+
+import {
+  getOtherBookingUser,
+  notifyCardno
+} from '../../helpers/notification.helper.js';
 
 export const FetchUpcoming = async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
@@ -135,6 +141,12 @@ export const CancelUtsavBooking = async (req, res) => {
   req.transaction = t;
 
   const booking = await UtsavBooking.findOne({
+    include: [
+      {
+        model: UtsavDb,
+        as: 'UtsavDb'
+      }
+    ],
     where: {
       bookingid: bookingid
     }
@@ -146,7 +158,33 @@ export const CancelUtsavBooking = async (req, res) => {
 
   await userCancelBooking(req.user, booking, t);
 
+  const utsav = await UtsavDb.findOne({
+    where: { id: booking.utsavid }
+  });
+  await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
+  
   await t.commit();
+  
+
+  if (booking.bookedBy) {
+    const other = getOtherBookingUser(booking, req.user.cardno);
+    if (other) {
+      const title = 'Utsav Booking Cancelled';
+      const body =
+        req.user.cardno === booking.cardno
+          ? `Booking of "${booking.UtsavDb.name}" for ${req.user.issuedto} has been cancelled.`
+          : `Your booking of "${booking.UtsavDb.name}" has been cancelled.`;
+      notifyCardno(other, {
+        title,
+        body,
+        screen: '/bookings'
+      });
+    }
+  }
+  
+
+  await sendUtsavBookingUpdateEmail(booking, utsav);
+
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
