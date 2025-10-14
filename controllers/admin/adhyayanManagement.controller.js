@@ -514,14 +514,14 @@ export const adhyayanStatusUpdate = async (req, res) => {
             primary: {
               cardno: booking.cardno,
               title: 'Adhyayan Booking Confirmed',
-              body: 'Admin has requested you to make payment for your adhyayan booking to secure your spot.'
+              body: 'Your adhyayan booking has been confirmed.'
             },
             bookedBy: booking.bookedBy && {
               token: bookedByCard.token,
               title: 'Adhyayan Booking Confirmed',
-              body: `Admin has requested you to make payment for ${
+              body: `Adhyayan booking for ${
                 booking.CardDb.issuedto.split(' ')[0]
-              }'s adhyayan booking to secure your spot.`
+              } has been confirmed.`
             },
             screen: '/bookings'
           });
