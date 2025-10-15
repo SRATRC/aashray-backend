@@ -457,7 +457,7 @@ export const utsavStatusUpdate = async (req, res) => {
           transaction: t
         });
 
-        transaction = created ? existingTransaction : existingTransaction;
+        transaction = existingTransaction;
       }
       newBookingStatus = STATUS_PAYMENT_PENDING;
       break;
