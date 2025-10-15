@@ -62,10 +62,22 @@ export const unifiedBooking = async (req, res) => {
   req.transaction = t;
   const userBookingIdMap = {};
   const waitingBookingCountMap = {};
+
+
+  let utsav = null;
+  if (primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
+
   let amount = await book(
     req.user,
     req.body,
     primary_booking,
+    utsav,
     userBookingIdMap,
     waitingBookingCountMap,
     t
@@ -77,6 +89,7 @@ export const unifiedBooking = async (req, res) => {
         req.user,
         req.body,
         addon,
+        utsav,
         userBookingIdMap,
         waitingBookingCountMap,
         t
@@ -151,6 +164,7 @@ async function book(
   user,
   body,
   data,
+  utsav,
   userBookingIdMap,
   waitingBookingCountMap,
   t
@@ -159,7 +173,7 @@ async function book(
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(user, body, data, t);
+      const roomResult = await bookRoom(user, body, data, utsav, t);
       amount += roomResult.amount;
 
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
@@ -269,7 +283,7 @@ async function validate(body, user, data, response, utsav) {
   return response;
 }
 
-async function bookRoom(user, body, data, t) {
+async function bookRoom(user, body, data, utsav, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
   const result = await bookRoomForMumukshus(
@@ -283,7 +297,8 @@ async function bookRoom(user, body, data, t) {
       }
     ],
     t,
-    user
+    user,
+    utsav
   );
 
   return result;
