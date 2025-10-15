@@ -308,7 +308,7 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
   }
 
   const now = moment().tz('Asia/Kolkata');
-  const feedbackStartDate = moment(adhyayan.end_date)
+  const feedbackStartDate = moment(adhyayan.start_date)
     .tz('Asia/Kolkata')
     .hour(FEEDBACK_ELIGIBILITY_HOUR)
     .minute(0)
