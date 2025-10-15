@@ -470,36 +470,57 @@ export const utsavStatusUpdate = async (req, res) => {
     booking.status !== STATUS_PAYMENT_PENDING &&
     booking.status !== STATUS_CONFIRMED &&
     booking.status !== STATUS_CANCELLED
-    ) {
+  ) {
     throw new ApiError(
       400,
-      'Admin Cancelled can only be set from waiting, payment pending, confirmed or completed'
+      'Admin Cancelled can only be set from waiting, payment pending, confirmed or cancelled'
     );
   }
 
+  // 🪑 Free seat if applicable
   if (
     booking.status === STATUS_CONFIRMED ||
-    booking.status === STATUS_PAYMENT_PENDING 
-    ) {
+    booking.status === STATUS_PAYMENT_PENDING
+  ) {
     const utsavRecord = await UtsavDb.findByPk(booking.utsavid, { transaction: t });
     if (!utsavRecord) throw new ApiError(404, 'Utsav not found');
     await openUtsavSeat(utsavRecord, booking.cardno, req.user.username, t);
   }
 
-  if (transaction && ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(transaction.status)) {
-    if (issueCredits) {
-      // ✅ Issue credits only if admin selected yes
-      await cancelTransaction(req.user, null, transaction, t, true);
-      console.log('>> Credits issued for admin cancellation');
+  if (transaction) {
+    if (transaction.status === STATUS_CANCELLED) {
+      // 🔁 user had cancelled earlier, now admin upgrades it
+      if (issueCredits === true || issueCredits === 'yes') {
+        console.log('>> Issuing credits for previously cancelled transaction');
+        await cancelTransaction(req.user, null, transaction, t, true); // ✅ adds credits + sets status=credited
+      } else {
+        console.log('>> Marking previously cancelled transaction as admin cancelled (no credits)');
+        await transaction.update(
+          { status: STATUS_ADMIN_CANCELLED, updatedBy: req.user.username },
+          { transaction: t }
+        );
+      }
+    } else if (![STATUS_CREDITED, STATUS_ADMIN_CANCELLED].includes(transaction.status)) {
+      // Normal admin cancel
+      if (issueCredits === true || issueCredits === 'yes') {
+        console.log('>> Issuing credits for admin cancellation');
+        await cancelTransaction(req.user, null, transaction, t, true);
+      } else {
+        console.log('>> Admin cancelled without credits');
+        await transaction.update(
+          {
+            status: STATUS_ADMIN_CANCELLED,
+            description: description || 'Admin cancelled without credits',
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      }
     } else {
-      await transaction.update(
-        { status: STATUS_ADMIN_CANCELLED, updatedBy: req.user.username },
-        { transaction: t }
-      );
-      console.log('>> Transaction marked admin cancelled without credits');
+      console.log('>> Transaction already credited/admin-cancelled, skipping');
     }
   } else {
-    console.log('>> Transaction already credited/cancelled/admin-cancelled, skipping');
+    console.log('>> No transaction found for this booking');
   }
 
   newBookingStatus = STATUS_ADMIN_CANCELLED;
