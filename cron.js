@@ -11,7 +11,8 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
-  TYPE_FOOD
+  TYPE_FOOD,
+  TYPE_UTSAV
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
