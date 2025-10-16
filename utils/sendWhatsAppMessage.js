@@ -44,9 +44,9 @@ export async function sendWhatsAppMessage(phone, templateName, params = []) {
 
     console.log(`✅ WhatsApp sent to ${phone}`);
   } catch (err) {
-    console.error(
-      `❌ WhatsApp failed for ${phone}:`,
-      err.response?.data || err.message
-    );
+    console.error(`❌ WhatsApp failed for ${phone}`);
+console.error("Status:", err.response?.status);
+console.error("Data:", JSON.stringify(err.response?.data, null, 2));
+console.error("Message:", err.message);
   }
 }

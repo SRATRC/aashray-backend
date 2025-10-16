@@ -45,58 +45,130 @@ import { sendWhatsAppMessage } from "../../utils/sendWhatsAppMessage.js";
 export const createUtsavBookingByAdmin = async (req, res) => {
   const { utsavid, mumukshus } = req.body;
 
+  // Validation
   if (!utsavid || !Array.isArray(mumukshus) || mumukshus.length === 0) {
-    return res.status(400).send({ message: "utsavid and mumukshus are required" });
+    return res.status(400).send({ 
+      message: "utsavid and mumukshus are required" 
+    });
   }
 
   for (const m of mumukshus) {
     if (!m?.cardno || !m?.packageid) {
-      return res
-        .status(400)
-        .send({ message: "Each mumukshu must include cardno and packageid" });
+      return res.status(400).send({ 
+        message: "Each mumukshu must include cardno and packageid" 
+      });
     }
   }
 
+  // Start transaction
   const t = await database.transaction();
   req.transaction = t;
 
   try {
+    // Create bookings
     const result = await bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, req.user);
+    
+    // Commit transaction
     await t.commit();
+    
+    console.log("✅ Transaction committed successfully");
+    console.log("📦 Booking result:", result);
 
-    try {
-      for (const cardno in result.userBookingIds) {
-        const bookingIds = result.userBookingIds[cardno];
-        for (const id of bookingIds) {
-          const booking = await UtsavBooking.findOne({ where: { bookingid: id } });
-          if (booking) {
-            await sendUtsavBookingUpdateEmail(booking, null);
+    // Send notifications AFTER successful commit (with separate error handling)
+    for (const cardno in result.userBookingIds) {
+      const bookingIds = result.userBookingIds[cardno];
+      
+      for (const id of bookingIds) {
+        console.log(`\n📋 Processing booking: ${id}`);
+        
+        // Fetch booking and card details
+        const booking = await UtsavBooking.findOne({ 
+          where: { bookingid: id } 
+        });
+        
+        if (!booking) {
+          console.warn(`⚠️ Booking not found: ${id}`);
+          continue;
+        }
 
-            // ✅ Send WhatsApp notification
-  const phone = booking.mobno;
-  if (phone) {
-    await sendWhatsAppMessage(
-      phone,
-      "room_allocation_2025",
-      [
-        booking.name || "Mumukshu",
-        booking.room_no || "N/A",
-        booking.start_date || "N/A"
-      ] // parameters for {{1}}, {{2}}, {{3}}
-            );
+        const card = await CardDb.findOne({ 
+          where: { cardno: booking.cardno } 
+        });
+        
+        if (!card) {
+          console.warn(`⚠️ Card not found for booking: ${id}`);
+          continue;
+        }
+
+        console.log("📋 Booking details:", {
+          bookingid: booking.bookingid,
+          cardno: card.cardno,
+          name: card.issuedto,
+          mobno: card.mobno,
+          roomno: booking.roomno,
+          status: booking.status
+        });
+
+        // Send Email (with separate error handling)
+        try {
+          await sendUtsavBookingUpdateEmail(booking, null);
+          console.log(`✅ Email sent for booking: ${id}`);
+        } catch (emailError) {
+          console.error(`❌ Email failed for booking: ${id}`);
+          console.error("Email error:", emailError.message);
+        }
+
+        // Send WhatsApp (with separate error handling)
+        try {
+          const phone = card.mobno;
+          
+          if (!phone) {
+            console.warn(`⚠️ No phone number for booking: ${id}`);
+            continue;
           }
+
+          // Clean and format phone number
+          const cleanPhone = String(phone).replace(/\D/g, '');
+          const formattedPhone = cleanPhone.startsWith('91') 
+            ? cleanPhone 
+            : `91${cleanPhone}`;
+          
+          console.log(`📞 Sending WhatsApp to: ${formattedPhone}`);
+          
+          // Get utsav details for the message
+          const utsav = await UtsavDb.findOne({ 
+            where: { id: booking.utsavid } 
+          });
+
+          await sendWhatsAppMessage(
+            formattedPhone,
+            "room_allocation_2025",
+            [
+              card.issuedto || "Mumukshu",
+              booking.roomno || "Not Assigned",
+              utsav?.start_date || booking.start_date || "TBD"
+            ]
+          );
+          
+          console.log(`✅ WhatsApp sent successfully for booking: ${id}`);
+        } catch (whatsappError) {
+          console.error(`❌ WhatsApp failed for booking: ${id}`);
+          console.error("WhatsApp error:", whatsappError.message);
+          console.error("Full error:", whatsappError.response?.data || whatsappError);
         }
       }
-    }} catch (e) {
-      console.warn("Email/WhatsApp sending failed for some bookings:", e?.message || e);
     }
 
+    // Return success response
     return res.status(200).send({
       message: "Utsav booking(s) created by admin",
       data: result,
     });
+
   } catch (err) {
+    // Rollback transaction on error
     await t.rollback();
+    console.error("❌ Transaction failed and rolled back:", err);
     throw err;
   }
 };
