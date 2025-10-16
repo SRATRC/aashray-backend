@@ -238,7 +238,7 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
   }
 }
 
-export async function sendAdhyayanBookingUpdateEmail(newBooking, adhyayan,isfromAdmin) {
+export async function sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, isfromAdmin) {
   // Build card numbers array efficiently and fetch all cards in single query
   const cardNumbers = [newBooking.cardno, newBooking.bookedBy].filter(Boolean);
   const cards = await CardDb.findAll({ where: { cardno: cardNumbers } });
@@ -261,7 +261,7 @@ export async function sendAdhyayanBookingUpdateEmail(newBooking, adhyayan,isfrom
   let adhyanName = adhyayan.name;
   // Status message mapping
   const statusMessages = {
-    [STATUS_PAYMENT_PENDING]: 'has been confirmed '+adminBody+' and you are requested to make payment within 24 hours to secure your spot.',
+    [STATUS_PAYMENT_PENDING]: 'has been pending '+adminBody+' and you are requested to make payment within 24 hours to secure your spot.',
     [STATUS_CONFIRMED]: 'has been confirmed '+adminBody+' for '+adhyanName+'.',
     [STATUS_WAITING]: "has been placed on the waiting list for "+adhyanName+" and will be notified if a spot becomes available."+adminBody+'.',
     [STATUS_CANCELLED]: 'has been cancelled for '+adhyanName+'.',
@@ -365,7 +365,7 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
   }
 
   const now = moment().tz('Asia/Kolkata');
-  const feedbackStartDate = moment(adhyayan.start_date)
+  const feedbackStartDate = moment(adhyayan.end_date)
     .tz('Asia/Kolkata')
     .hour(FEEDBACK_ELIGIBILITY_HOUR)
     .minute(0)

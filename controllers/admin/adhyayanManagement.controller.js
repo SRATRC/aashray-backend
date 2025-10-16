@@ -27,7 +27,7 @@ import {
   openAdhyayanSeat,
   validateAdhyayanBooking,
   validateAdhyayans, 
-  sendAdhyayanBookingUpdateEmail
+  sendAdhyayanBookingUpdateNotification
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
@@ -550,10 +550,10 @@ export const adhyayanStatusUpdate = async (req, res) => {
   // Send notifications and emails after transaction commit
   try {
    
-    sendAdhyayanBookingUpdateEmail(booking, adhyayan);
-    // Send email for new booking if exists
+    sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+    // Send notification and email for new booking if exists
     if (newBooking) {
-      await sendAdhyayanBookingUpdateEmail(newBooking, adhyayan);
+      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
     }
   } catch (error) {
     // Log error but don't fail the response since transaction is already committed

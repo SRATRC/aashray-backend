@@ -18,7 +18,7 @@ import {
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
-import { openAdhyayanSeat ,sendAdhyayanBookingUpdateEmail} from '../../helpers/adhyayanBooking.helper.js';
+import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   getOtherBookingUser,
@@ -167,11 +167,11 @@ export const CancelShibir = async (req, res) => {
   await t.commit();
 
 
-  await sendAdhyayanBookingUpdateEmail(booking, adhyayan);
+  await sendAdhyayanBookingUpdateNotification(booking, adhyayan);
 
 if (newBooking) {
-    //sending email to user who got moved from waiting to pending and cc to the bookedBy user if any.
-    await sendAdhyayanBookingUpdateEmail(newBooking, adhyayan);
+    //sending notification and email to user who got moved from waiting to pending and cc to the bookedBy user if any.
+    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
   }
   
   return res.status(200).send({ message: 'Adhyayan booking cancelled' });
