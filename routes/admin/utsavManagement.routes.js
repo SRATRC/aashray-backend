@@ -13,13 +13,16 @@ import {
   updateUtsavPackage,
   fetchAllPackages,
   fetchPackage,
+  fetchPackagesByUtsav,
   fetchAllUtsavList,
   utsavCheckin,
   utsavCheckinReport,
   fetchUtsavBookingsVolunteer,
   uploadRoomNoExcel,
-  updateRoomNo
+  updateRoomNo,
+  fetchVolunteerOptions
 } from '../../controllers/admin/utsavManagement.controller.js';
+import { createUtsavBookingByAdmin } from '../../controllers/admin/utsavManagement.controller.js';
 
 import {
   ROLE_SUPER_ADMIN,
@@ -52,11 +55,23 @@ utsavAdminRouter.use(
 
 utsavAdminRouter.post('/create', CatchAsync(createUtsav));
 utsavAdminRouter.post('/package', CatchAsync(addUtsavPackage));
+// Only allow admins with write permissions to create bookings (exclude read-only)
+utsavAdminRouter.post(
+  '/booking',
+  authorizeRoles(
+    ROLE_UTSAV_ADMIN,
+    ROLE_SUPER_ADMIN,
+    ROLE_PRA_ACCOUNTS_ADMIN,
+    ROLE_ACCOUNTS_ADMIN
+  ),
+  CatchAsync(createUtsavBookingByAdmin)
+);
 utsavAdminRouter.put('/update/:id', CatchAsync(updateUtsav));
 utsavAdminRouter.put('/updatepackage/:id/:utsavId', CatchAsync(updateUtsavPackage));
 utsavAdminRouter.get('/bookings', CatchAsync(fetchUtsavBookings));
 utsavAdminRouter.get('/volunteer', CatchAsync(fetchUtsavBookingsVolunteer));
 utsavAdminRouter.get('/fetchpackage', CatchAsync(fetchAllPackages));
+utsavAdminRouter.get('/fetchPackagesByUtsav', CatchAsync(fetchPackagesByUtsav));
 utsavAdminRouter.get('/fetch', CatchAsync(fetchAllUtsav));
 utsavAdminRouter.get('/fetch/:id', CatchAsync(fetchUtsav));
 utsavAdminRouter.get('/fetchpackage/:id', CatchAsync(fetchPackage));
@@ -66,6 +81,7 @@ utsavAdminRouter.get('/fetchList', CatchAsync(fetchAllUtsavList));
 utsavAdminRouter.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
 utsavAdminRouter.post('/uploadRoomNo', upload.single('file'), CatchAsync(uploadRoomNoExcel));
 utsavAdminRouter.put('/updateRoomNo', CatchAsync(updateRoomNo));
+utsavAdminRouter.get('/fetchVolunteerOptions', CatchAsync(fetchVolunteerOptions));
 
 // ✅ Export both routers
 export { utsavPublicRouter, utsavAdminRouter };

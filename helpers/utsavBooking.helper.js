@@ -114,6 +114,67 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
+export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUser) {
+  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
+  if (!utsav) throw new ApiError(400, 'Utsav not found');
+
+  const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
+
+  await checkUtsavAlreadyBooked(utsavid, mumukshus);
+
+  let total_amount = 0;
+  let userBookingIds = {}, waitingBookingCount = 0;
+
+  for (const mumukshu of mumukshus) {
+    let bookings = [];
+    const bookingid = uuidv4();
+
+    const package_info = packages.find((p) => p.id === Number(mumukshu.packageid));
+    if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+
+    // Admin flow: do not check or decrement available seats; set to payment pending
+    const booking = await UtsavBooking.create(
+      {
+        bookingid,
+        utsavid,
+        cardno: mumukshu.cardno,
+        bookedBy: null,
+        packageid: mumukshu.packageid,
+        arrival: mumukshu.arrival,
+        carno: mumukshu.carno,
+        other: mumukshu.other,
+        volunteer: mumukshu.volunteer,
+        status: STATUS_PAYMENT_PENDING,
+        updatedBy: adminUser.username || 'admin'
+      },
+      { transaction: t }
+    );
+
+    // Always create pending/cash transaction for admin
+    const cardRecord = await CardDb.findOne({ where: { cardno: mumukshu.cardno } });
+    if (!cardRecord) throw new ApiError(400, `Card not found for cardno ${mumukshu.cardno}`);
+
+    await createPendingTransaction(
+      cardRecord,
+      booking,
+      TYPE_UTSAV,
+      package_info.amount,
+      adminUser.username || 'admin',
+      t,
+      true
+    );
+
+    total_amount += package_info.amount;
+
+    bookings.push(bookingid);
+    userBookingIds[mumukshu.cardno] = bookings;
+  }
+
+  // Admin flow: do not adjust available_seats here
+
+  return { amount: total_amount, userBookingIds, waitingBookingCount };
+}
+
 export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
   const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
   const alreadyBooked = await UtsavBooking.findAll({
