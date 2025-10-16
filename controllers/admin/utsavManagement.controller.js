@@ -40,19 +40,20 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
-
+import { sendWhatsAppMessage } from "../../utils/sendWhatsAppMessage.js";
 
 export const createUtsavBookingByAdmin = async (req, res) => {
   const { utsavid, mumukshus } = req.body;
 
   if (!utsavid || !Array.isArray(mumukshus) || mumukshus.length === 0) {
-    return res.status(400).send({ message: 'utsavid and mumukshus are required' });
+    return res.status(400).send({ message: "utsavid and mumukshus are required" });
   }
 
-  // basic per-item validation
   for (const m of mumukshus) {
     if (!m?.cardno || !m?.packageid) {
-      return res.status(400).send({ message: 'Each mumukshu must include cardno and packageid' });
+      return res
+        .status(400)
+        .send({ message: "Each mumukshu must include cardno and packageid" });
     }
   }
 
@@ -61,10 +62,8 @@ export const createUtsavBookingByAdmin = async (req, res) => {
 
   try {
     const result = await bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, req.user);
-
     await t.commit();
 
-    // send emails outside transaction
     try {
       for (const cardno in result.userBookingIds) {
         const bookingIds = result.userBookingIds[cardno];
@@ -72,16 +71,29 @@ export const createUtsavBookingByAdmin = async (req, res) => {
           const booking = await UtsavBooking.findOne({ where: { bookingid: id } });
           if (booking) {
             await sendUtsavBookingUpdateEmail(booking, null);
+
+            // ✅ Send WhatsApp notification
+  const phone = booking.mobno;
+  if (phone) {
+    await sendWhatsAppMessage(
+      phone,
+      "room_allocation_2025",
+      [
+        booking.name || "Mumukshu",
+        booking.room_no || "N/A",
+        booking.start_date || "N/A"
+      ] // parameters for {{1}}, {{2}}, {{3}}
+            );
           }
         }
       }
-    } catch (e) {
-      console.warn('Email sending failed for some bookings:', e?.message || e);
+    }} catch (e) {
+      console.warn("Email/WhatsApp sending failed for some bookings:", e?.message || e);
     }
 
     return res.status(200).send({
-      message: 'Utsav booking(s) created by admin',
-      data: result
+      message: "Utsav booking(s) created by admin",
+      data: result,
     });
   } catch (err) {
     await t.rollback();
