@@ -282,32 +282,29 @@ export async function validateUtsavPackage(packageId, utsavId) {
 }
 
 export async function sendUtsavBookingUpdateEmail(booking, utsav) {
-  let bookedByCard = null;
-  
-  if (booking.bookedBy) {
-  bookedByCard = await CardDb.findOne({
-    where: { cardno: booking.bookedBy }
-  });
-  }
+  // Parallel database queries for better performance
+  const [card, bookedByCard, utsavData] = await Promise.all([
+    CardDb.findOne({ where: { cardno: booking.cardno } }),
+    booking.bookedBy ? CardDb.findOne({ where: { cardno: booking.bookedBy } }) : null,
+    utsav || UtsavDb.findOne({ where: { id: booking.utsavid } })
+  ]);
 
-  const card = await CardDb.findOne({
-    where: { cardno: booking.cardno }
-  });
+  // Early return if no card or email
+  if (!card?.email) return;
 
-  if (card && card.email) {
-    sendMail({
-      email: card.email,
-      cc: bookedByCard ? bookedByCard.email : null,
-      subject: 'Utsav Booking Updated',
-      template: 'utsavStatusUpdate',    
-      context: {
-        name: card.issuedto,
-        bookingid: booking.bookingid,
-        status: booking.status,
-        utsavName: utsav.name,
-        utsavStartDate: utsav.start_date,
-        utsavEndDate: utsav.end_date
-      }
-    });
-  }
+  // Send email with optimized context
+  sendMail({
+    email: card.email,
+    cc: bookedByCard?.email,
+    subject: 'Utsav Booking Updated',
+    template: 'utsavStatusUpdate',    
+    context: {
+      name: card.issuedto,
+      bookingid: booking.bookingid,
+      status: booking.status,
+      utsavName: utsavData.name,
+      utsavStartDate: utsavData.start_date,
+      utsavEndDate: utsavData.end_date
+    }
+  });
 }
