@@ -459,18 +459,12 @@ export const checkGuests = async (req, res) => {
 };
 
 async function bookFlat(data, t, user) {
-  const { checkin_date, checkout_date, guestGroup } = data.details;
+  const { checkin_date, checkout_date, guests } = data.details;
 
   // Handle missing checkout_date
   if (!checkout_date) {
     throw new ApiError(400, 'checkout_date is required for flat booking');
   }
-
-  // Extract guests from guestGroup (similar to room booking pattern)
-  // For guest bookings, we need at least one guest specified
-  const guests = guestGroup
-    ? guestGroup.flatMap((group) => group.guests || [])
-    : [];
 
   if (guests.length === 0) {
     throw new ApiError(
@@ -493,18 +487,12 @@ async function bookFlat(data, t, user) {
 }
 
 async function checkFlatAvailability(data, user) {
-  const { checkin_date, checkout_date, guestGroup } = data.details;
+  const { checkin_date, checkout_date, guests } = data.details;
 
   // Handle missing checkout_date
   if (!checkout_date) {
     throw new ApiError(400, 'checkout_date is required for flat booking');
   }
-
-  // Extract guests from guestGroup (similar to room booking pattern)
-  // For guest bookings, we need at least one guest specified
-  const guests = guestGroup
-    ? guestGroup.flatMap((group) => group.guests || [])
-    : [];
 
   if (guests.length === 0) {
     throw new ApiError(
