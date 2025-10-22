@@ -53,6 +53,7 @@ import {
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
+import logger from '../../config/logger.js';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -84,7 +85,9 @@ export const mumukshuBooking = async (req, res) => {
   }
 
   var order = null;
-  if (req.user.country == 'India' && amount > 0) {
+  const payLater = req.body.pay_later === true;
+
+  if (amount > 0 && !payLater) {
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, [], order.id, t);
@@ -255,7 +258,12 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data, user, utsav);
+      response.foodDetails = await checkFoodAvailability(
+        body,
+        data,
+        user,
+        utsav
+      );
       break;
 
     case TYPE_ADHYAYAN:
