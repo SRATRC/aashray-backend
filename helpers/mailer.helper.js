@@ -17,16 +17,17 @@ export async function sendCancellationEmail(
   );
 }
 
-export async function sendOpenBookingEmail(openBookingIds) {
+export async function sendOpenBookingEmail(bookingType, openBookings) {
   const emailActions = {
     [TYPE_UTSAV]: sendUtsavBookingUpdateEmail,
     [TYPE_ADHYAYAN]: sendAdhyayanBookingUpdateNotification
   };
 
-  await Promise.all(
-    Object.entries(openBookingIds).map(([bookingType, bookingIds]) => {
-      const sendEmail = emailActions[bookingType];
-      return sendEmail ? Promise.all(bookingIds.map(sendEmail)) : Promise.resolve();
-    })
-  );
+  const sendEmail = emailActions[bookingType];
+  
+  if (sendEmail && Array.isArray(openBookings)) {
+    await Promise.all(openBookings.map(booking => sendEmail(booking)));
+  } else {
+    console.log('No email function found for bookingType:', bookingType, 'or openBookings is not an array:', openBookings);
+  }
 }
