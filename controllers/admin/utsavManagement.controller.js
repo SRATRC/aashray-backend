@@ -9,8 +9,11 @@ import {
   validateUtsavBooking,
   reserveUtsavSeat,
   openUtsavSeat,
-  validateUtsavPackage
+  validateUtsavPackage,
+  bookUtsavForMumukshus,
+  bookUtsavForMumukshusAdmin
 } from '../../helpers/utsavBooking.helper.js';
+import { sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import {
   adminCancelTransaction,
@@ -38,6 +41,53 @@ import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
 
+
+export const createUtsavBookingByAdmin = async (req, res) => {
+  const { utsavid, mumukshus } = req.body;
+
+  if (!utsavid || !Array.isArray(mumukshus) || mumukshus.length === 0) {
+    return res.status(400).send({ message: 'utsavid and mumukshus are required' });
+  }
+
+  // basic per-item validation
+  for (const m of mumukshus) {
+    if (!m?.cardno || !m?.packageid) {
+      return res.status(400).send({ message: 'Each mumukshu must include cardno and packageid' });
+    }
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  try {
+    const result = await bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, req.user);
+
+    await t.commit();
+
+    // send emails outside transaction
+    try {
+      for (const cardno in result.userBookingIds) {
+        const bookingIds = result.userBookingIds[cardno];
+        for (const id of bookingIds) {
+          const booking = await UtsavBooking.findOne({ where: { bookingid: id } });
+          if (booking) {
+            await sendUtsavBookingUpdateEmail(booking, null);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Email sending failed for some bookings:', e?.message || e);
+    }
+
+    return res.status(200).send({
+      message: 'Utsav booking(s) created by admin',
+      data: result
+    });
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
+};
 
 export const createUtsav = async (req, res) => {
   const {
@@ -675,6 +725,21 @@ export const fetchAllPackages = async (req, res) => {
     .send({ message: 'Fetched Package Records', data: packages });
 };
 
+export const fetchPackagesByUtsav = async (req, res) => {
+  const { utsavid } = req.query;
+
+  if (!utsavid) {
+    return res.status(400).send({ message: 'utsavid is required' });
+  }
+
+  const packages = await UtsavPackagesDb.findAll({
+    where: { utsavid },
+    order: [['start_date', 'ASC']]
+  });
+
+  return res.status(200).send({ message: 'Fetched packages for utsav', data: packages });
+};
+
 export const fetchPackage = async (req, res) => {
   const { id } = req.params;
 
@@ -831,6 +896,19 @@ export const utsavCheckinReport = async (req, res) => {
     message: 'Filtered Utsav Bookings',
     data: utsavData
   });
+};
+
+export const fetchVolunteerOptions = async (_req, res) => {
+  // Keep keys aligned with app VOLUNTEER list values
+  const options = [
+    { key: 'admin', value: 'Admin' },
+    { key: 'logistics', value: 'Logistics' },
+    { key: 'kitchen', value: 'Kitchen' },
+    { key: 'vv', value: 'Vitraag Vigyaan Bhavan' },
+    { key: 'samadhi', value: 'Samadhi Sthal' },
+    { key: 'none', value: 'Unable to Volunteer' }
+  ];
+  return res.status(200).send({ message: 'Fetched volunteer options', data: options });
 };
 
 export const uploadRoomNoExcel = async (req, res) => {
