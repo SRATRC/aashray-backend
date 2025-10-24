@@ -56,7 +56,7 @@ export async function checkTravelAlreadyBooked(
 async function getTravelBookingStatus(type, date, travelBookingsFordate) {
   //if regular travel and more than 5 bookings for the date, then waiting.
   // But if it is a gyan sabha or utsav, then return awaiting confirmation.
-  if (type == TRAVEL_TYPE_REGULAR && travelBookingsFordate > 4) {
+  if (type!= null && type.toLowerCase() == TRAVEL_TYPE_REGULAR.toLowerCase() && travelBookingsFordate > 4) {
     if (await checkAdhyayanParamGyanSabhaOrUtsav(date)) {
       return STATUS_AWAITING_CONFIRMATION;
     }

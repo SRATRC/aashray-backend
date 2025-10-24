@@ -1,8 +1,10 @@
 import {
   ShibirDb,
   ShibirBookingDb,
-  AdhyayanFeedback
+  AdhyayanFeedback,
+  CardDb
 } from '../../models/associations.js';
+
 import {
   STATUS_CONFIRMED,
   STATUS_PAYMENT_PENDING,
@@ -16,7 +18,7 @@ import {
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
-import { openAdhyayanSeat } from '../../helpers/adhyayanBooking.helper.js';
+import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   getOtherBookingUser,
@@ -112,11 +114,11 @@ export const FetchBookedShibir = async (req, res) => {
 
   const currentDate = new Date();
   shibirs.forEach((shibir) => {
-    const endDate = new Date(shibir.end_date);
-    const feedbackStartDate = new Date(endDate);
+    const startDate = new Date(shibir.start_date);
+    const feedbackStartDate = new Date(startDate);
     feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
 
-    const feedbackEndDate = new Date(endDate);
+    const feedbackEndDate = new Date(shibir.end_date);
     feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
 
     shibir.showFeedback =
@@ -156,36 +158,23 @@ export const CancelShibir = async (req, res) => {
     where: { id: booking.shibir_id }
   });
 
+  let newBooking = null;
   if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
-    await openAdhyayanSeat(adhyayan, req.user.username, t);
+    newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
   }
 
   await userCancelBooking(req.user, booking, t);
   await t.commit();
 
-  sendMail({
-    email: req.user.email,
-    subject: 'Raj Adhyayan Booking Cancelled',
-    template: 'rajAdhyayanCancellation',
-    context: {
-      name: req.user.issuedto,
-      adhyayanName: adhyayan.name
-    }
-  });
 
-  if (booking.bookedBy) {
-    const other = getOtherBookingUser(booking, req.user.cardno);
-    if (other) {
-      const title = 'Adhyayan Booking Cancelled';
-      const body =
-        req.user.cardno === booking.cardno
-          ? `booking of "${adhyayan.name}" has been cancelled for ${req.user.issuedto}.`
-          : `Your booking of "${adhyayan.name}" has been cancelled.`;
-      notifyCardno(other, { title, body, screen: '/bookings' });
-    }
+  await sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+
+if (newBooking) {
+    //sending notification and email to user who got moved from waiting to pending and cc to the bookedBy user if any.
+    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
   }
-
-  return res.status(200).send({ message: 'Shibir booking cancelled' });
+  
+  return res.status(200).send({ message: 'Adhyayan booking cancelled' });
 };
 
 export const FetchShibirInRange = async (req, res) => {

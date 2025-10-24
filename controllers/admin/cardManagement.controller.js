@@ -371,3 +371,22 @@ export const resetPasswordDefault = async (req, res) => {
     .status(200)
     .json({ message: 'Password reset successfully to default.' });
 };
+
+export const getCardByMobile = async (req, res) => {
+  const { mobno } = req.params;
+
+  if (!mobno) {
+    return res.status(400).json({ message: 'mobno is required' });
+  }
+
+  const card = await CardDb.findOne({
+    attributes: ['cardno', 'issuedto', 'center', 'mobno', 'res_status', 'gender'],
+    where: { mobno }
+  });
+
+  if (!card) {
+    return res.status(404).json({ message: 'Card not found' });
+  }
+
+  return res.status(200).json({ message: 'Found card', data: card });
+};

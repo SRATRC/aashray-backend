@@ -9,6 +9,8 @@ import {
   STATUS_OPEN,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED,
   TYPE_ADHYAYAN,
   STATUS_CASH_COMPLETED,
   ERR_FEEDBACK_ALREADY_SUBMITTED,
@@ -21,6 +23,7 @@ import {
   UtsavDb,
   CardDb
 } from '../models/associations.js';
+import sendMail from '../utils/sendMail.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createPendingTransaction } from './transactions.helper.js';
 import { validateCard, validateCards } from './card.helper.js';
@@ -222,29 +225,83 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
       updatedBy,
       t
     );
-
-    sendDualUserNotifications({
-      primary: {
-        cardno: booking.CardDb.token,
-        title: 'Adhyayan Booking Confirmed',
-        body: 'Your adhyayan booking has been confirmed from waitlist and you are requested to make payment within 24 hours to secure your spot.'
-      },
-      bookedBy: booking.bookedBy && {
-        token: card.token,
-        title: 'Adhyayan Booking Confirmed',
-        body: `adhyayan booking for ${
-          booking.CardDb.issuedto.split(' ')[0]
-        } has been confirmed from waitlist and you are requested to make payment within 24 hours to secure your spot.`
-      },
-      screen: '/bookings'
-    });
-  } else {
+ return booking;
+ } else {
     await adhyayan.update(
       {
         available_seats: adhyayan.dataValues.available_seats + 1
       },
       { transaction: t }
     );
+
+    return null;
+  }
+}
+
+export async function sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, isfromAdmin) {
+  // Build card numbers array efficiently and fetch all cards in single query
+  const cardNumbers = [newBooking.cardno, newBooking.bookedBy].filter(Boolean);
+  const cards = await CardDb.findAll({ where: { cardno: cardNumbers } });
+
+  if(!adhyayan){
+    adhyayan = await ShibirDb.findOne({ where: { id: newBooking.shibir_id } });
+  }
+
+  // Create lookup map for O(1) access
+  const cardMap = new Map(cards.map(card => [card.cardno, card]));
+  const card = cardMap.get(newBooking.cardno);
+  const bookedByCard = newBooking.bookedBy ? cardMap.get(newBooking.bookedBy) : null;
+
+  // Early return if no card
+  if (!card) return;
+  let adminBody = '';
+  if(isfromAdmin){
+  adminBody = ' by an Admin';
+  }
+  let adhyanName = adhyayan.name;
+  // Status message mapping
+  const statusMessages = {
+    [STATUS_PAYMENT_PENDING]: 'has been pending '+adminBody+' and you are requested to make payment within 24 hours to secure your spot.',
+    [STATUS_CONFIRMED]: 'has been confirmed '+adminBody+' for '+adhyanName+'.',
+    [STATUS_WAITING]: "has been placed on the waiting list for "+adhyanName+" and will be notified if a spot becomes available."+adminBody+'.',
+    [STATUS_CANCELLED]: 'has been cancelled for '+adhyanName+'.',
+    [STATUS_ADMIN_CANCELLED]: 'has been cancelled by an Admin for '+adhyanName+'.',
+  };
+
+  const messageBody = statusMessages[newBooking.status] || 'has been updated.';
+  const userName = card.issuedto;
+
+  // Send notifications
+  sendDualUserNotifications({
+    primary: {
+      token: card.token,
+      title: 'Adhyayan Booking Updated',
+      body: `Your adhyayan ${messageBody}`
+    },
+    bookedBy: bookedByCard && {
+      token: bookedByCard.token,
+      title: 'Adhyayan Booking Updated',
+      body: `Adhyayan booking for ${userName} ${messageBody}`
+    },
+    screen: '/bookings'
+  });
+
+  // Send email if email exists
+  if (card.email) {
+    sendMail({
+      email: card.email,
+      cc: bookedByCard?.email,
+      subject: 'Raj Adhyayan Booking Updated',
+      template: 'rajAdhyayanUpdate',
+      context: {
+        name: card.issuedto,
+        bookingid: newBooking.bookingid,
+        status: newBooking.status,
+        adhyayanName: adhyayan.name,
+        adhyayanStartDate: adhyayan.start_date,
+        adhyayanEndDate: adhyayan.end_date
+      }
+    });
   }
 }
 

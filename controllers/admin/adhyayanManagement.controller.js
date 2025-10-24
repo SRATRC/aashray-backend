@@ -26,7 +26,8 @@ import {
   reserveAdhyayanSeat,
   openAdhyayanSeat,
   validateAdhyayanBooking,
-  validateAdhyayans
+  validateAdhyayans, 
+  sendAdhyayanBookingUpdateNotification
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
@@ -405,9 +406,12 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const { shibir_id, bookingid, status, description } = req.body;
 
   var newBookingStatus = status;
-
+  let newBooking = null;
   const t = await database.transaction();
   req.transaction = t;
+
+  // Store notification data to send after transaction commit
+  const notificationData = [];
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
   const booking = await validateAdhyayanBooking(bookingid, shibir_id);
@@ -463,22 +467,6 @@ export const adhyayanStatusUpdate = async (req, res) => {
         );
       }
 
-      sendDualUserNotifications({
-        primary: {
-          token: bookedByCard.token,
-          title: 'Adhyayan Booking Confirmed',
-          body: 'Your adhyayan booking has been confirmed by admin'
-        },
-        bookedBy: booking.bookedBy && {
-          cardno: booking.bookedBy,
-          title: 'Adhyayan Booking Confirmed',
-          body: `Adhyayan booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been confirmed by admin`
-        },
-        screen: '/bookings'
-      });
-
       break;
 
     case STATUS_PAYMENT_PENDING:
@@ -514,14 +502,14 @@ export const adhyayanStatusUpdate = async (req, res) => {
             primary: {
               cardno: booking.cardno,
               title: 'Adhyayan Booking Confirmed',
-              body: 'Admin has requested you to make payment for your adhyayan booking to secure your spot.'
+              body: 'Your adhyayan booking has been confirmed.'
             },
             bookedBy: booking.bookedBy && {
               token: bookedByCard.token,
               title: 'Adhyayan Booking Confirmed',
-              body: `Admin has requested you to make payment for ${
+              body: `Adhyayan booking for ${
                 booking.CardDb.issuedto.split(' ')[0]
-              }'s adhyayan booking to secure your spot.`
+              } has been confirmed.`
             },
             screen: '/bookings'
           });
@@ -535,7 +523,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
         booking.status == STATUS_CONFIRMED ||
         booking.status == STATUS_PAYMENT_PENDING
       ) {
-        await openAdhyayanSeat(adhyayan, req.user.username, t);
+         newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
+       
       }
 
       if (transaction) {
@@ -557,6 +546,20 @@ export const adhyayanStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
+  
+  // Send notifications and emails after transaction commit
+  try {
+   
+    sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+    // Send notification and email for new booking if exists
+    if (newBooking) {
+      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+    }
+  } catch (error) {
+    // Log error but don't fail the response since transaction is already committed
+    console.error('Error sending notifications/emails:', error);
+  }
+  
   return res.status(200).send({ message: 'Updated booking status' });
 };
 
@@ -644,60 +647,6 @@ export const softDeleteShibir = async (req, res) => {
   res.status(200).json({ message: 'Shibir marked as deleted' });
 };
 
-// export const getAdhyayanFeedback = async (req, res) => {
-//   const { shibir_id } = req.params;
-//   const page = parseInt(req.query.page) || 1;
-//   const pageSize = parseInt(req.query.page_size) || 20;
-//   const offset = (page - 1) * pageSize;
-
-//   if (!shibir_id) {
-//     throw new ApiError(400, 'Adhyayan ID is required');
-//   }
-
-//   const feedback = await AdhyayanFeedback.findAll({
-//     where: { shibir_id: parseInt(shibir_id) },
-//     include: [
-//       {
-//         model: CardDb,
-//         attributes: ['cardno', 'issuedto', 'center', 'res_status']
-//       },
-//       {
-//         model: ShibirDb,
-//         attributes: [
-//           'id',
-//           'name',
-//           'speaker',
-//           'start_date',
-//           'end_date',
-//           'location'
-//         ]
-//       }
-//     ],
-//     order: [['submitted_at', 'DESC']],
-//     offset,
-//     limit: pageSize
-//   });
-
-//   const totalCount = await AdhyayanFeedback.count({
-//     where: { shibir_id: parseInt(shibir_id) }
-//   });
-
-//   const stats = await getFeedbackStats(parseInt(shibir_id));
-
-//   return res.status(200).send({
-//     message: MSG_FETCH_SUCCESSFUL,
-//     data: {
-//       feedback,
-//       stats,
-//       pagination: {
-//         page,
-//         pageSize,
-//         totalCount,
-//         totalPages: Math.ceil(totalCount / pageSize)
-//       }
-//     }
-//   });
-// };
 
 export const getAdhyayanFeedback = async (req, res) => {
   const { shibir_id } = req.params;

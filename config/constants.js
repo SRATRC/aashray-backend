@@ -16,7 +16,7 @@ export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
-export const FEEDBACK_ELIGIBILITY_HOUR = 18;
+export const FEEDBACK_ELIGIBILITY_HOUR = 13;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
@@ -74,7 +74,7 @@ export const ROOM_BLOCKED = 'blocked';
 
 // TRAVEL
 export const TRAVEL_DETAIL = 'Travel Booking';
-export const TRAVEL_TYPE_REGULAR = 'regular';
+export const TRAVEL_TYPE_REGULAR = 'Regular';
 export const TRAVEL_TYPE_FULL = 'full';
 
 // ADMIN ROLES
