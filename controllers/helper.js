@@ -21,9 +21,8 @@ import {
   TYPE_UTSAV,
   STATUS_GUEST,
   STATUS_ACTIVE,
-  ERR_DATES_NOT_BETWEEN_UTSAV,
+  ERR_INVALID_TOMMORROW_BOOKING_DATE, 
   RAJ_PRAVAS_EMAIL,
-  SUBJECT_BOOKING,
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
@@ -136,11 +135,19 @@ export async function isFoodBooked(start_date, end_date, cardno) {
 }
 
 export function validateDate(start_date, end_date) {
-  const today = moment().format('YYYY-MM-DD');
-  const checkinDate = new Date(start_date);
-  const checkoutDate = new Date(end_date);
-  if (today > start_date || today > end_date || checkinDate > checkoutDate) {
+  const today = moment().tz('Asia/Kolkata');
+  const checkinDate = moment.tz(start_date, 'Asia/Kolkata');
+  const checkoutDate = moment.tz(end_date, 'Asia/Kolkata');
+  
+  // Check if checkin date is after checkout date
+  if (checkinDate.isAfter(checkoutDate, 'day') ||today.isSameOrAfter(checkinDate, 'day') || today.isSameOrAfter(checkoutDate, 'day')) {
     throw new ApiError(400, ERR_INVALID_DATE);
+  }
+  
+  // Check if booking is for tomorrow and current time is after 11 AM
+  const tomorrow = today.clone().add(1, 'day');
+  if (checkinDate.isSame(tomorrow, 'day') && today.hour() > 11) {
+    throw new ApiError(400, ERR_INVALID_TOMMORROW_BOOKING_DATE);
   }
 }
 
