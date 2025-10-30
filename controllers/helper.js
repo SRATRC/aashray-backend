@@ -35,6 +35,7 @@ import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
+import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   const startDate = new Date(checkin_date);
@@ -615,7 +616,63 @@ export async function sendUnifiedEmail(
       }
     });
   }
+  // ✅ Also send WhatsApp messages
+  await sendUnifiedWhatsApp(cardno, bookedBy, null, bookingIds);
+
+
 }
+
+async function sendUnifiedWhatsApp(cardno, bookedBy, bookingStatus = null, bookingIds) {
+  try {
+    const user = cardno
+      ? await CardDb.findOne({ where: { cardno } })
+      : bookedBy;
+
+    const phone = user?.mobno ? String(user.mobno) : null; // ✅ ensure it's a string
+    if (!phone) {
+      console.warn(`⚠️ No WhatsApp number found for ${user?.issuedto}`);
+      return;
+    }
+
+    // loop through booking types (adhyayan, utsav, etc)
+    for (const [type, ids] of Object.entries(bookingIds)) {
+      if (!Array.isArray(ids) || ids.length === 0) continue;
+
+      switch (type) {
+case TYPE_ADHYAYAN: {
+  const bookings = await ShibirBookingDb.findAll({
+    where: { bookingId: { [Sequelize.Op.in]: ids } },
+    attributes: ['status', 'bookingid']
+  });
+
+  for (const b of bookings) {
+    await sendAdhyayanWhatsApp(user, b.status, [b.bookingid]);
+  }
+  break;
+}
+
+        // case TYPE_UTSAV:
+        //   await sendUtsavWhatsApp(user, bookingStatus, ids);
+        //   break;
+
+        // case TYPE_TRAVEL:
+        //   await sendTravelWhatsApp(user, bookingStatus, ids);
+        //   break;
+
+        // case TYPE_ROOM:
+        //   await sendRoomWhatsApp(user, bookingStatus, ids);
+        //   break;
+
+        // case TYPE_FLAT:
+        //   await sendFlatWhatsApp(user, bookingStatus, ids);
+        //   break;
+      }
+    }
+  } catch (err) {
+    console.error("❌ WhatsApp integration error:", err);
+  }
+}
+
 
 export async function createGuestsHelper(cardno, guests, t) {
   const registeredGuests = guests.filter((guest) => guest.cardno);
@@ -749,3 +806,57 @@ export async function createCardIds(count) {
   return newIds;
 }
 
+
+async function sendAdhyayanWhatsApp(user, bookingStatus, bookingIds) {
+  const bookings = await ShibirBookingDb.findAll({
+    include: [
+      {
+        model: ShibirDb,
+        attributes: ["name", "speaker", "location", "start_date", "end_date"]
+      },
+    ],
+    where: { bookingId: { [Sequelize.Op.in]: bookingIds } },
+  });
+
+  for (const b of bookings) {
+    const params = [
+      user.issuedto, // {{1}}
+      user.issuedto, // {{2}}
+      b.bookingid,   // {{3}}
+      b.status,      // {{4}}
+      b.ShibirDb.name, // {{5}}
+      b.ShibirDb.venue || "Research Centre", // {{6}}
+      b.ShibirDb.speaker, // {{7}}
+      moment(b.ShibirDb.start_date).format("DD MMM YYYY"), // {{8}}
+      moment(b.ShibirDb.end_date).format("DD MMM YYYY"),   // {{9}}
+    ];
+
+    const template =
+      bookingStatus === "waiting"
+        ? "booking_adhyayan_self_waiting_for"
+        : "booking_adhyayan_self_confirmed";
+
+    // create payload components
+    const components = [
+      {
+        type: "body",
+        parameters: params
+          .filter((p) => p !== null && p !== undefined && p !== "")
+          .map((p) => ({ type: "text", text: String(p) }))
+      }
+    ];
+
+    // ✅ Add button with shibir_id only for the "waiting" template
+    if (template === "booking_adhyayan_self_waiting_for") {
+      components.push({
+        type: "button",
+        sub_type: "url",
+        index: "0",
+        parameters: [{ type: "text", text: String(b.ShibirDb.id) }]
+      });
+    }
+
+    await sendWhatsAppMessage(user.mobno, template, components);
+    console.log("📩 Adhyayan WhatsApp:", { status: bookingStatus, template });
+  }
+}

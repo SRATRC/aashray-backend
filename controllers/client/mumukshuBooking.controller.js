@@ -90,7 +90,9 @@ export const mumukshuBooking = async (req, res) => {
     await updateRazorpayTransactions(bookingIds, [], order.id, t);
   }
   await t.commit();
-
+  
+  console.log(userBookingIdMap);
+  
   //Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(
     userBookingIdMap,
