@@ -525,7 +525,13 @@ export async function checkRoomAvailabilityDuringUtsav(
   let availableCredits = 0;
 
   if (new Date(checkin_date) < new Date(event_start_date)) {
-    const beforeNights = await calculateNights(checkin_date, event_start_date);
+    let beforeNights = 0;
+    checkout_date = new Date(checkout_date);
+    if (checkout_date > event_start_date) {
+      beforeNights = await calculateNights(checkin_date, event_start_date);
+    } else {
+      beforeNights = await calculateNights(checkin_date, checkout_date);
+    }
 
     if (beforeNights > 0) {
       if (beforeNights == 1) {
