@@ -39,6 +39,7 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
 import {
+  findUtsavOnBoundaryDates,
   getDateRangesDuringUtsav
 } from './utsavBooking.helper.js';
 
@@ -403,14 +404,8 @@ export async function createRoomBooking(
   // This handles the scenario: check-in = utsav.end_date, check-out = utsav.end_date + 1 day.
   const isSingleNight = nights === 1;
   if (isSingleNight) {
-    // Find an Utsav whose end_date is the same as the check-in date.
-    const utsavEndingToday = await UtsavDb.findOne({
-      where: { end_date: checkin }
-    });
-    const utsavStartingTomorrow = await UtsavDb.findOne({
-      where: { start_date: checkout }
-    });
-    if (utsavEndingToday || utsavStartingTomorrow) {
+    const utsavOnBoundary = await findUtsavOnBoundaryDates(startDate, endDate);
+    if (utsavOnBoundary) {
       const result = await bookWaitingRoom(
         cardno,
         checkin,

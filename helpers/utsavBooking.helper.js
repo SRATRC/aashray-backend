@@ -416,11 +416,14 @@ export async function getDateRangesDuringUtsav(
         )
       );
     } else {
+      // In case, utsav booking is not found for this mumukshu, check if there is any 
+      // utsav starts on checkout or ends on checkin date
+      const utsavOnBoundary = await findUtsavOnBoundaryDates(startDate, endDate);
       dateRanges.push(
         {
           start: startDate,
           end: endDate,
-          overlappingWithUtsav: false
+          overlappingWithUtsav: utsavOnBoundary ? true : false
         }
       )
     }
@@ -463,4 +466,17 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
       }
     });
   }
+}
+
+export async function findUtsavOnBoundaryDates(checkin, checkout) {
+  const utsav = await UtsavDb.findOne({
+    where: { 
+      [Sequelize.Op.or]: [
+        { end_date: checkin },
+        { start_date: checkout }
+      ]
+    }
+  });
+
+  return utsav;
 }
