@@ -27,25 +27,16 @@ const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
-  const utsav = await UtsavDb.findOne({
-    where: {
-      id: utsavid
-    }
-  });
+  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
-  const packages = await UtsavPackagesDb.findAll({
-    where: { utsavid }
-  });
-
+  const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
   await checkUtsavAlreadyBooked(utsavid, mumukshus);
 
   let total_amount = 0;
   let available_seats = utsav.available_seats;
+  let userBookingIds = {}, waitingBookingCount = 0;
 
-  let status = STATUS_PAYMENT_PENDING;
-  let userBookingIds = {},
-    waitingBookingCount = 0;
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
@@ -53,16 +44,18 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     const package_info = packages.find(
       (p) => p.id === Number(mumukshu.packageid)
     );
+    if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
 
-    if (!package_info) {
-      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
-    }
-
+    // 🟢 NEW LOGIC
+    let status;
     if (available_seats <= 0) {
       status = STATUS_WAITING;
       waitingBookingCount++;
-    } else {
+    } else if (package_info.amount > 0) {
       status = STATUS_PAYMENT_PENDING;
+      available_seats--;
+    } else {
+      status = STATUS_CONFIRMED;  // auto-confirm free packages
       available_seats--;
     }
 
@@ -83,7 +76,12 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       { transaction: t }
     );
 
-    if (utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
+    // 🟢 UPDATED CONDITIONAL
+    if (
+      utsav.status === STATUS_OPEN &&
+      status === STATUS_PAYMENT_PENDING &&
+      package_info.amount > 0
+    ) {
       await createPendingTransaction(
         user,
         booking,
@@ -92,23 +90,16 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-
       total_amount += package_info.amount;
     }
+
     bookings.push(bookingid);
     userBookingIds[mumukshu.cardno] = bookings;
   }
 
-  UtsavDb.update(
-    {
-      available_seats: available_seats
-    },
-    {
-      where: {
-        id: utsavid
-      }
-    },
-    { transaction: t }
+  await UtsavDb.update(
+    { available_seats },
+    { where: { id: utsavid }, transaction: t }
   );
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
