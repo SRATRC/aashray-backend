@@ -69,7 +69,7 @@ export async function getBlockedDates(checkin_date, checkout_date) {
   return blockedDates;
 }
 
-export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
+export async function checkFlatAlreadyBooked(checkin, checkout, cardnos) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -91,7 +91,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
             { checkout: { [Sequelize.Op.gte]: checkout } }
           ]
         }
-
       ],
       status: {
         [Sequelize.Op.notIn]: [
@@ -100,10 +99,9 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
           ROOM_STATUS_CHECKEDOUT
         ]
       },
-      cardno: card_no
+      cardno: cardnos
     }
   });
-
 
   return result.length > 0;
 }
@@ -321,30 +319,28 @@ export async function sendUnifiedEmailForBookedBy(
   }
 }
 
-export function getSubject(bookingStatus){
-  if(bookingStatus == BOOKING_STATUS_PENDING){
+export function getSubject(bookingStatus) {
+  if (bookingStatus == BOOKING_STATUS_PENDING) {
     return 'Bookings created';
   }
-  if(bookingStatus == STATUS_CANCELLED){
+  if (bookingStatus == STATUS_CANCELLED) {
     return 'Bookings cancelled';
   }
   return 'Bookings confirmed';
 }
 
-export function getWelcomeMessage(bookingStatus,country){
-
-  if (bookingStatus == BOOKING_STATUS_PENDING)
-  {
-
-    const bookingCreate ="Your bookings were created.";
-    return (country &&
-    country != 'India' ) ? 
-    bookingCreate+' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
-    :bookingCreate+" Payment is due within 24 hours to confirm any bookings in pending status.";
+export function getWelcomeMessage(bookingStatus, country) {
+  if (bookingStatus == BOOKING_STATUS_PENDING) {
+    const bookingCreate = 'Your bookings were created.';
+    return country && country != 'India'
+      ? bookingCreate +
+          ' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
+      : bookingCreate +
+          ' Payment is due within 24 hours to confirm any bookings in pending status.';
   }
 
-  if( bookingStatus == STATUS_CANCELLED){
-    return "We are sorry to inform you that your bookings have been cancelled.";
+  if (bookingStatus == STATUS_CANCELLED) {
+    return 'We are sorry to inform you that your bookings have been cancelled.';
   }
   return 'We are pleased to inform you that your bookings have been confirmed.';
 }
@@ -353,7 +349,7 @@ export async function sendUnifiedEmail(
   cardno,
   bookingIds,
   bookedBy,
-  bookingStatus =STATUS_CONFIRMED,
+  bookingStatus = STATUS_CONFIRMED,
   template = 'unifiedBookingEmail'
 ) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
@@ -563,12 +559,10 @@ export async function sendUnifiedEmail(
     });
   }
 
-
   const country =
     user && user.country ? user.country : bookedBy && bookedBy.country;
 
-  let welcomeMessage = getWelcomeMessage(bookingStatus,country) ;
-  
+  let welcomeMessage = getWelcomeMessage(bookingStatus, country);
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
@@ -748,4 +742,3 @@ export async function createCardIds(count) {
 
   return newIds;
 }
-

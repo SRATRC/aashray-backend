@@ -17,6 +17,7 @@ router.get('/', CatchAsync(fetchGuests));
 router.post('/', CatchAsync(createGuests));
 router.post('/booking', CheckDatesBlocked, CatchAsync(guestBooking));
 router.post('/validate', CheckDatesBlocked, CatchAsync(validateBooking));
+// DEPRECATED: Use unified booking endpoint instead
 router.post('/flat', CatchAsync(guestBookingFlat));
 router.get('/check/:mobno', CatchAsync(checkGuests));
 
