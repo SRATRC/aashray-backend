@@ -327,15 +327,29 @@ export const updateAdhyayan = async (req, res) => {
     location,
     total_seats,
     food_allowed,
-    comments
+    comments,
+    available_seats // optional manual override
   } = req.body;
 
   const adhyayanId = req.params.id;
   const adhyayan = (await validateAdhyayans(adhyayanId))[0];
 
-  const diff = total_seats - adhyayan.total_seats;
-  const available_seats = Math.max(0, adhyayan.available_seats + diff);
   const month = moment(start_date).format('MMMM');
+
+  // 🧩 If total_seats changed, adjust available_seats accordingly
+  let newAvailableSeats;
+  if (total_seats != adhyayan.total_seats) {
+    const diff = total_seats - adhyayan.total_seats;
+    newAvailableSeats = Math.max(0, adhyayan.available_seats + diff);
+  } 
+  // 🧩 If total_seats is same, allow manual update if provided
+  else if (available_seats !== undefined && available_seats !== null) {
+    newAvailableSeats = available_seats;
+  } 
+  // 🧩 Otherwise, retain existing available seats
+  else {
+    newAvailableSeats = adhyayan.available_seats;
+  }
 
   await adhyayan.update({
     name,
@@ -346,7 +360,7 @@ export const updateAdhyayan = async (req, res) => {
     location,
     total_seats,
     amount,
-    available_seats,
+    available_seats: newAvailableSeats,
     food_allowed,
     comments,
     updatedBy: req.user.username

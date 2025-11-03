@@ -218,14 +218,32 @@ export const updateUtsav = async (req, res) => {
     end_date,
     status,
     total_seats,
+    available_seats, // optional manual override
     comments,
     location,
     registration_deadline
   } = req.body;
-  const utsavId = req.params.id;
 
+  const utsavId = req.params.id;
   const utsav = await validateUtsav(utsavId);
   const month = moment(start_date).format('MMMM');
+
+  // 🧩 Hybrid available_seats logic
+  let newAvailableSeats;
+
+  // If total_seats changed → auto adjust
+  if (total_seats != utsav.total_seats) {
+    const diff = total_seats - utsav.total_seats;
+    newAvailableSeats = Math.max(0, utsav.available_seats + diff);
+  }
+  // If same total_seats but frontend sent available_seats → allow manual override
+  else if (available_seats !== undefined && available_seats !== null) {
+    newAvailableSeats = available_seats;
+  }
+  // Otherwise → keep existing
+  else {
+    newAvailableSeats = utsav.available_seats;
+  }
 
   await utsav.update({
     name,
@@ -234,6 +252,7 @@ export const updateUtsav = async (req, res) => {
     month,
     status,
     total_seats,
+    available_seats: newAvailableSeats,
     comments,
     location,
     registration_deadline,
