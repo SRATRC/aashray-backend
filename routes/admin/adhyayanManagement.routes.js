@@ -26,7 +26,8 @@ import {
   ROLE_DHU_ADHYAYAN_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
   ROLE_PRA_ACCOUNTS_ADMIN,
-  ROLE_ADHYAYAN_READ_ONLY
+  ROLE_ADHYAYAN_READ_ONLY,
+  ROLE_UTSAV_ADMIN
 } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
@@ -41,7 +42,8 @@ router.use(
     ROLE_KOL_ADHYAYAN_ADMIN,
     ROLE_ACCOUNTS_ADMIN,
     ROLE_PRA_ACCOUNTS_ADMIN,
-    ROLE_ADHYAYAN_READ_ONLY
+    ROLE_ADHYAYAN_READ_ONLY,
+    ROLE_UTSAV_ADMIN
   )
 );
 

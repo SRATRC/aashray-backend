@@ -358,6 +358,7 @@ ORDER BY
 };
 
 export const fetchAllUtsav = async (req, res) => {
+  
   const utsavs = await database.query(
     `SELECT
       utsav_db.id,
@@ -406,6 +407,72 @@ END) AS volunteer_opted_count
   return res
     .status(200)
     .send({ message: 'Fetched Utsav Records', data: utsavs });
+};
+
+export const fetchUtsavByLocation = async (req, res) => {
+  try {
+    const { location } = req.query;
+    console.log('Selected location:', location);
+
+    if (!location) {
+      return res.status(400).send({ message: 'Location is required' });
+    }
+
+    const utsavs = await database.query(
+      `SELECT
+        utsav_db.id,
+        utsav_db.name,
+        utsav_db.start_date,
+        utsav_db.end_date,
+        utsav_db.status,
+        utsav_db.total_seats,
+        utsav_db.location,
+        utsav_db.available_seats,
+        utsav_db.registration_deadline,
+        COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin') THEN 1 END) AS confirmed_count,
+        COUNT(CASE WHEN utsav_booking.status = '${ROOM_STATUS_CHECKEDIN}' THEN 1 END) AS checkedin_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_CANCELLED}' THEN 1 END) AS selfcancel_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admincancel_count,
+        COUNT(CASE 
+          WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin')
+               AND utsav_booking.volunteer NOT IN ('Unable to Volunteer', 'not selected') 
+               AND utsav_booking.volunteer IS NOT NULL
+          THEN 1 
+        END) AS volunteer_opted_count
+      FROM 
+        utsav_db
+      LEFT JOIN 
+        utsav_booking ON utsav_db.id = utsav_booking.utsavid
+      WHERE 
+        utsav_db.location = :location
+      GROUP BY
+        utsav_db.id,
+        utsav_db.name,
+        utsav_db.start_date,
+        utsav_db.end_date,
+        utsav_db.status,
+        utsav_db.total_seats,
+        utsav_db.location,
+        utsav_db.available_seats,
+        utsav_db.registration_deadline
+      ORDER BY 
+        utsav_db.start_date ASC;`,
+      {
+        type: QueryTypes.SELECT,
+        replacements: { location },
+      }
+    );
+
+    return res.status(200).send({
+      message: 'Fetched Utsav Records by Location',
+      data: utsavs,
+    });
+  } catch (error) {
+    console.error('Error fetching Utsavs:', error);
+    return res.status(500).send({ message: 'Error fetching utsav data' });
+  }
 };
 
 export const activateUtsav = async (req, res) => {

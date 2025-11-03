@@ -20,7 +20,8 @@ import {
   fetchUtsavBookingsVolunteer,
   uploadRoomNoExcel,
   updateRoomNo,
-  fetchVolunteerOptions
+  fetchVolunteerOptions,
+  fetchUtsavByLocation
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { createUtsavBookingByAdmin } from '../../controllers/admin/utsavManagement.controller.js';
 
@@ -29,7 +30,8 @@ import {
   ROLE_UTSAV_ADMIN,
   ROLE_PRA_ACCOUNTS_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
-  ROLE_UTSAV_READ_ONLY
+  ROLE_UTSAV_READ_ONLY,
+  ROLE_UTSAV_ADMIN_RAJ
 } from '../../config/constants.js';
 import multer from 'multer';
 
@@ -49,7 +51,8 @@ utsavAdminRouter.use(
     ROLE_SUPER_ADMIN,
     ROLE_PRA_ACCOUNTS_ADMIN,
     ROLE_ACCOUNTS_ADMIN,
-    ROLE_UTSAV_READ_ONLY
+    ROLE_UTSAV_READ_ONLY,
+    ROLE_UTSAV_ADMIN_RAJ
   )
 );
 
@@ -73,6 +76,7 @@ utsavAdminRouter.get('/volunteer', CatchAsync(fetchUtsavBookingsVolunteer));
 utsavAdminRouter.get('/fetchpackage', CatchAsync(fetchAllPackages));
 utsavAdminRouter.get('/fetchPackagesByUtsav', CatchAsync(fetchPackagesByUtsav));
 utsavAdminRouter.get('/fetch', CatchAsync(fetchAllUtsav));
+utsavAdminRouter.get('/fetchUtsav', CatchAsync(fetchUtsavByLocation));
 utsavAdminRouter.get('/fetch/:id', CatchAsync(fetchUtsav));
 utsavAdminRouter.get('/fetchpackage/:id', CatchAsync(fetchPackage));
 utsavAdminRouter.put('/:id/:activate', CatchAsync(activateUtsav));
