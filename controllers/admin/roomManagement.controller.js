@@ -100,7 +100,7 @@ const handleSameDayCheckout = async ({
       category: TYPE_ROOM,
       amount: lateCheckoutAmount,
       status: STATUS_CASH_PENDING,
-      description: `Late checkout fee for booking ${booking.bookingid}`,
+      description: `Late checkout fee for booking ${booking.bookingid} dated ${booking.checkout}`,
       updatedBy: user.username
     },
     { transaction: dbTransaction }
