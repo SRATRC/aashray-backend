@@ -218,14 +218,32 @@ export const updateUtsav = async (req, res) => {
     end_date,
     status,
     total_seats,
+    available_seats, // optional manual override
     comments,
     location,
     registration_deadline
   } = req.body;
-  const utsavId = req.params.id;
 
+  const utsavId = req.params.id;
   const utsav = await validateUtsav(utsavId);
   const month = moment(start_date).format('MMMM');
+
+  // 🧩 Hybrid available_seats logic
+  let newAvailableSeats;
+
+  // If total_seats changed → auto adjust
+  if (total_seats != utsav.total_seats) {
+    const diff = total_seats - utsav.total_seats;
+    newAvailableSeats = Math.max(0, utsav.available_seats + diff);
+  }
+  // If same total_seats but frontend sent available_seats → allow manual override
+  else if (available_seats !== undefined && available_seats !== null) {
+    newAvailableSeats = available_seats;
+  }
+  // Otherwise → keep existing
+  else {
+    newAvailableSeats = utsav.available_seats;
+  }
 
   await utsav.update({
     name,
@@ -234,6 +252,7 @@ export const updateUtsav = async (req, res) => {
     month,
     status,
     total_seats,
+    available_seats: newAvailableSeats,
     comments,
     location,
     registration_deadline,
@@ -358,6 +377,7 @@ ORDER BY
 };
 
 export const fetchAllUtsav = async (req, res) => {
+  
   const utsavs = await database.query(
     `SELECT
       utsav_db.id,
@@ -406,6 +426,72 @@ END) AS volunteer_opted_count
   return res
     .status(200)
     .send({ message: 'Fetched Utsav Records', data: utsavs });
+};
+
+export const fetchUtsavByLocation = async (req, res) => {
+  try {
+    const { location } = req.query;
+    console.log('Selected location:', location);
+
+    if (!location) {
+      return res.status(400).send({ message: 'Location is required' });
+    }
+
+    const utsavs = await database.query(
+      `SELECT
+        utsav_db.id,
+        utsav_db.name,
+        utsav_db.start_date,
+        utsav_db.end_date,
+        utsav_db.status,
+        utsav_db.total_seats,
+        utsav_db.location,
+        utsav_db.available_seats,
+        utsav_db.registration_deadline,
+        COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin') THEN 1 END) AS confirmed_count,
+        COUNT(CASE WHEN utsav_booking.status = '${ROOM_STATUS_CHECKEDIN}' THEN 1 END) AS checkedin_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_CANCELLED}' THEN 1 END) AS selfcancel_count,
+        COUNT(CASE WHEN utsav_booking.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admincancel_count,
+        COUNT(CASE 
+          WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin')
+               AND utsav_booking.volunteer NOT IN ('Unable to Volunteer', 'not selected') 
+               AND utsav_booking.volunteer IS NOT NULL
+          THEN 1 
+        END) AS volunteer_opted_count
+      FROM 
+        utsav_db
+      LEFT JOIN 
+        utsav_booking ON utsav_db.id = utsav_booking.utsavid
+      WHERE 
+        utsav_db.location = :location
+      GROUP BY
+        utsav_db.id,
+        utsav_db.name,
+        utsav_db.start_date,
+        utsav_db.end_date,
+        utsav_db.status,
+        utsav_db.total_seats,
+        utsav_db.location,
+        utsav_db.available_seats,
+        utsav_db.registration_deadline
+      ORDER BY 
+        utsav_db.start_date ASC;`,
+      {
+        type: QueryTypes.SELECT,
+        replacements: { location },
+      }
+    );
+
+    return res.status(200).send({
+      message: 'Fetched Utsav Records by Location',
+      data: utsavs,
+    });
+  } catch (error) {
+    console.error('Error fetching Utsavs:', error);
+    return res.status(500).send({ message: 'Error fetching utsav data' });
+  }
 };
 
 export const activateUtsav = async (req, res) => {

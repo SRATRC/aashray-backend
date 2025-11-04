@@ -11,6 +11,7 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.use(validateCard);
 
 router.post('/cancel', CatchAsync(CancelBooking));
+// DEPRECATED: Use unified booking endpoint instead
 router.post('/flat', CatchAsync(FlatBookingMumukshu));
 router.get('/bookings', CatchAsync(ViewAllBookings));
 
