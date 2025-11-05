@@ -108,7 +108,6 @@ export const ERR_CARD_NOT_FOUND = 'User not found';
 
 export const ERR_INVALID_BOOKING_TYPE = 'Invalid booking type';
 export const ERR_INVALID_DATE = 'Invalid date';
-export const ERR_INVALID_TOMMORROW_BOOKING_DATE = 'You can only book for tomorrow before 11:00 AM today';
 export const ERR_INVALID_MEAL_TIME = 'Invalid meal time';
 export const ERR_BLOCKED_DATES = 'Dates are blocked';
 
