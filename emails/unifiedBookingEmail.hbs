@@ -1,43 +1,37 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Booking Confirmation</title>
-
+    <title>Booking Confirmation - Vitraag Vigyaan Aashray</title>
     {{> styles }}
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <img src="https://i.imgur.com/SkOGGbd.png" alt="Company Logo">
+            <img src="https://i.imgur.com/SkOGGbd.png" alt="Vitraag Vigyaan Aashray Logo">
         </div>
-        <div class="content" >
-            <p class="intro">Dear {{name}},</p> <p class="intro"> {{welcomeMessage}} Here are the details of your bookings:</p>
+        <div class="content">
+            <p class="intro">Dear {{name}},</p>
+            <p class="intro">{{welcomeMessage}}</p>
+            <p class="intro">Here are the details of your bookings:</p>
            
-         {{#if showUtsavDetail}}
+            {{#if showUtsavDetail}}
             <div class="details">
-                <p class="section-title"><strong>Raj Utsav Booking:</strong></p>
+                <p class="section-title"><strong>Raj Utsav Booking</strong></p>
                 <table>
-                    <thead> <tr>
-                            <th>BookingId</th>
-                            <th>Utsav Name</th>
-                            <th>Name</th>     
-                            <th>Start Date</th>
-                            <th>End Date</th> 
-                            <th>Package</th> 
-                            <th>Status</th>
-                            </tr>
-                    </thead>
-                    <tbody> {{#each utsavBookingDetails}}
+                    <tbody>
+                        {{#each utsavBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{utsavname}}</td>
-                            <td>{{name}}</td>
-                            <td>{{startdate}}</td>
-                            <td>{{enddate}}</td>
-                            <td>{{package}}</td>
-                            <td><b><span style="color: blue;">{{status}}</span></b></td>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Utsav Name:</strong> {{utsavname}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Start Date:</strong> {{startdate}}<br>
+                                <strong>End Date:</strong> {{enddate}}<br>
+                                <strong>Package:</strong> {{package}}<br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                            </td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -46,25 +40,20 @@
             {{/if}}
 
 
-             {{#if showRoomDetail}}
+            {{#if showRoomDetail}}
             <div class="details">
-                <p class="section-title"><strong>Raj Sharan - Room Booking:</strong></p>
+                <p class="section-title"><strong>Raj Sharan - Room Booking</strong></p>
                 <table>
-                    <thead> <tr>
-                            <th>BookingId</th>
-                            <th>Name</th>
-                            <th>Checkin</th>
-                            <th>Checkout</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody> {{#each roomBookingDetails}}
+                    <tbody>
+                        {{#each roomBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{checkin}}</td>
-                            <td>{{checkout}}</td>
-                            <td><span style="color: blue;">{{status}}</span></td>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Check-in:</strong> {{checkin}}<br>
+                                <strong>Check-out:</strong> {{checkout}}<br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                            </td>
                         </tr>
                         {{/each}}
                     </tbody>
@@ -74,96 +63,71 @@
 
             {{#if showFlatDetail}}
             <div class="details">
-                 <p class="section-title"><strong>Raj Sharan - Flat Booking:</strong></p>
-                 <table>
-                     <thead>
-                        <tr>
-                            <th>BookingId</th>
-                            <th>Name</th>
-                            <th>Flat No.</th>
-                            <th>Checkin</th>
-                            <th>Checkout</th>
-                            <th>Status</th>
-                        </tr>
-                     </thead>
-                     <tbody>
+                <p class="section-title"><strong>Raj Sharan - Flat Booking</strong></p>
+                <table>
+                    <tbody>
                         {{#each flatBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{flatno}}</td>
-                            <td>{{checkin}}</td>
-                            <td>{{checkout}}</td>
-                            <td><span style="color: blue;">{{status}}</span></td>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Flat No.:</strong> {{flatno}}<br>
+                                <strong>Check-in:</strong> {{checkin}}<br>
+                                <strong>Check-out:</strong> {{checkout}}<br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                            </td>
                         </tr>
                         {{/each}}
-                     </tbody>
+                    </tbody>
                 </table>
             </div>
             {{/if}}
 
             {{#if showAdhyanDetail}}
-             <div class="details" >
-                <p class="section-title"><strong>Raj Adhyayan Booking:</strong></p>
+            <div class="details">
+                <p class="section-title"><strong>Raj Adhyayan Booking</strong></p>
                 <table>
-                   <thead>
+                    <tbody>
+                        {{#each adhyanBookingDetails}}
                         <tr>
-                           <th>BookingId</th>
-                           <th>Name</th>
-                           <th>Adhyayan Name</th>
-                           <th>Speaker</th>
-                           <th>Start Date</th>
-                           <th>End Date</th>
-                           <th>Status</th>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Adhyayan Name:</strong> {{adhyayanname}}<br>
+                                <strong>Speaker:</strong> {{speaker}}<br>
+                                <strong>Start Date:</strong> {{startdate}}<br>
+                                <strong>End Date:</strong> {{enddate}}<br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                            </td>
                         </tr>
-                   </thead>
-                   <tbody>
-                     {{#each adhyanBookingDetails}}
-                        <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{adhyayanname}}</td>
-                            <td>{{speaker}}</td>
-                            <td>{{startdate}}</td>
-                            <td>{{enddate}}</td>
-                            <td><span style="color: blue;">{{status}}</span></td>
-                        </tr>
-                    {{/each}}
-                   </tbody>
+                        {{/each}}
+                    </tbody>
                 </table>
 
                 <div class="note">
-                    <p><strong>Please note</strong> that the adhyayan committee reserves the right to cancel your booking within 7 days if you do not meet the adhyayan criteria.</p>
+                    <p><strong>Please note:</strong> The adhyayan committee reserves the right to cancel your booking within 7 days if you do not meet the adhyayan criteria.</p>
                 </div>
             </div>
-           {{/if}}
+            {{/if}}
 
-           {{#if showTravelDetail}}
-             <div class="details" >
-                <p class="section-title"><strong>Raj Pravas - Travel Booking:</strong></p>
+            {{#if showTravelDetail}}
+            <div class="details">
+                <p class="section-title"><strong>Raj Pravas - Travel Booking</strong></p>
                 <table>
-                   <thead>
-                       <tr>
-                           <th>BookingId</th>
-                           <th>Name</th>
-                           <th>Date</th>
-                           <th>Pickup Point</th>
-                           <th>Dropoff Point</th>
-                           <th>Status</th>
-                       </tr>
-                   </thead>
-                   <tbody>
-                     {{#each travelBookingDetails}}
+                    <tbody>
+                        {{#each travelBookingDetails}}
                         <tr>
-                            <td>{{bookingid}}</td>
-                            <td>{{name}}</td>
-                            <td>{{date}}</td>
-                            <td>{{pickuppoint}}</td>
-                            <td>{{dropoffpoint}}</td>
-                            <td><b><span style="color: blue;">{{status}}</span></b></td>
+                            <td>
+                                <strong>Booking ID:</strong> {{bookingid}}<br>
+                                <strong>Name:</strong> {{name}}<br>
+                                <strong>Date:</strong> {{date}}<br>
+                                <strong>Pickup Point:</strong> {{pickuppoint}}<br>
+                                <strong>Drop-off Point:</strong> {{dropoffpoint}}<br>
+                                <strong>Status:</strong> <span style="color: blue;">{{status}}</span>
+                            </td>
                         </tr>
-                    {{/each}}
-                   </tbody>
+                        {{/each}}
+                    </tbody>
                 </table>
             </div>
             
@@ -184,13 +148,12 @@
                 <p><b>admin cancelled:</b> Your travel booking has been cancelled by the administrator because of non payment.</p>
             </div>
 
-
             <div class="steps">
-              <p>You can view all your bookings, booking statuses and make any pending payments on the <a href="https://aashray.vitraagvigyaan.org">Vitraag Vigyaan Aashray mobile app</a>.</p>
-              <p> <a href='https://drive.google.com/file/d/1nTqWPlsiFZUc_rulepkbo7eLYaM3MidM/view' target='_blank' class="link">Please click here</a> to read the guidelines for your stay at the Research Center. We hope you have a spiritually blissful stay.</p>
-              <p>If you have any questions or need further assistance, please feel free to contact us at <b>+91-7875432613 / +91-9004273512</b>.</p>
-           </div>
-       </div>
+                <p>You can view all your bookings, booking statuses, and make any pending payments on the <a href="https://aashray.vitraagvigyaan.org" class="link">Vitraag Vigyaan Aashray mobile app</a>.</p>
+                <p><a href="https://drive.google.com/file/d/1nTqWPlsiFZUc_rulepkbo7eLYaM3MidM/view" target="_blank" class="link">Please click here</a> to read the guidelines for your stay at the Research Center. We hope you have a spiritually blissful stay.</p>
+                <p>If you have any questions or need further assistance, please feel free to contact us at <strong>+91-7875432613</strong> / <strong>+91-9004273512</strong>.</p>
+            </div>
+        </div>
 
         {{> _footer}}
     </div>

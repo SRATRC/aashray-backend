@@ -11,6 +11,7 @@ import {
   STATUS_RESIDENT,
   STATUS_MUMUKSHU,
   TYPE_UTSAV,
+  TYPE_FLAT,
   STATUS_AWAITING_CONFIRMATION,
   BOOKING_STATUS_PENDING,
   STATUS_SEVA_KUTIR,
@@ -18,9 +19,11 @@ import {
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
-  checkRoomAvailabilityForMumukshus
+  checkRoomAvailabilityForMumukshus,
+  bookFlatForMumukshus,
+  checkFlatAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
-import { UtsavDb } from '../../models/associations.js';
+import { CardDb, UtsavDb } from '../../models/associations.js';
 import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
@@ -37,7 +40,6 @@ import {
   bookUtsavForMumukshus,
   validateUtsavs
 } from '../../helpers/utsavBooking.helper.js';
-import { CardDb } from '../../models/associations.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
   generateOrderId,
@@ -56,6 +58,9 @@ import moment from 'moment';
 
 export const mumukshuBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
+
+  validateFlatBookingConstraints(primary_booking, addons);
+
   var t = await database.transaction();
   req.transaction = t;
 
@@ -125,6 +130,7 @@ export const validateBooking = async (req, res) => {
     foodDetails: {},
     travelDetails: {},
     utsavDetails: [],
+    flatDetails: [],
     totalCharge: 0
   };
 
@@ -228,6 +234,12 @@ async function book(
 
       break;
 
+    case TYPE_FLAT:
+      const flatResult = await bookFlat(data, t, user);
+      amount += flatResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
@@ -255,7 +267,12 @@ async function validate(body, user, data, response) {
       break;
 
     case TYPE_FOOD:
-      response.foodDetails = await checkFoodAvailability(body, data, user, utsav);
+      response.foodDetails = await checkFoodAvailability(
+        body,
+        data,
+        user,
+        utsav
+      );
       break;
 
     case TYPE_ADHYAYAN:
@@ -282,6 +299,14 @@ async function validate(body, user, data, response) {
       );
       totalCharge += response.utsavDetails.reduce(
         (partialSum, utsav) => partialSum + utsav.charge,
+        0
+      );
+      break;
+
+    case TYPE_FLAT:
+      response.flatDetails = await checkFlatAvailability(data, user);
+      totalCharge += response.flatDetails.reduce(
+        (partialSum, flat) => partialSum + flat.charge,
         0
       );
       break;
@@ -399,4 +424,70 @@ async function checkTravelAvailability(data) {
     status: STATUS_AWAITING_CONFIRMATION,
     charge: 0
   };
+}
+
+async function bookFlat(data, t, user) {
+  const { checkin_date, checkout_date, mumukshus } = data.details;
+
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout date is required for flat booking');
+  }
+
+  const result = await bookFlatForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshus,
+    user,
+    t
+  );
+  return {
+    amount: result.order.amount,
+    userBookingIds: result.userBookingIds
+  };
+}
+
+async function checkFlatAvailability(data, user) {
+  const { checkin_date, checkout_date, mumukshus } = data.details;
+
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout_date is required for flat booking');
+  }
+
+  const result = await checkFlatAvailabilityForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshus,
+    user
+  );
+  return result;
+}
+
+function validateFlatBookingConstraints(primary_booking, addons) {
+  // Check if TYPE_FLAT is in addons (not allowed)
+  if (addons && addons.length > 0) {
+    const flatAddon = addons.find((addon) => addon.booking_type === TYPE_FLAT);
+    if (flatAddon) {
+      throw new ApiError(
+        400,
+        'Flat booking cannot be added as an addon. It must be the primary booking type.'
+      );
+    }
+  }
+
+  // Check if TYPE_FLAT is primary booking with other primary booking types
+  if (primary_booking && primary_booking.booking_type === TYPE_FLAT) {
+    // Flat booking should be standalone - no addons of accommodation types allowed
+    if (addons && addons.length > 0) {
+      const accommodationAddons = addons.filter(
+        (addon) =>
+          addon.booking_type === TYPE_ROOM || addon.booking_type === TYPE_UTSAV
+      );
+      if (accommodationAddons.length > 0) {
+        throw new ApiError(
+          400,
+          'Flat booking cannot be combined with other accommodation types (room or utsav bookings).'
+        );
+      }
+    }
+  }
 }

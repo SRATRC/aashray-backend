@@ -2,6 +2,7 @@ import {
   AdhyayanFeedback,
   CardDb,
   ShibirDb,
+  ShibirBookingDb,
   Transactions
 } from '../../models/associations.js';
 import {
@@ -25,14 +26,19 @@ import {
   reserveAdhyayanSeat,
   openAdhyayanSeat,
   validateAdhyayanBooking,
-  validateAdhyayans
+  validateAdhyayans, 
+  sendAdhyayanBookingUpdateNotification
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
-import database from '../../config/database.js';
-import Sequelize, { QueryTypes } from 'sequelize';
-import moment from 'moment';
-import ApiError from '../../utils/ApiError.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
+import {
+  sendDualUserNotifications,
+  sendPushNotifications
+} from '../../helpers/notification.helper.js';
+import Sequelize, { QueryTypes } from 'sequelize';
+import database from '../../config/database.js';
+import ApiError from '../../utils/ApiError.js';
+import moment from 'moment';
 
 export const createAdhyayan = async (req, res) => {
   const {
@@ -156,7 +162,7 @@ export const fetchAdhyayanByLocation = async (req, res) => {
     LEFT JOIN 
       shibir_booking_db ON shibir_db.id = shibir_booking_db.shibir_id
     WHERE 
-      shibir_db.start_date >= CURRENT_DATE - INTERVAL 7 DAY
+      shibir_db.start_date >= CURRENT_DATE - INTERVAL 15 DAY
       AND shibir_db.location = :location
     GROUP BY 
       shibir_db.id,
@@ -321,15 +327,29 @@ export const updateAdhyayan = async (req, res) => {
     location,
     total_seats,
     food_allowed,
-    comments
+    comments,
+    available_seats // optional manual override
   } = req.body;
 
   const adhyayanId = req.params.id;
   const adhyayan = (await validateAdhyayans(adhyayanId))[0];
 
-  const diff = total_seats - adhyayan.total_seats;
-  const available_seats = Math.max(0, adhyayan.available_seats + diff);
   const month = moment(start_date).format('MMMM');
+
+  // 🧩 If total_seats changed, adjust available_seats accordingly
+  let newAvailableSeats;
+  if (total_seats != adhyayan.total_seats) {
+    const diff = total_seats - adhyayan.total_seats;
+    newAvailableSeats = Math.max(0, adhyayan.available_seats + diff);
+  } 
+  // 🧩 If total_seats is same, allow manual update if provided
+  else if (available_seats !== undefined && available_seats !== null) {
+    newAvailableSeats = available_seats;
+  } 
+  // 🧩 Otherwise, retain existing available seats
+  else {
+    newAvailableSeats = adhyayan.available_seats;
+  }
 
   await adhyayan.update({
     name,
@@ -340,7 +360,7 @@ export const updateAdhyayan = async (req, res) => {
     location,
     total_seats,
     amount,
-    available_seats,
+    available_seats: newAvailableSeats,
     food_allowed,
     comments,
     updatedBy: req.user.username
@@ -400,9 +420,12 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const { shibir_id, bookingid, status, description } = req.body;
 
   var newBookingStatus = status;
-
+  let newBooking = null;
   const t = await database.transaction();
   req.transaction = t;
+
+  // Store notification data to send after transaction commit
+  const notificationData = [];
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
   const booking = await validateAdhyayanBooking(bookingid, shibir_id);
@@ -426,8 +449,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const bookedByCard = await validateCard(cardno);
 
   switch (status) {
-    // Only Waiting & Payment Pending booking can be changed to
-    // Confirmed
+    // Only Waiting & Payment Pending booking can be changed to Confirmed
     case STATUS_CONFIRMED:
       if (booking.status == STATUS_WAITING) {
         await reserveAdhyayanSeat(adhyayan, t);
@@ -445,7 +467,6 @@ export const adhyayanStatusUpdate = async (req, res) => {
         );
       }
 
-      // ✅ Update transaction status if pending or cash pending
       if (
         transaction.status === STATUS_PAYMENT_PENDING ||
         transaction.status === STATUS_CASH_PENDING
@@ -490,6 +511,22 @@ export const adhyayanStatusUpdate = async (req, res) => {
         // then confirm the booking.
         if (transaction.status == STATUS_PAYMENT_COMPLETED) {
           newBookingStatus = STATUS_CONFIRMED;
+
+          sendDualUserNotifications({
+            primary: {
+              cardno: booking.cardno,
+              title: 'Adhyayan Booking Confirmed',
+              body: 'Your adhyayan booking has been confirmed.'
+            },
+            bookedBy: booking.bookedBy && {
+              token: bookedByCard.token,
+              title: 'Adhyayan Booking Confirmed',
+              body: `Adhyayan booking for ${
+                booking.CardDb.issuedto.split(' ')[0]
+              } has been confirmed.`
+            },
+            screen: '/bookings'
+          });
         }
       }
 
@@ -500,7 +537,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
         booking.status == STATUS_CONFIRMED ||
         booking.status == STATUS_PAYMENT_PENDING
       ) {
-        await openAdhyayanSeat(adhyayan, req.user.username, t);
+         newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
+       
       }
 
       if (transaction) {
@@ -522,6 +560,20 @@ export const adhyayanStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
+  
+  // Send notifications and emails after transaction commit
+  try {
+   
+    sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+    // Send notification and email for new booking if exists
+    if (newBooking) {
+      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+    }
+  } catch (error) {
+    // Log error but don't fail the response since transaction is already committed
+    console.error('Error sending notifications/emails:', error);
+  }
+  
   return res.status(200).send({ message: 'Updated booking status' });
 };
 
@@ -570,63 +622,45 @@ export const softDeleteShibir = async (req, res) => {
     return res.status(404).json({ message: 'Shibir not found' });
   }
 
+  // Notify all users who have bookings for this adhyayan (rate-limited)
+  try {
+    const shibirId = parseInt(id);
+    const bookings = await ShibirBookingDb.findAll({
+      where: {
+        shibir_id: shibirId,
+        status: { [Sequelize.Op.in]: ['waiting', 'confirmed', 'pending'] }
+      },
+      attributes: ['cardno', 'bookedBy']
+    });
+
+    const recipients = new Set();
+    for (const b of bookings) {
+      if (b.cardno) recipients.add(b.cardno);
+      if (b.bookedBy) recipients.add(b.bookedBy);
+    }
+
+    if (recipients.size > 0) {
+      const cards = await CardDb.findAll({
+        where: { cardno: { [Sequelize.Op.in]: Array.from(recipients) } },
+        attributes: ['token']
+      });
+
+      const tokens = cards.map((c) => c.token).filter(Boolean);
+      if (tokens.length > 0) {
+        sendPushNotifications(tokens, {
+          title: 'Adhyayan Cancelled by Admin',
+          body: 'Your adhyayan booking has been cancelled by admin. We apologize for any inconvenience.',
+          screen: '/bookings'
+        });
+      }
+    }
+  } catch (notifyErr) {
+    console.error('Bulk adhyayan cancel notification failed:', notifyErr);
+  }
+
   res.status(200).json({ message: 'Shibir marked as deleted' });
 };
 
-// export const getAdhyayanFeedback = async (req, res) => {
-//   const { shibir_id } = req.params;
-//   const page = parseInt(req.query.page) || 1;
-//   const pageSize = parseInt(req.query.page_size) || 20;
-//   const offset = (page - 1) * pageSize;
-
-//   if (!shibir_id) {
-//     throw new ApiError(400, 'Adhyayan ID is required');
-//   }
-
-//   const feedback = await AdhyayanFeedback.findAll({
-//     where: { shibir_id: parseInt(shibir_id) },
-//     include: [
-//       {
-//         model: CardDb,
-//         attributes: ['cardno', 'issuedto', 'center', 'res_status']
-//       },
-//       {
-//         model: ShibirDb,
-//         attributes: [
-//           'id',
-//           'name',
-//           'speaker',
-//           'start_date',
-//           'end_date',
-//           'location'
-//         ]
-//       }
-//     ],
-//     order: [['submitted_at', 'DESC']],
-//     offset,
-//     limit: pageSize
-//   });
-
-//   const totalCount = await AdhyayanFeedback.count({
-//     where: { shibir_id: parseInt(shibir_id) }
-//   });
-
-//   const stats = await getFeedbackStats(parseInt(shibir_id));
-
-//   return res.status(200).send({
-//     message: MSG_FETCH_SUCCESSFUL,
-//     data: {
-//       feedback,
-//       stats,
-//       pagination: {
-//         page,
-//         pageSize,
-//         totalCount,
-//         totalPages: Math.ceil(totalCount / pageSize)
-//       }
-//     }
-//   });
-// };
 
 export const getAdhyayanFeedback = async (req, res) => {
   const { shibir_id } = req.params;

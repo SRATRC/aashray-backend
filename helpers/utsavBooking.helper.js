@@ -11,7 +11,8 @@ import {
 import {
   UtsavDb,
   UtsavPackagesDb,
-  UtsavBooking
+  UtsavBooking,
+  CardDb
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -21,30 +22,21 @@ import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import database from '../config/database.js';
-
+import sendMail from '../utils/sendMail.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
-  const utsav = await UtsavDb.findOne({
-    where: {
-      id: utsavid
-    }
-  });
+  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
-  const packages = await UtsavPackagesDb.findAll({
-    where: { utsavid }
-  });
-
+  const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
   await checkUtsavAlreadyBooked(utsavid, mumukshus);
 
   let total_amount = 0;
   let available_seats = utsav.available_seats;
+  let userBookingIds = {}, waitingBookingCount = 0;
 
-  let status = STATUS_PAYMENT_PENDING;
-  let userBookingIds = {},
-    waitingBookingCount = 0;
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
@@ -52,16 +44,18 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     const package_info = packages.find(
       (p) => p.id === Number(mumukshu.packageid)
     );
+    if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
 
-    if (!package_info) {
-      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
-    }
-
+    // 🟢 NEW LOGIC
+    let status;
     if (available_seats <= 0) {
       status = STATUS_WAITING;
       waitingBookingCount++;
-    } else {
+    } else if (package_info.amount > 0) {
       status = STATUS_PAYMENT_PENDING;
+      available_seats--;
+    } else {
+      status = STATUS_CONFIRMED;  // auto-confirm free packages
       available_seats--;
     }
 
@@ -82,7 +76,12 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       { transaction: t }
     );
 
-    if (utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
+    // 🟢 UPDATED CONDITIONAL
+    if (
+      utsav.status === STATUS_OPEN &&
+      status === STATUS_PAYMENT_PENDING &&
+      package_info.amount > 0
+    ) {
       await createPendingTransaction(
         user,
         booking,
@@ -91,24 +90,78 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-
       total_amount += package_info.amount;
     }
+
     bookings.push(bookingid);
     userBookingIds[mumukshu.cardno] = bookings;
   }
 
-  UtsavDb.update(
-    {
-      available_seats: available_seats
-    },
-    {
-      where: {
-        id: utsavid
-      }
-    },
-    { transaction: t }
+  await UtsavDb.update(
+    { available_seats },
+    { where: { id: utsavid }, transaction: t }
   );
+
+  return { amount: total_amount, userBookingIds, waitingBookingCount };
+}
+
+export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUser) {
+  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
+  if (!utsav) throw new ApiError(400, 'Utsav not found');
+
+  const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
+
+  await checkUtsavAlreadyBooked(utsavid, mumukshus);
+
+  let total_amount = 0;
+  let userBookingIds = {}, waitingBookingCount = 0;
+
+  for (const mumukshu of mumukshus) {
+    let bookings = [];
+    const bookingid = uuidv4();
+
+    const package_info = packages.find((p) => p.id === Number(mumukshu.packageid));
+    if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+
+    // Admin flow: do not check or decrement available seats; set to payment pending
+    const booking = await UtsavBooking.create(
+      {
+        bookingid,
+        utsavid,
+        cardno: mumukshu.cardno,
+        bookedBy: null,
+        packageid: mumukshu.packageid,
+        arrival: mumukshu.arrival,
+        carno: mumukshu.carno,
+        other: mumukshu.other,
+        volunteer: mumukshu.volunteer,
+        status: STATUS_PAYMENT_PENDING,
+        updatedBy: adminUser.username || 'admin'
+      },
+      { transaction: t }
+    );
+
+    // Always create pending/cash transaction for admin
+    const cardRecord = await CardDb.findOne({ where: { cardno: mumukshu.cardno } });
+    if (!cardRecord) throw new ApiError(400, `Card not found for cardno ${mumukshu.cardno}`);
+
+    await createPendingTransaction(
+      cardRecord,
+      booking,
+      TYPE_UTSAV,
+      package_info.amount,
+      adminUser.username || 'admin',
+      t,
+      true
+    );
+
+    total_amount += package_info.amount;
+
+    bookings.push(bookingid);
+    userBookingIds[mumukshu.cardno] = bookings;
+  }
+
+  // Admin flow: do not adjust available_seats here
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
@@ -278,4 +331,32 @@ export async function validateUtsavPackage(packageId, utsavId) {
   }
 
   return packageData;
+}
+
+export async function sendUtsavBookingUpdateEmail(booking, utsav) {
+  // Parallel database queries for better performance
+  const [card, bookedByCard, utsavData] = await Promise.all([
+    CardDb.findOne({ where: { cardno: booking.cardno } }),
+    booking.bookedBy ? CardDb.findOne({ where: { cardno: booking.bookedBy } }) : null,
+    utsav || UtsavDb.findOne({ where: { id: booking.utsavid } })
+  ]);
+
+  // Early return if no card or email
+  if (!card?.email) return;
+
+  // Send email with optimized context
+  sendMail({
+    email: card.email,
+    cc: bookedByCard?.email,
+    subject: 'Utsav Booking Updated',
+    template: 'utsavStatusUpdate',    
+    context: {
+      name: card.issuedto,
+      bookingid: booking.bookingid,
+      status: booking.status,
+      utsavName: utsavData.name,
+      utsavStartDate: utsavData.start_date,
+      utsavEndDate: utsavData.end_date
+    }
+  });
 }

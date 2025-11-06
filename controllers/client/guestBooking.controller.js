@@ -29,17 +29,15 @@ import {
   setWaitingBookingCountMap
 } from '../helper.js';
 import {
-  createFlatBooking,
   checkRoomAvailabilityForMumukshus,
   bookRoomForMumukshus,
-  bookFlatForMumukshus
+  bookFlatForMumukshus,
+  roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
   generateOrderId,
   updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
-import database from '../../config/database.js';
-import ApiError from '../../utils/ApiError.js';
 import {
   bookFoodForMumukshus,
   checkFoodAvailabilityForMumumkshus
@@ -48,10 +46,20 @@ import {
   validateUtsavs,
   bookUtsavForMumukshus
 } from '../../helpers/utsavBooking.helper.js';
-import { bookAdhyayanForMumukshus, checkAdhyayanAvailabilityForMumukshus } from '../../helpers/adhyayanBooking.helper.js';
+import {
+  bookAdhyayanForMumukshus,
+  checkAdhyayanAvailabilityForMumukshus
+} from '../../helpers/adhyayanBooking.helper.js';
+import { validateCards } from '../../helpers/card.helper.js';
+import database from '../../config/database.js';
+import ApiError from '../../utils/ApiError.js';
+import logger from '../../config/logger.js';
 
 export const guestBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
+
+  validateFlatBookingConstraints(primary_booking, addons);
+
   var t = await database.transaction();
   req.transaction = t;
 
@@ -102,12 +110,7 @@ export const guestBooking = async (req, res) => {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(
-        cardno,
-        bookings,
-        req.user,
-        BOOKING_STATUS_PENDING
-      );
+      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
     }
   }
   let message = MSG_BOOKING_SUCCESSFUL;
@@ -129,6 +132,7 @@ export const validateBooking = async (req, res) => {
     adhyayanDetails: [],
     foodDetails: {},
     utsavDetails: [],
+    flatDetails: [],
     totalCharge: 0
   };
 
@@ -151,7 +155,15 @@ export const validateBooking = async (req, res) => {
 
   return res.status(200).send({ data: response });
 };
-async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMap, transactionIds) {
+async function book(
+  body,
+  data,
+  t,
+  user,
+  userBookingIdMap,
+  waitingBookingCountMap,
+  transactionIds
+) {
   let amount = 0;
 
   switch (data.booking_type) {
@@ -162,12 +174,7 @@ async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMa
       break;
 
     case TYPE_FOOD:
-      const foodResult = await bookFood(
-        body,
-        data,
-        t,
-        user
-      );
+      const foodResult = await bookFood(body, data, t, user);
       amount += foodResult.amount;
       transactionIds.push(...foodResult.transactionIds);
       break;
@@ -200,6 +207,12 @@ async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMa
       );
       break;
 
+    case TYPE_FLAT:
+      const flatResult = await bookFlat(data, t, user);
+      amount += flatResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
@@ -212,11 +225,7 @@ async function validate(body, user, data, utsav, response) {
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(
-        data,
-        user,
-        utsav
-      );
+      response.roomDetails = await checkRoomAvailability(data, user, utsav);
       totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -252,6 +261,14 @@ async function validate(body, user, data, utsav, response) {
       );
       totalCharge += response.utsavDetails.reduce(
         (partialSum, utsav) => partialSum + utsav.charge,
+        0
+      );
+      break;
+
+    case TYPE_FLAT:
+      response.flatDetails = await checkFlatAvailability(data, user);
+      totalCharge += response.flatDetails.reduce(
+        (partialSum, flat) => partialSum + flat.charge,
         0
       );
       break;
@@ -334,7 +351,14 @@ async function bookAdhyayan(data, t, user) {
   return result;
 }
 
+/**
+ * @deprecated This endpoint is deprecated. Use the unified booking endpoint with TYPE_FLAT as primary_booking instead.
+ */
 export const guestBookingFlat = async (req, res) => {
+  logger.warn(
+    '[DEPRECATED] guestBookingFlat endpoint is deprecated. Use unified booking endpoint instead.'
+  );
+
   const { guests, startDay, endDay } = req.body;
 
   const t = await database.transaction();
@@ -350,11 +374,7 @@ export const guestBookingFlat = async (req, res) => {
 
   await t.commit();
 
-  sendUnifiedEmailForBookedBy(
-    userBookingIds,
-    req.user,
-    BOOKING_STATUS_PENDING
-  );
+  sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
 
   Object.entries(userBookingIds)
     .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
@@ -437,3 +457,127 @@ export const checkGuests = async (req, res) => {
     throw new ApiError(401, 'User is not a guest');
   }
 };
+
+async function bookFlat(data, t, user) {
+  const { checkin_date, checkout_date, guests } = data.details;
+
+  // Handle missing checkout_date
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout_date is required for flat booking');
+  }
+
+  if (guests.length === 0) {
+    throw new ApiError(
+      400,
+      'At least one guest must be specified for flat booking'
+    );
+  }
+
+  const result = await bookFlatForMumukshus(
+    checkin_date,
+    checkout_date,
+    guests,
+    user,
+    t
+  );
+  return {
+    amount: result.order.amount,
+    userBookingIds: result.userBookingIds
+  };
+}
+
+async function checkFlatAvailability(data, user) {
+  const { checkin_date, checkout_date, guests } = data.details;
+
+  // Handle missing checkout_date
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout_date is required for flat booking');
+  }
+
+  if (guests.length === 0) {
+    throw new ApiError(
+      400,
+      'At least one guest must be specified for flat booking'
+    );
+  }
+
+  // Check if user owns a flat
+  const flat = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: user.cardno
+    }
+  });
+
+  if (!flat) {
+    throw new ApiError(404, `Flat not found for ${user.cardno}`);
+  }
+
+  validateDate(checkin_date, checkout_date);
+  await validateCards(guests);
+
+  // Check if any guest already has a flat booking for these dates
+  for (const guest of guests) {
+    if (await checkFlatAlreadyBooked(checkin_date, checkout_date, guest)) {
+      throw new ApiError(
+        400,
+        `Flat already booked for ${guest} during selected dates`
+      );
+    }
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const flatDetails = [];
+
+  for (const guest of guests) {
+    // Check if this guest is the flat owner
+    const isFlatOwner = await FlatDb.findOne({
+      where: {
+        owner: guest,
+        flatno: flat.flatno
+      }
+    });
+
+    const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+
+    flatDetails.push({
+      guest: guest,
+      flatno: flat.flatno,
+      nights: nights,
+      charge: charge,
+      status: 'available'
+    });
+  }
+
+  return flatDetails;
+}
+
+function validateFlatBookingConstraints(primary_booking, addons) {
+  // Check if TYPE_FLAT is in addons (not allowed)
+  if (addons && addons.length > 0) {
+    const flatAddon = addons.find((addon) => addon.booking_type === TYPE_FLAT);
+    if (flatAddon) {
+      throw new ApiError(
+        400,
+        'Flat booking cannot be added as an addon. It must be the primary booking type.'
+      );
+    }
+  }
+
+  // Check if TYPE_FLAT is primary booking with other primary booking types
+  if (primary_booking && primary_booking.booking_type === TYPE_FLAT) {
+    // Flat booking should be standalone - no addons of accommodation types allowed
+    if (addons && addons.length > 0) {
+      const accommodationAddons = addons.filter(
+        (addon) =>
+          addon.booking_type === TYPE_ROOM || addon.booking_type === TYPE_UTSAV
+      );
+      if (accommodationAddons.length > 0) {
+        throw new ApiError(
+          400,
+          'Flat booking cannot be combined with other accommodation types (room or utsav bookings).'
+        );
+      }
+    }
+  }
+}

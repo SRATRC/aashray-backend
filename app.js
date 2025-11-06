@@ -183,7 +183,7 @@ app.use('/api/v1/admin/travel', travelManagementRoutes);
 app.use('/api/v1/admin/accounts', accountsManagementRoutes);
 app.use('/api/v1/admin/maintenance', maintenanceManagementRoutes);
 app.use('/api/v1/admin/bookings', bookingManagementRoutes);
-// app.use('/api/v1/admin/utsav', utsavManagementRoutes);
+app.use('/api/v1/admin/location', locationRoutes);
 app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
 app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);

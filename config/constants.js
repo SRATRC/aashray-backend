@@ -16,7 +16,7 @@ export const TRANSACTION_TYPE_UPI = 'upi';
 export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
-export const FEEDBACK_ELIGIBILITY_HOUR = 18;
+export const FEEDBACK_ELIGIBILITY_HOUR = 13;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
@@ -74,7 +74,7 @@ export const ROOM_BLOCKED = 'blocked';
 
 // TRAVEL
 export const TRAVEL_DETAIL = 'Travel Booking';
-export const TRAVEL_TYPE_REGULAR = 'regular';
+export const TRAVEL_TYPE_REGULAR = 'Regular';
 export const TRAVEL_TYPE_FULL = 'full';
 
 // ADMIN ROLES
@@ -101,6 +101,7 @@ export const ROLE_WIFI_ADMIN = 'wifiAdmin';
 export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
+export const ROLE_UTSAV_ADMIN_RAJ = 'utsavAdminRaj';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
@@ -136,7 +137,8 @@ export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 
 export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
-export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
+export const ERR_FLAT_ALREADY_BOOKED =
+  'Flat already booked for one or more mumukshus during selected dates';
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
 
 export const ERR_FEEDBACK_ALREADY_SUBMITTED =

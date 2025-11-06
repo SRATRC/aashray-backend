@@ -9,11 +9,15 @@ import {
   ERR_BOOKING_NOT_FOUND
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
+import {
+  getOtherBookingUser,
+  notifyCardno
+} from '../../helpers/notification.helper.js';
 import database from '../../config/database.js';
-import Sequelize from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
-import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
+import Sequelize from 'sequelize';
 import moment from 'moment';
 
 export const FetchUpcoming = async (req, res) => {
@@ -32,6 +36,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.type,
        t1.luggage,
        t1.comments,
+       t1.admin_comments,
        t1.status,
        t2.amount,
        t2.status AS transaction_status
@@ -65,7 +70,12 @@ export const CancelTravel = async (req, res) => {
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
-      status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED ,STATUS_PROCEED_FOR_PAYMENT, STATUS_WAITING]
+      status: [
+        STATUS_AWAITING_CONFIRMATION,
+        STATUS_CONFIRMED,
+        STATUS_PROCEED_FOR_PAYMENT,
+        STATUS_WAITING
+      ]
     }
   });
 
@@ -74,7 +84,7 @@ export const CancelTravel = async (req, res) => {
   }
 
   const bookingStatus = booking.status;
-  
+
   await userCancelBooking(req.user, booking, t);
   await t.commit();
 
@@ -94,9 +104,30 @@ export const CancelTravel = async (req, res) => {
     }
   });
 
-  //bring people from the waiting to awaiting confrimation.
-  if(bookingStatus != STATUS_WAITING)
-  {
+  if (booking.bookedBy) {
+    const other = getOtherBookingUser(booking, req.user.cardno);
+    if (other) {
+      const title = 'Raj Pravas Booking Cancelled';
+      const body =
+        req.user.cardno === booking.cardno
+          ? `Travel on ${moment(booking.date).format('Do MMM, YYYY')} for ${
+              req.user.issuedto
+            } has been cancelled.`
+          : `Your travel on ${moment(booking.date).format(
+              'Do MMM, YYYY'
+            )} from ${booking.pickup_point} to ${
+              booking.drop_point
+            } has been cancelled.`;
+      notifyCardno(other, {
+        title,
+        body,
+        screen: '/bookings'
+      });
+    }
+  }
+
+  // bring people from the waiting to awaiting confirmation.
+  if (bookingStatus != STATUS_WAITING) {
     updateWaitingTravelBooking(booking.date);
   }
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
