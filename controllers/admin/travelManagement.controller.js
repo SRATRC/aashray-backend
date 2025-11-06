@@ -625,3 +625,28 @@ export const updateTransactionStatus = async (req, res) => {
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
+export async function updateTransactionAmount(req, res) {
+  try {
+    const { bookingid, amount } = req.body;
+
+    if (!bookingid || !amount) {
+      return res.status(400).json({ message: 'Booking ID and amount are required' });
+    }
+
+    const transaction = await Transactions.findOne({ where: { bookingid } });
+
+    if (!transaction) {
+      return res.status(404).json({ message: 'Transaction not found for this booking' });
+    }
+
+    await transaction.update({
+      amount,
+      updatedBy: req.user.username, // if you track updater
+    });
+
+    return res.json({ message: 'Transaction amount updated successfully' });
+  } catch (error) {
+    console.error('Error updating transaction amount:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+}
