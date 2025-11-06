@@ -5,7 +5,8 @@ import {
   updateBookingStatus,
   updateTransactionStatus,
   fetchSummary,
-  fetchBookingForDriver
+  fetchBookingForDriver,
+  updateTransactionAmount 
 } from '../../controllers/admin/travelManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN, ROLE_DRI_TRAVEL_ADMIN } from '../../config/constants.js';
@@ -20,5 +21,6 @@ router.get('/driver', CatchAsync(fetchBookingForDriver));
 
 router.post('/booking/status', CatchAsync(updateBookingStatus));
 router.post('/transaction/status', CatchAsync(updateTransactionStatus));
+router.put('/transaction/amount', CatchAsync(updateTransactionAmount));
 
 export default router;
