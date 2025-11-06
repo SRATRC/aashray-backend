@@ -180,8 +180,8 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     }
   }
 
-  let travelBookingsFordateFromRC = bookingsGoingFromRC.length;
-  let travelBookingsFordateToRC = bookingGoingToRC.length;
+  let travelBookingCountFromRC = bookingsGoingFromRC.length;
+  let travelBookingCountToRC = bookingGoingToRC.length;
   var bookingsToCreate = [],
     bookingId;
   for (const group of mumukshuGroup) {
@@ -199,15 +199,17 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
 
     for (const mumukshu of mumukshus) {
       bookingId = uuidv4();
-      const travelBookingsFordate = drop_point === RESEARCH_CENTRE 
-        ? travelBookingsFordateToRC 
+    
+      const travelBookingCount = drop_point === RESEARCH_CENTRE 
+        ? travelBookingCountToRC 
         : pickup_point === RESEARCH_CENTRE 
-          ? travelBookingsFordateFromRC 
+          ? travelBookingCountFromRC 
           : 0;
-      let travelbookingStatus = await getTravelBookingStatus(
+      
+      const travelbookingStatus = await getTravelBookingStatus(
         type,
         date,
-        travelBookingsFordate
+        travelBookingCount
       );
       if (travelbookingStatus == STATUS_WAITING) {
         waitingBookingCount++;
@@ -232,9 +234,9 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         createPendingTransaction(bookingId, TYPE_TRAVEL, t);
       }
       if(drop_point === RESEARCH_CENTRE) {
-        travelBookingsFordateToRC++;
+        travelBookingCountToRC++;
       } else if(pickup_point === RESEARCH_CENTRE) {
-        travelBookingsFordateFromRC++;
+        travelBookingCountFromRC++;
       }
       userBookingIds[mumukshu] = [bookingId];
     }
