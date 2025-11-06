@@ -161,7 +161,17 @@ export const CancelBooking = async (req, res) => {
   res.status(200).send({ message: 'Room booking cancelled' });
 };
 
+/**
+ * @deprecated This endpoint is deprecated. Use the unified booking endpoint with TYPE_FLAT as primary_booking instead.
+ * This endpoint is kept for backward compatibility only.
+ * New implementations should use: POST /api/mumukshu-booking/booking with primary_booking.booking_type = 'flat'
+ */
 export const FlatBookingMumukshu = async (req, res) => {
+  // Log deprecation warning
+  console.warn(
+    '[DEPRECATED] FlatBookingMumukshu endpoint is deprecated. Use unified booking endpoint instead.'
+  );
+
   const { mumukshus, startDay, endDay } = req.body;
 
   const t = await database.transaction();

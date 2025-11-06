@@ -11,7 +11,8 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
-  TYPE_FOOD
+  TYPE_FOOD,
+  TYPE_UTSAV
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
@@ -21,7 +22,7 @@ import { Sequelize } from 'sequelize';
 import Transactions from './models/transactions.model.js';
 import ShibirDb from './models/shibir_db.model.js';
 import UtsavDb from './models/utsav_db.model.js';
-import { sendCancellationEmail } from './helpers/mailer.helper.js';
+import { sendCancellationEmail, sendOpenBookingEmail } from './helpers/mailer.helper.js';
 import {
   getBooking,
   getBookingType,
@@ -75,6 +76,7 @@ async function cancelMeals(systemUser, transactions, t) {
 
 async function runJob(systemUser, t) {
   const userBookingIds = {};
+  const openBookings = {};
   const transactions = [];
   const bookings = [];
 
@@ -84,7 +86,7 @@ async function runJob(systemUser, t) {
   logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings)}`);
   logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions)}`);
 
-  await cancelBookings(systemUser, bookings, userBookingIds, t);
+  await cancelBookings(systemUser, bookings, userBookingIds, openBookings, t);
   await cancelTransactions(systemUser, transactions, t, true);
   await cancelMeals(systemUser, transactions, t);
   await t.commit();
@@ -92,6 +94,10 @@ async function runJob(systemUser, t) {
   for (const cardno in userBookingIds) {
     const bookingIds = userBookingIds[cardno];
     await sendCancellationEmail(cardno, bookingIds, null);
+  }
+  for (const bookingType in openBookings) {
+    const bookings = openBookings[bookingType];
+    await sendOpenBookingEmail(bookingType,bookings);
   }
 }
 
@@ -114,7 +120,7 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
   }
 }
 
-async function cancelBookings(systemUser, bookings, userBookingIds, t) {
+async function cancelBookings(systemUser, bookings, userBookingIds, openBookings, t) {
   for (const booking of bookings) {
     const bookingType = getBookingTypeFromBooking(booking);
 
@@ -123,13 +129,18 @@ async function cancelBookings(systemUser, bookings, userBookingIds, t) {
         const adhyayan = await ShibirDb.findOne({
           where: { id: booking.shibir_id }
         });
-        await openAdhyayanSeat(adhyayan, systemUser.username, t);
+        let newBooking = await openAdhyayanSeat(adhyayan, systemUser.username, t);
+        if(newBooking){
+          addToOpenBookings(openBookings, newBooking);
+        }
         break;
       case TYPE_UTSAV:
         const utsav = await UtsavDb.findOne({
           where: { id: booking.utsavid }
         });
+        //Not automatically moving from waiting to payment pending for now
         await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
+        
         break;
     }
 
@@ -154,6 +165,13 @@ function addToUserBookingIdMap(userBookingIds, booking) {
   bookingIds.push(booking.bookingid);
   bookingIdsByType[bookingType] = bookingIds;
   userBookingIds[cardno] = bookingIdsByType;
+}
+
+function addToOpenBookings(openBookings, booking) {
+  const bookingType = getBookingTypeFromBooking(booking);
+  const bookingsByType = openBookings[bookingType] || [];
+  bookingsByType.push(booking);
+  openBookings[bookingType] = bookingsByType;
 }
 
 async function getUnpaidPastBookingsAndTransactions(bookings, transactions) {

@@ -36,6 +36,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.type,
        t1.luggage,
        t1.comments,
+       t1.admin_comments,
        t1.status,
        t2.amount,
        t2.status AS transaction_status

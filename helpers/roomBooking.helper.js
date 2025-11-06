@@ -35,6 +35,7 @@ import {
 } from '../controllers/helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
+import { usableCredits } from './transactions.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import { usableCredits } from './transactions.helper.js';
@@ -475,10 +476,8 @@ export async function bookFlatForMumukshus(
   validateDate(startDay, endDay);
   await validateCards(mumukshus);
 
-  for (var mumukshu of mumukshus) {
-    if (await checkFlatAlreadyBooked(startDay, endDay, mumukshu)) {
-      throw new ApiError(400, `${ERR_FLAT_ALREADY_BOOKED} for ${mumukshu}`);
-    }
+  if (await checkFlatAlreadyBooked(startDay, endDay, mumukshus)) {
+    throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
 
   const nights = await calculateNights(startDay, endDay);
@@ -528,9 +527,6 @@ export async function createFlatBooking(
   cashAllowed = false
 ) {
   let bookingId = uuidv4();
-  // let status = cashAllowed
-  //   ? STATUS_CASH_PENDING
-  //   : STATUS_PAYMENT_PENDING;
 
   let status = STATUS_PAYMENT_PENDING;
 
@@ -676,4 +672,59 @@ export async function checkRoomAvailabilityForMumukshus(
   }
 
   return roomDetails;
+}
+
+export async function checkFlatAvailabilityForMumukshus(
+  checkin_date,
+  checkout_date,
+  mumukshus,
+  user
+) {
+  const flat = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: user.cardno
+    }
+  });
+
+  if (!flat) {
+    throw new ApiError(404, 'User does not own a flat');
+  }
+
+  validateDate(checkin_date, checkout_date);
+  await validateCards(mumukshus);
+
+  if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
+    throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const flatDetails = [];
+
+  const flatOwnerData = await FlatDb.findAll({
+    where: {
+      owner: mumukshus
+    }
+  });
+
+  for (const mumukshu of mumukshus) {
+    const isFlatOwner = flatOwnerData.some(
+      (item) => item.dataValues.owner == mumukshu
+    );
+
+    const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+    const availableCredits =
+      charge > 0 ? usableCredits(user, TYPE_FLAT, charge) : 0;
+
+    flatDetails.push({
+      mumukshu: mumukshu,
+      flatno: flat.flatno,
+      nights: nights,
+      charge: charge,
+      availableCredits: availableCredits,
+      status: STATUS_AVAILABLE
+    });
+  }
+
+  return flatDetails;
 }

@@ -69,7 +69,7 @@ export async function getBlockedDates(checkin_date, checkout_date) {
   return blockedDates;
 }
 
-export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
+export async function checkFlatAlreadyBooked(checkin, checkout, cardnos) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -99,7 +99,7 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
           ROOM_STATUS_CHECKEDOUT
         ]
       },
-      cardno: card_no
+      cardno: cardnos
     }
   });
 
@@ -571,7 +571,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject: SUBJECT_BOOKING + getSubject(bookingStatus),
+      subject:getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
@@ -598,7 +598,7 @@ export async function sendUnifiedEmail(
   ) {
     sendMail({
       email: RAJ_PRAVAS_EMAIL,
-      subject: SUBJECT_BOOKING + name,
+      subject: getSubject(bookingStatus) + name,
       template: template,
       context: {
         showTravelDetail: wasRajprvasBooked,

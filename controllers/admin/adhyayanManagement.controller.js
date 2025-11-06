@@ -26,7 +26,8 @@ import {
   reserveAdhyayanSeat,
   openAdhyayanSeat,
   validateAdhyayanBooking,
-  validateAdhyayans
+  validateAdhyayans, 
+  sendAdhyayanBookingUpdateNotification
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
@@ -326,15 +327,29 @@ export const updateAdhyayan = async (req, res) => {
     location,
     total_seats,
     food_allowed,
-    comments
+    comments,
+    available_seats // optional manual override
   } = req.body;
 
   const adhyayanId = req.params.id;
   const adhyayan = (await validateAdhyayans(adhyayanId))[0];
 
-  const diff = total_seats - adhyayan.total_seats;
-  const available_seats = Math.max(0, adhyayan.available_seats + diff);
   const month = moment(start_date).format('MMMM');
+
+  // 🧩 If total_seats changed, adjust available_seats accordingly
+  let newAvailableSeats;
+  if (total_seats != adhyayan.total_seats) {
+    const diff = total_seats - adhyayan.total_seats;
+    newAvailableSeats = Math.max(0, adhyayan.available_seats + diff);
+  } 
+  // 🧩 If total_seats is same, allow manual update if provided
+  else if (available_seats !== undefined && available_seats !== null) {
+    newAvailableSeats = available_seats;
+  } 
+  // 🧩 Otherwise, retain existing available seats
+  else {
+    newAvailableSeats = adhyayan.available_seats;
+  }
 
   await adhyayan.update({
     name,
@@ -345,7 +360,7 @@ export const updateAdhyayan = async (req, res) => {
     location,
     total_seats,
     amount,
-    available_seats,
+    available_seats: newAvailableSeats,
     food_allowed,
     comments,
     updatedBy: req.user.username
@@ -405,9 +420,12 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const { shibir_id, bookingid, status, description } = req.body;
 
   var newBookingStatus = status;
-
+  let newBooking = null;
   const t = await database.transaction();
   req.transaction = t;
+
+  // Store notification data to send after transaction commit
+  const notificationData = [];
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
   const booking = await validateAdhyayanBooking(bookingid, shibir_id);
@@ -462,22 +480,6 @@ export const adhyayanStatusUpdate = async (req, res) => {
           { transaction: t }
         );
       }
-
-      sendDualUserNotifications({
-        primary: {
-          token: bookedByCard.token,
-          title: 'Adhyayan Booking Confirmed',
-          body: 'Your adhyayan booking has been confirmed by admin'
-        },
-        bookedBy: booking.bookedBy && {
-          cardno: booking.bookedBy,
-          title: 'Adhyayan Booking Confirmed',
-          body: `Adhyayan booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been confirmed by admin`
-        },
-        screen: '/bookings'
-      });
 
       break;
 
@@ -535,7 +537,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
         booking.status == STATUS_CONFIRMED ||
         booking.status == STATUS_PAYMENT_PENDING
       ) {
-        await openAdhyayanSeat(adhyayan, req.user.username, t);
+         newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
+       
       }
 
       if (transaction) {
@@ -557,6 +560,20 @@ export const adhyayanStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
+  
+  // Send notifications and emails after transaction commit
+  try {
+   
+    sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+    // Send notification and email for new booking if exists
+    if (newBooking) {
+      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+    }
+  } catch (error) {
+    // Log error but don't fail the response since transaction is already committed
+    console.error('Error sending notifications/emails:', error);
+  }
+  
   return res.status(200).send({ message: 'Updated booking status' });
 };
 

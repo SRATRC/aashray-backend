@@ -100,7 +100,7 @@ const handleSameDayCheckout = async ({
       category: TYPE_ROOM,
       amount: lateCheckoutAmount,
       status: STATUS_CASH_PENDING,
-      description: `Late checkout fee for booking ${booking.bookingid}`,
+      description: `Late checkout fee for booking ${booking.bookingid} dated ${booking.checkout}`,
       updatedBy: user.username
     },
     { transaction: dbTransaction }
@@ -1754,4 +1754,52 @@ export const updateFlatBookingStatus = async (req, res) => {
 
   await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+};
+
+
+export const fetchLateCheckoutFees = async (req, res) => {
+  const { payment_type } = req.query;
+
+  // payment_pending or payment_done
+  const status = payment_type === "payment_done" ? "completed" : "cash pending";
+
+  const transactions = await Transactions.findAll({
+    where: {
+      description: { [Op.like]: "Late checkout fee%" },
+      status
+    }
+  });
+
+  const finalData = [];
+
+  for (const tr of transactions) {
+    // Description looks like: "Late checkout fee for booking <bookingid>"
+    const match = tr.description.match(/booking\s(.+)$/);
+    const bookingid = match ? match[1].trim() : null;
+    if (!bookingid) continue;
+
+    const booking = await RoomBooking.findOne({ where: { bookingid: bookingid } });
+    if (!booking) continue;
+
+    const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
+
+    const nights =
+      (new Date(booking.checkout) - new Date(booking.checkin)) /
+      (1000 * 60 * 60 * 24);
+
+    finalData.push({
+      amount: tr.amount,
+      bookingid,
+      guest_name: card?.issuedto,
+      mobile: card?.mobno || "—",
+
+      roomno: booking.roomno,
+      roomtype: booking.roomtype,
+      nights,
+      checkin: booking.checkin,
+      checkout: booking.checkout
+    });
+  }
+
+  res.json({ success: true, data: finalData });
 };
