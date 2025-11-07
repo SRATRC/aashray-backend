@@ -54,10 +54,11 @@ export async function checkTravelAlreadyBooked(
   }
 }
 
-async function getTravelBookingStatus(type, date, travelBookingsFordate) {
+async function getTravelBookingStatus(type, date, travelBookingCount) {
   //if regular travel and more than 5 bookings for the date, then waiting.
   // But if it is a gyan sabha or utsav, then return awaiting confirmation.
-  if (type!= null && type.toLowerCase() == TRAVEL_TYPE_REGULAR.toLowerCase() && travelBookingsFordate > 4) {
+  if (type!= null && type.toLowerCase() == TRAVEL_TYPE_REGULAR.toLowerCase() 
+    && travelBookingCount > 4) {
     if (!await checkAdhyayanParamGyanSabhaOrUtsav(date)){
       return STATUS_WAITING;
     }
@@ -90,29 +91,29 @@ export async function updateWaitingTravelBooking(booking, t) {
       }
     });
   }
-  const travelBookingsFordate = await TravelDb.findOne({
+  const travelBookingFordate = await TravelDb.findOne({
     where: conditions,
     order: [['createdAt', 'ASC']]
   });
-  if (travelBookingsFordate) {
-    await travelBookingsFordate.update(
+  if (travelBookingFordate) {
+    await travelBookingFordate.update(
       {
         status: STATUS_AWAITING_CONFIRMATION
       },
       { transaction: t }
     );
     
-    return travelBookingsFordate;
+    return travelBookingFordate;
     
   }
 }
 
-export async function sendTravelBookingStatusUpdateMail(travelBookingsFordate) {
+export async function sendTravelBookingStatusUpdateMail(travelBookingFordate) {
   
-  let bookedBy = travelBookingsFordate.bookedBy;
+  let bookedBy = travelBookingFordate.bookedBy;
   const user = await CardDb.findOne({
     where: {
-      cardno: travelBookingsFordate.cardno
+      cardno: travelBookingFordate.cardno
     }
   });
 
@@ -131,11 +132,11 @@ export async function sendTravelBookingStatusUpdateMail(travelBookingsFordate) {
       template: 'rajPravasStatusUpdate',
       context: {
         name: user.issuedto,
-        bookingid: travelBookingsFordate.bookingid,
-        date: moment(travelBookingsFordate.date).format('Do MMMM, YYYY'),
-        pickup: travelBookingsFordate.pickup_point,
-        drop: travelBookingsFordate.drop_point,
-        status: travelBookingsFordate.status
+        bookingid: travelBookingFordate.bookingid,
+        date: moment(travelBookingFordate.date).format('Do MMMM, YYYY'),
+        pickup: travelBookingFordate.pickup_point,
+        drop: travelBookingFordate.drop_point,
+        status: travelBookingFordate.status
       }
     });
   }
