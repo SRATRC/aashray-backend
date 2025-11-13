@@ -460,7 +460,10 @@ export async function bookFlatForMumukshus(
   endDay,
   mumukshus,
   user,
-  t
+  t,
+  createOrder = true // adding this for backwards compatibility.
+  // once we are not using flat booking end points in guest and room booking controllers
+  // we can remove this argument
 ) {
   const flat = await FlatDb.findOne({
     attributes: ['flatno'],
@@ -502,7 +505,7 @@ export async function bookFlatForMumukshus(
   }
 
   var order = null;
-  if (user.country == 'India' && amount > 0) {
+  if (createOrder && user.country == 'India' && amount > 0) {
     order = await generateOrderId(amount);
     await updateRazorpayTransactions(bookingIds, [], order.id, t);
   } else {
@@ -511,7 +514,8 @@ export async function bookFlatForMumukshus(
 
   return {
     userBookingIds,
-    order
+    order,
+    amount
   };
 }
 
