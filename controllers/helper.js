@@ -37,8 +37,8 @@ import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
-  const startDate = new Date(checkin_date);
-  const endDate = new Date(checkout_date);
+  // const startDate = new Date(checkin_date);
+  // const endDate = new Date(checkout_date);
 
   const blockedDates = await BlockDates.findAll({
     where: {
@@ -46,20 +46,20 @@ export async function getBlockedDates(checkin_date, checkout_date) {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: startDate } },
-            { checkout: { [Sequelize.Op.gte]: startDate } }
+            { checkin: { [Sequelize.Op.lte]: checkin_date } },
+            { checkout: { [Sequelize.Op.gte]: checkin_date } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: endDate } },
-            { checkout: { [Sequelize.Op.gte]: endDate } }
+            { checkin: { [Sequelize.Op.lte]: checkout_date } },
+            { checkout: { [Sequelize.Op.gte]: checkout_date } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: startDate } },
-            { checkin: { [Sequelize.Op.lte]: endDate } }
+            { checkin: { [Sequelize.Op.gte]: checkin_date } },
+            { checkin: { [Sequelize.Op.lte]: checkout_date } }
           ]
         }
       ]
@@ -741,4 +741,50 @@ export async function createCardIds(count) {
   }
 
   return newIds;
+}
+
+export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllowed = true) {
+  const startDate1 = new Date(start1);
+  const endDate1 = new Date(end1);
+  const startDate2 = new Date(start2);
+  const endDate2 = new Date(end2);
+
+  // No overlap if one range ends before the other starts
+  const noOverlap = boundaryAllowed
+    ? endDate1 <= startDate2 || endDate2 <= startDate1
+    : endDate1 < startDate2 || endDate2 < startDate1
+
+  return !noOverlap;
+}
+
+export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {  
+  return isDateRangeOverlapping(
+    blockedDate.checkin,
+    blockedDate.checkout,
+    startDate,
+    endDate,
+    boundaryAllowed
+  );
+}
+
+export function validateBlockedDates(blockedDates, dateRanges) {
+  const conflictingBlocks = [];
+  for (const range of dateRanges) {
+    for (const blockedDate of blockedDates) {
+      if (isDateBlocked(blockedDate, range.start, range.end, range.overlappingWithUtsav)) {
+        conflictingBlocks.push(
+          `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
+            blockedDate.checkout).format('Do MMMM, YYYY')}`
+        );
+      }
+    }
+  }
+
+  if (conflictingBlocks.length > 0) {
+    const blockingInfo = conflictingBlocks.join(',');
+    throw new ApiError(
+      400,
+      `Dates are blocked during following periods: ${blockingInfo}`
+    );
+  }
 }
