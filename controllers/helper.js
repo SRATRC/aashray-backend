@@ -526,6 +526,7 @@ export async function sendUnifiedEmail(
         name: user ? user.issuedto : roomBooking.dataValues.CardDb.issuedto,
         status: roomBooking.status,
         bookingid: roomBooking.bookingid,
+        roomno: roomBooking.roomno,
         checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
         checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
       });

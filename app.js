@@ -1,4 +1,31 @@
 import './config/environment.js';
+// -------------------------------------------------------------
+// 🔍 ENABLE SEQUELIZE SQL TRACE (to locate broken queries)
+// -------------------------------------------------------------
+import Sequelize from "sequelize";
+// import Sequelize from "sequelize";
+const { Op } = Sequelize;
+
+// Show stacktrace for each query
+Sequelize.Model.$scopeStackTrace = true;
+
+// Monkey-patch console.log to trace any SELECT queries
+const originalLog = console.log;
+console.log = (...args) => {
+  if (typeof args[0] === "string" && args[0].includes("SELECT")) {
+    console.trace("⚡ SQL SOURCE TRACE");
+  }
+  originalLog(...args);
+};
+
+// OPTIONAL: trace findAll calls
+const originalFindAll = Sequelize.Model.findAll;
+Sequelize.Model.findAll = function (...args) {
+  console.trace("⚡ findAll called from:");
+  return originalFindAll.apply(this, args);
+};
+// -------------------------------------------------------------
+
 import express, { urlencoded, json } from 'express';
 import { ErrorHandler } from './middleware/Error.js';
 import { httpLogger } from './middleware/Logger.js';

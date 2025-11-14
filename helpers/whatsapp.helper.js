@@ -1,13 +1,69 @@
-import { CardDb } from "../models/associations.js";
+import Sequelize from "sequelize";
+// at top of both files (whatsapp.helper and mumukshuBooking.controller)
+import { Op } from 'sequelize';
+import { CardDb, Transactions, UtsavDb, UtsavPackagesDb } from "../models/associations.js";
 import moment from "moment";
 // import { TYPE_ADHYAYAN } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 
-// Exported main function
-// old:
-// export async function sendUnifiedWhatsApp(cardno, adhyanBookingDetails = [], ...) { ... }
+function sanitizeParamText(s) {
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim();
+}
 
-// new:
+const TEMPLATE_PARAM_COUNTS = {
+  booking_adhyayan_self_pending_for: 9,
+  booking_sharan_self_pending_for: 10,
+  booking_utsav_self_confirmed_for: 12,
+  // add the actual counts for your templates
+};
+
+/**
+ * Helper that tries primary template and if WhatsApp returns a "template missing" 404,
+ * retries with a fallback template (usually a 'confirmed' variant). Non-fatal.
+ */
+async function sendWithTemplateFallback(phone, template, components) {
+  try {
+    await sendWhatsAppMessage(phone, template, components);
+    return { ok: true, usedTemplate: template };
+  } catch (err) {
+    // try detect "template missing" error from FB API
+    const status = err?.response?.status;
+    const details = err?.response?.data;
+    const isTemplateMissing =
+      status === 404 &&
+      details &&
+      details.error &&
+      String(details.error.details || "").toLowerCase().includes("does not exist");
+
+    console.warn(`WA SEND FAILED for ${phone} template=${template}:`, err && (err.message || err));
+
+    if (isTemplateMissing) {
+      // Create a reasonable fallback: replace waiting/pending variants with 'confirmed'
+      let fallbackTemplate = template;
+      fallbackTemplate = fallbackTemplate.replace(/_pending_for|_pending|_waiting_for|_waiting/gi, "_confirmed");
+      // if nothing changed, try a generic fallback (adhyayan confirmed)
+      if (fallbackTemplate === template) {
+        fallbackTemplate = "booking_adhyayan_self_confirmed";
+      }
+
+      try {
+        console.log(`WA SEND: retrying with fallback template '${fallbackTemplate}' for phone ${phone}`);
+        await sendWhatsAppMessage(phone, fallbackTemplate, components);
+        return { ok: true, usedTemplate: fallbackTemplate, fallback: true };
+      } catch (innerErr) {
+        console.error(`WA fallback also failed for ${phone} template=${fallbackTemplate}:`, innerErr && (innerErr.message || innerErr));
+        return { ok: false, error: innerErr };
+      }
+    } else {
+      // other error (network/rate-limit/etc.)
+      console.error("WA send error (non-template):", err && (err.message || err));
+      return { ok: false, error: err };
+    }
+  }
+}
+
+// Exported main function
 export async function sendUnifiedWhatsApp(
   cardno,
   adhyanBookingDetails = [],
@@ -32,7 +88,7 @@ export async function sendUnifiedWhatsApp(
     // If caller provided bookedForCardno, fetch that card (optional)
     let bookedForUser = null;
     if (bookedForCardno) {
-      bookedForUser = await CardDb.findOne({ where: { cardno: bookedForCardno } });
+      bookedForUser = await CardDb.findOne({ where: { cardno: bookedForCardno } }).catch(() => null);
       // if not found, we fallback later to user.issuedto
     }
 
@@ -42,18 +98,36 @@ export async function sendUnifiedWhatsApp(
       return;
     }
 
-    // ADHYAYAN
+    // prepare jobs for all types (run concurrently)
+    const jobs = [];
+
     if (Array.isArray(adhyanBookingDetails) && adhyanBookingDetails.length) {
-      // pass bookedForUser (may be null)
-      await sendAdhyayanWhatsApp(user, adhyanBookingDetails, bookedForUser);
+      jobs.push(sendAdhyayanWhatsApp(user, adhyanBookingDetails, bookedForUser));
     }
-
-    // other types: pass bookedForUser similarly if you want the same behavior
     if (Array.isArray(roomBookingDetails) && roomBookingDetails.length) {
-      await sendRoomWhatsApp(user, roomBookingDetails, bookedForUser);
+      jobs.push(sendRoomWhatsApp(user, roomBookingDetails, bookedForUser));
+    }
+    if (Array.isArray(utsavBookingDetails) && utsavBookingDetails.length) {
+      jobs.push(sendUtsavWhatsApp(user, utsavBookingDetails, bookedForUser));
+    }
+    if (Array.isArray(travelBookingDetails) && travelBookingDetails.length) {
+      jobs.push(sendTravelWhatsApp(user, travelBookingDetails, bookedForUser));
+    }
+    if (Array.isArray(flatBookingDetails) && flatBookingDetails.length) {
+      jobs.push(sendFlatWhatsApp(user, flatBookingDetails, bookedForUser));
     }
 
-    // ... travel, utsav, flat etc.
+    if (jobs.length === 0) {
+      // nothing to send
+      return;
+    }
+
+    const results = await Promise.allSettled(jobs);
+    results.forEach((r) => {
+      if (r.status === "rejected") {
+        console.error("One of the WA type-sends rejected:", r.reason);
+      }
+    });
   } catch (err) {
     console.error("❌ WhatsApp integration error:", err);
   }
@@ -96,14 +170,10 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
       let template = "booking_adhyayan_self_confirmed";
       if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
         template = "booking_adhyayan_self_waiting_for";
-      } else if (
-        bookingStatus === "pending" ||
-        bookingStatus.includes("pend") // handles "Pending", "PENDING", "pending_payment", etc.
-      ) {
-        template = "booking_adhyayan_self_waiting_for";
+      } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
+        template = "booking_adhyayan_self_pending_for";
       } else {
-        // anything else -> confirmed template
-        template = "booking_adhyayan_self_waiting_for";
+        template = "booking_adhyayan_self_confirmed";
       }
 
       const shibir = b.ShibirDb || {};
@@ -157,26 +227,30 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
 
       const components = [{ type: "body", parameters: bodyParameters }];
 
-      // Button only for waiting template
-      if (template === "booking_adhyayan_self_waiting_for" && shibir.id) {
+      // Button only for waiting/pending templates
+      if ((template === "booking_adhyayan_self_waiting_for" || template === "booking_adhyayan_self_pending_for") && shibir.id) {
         components.push({
           type: "button",
           sub_type: "url",
-          index: "0",
+          index: 0,
           parameters: [{ type: "text", text: String(shibir.id) }]
         });
       }
 
-      // send and catch errors per-send (already inside try)
-      await sendWhatsAppMessage(phone, template, components);
-
-      console.log("📩 Adhyayan WhatsApp sent:", {
-        toCard: user.cardno,
-        bookedFor: bookedForName,
-        bookingid: bookingId,
-        status: bookingStatus,
-        template
-      });
+      // send with fallback handling
+      const sendResult = await sendWithTemplateFallback(phone, template, components);
+      if (!sendResult.ok) {
+        console.error("Adhyayan WA failed for booking", bookingId, sendResult.error);
+      } else {
+        console.log("📩 Adhyayan WhatsApp sent:", {
+          toCard: user.cardno,
+          bookedFor: bookedForName,
+          bookingid: bookingId,
+          status: bookingStatus,
+          template: sendResult.usedTemplate,
+          fallbackUsed: !!sendResult.fallback
+        });
+      }
     } catch (err) {
       console.error(
         "Error sending adhyayan WhatsApp for booking",
@@ -187,8 +261,368 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
   }
 }
 
+// --- Generic pattern for other booking types (room, travel, utsav, flat) ---
+// Each follows the same robust pattern: normalize status, pick template, resolve bookedForName, assemble params, call sendWithTemplateFallback.
 
-// --- Utility helper to ensure phone and warn if missing ---
+// ROOM
+
+async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = null) {
+  if (!user) return;
+  const phone = user?.mobno ? String(user.mobno) : null;
+  if (!phone) {
+    console.warn(`No mobile for cardno=${user.cardno}; skipping room WA.`);
+    return;
+  }
+
+  if (!Array.isArray(roomBookingDetails)) roomBookingDetails = [];
+
+  // Build bookingIds list
+  const bookingIds = roomBookingDetails
+    .map((b) => (b.bookingid || b.bookingId || b.id ? String(b.bookingid || b.bookingId || b.id) : null))
+    .filter(Boolean);
+
+  // Fetch transactions in batch
+  let transactionsMap = new Map();
+  try {
+    if (bookingIds.length && typeof Transactions !== "undefined") {
+      const txRows = await Transactions.findAll({
+        where: { bookingid: { [Op.in]: bookingIds } },
+        attributes: ["bookingid", "amount", "discount", "razorpay_order_id"]
+      });
+
+      for (const tx of txRows) {
+        transactionsMap.set(String(tx.bookingid), {
+          amount: tx.amount,
+          discount: tx.discount,
+          razorpay_order_id: tx.razorpay_order_id
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch transactions for room bookings (non-fatal):", err && (err.message || err));
+  }
+
+  const bookedForCache = new Map();
+  if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
+
+  for (const b of roomBookingDetails) {
+    try {
+      if (!b || typeof b !== "object") continue;
+
+      const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
+      const status = rawStatus.trim().toLowerCase();
+
+      // choose template names — adjust to actual template strings you use
+      let template = "booking_sharan_self_pending_for";
+      if (status === "waiting" || status.startsWith("wait")) template = "booking_sharan_self_pending_for";
+      else if (status === "pending" || status.includes("pend")) template = "booking_sharan_self_pending_for";
+
+      // resolve bookedFor name
+      let bookedForName = user.issuedto || "";
+      if (b.__bookedForCardno) {
+        const bf = String(b.__bookedForCardno);
+        if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
+        else {
+          const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
+          const nm = rec?.issuedto || "";
+          bookedForCache.set(bf, nm);
+          if (nm) bookedForName = nm;
+        }
+      } else if (bookedForUser && bookedForUser.issuedto) {
+        bookedForName = bookedForUser.issuedto;
+      }
+
+      // get transaction info
+      const bookingId = String(b.bookingid || b.bookingId || b.id || "");
+      const tx = transactionsMap.get(bookingId) || { amount: null, discount: null, razorpay_order_id: null };
+
+      // build params (only include non-empty values to avoid template param mismatch)
+
+      const rawParams = [
+  user.issuedto || "",
+  bookedForName,
+  bookingId,
+  rawStatus || "",
+  b.roomtype || "",
+  b.roomno || "",
+  b.checkin ? moment(b.checkin).format("Do MMMM, YYYY") : "",
+  b.checkout ? moment(b.checkout).format("Do MMMM, YYYY") : "",
+  tx.amount != null ? String(tx.amount) : "",
+  tx.discount != null ? String(tx.discount) : "",
+//   tx.razorpay_order_id || ""
+];
+
+const sanitized = rawParams.map(sanitizeParamText);
+const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
+const components = buildBodyComponents(sanitized, expectedCount);
+
+// // add button param, sanitized:
+// if ((template === "booking_sharan_self_pending_for" || template === "booking_sharan_self_pending_for") && bookingId) {
+//   components.push({
+//   type: "button",
+//   sub_type: "url",
+//   index: 0
+// });
+// }
+
+      // send with fallback wrapper if you have it, otherwise sendWhatsAppMessage(phone, template, components)
+      const result = await sendWithTemplateFallback ? await sendWithTemplateFallback(phone, template, components) : await sendWhatsAppMessage(phone, template, components);
+
+      if (!result || !result.ok) {
+        console.error("Room WA failed for booking", bookingId, result && result.error ? result.error : "unknown");
+      } else {
+        console.log("📩 Room WhatsApp sent:", {
+          toCard: user.cardno,
+          bookedFor: bookedForName,
+          booking: bookingId,
+          template: result.usedTemplate || template,
+          transaction: tx
+        });
+      }
+    } catch (err) {
+      console.error("Error sending room WhatsApp for", b.id || b.bookingid || b, err && (err.stack || err.message || err));
+    }
+  }
+}
+
+
+// TRAVEL
+async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser = null) {
+  if (!user) return;
+  const phone = user?.mobno ? String(user.mobno) : null;
+  if (!phone) {
+    console.warn(`No mobile for cardno=${user.cardno}; skipping travel WA.`);
+    return;
+  }
+
+  const bookedForCache = new Map();
+  if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
+
+  for (const b of Array.isArray(travelBookingDetails) ? travelBookingDetails : []) {
+    try {
+      const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
+      const status = rawStatus.trim().toLowerCase();
+
+      let template = "booking_travel_confirmed";
+      if (status === "waiting" || status.startsWith("wait")) template = "booking_travel_waiting";
+      else if (status === "pending" || status.includes("pend")) template = "booking_travel_pending";
+
+      let bookedForName = user.issuedto || "";
+      if (b.__bookedForCardno) {
+        const bf = String(b.__bookedForCardno);
+        if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
+        else {
+          const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
+          const nm = rec?.issuedto || "";
+          bookedForCache.set(bf, nm);
+          if (nm) bookedForName = nm;
+        }
+      } else if (bookedForUser && bookedForUser.issuedto) {
+        bookedForName = bookedForUser.issuedto;
+      }
+
+      const params = [
+        user.issuedto || "",
+        bookedForName,
+        b.id || b.bookingid || "",
+        rawStatus || "",
+        b.pickup_point || "",
+        b.drop_point || "",
+        b.date || ""
+      ];
+
+      const components = [{ type: "body", parameters: params.filter(p => p !== null && p !== undefined && p !== "").map(p => ({ type: "text", text: String(p) })) }];
+
+      const result = await sendWithTemplateFallback(phone, template, components);
+      if (!result.ok) console.error("Travel WA failed for booking", b, result.error);
+      else console.log("📩 Travel WhatsApp sent:", { toCard: user.cardno, bookedFor: bookedForName, booking: b.id || b.bookingid || b, template: result.usedTemplate });
+    } catch (err) {
+      console.error("Error sending travel WhatsApp for", b.id || b.bookingid || b, err);
+    }
+  }
+}
+
+// UTSAV
+async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser = null) {
+  if (!user) return;
+  const phone = user?.mobno ? String(user.mobno) : null;
+  if (!phone) {
+    console.warn(`No mobile for cardno=${user.cardno}; skipping utsav WA.`);
+    return;
+  }
+
+  // defensive array
+  if (!Array.isArray(utsavBookingDetails)) utsavBookingDetails = [];
+
+  // collect bookingIds
+  const bookingIds = utsavBookingDetails
+    .map((b) => (b.bookingid || b.bookingId || b.id ? String(b.bookingid || b.bookingId || b.id) : null))
+    .filter(Boolean);
+
+  // fetch transactions in batch
+  let transactionsMap = new Map();
+  try {
+    if (bookingIds.length && typeof Transactions !== "undefined") {
+      const txRows = await Transactions.findAll({
+        where: { bookingid: { [Op.in]: bookingIds } },
+        attributes: ["bookingid", "amount", "discount", "razorpay_order_id"]
+      });
+      for (const tx of txRows) {
+        transactionsMap.set(String(tx.bookingid), {
+          amount: tx.amount,
+          discount: tx.discount,
+          razorpay_order_id: tx.razorpay_order_id
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch transactions for utsav bookings (non-fatal):", err && (err.message || err));
+  }
+
+  const bookedForCache = new Map();
+  if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
+
+  for (const b of utsavBookingDetails) {
+    try {
+      if (!b || typeof b !== "object") continue;
+
+      const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
+      const status = rawStatus.trim().toLowerCase();
+
+      let template = "booking_utsav_self_confirmed_for";
+      if (status === "waiting" || status.startsWith("wait")) template = "booking_utsav_self_confirmed_for";
+      else if (status === "pending" || status.includes("pend")) template = "booking_utsav_self_confirmed_for";
+
+      // derive bookedFor name
+      let bookedForName = user.issuedto || "";
+      if (b.__bookedForCardno) {
+        const bf = String(b.__bookedForCardno);
+        if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
+        else {
+          const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
+          const nm = rec?.issuedto || "";
+          bookedForCache.set(bf, nm);
+          if (nm) bookedForName = nm;
+        }
+      } else if (bookedForUser && bookedForUser.issuedto) {
+        bookedForName = bookedForUser.issuedto;
+      }
+
+      // If the booking object already contains utsav/ package fields (from your earlier join), use them. Otherwise, attempt to fetch
+      let utsavName = b.utsavname || (b.UtsavDb && b.UtsavDb.name) || "";
+      let location = (b.UtsavDb && b.UtsavDb.location) || "";
+      let startDate = b.startdate || (b.UtsavDb && b.UtsavDb.start_date ? moment(b.UtsavDb.start_date).format("Do MMMM, YYYY") : "");
+      let endDate = b.enddate || (b.UtsavDb && b.UtsavDb.end_date ? moment(b.UtsavDb.end_date).format("Do MMMM, YYYY") : "");
+      let packageName = b.package || (b.UtsavPackagesDb && b.UtsavPackagesDb.name) || "";
+
+      // transaction
+      const bookingId = String(b.bookingid || b.bookingId || b.id || "");
+      const tx = transactionsMap.get(bookingId) || { amount: null, discount: null, razorpay_order_id: null };
+
+      const rawParams = [
+        user.issuedto || "",
+        bookedForName,
+        bookingId,
+        rawStatus || "",
+        utsavName,
+        packageName,
+        location,
+        startDate,
+        endDate,
+        tx.amount != null ? String(tx.amount) : "",
+        tx.discount != null ? String(tx.discount) : "",
+        tx.razorpay_order_id || ""
+      ];
+
+      const sanitized = rawParams.map(sanitizeParamText);
+const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
+const components = buildBodyComponents(sanitized, expectedCount);
+
+// add button param, sanitized:
+// if ((template === "booking_utsav_self_confirmed_for" || template === "booking_utsav_self_confirmed_for") && bookingId) {
+//   components.push({
+//     type: "button",
+//     sub_type: "url",
+//     index: 0,
+//     // parameters: [{ type: "text", text: sanitizeParamText(bookingId) }]
+//   });
+// }
+      const result = await (sendWithTemplateFallback ? sendWithTemplateFallback(phone, template, components) : sendWhatsAppMessage(phone, template, components));
+
+      if (!result || !result.ok) {
+        console.error("Utsav WA failed for booking", bookingId, result && result.error ? result.error : "unknown");
+      } else {
+        console.log("📩 Utsav WhatsApp sent:", {
+          toCard: user.cardno,
+          bookedFor: bookedForName,
+          booking: bookingId,
+          template: result.usedTemplate || template,
+          transaction: tx
+        });
+      }
+    } catch (err) {
+      console.error("Error sending utsav WhatsApp for", b.id || b.bookingid || b, err && (err.stack || err.message || err));
+    }
+  }
+}
+
+// FLAT / FOOD or other
+async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = null) {
+  if (!user) return;
+  const phone = user?.mobno ? String(user.mobno) : null;
+  if (!phone) {
+    console.warn(`No mobile for cardno=${user.cardno}; skipping flat WA.`);
+    return;
+  }
+
+  const bookedForCache = new Map();
+  if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
+
+  for (const b of Array.isArray(flatBookingDetails) ? flatBookingDetails : []) {
+    try {
+      const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
+      const status = rawStatus.trim().toLowerCase();
+
+      let template = "booking_flat_confirmed";
+      if (status === "waiting" || status.startsWith("wait")) template = "booking_flat_waiting";
+      else if (status === "pending" || status.includes("pend")) template = "booking_flat_pending";
+
+      let bookedForName = user.issuedto || "";
+      if (b.__bookedForCardno) {
+        const bf = String(b.__bookedForCardno);
+        if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
+        else {
+          const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
+          const nm = rec?.issuedto || "";
+          bookedForCache.set(bf, nm);
+          if (nm) bookedForName = nm;
+        }
+      } else if (bookedForUser && bookedForUser.issuedto) {
+        bookedForName = bookedForUser.issuedto;
+      }
+
+      const params = [
+        user.issuedto || "",
+        bookedForName,
+        b.id || b.bookingid || "",
+        rawStatus || "",
+        b.flat_no || b.flatNo || "",
+        b.start_date ? moment(b.start_date).format("DD MMM YYYY") : "",
+        b.end_date ? moment(b.end_date).format("DD MMM YYYY") : ""
+      ];
+
+      const components = [{ type: "body", parameters: params.filter(p => p !== null && p !== undefined && p !== "").map(p => ({ type: "text", text: String(p) })) }];
+
+      const result = await sendWithTemplateFallback(phone, template, components);
+      if (!result.ok) console.error("Flat WA failed for booking", b, result.error);
+      else console.log("📩 Flat WhatsApp sent:", { toCard: user.cardno, bookedFor: bookedForName, booking: b.id || b.bookingid || b, template: result.usedTemplate });
+    } catch (err) {
+      console.error("Error sending flat WhatsApp for", b.id || b.bookingid || b, err);
+    }
+  }
+}
+
+// Utility helper (kept for compatibility if used elsewhere)
 function phoneOrWarn(mobno) {
   if (!mobno) {
     throw new Error("No mobile number to send WhatsApp");
@@ -196,46 +630,24 @@ function phoneOrWarn(mobno) {
   return String(mobno);
 }
 
-// --- Example placeholders for other types (implement template details similarly) ---
-async function sendRoomWhatsApp(user, roomBookingDetails = []) {
-  for (const b of roomBookingDetails) {
-    try {
-      const bookingStatus = String(b.status || "").toLowerCase();
-      // choose template based on status and build params similar to adhyayan
-      // e.g. template = bookingStatus === 'waiting' ? 'booking_room_waiting' : 'booking_room_confirmed'
-      // build components and call sendWhatsAppMessage(user.mobno, template, components)
-    } catch (err) {
-      console.error("Error sending room WhatsApp for", b.id, err);
-    }
-  }
-}
+// Ensure the components.body.parameters length matches template expectation.
+// expectedCount = number of placeholders your WA template expects.
+// If fewer params provided, pad with empty text params.
+// Ensure the components.body.parameters length matches template expectation.
+// expectedCount = number of placeholders your WA template expects.
+// If fewer params provided, pad with single-space text params (Meta rejects empty strings).
+function buildBodyComponents(paramsArray = [], expectedCount = null) {
+  // convert null/undefined -> "" then to string
+  const filtered = (paramsArray || []).map(p => (p === null || p === undefined ? "" : String(p)));
 
-async function sendTravelWhatsApp(user, travelBookingDetails = []) {
-  for (const b of travelBookingDetails) {
-    try {
-      // Implement similar to above
-    } catch (err) {
-      console.error("Error sending travel WhatsApp for", b.id, err);
-    }
-  }
-}
+  // replace empty strings with single space to avoid "missing text value" errors
+  const normalized = filtered.map(p => (p === "" ? " " : p));
 
-async function sendUtsavWhatsApp(user, utsavBookingDetails = []) {
-  for (const b of utsavBookingDetails) {
-    try {
-      // Implement similar to above
-    } catch (err) {
-      console.error("Error sending utsav WhatsApp for", b.id, err);
-    }
+  // pad with single-space entries until reaching expected count (if asked)
+  if (expectedCount && normalized.length < expectedCount) {
+    while (normalized.length < expectedCount) normalized.push(" ");
   }
-}
 
-async function sendFlatWhatsApp(user, flatBookingDetails = []) {
-  for (const b of flatBookingDetails) {
-    try {
-      // Implement similar to above
-    } catch (err) {
-      console.error("Error sending flat WhatsApp for", b.id, err);
-    }
-  }
+  const bodyParameters = normalized.map(p => ({ type: "text", text: p }));
+  return [{ type: "body", parameters: bodyParameters }];
 }
