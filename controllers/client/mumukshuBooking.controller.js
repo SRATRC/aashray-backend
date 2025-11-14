@@ -92,6 +92,120 @@ export const mumukshuBooking = async (req, res) => {
   await t.commit();
   
   console.log(userBookingIdMap);
+  // ------------------ WHATSAPP NOTIFICATIONS ------------------
+// ------------------ WHATSAPP NOTIFICATIONS (VERBOSE DIAGNOSTICS) ------------------
+try {
+  const bookedByCard = req.user.cardno;
+  const allCardnos = Object.keys(userBookingIdMap || {});
+
+  console.log("WA DIAG: userBookingIdMap =", JSON.stringify(userBookingIdMap));
+  console.log("WA DIAG: bookedByCard =", bookedByCard, "allCardnos =", allCardnos);
+
+  async function fetchFreshDetailsForCard(cardno) {
+    const typeMap = userBookingIdMap[cardno] || {};
+    const adhyanIds = Array.isArray(typeMap[TYPE_ADHYAYAN]) ? typeMap[TYPE_ADHYAYAN].map(String).filter(Boolean) : [];
+    const travelIds = Array.isArray(typeMap[TYPE_TRAVEL]) ? typeMap[TYPE_TRAVEL].map(String).filter(Boolean) : [];
+    const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
+    const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
+    const flatIds   = Array.isArray(typeMap['FLAT']) ? typeMap['FLAT'].map(String).filter(Boolean) : [];
+
+    console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)}`);
+
+    const [
+      adhyanBookingDetailsFromDb,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails
+    ] = await Promise.all([
+      adhyanIds.length
+        ? ShibirBookingDb.findAll({
+            where: { bookingid: { [Op.in]: adhyanIds } }, // no status filter
+            include: [{ model: ShibirDb, as: 'ShibirDb' }],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
+        : [],
+      travelIds.length ? TravelDb.findAll({ where: { id: { [Op.in]: travelIds } } }) : [],
+      roomIds.length ? RoomBooking.findAll({ where: { id: { [Op.in]: roomIds } } }) : [],
+      utsavIds.length ? UtsavBooking.findAll({ where: { id: { [Op.in]: utsavIds } } }) : [],
+      flatIds.length ? FlatBooking.findAll({ where: { id: { [Op.in]: flatIds } } }) : []
+    ]);
+
+    console.log(`WA DIAG: DB returned for ${cardno} - adhyanCount=${(adhyanBookingDetailsFromDb||[]).length}`);
+
+    // synthesize missing adhyan entries (if any) so booker still gets messages
+    const requested = adhyanIds.map(String);
+    const foundIds = new Set((adhyanBookingDetailsFromDb || []).map((r) => String(r.bookingid || r.bookingId || r.id)));
+    const missing = requested.filter(id => !foundIds.has(id));
+    if (missing.length) {
+      console.log(`WA DIAG: synthesize missing adhyan ids for ${cardno}:`, missing);
+    }
+    const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
+
+    const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
+
+    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length}`);
+
+    return {
+      adhyanBookingDetails,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails
+    };
+  }
+
+  const jobs = [];
+  let jobIndex = 0;
+
+  for (const cardno of allCardnos) {
+    const details = await fetchFreshDetailsForCard(cardno);
+
+    console.log(`WA DIAG: scheduling sendUnifiedWhatsApp -> recipient=${cardno} bookedFor=null adhyan=${(details.adhyanBookingDetails||[]).length}`);
+    jobs.push(
+      (async () => sendUnifiedWhatsApp(
+        cardno,
+        details.adhyanBookingDetails,
+        details.travelBookingDetails,
+        details.flatBookingDetails,
+        details.utsavBookingDetails,
+        details.roomBookingDetails,
+        null
+      ))()
+    );
+    jobIndex++;
+
+    if (cardno !== bookedByCard) {
+      console.log(`WA DIAG: scheduling sendUnifiedWhatsApp -> recipient=${bookedByCard} bookedFor=${cardno} adhyan=${(details.adhyanBookingDetails||[]).length}`);
+      jobs.push(
+        (async () => sendUnifiedWhatsApp(
+          bookedByCard,
+          details.adhyanBookingDetails,
+          details.travelBookingDetails,
+          details.flatBookingDetails,
+          details.utsavBookingDetails,
+          details.roomBookingDetails,
+          cardno
+        ))()
+      );
+      jobIndex++;
+    }
+  }
+
+  console.log(`WA DIAG: total jobs scheduled = ${jobs.length}`);
+
+  const results = await Promise.allSettled(jobs);
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.error(`WhatsApp job #${i} failed:`, r.reason);
+    } else {
+      console.log(`WhatsApp job #${i} succeeded`);
+    }
+  });
+} catch (err) {
+  console.error("Unexpected error in WhatsApp notification block:", err);
+}
+// ------------------------------------------------------------------------------------
   
   //Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(
@@ -400,5 +514,63 @@ async function checkTravelAvailability(data) {
   return {
     status: STATUS_AWAITING_CONFIRMATION,
     charge: 0
+  };
+}
+
+import { 
+  ShibirBookingDb,
+  TravelDb,
+  RoomBooking,
+  UtsavBooking,
+  FlatBooking,
+  ShibirDb
+} from "../../models/associations.js";
+import Sequelize from "sequelize";
+const { Op } = Sequelize;
+import { sendUnifiedWhatsApp } from "../../helpers/whatsapp.helper.js";
+
+
+async function getBookingDetailsForCard(cardno, userBookingIdMap) {
+  const typeMap = userBookingIdMap[cardno] || {};
+
+  const adhyanIds = typeMap[TYPE_ADHYAYAN] || [];
+  const travelIds = typeMap[TYPE_TRAVEL] || [];
+  const roomIds   = typeMap[TYPE_ROOM] || [];
+  const utsavIds  = typeMap[TYPE_UTSAV] || [];
+  const flatIds   = typeMap["FLAT"] || []; // if used later
+
+  const [
+    adhyanBookingDetails,
+    travelBookingDetails,
+    roomBookingDetails,
+    utsavBookingDetails,
+    flatBookingDetails
+  ] = await Promise.all([
+    adhyanIds.length
+      ? ShibirBookingDb.findAll({
+          where: { bookingid: { [Op.in]: adhyanIds } },
+          include: [{ model: ShibirDb, as: "ShibirDb" }]
+        })
+      : [],
+    travelIds.length
+      ? TravelDb.findAll({ where: { id: { [Op.in]: travelIds } } })
+      : [],
+    roomIds.length
+      ? RoomBooking.findAll({ where: { id: { [Op.in]: roomIds } } })
+      : [],
+    utsavIds.length
+      ? UtsavBooking.findAll({ where: { id: { [Op.in]: utsavIds } } })
+      : [],
+    flatIds.length
+      ? FlatBooking.findAll({ where: { id: { [Op.in]: flatIds } } })
+      : []
+  ]);
+
+  return {
+    adhyanBookingDetails,
+    travelBookingDetails,
+    roomBookingDetails,
+    utsavBookingDetails,
+    flatBookingDetails
   };
 }

@@ -77,15 +77,15 @@ export const createUtsavBookingByAdmin = async (req, res) => {
     // Send notifications AFTER successful commit (with separate error handling)
     for (const cardno in result.userBookingIds) {
       const bookingIds = result.userBookingIds[cardno];
-      
+
       for (const id of bookingIds) {
         console.log(`\n📋 Processing booking: ${id}`);
-        
+
         // Fetch booking and card details
         const booking = await UtsavBooking.findOne({ 
           where: { bookingid: id } 
         });
-        
+
         if (!booking) {
           console.warn(`⚠️ Booking not found: ${id}`);
           continue;
@@ -94,7 +94,7 @@ export const createUtsavBookingByAdmin = async (req, res) => {
         const card = await CardDb.findOne({ 
           where: { cardno: booking.cardno } 
         });
-        
+
         if (!card) {
           console.warn(`⚠️ Card not found for booking: ${id}`);
           continue;
@@ -121,7 +121,7 @@ export const createUtsavBookingByAdmin = async (req, res) => {
         // Send WhatsApp (with separate error handling)
         try {
           const phone = card.mobno;
-          
+
           if (!phone) {
             console.warn(`⚠️ No phone number for booking: ${id}`);
             continue;
@@ -132,9 +132,9 @@ export const createUtsavBookingByAdmin = async (req, res) => {
           const formattedPhone = cleanPhone.startsWith('91') 
             ? cleanPhone 
             : `91${cleanPhone}`;
-          
+
           console.log(`📞 Sending WhatsApp to: ${formattedPhone}`);
-          
+
           // Get utsav details for the message
           const utsav = await UtsavDb.findOne({ 
             where: { id: booking.utsavid } 
@@ -146,16 +146,18 @@ export const createUtsavBookingByAdmin = async (req, res) => {
             [
               card.issuedto || "Mumukshu",
               booking.roomno || "Not Assigned",
-              utsav?.start_date || booking.start_date || "TBD"
+              utsav?.start_date || "TBD"
             ]
           );
-          
+  
           console.log(`✅ WhatsApp sent successfully for booking: ${id}`);
-        } catch (whatsappError) {
-          console.error(`❌ WhatsApp failed for booking: ${id}`);
-          console.error("WhatsApp error:", whatsappError.message);
-          console.error("Full error:", whatsappError.response?.data || whatsappError);
-        }
+        } catch (err) {
+    console.error(`❌ WhatsApp failed for ${phone}`);
+    console.error("Status:", err.response?.status);
+    console.error("Data:", JSON.stringify(err.response?.data, null, 2));
+    console.error("Message:", err.message);
+    throw err;
+  }
       }
     }
 
