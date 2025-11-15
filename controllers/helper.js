@@ -571,7 +571,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject:getSubject(bookingStatus),
+      subject: getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
@@ -612,10 +612,9 @@ export async function sendUnifiedEmail(
 }
 
 export async function createGuestsHelper(cardno, guests, t) {
-  const registeredGuests = guests.filter((guest) => guest.cardno);
-  const unregisteredGuests = guests.filter((guest) => !guest.cardno);
+  const registeredGuests = guests.filter((g) => g.cardno);
+  const unregisteredGuests = guests.filter((g) => !g.cardno);
 
-  // Generate all needed IDs in one call
   const newCardIds =
     unregisteredGuests.length > 0
       ? await createCardIds(unregisteredGuests.length)
@@ -625,11 +624,11 @@ export async function createGuestsHelper(cardno, guests, t) {
     issuedto: guest.name,
     gender: guest.gender,
     mobno: guest.mobno,
+    dob: guest.dob,
     guest_type: guest.type,
     cardno: newCardIds[index],
     res_status: STATUS_GUEST,
-    updatedBy: cardno,
-    packageid: guest.packageid
+    updatedBy: cardno
   }));
 
   let createdGuests = [];
@@ -638,23 +637,54 @@ export async function createGuestsHelper(cardno, guests, t) {
       transaction: t,
       returning: true
     });
-  }
 
-  if (guestsToCreate.length > 0) {
     await GuestRelationship.bulkCreate(
-      guestsToCreate.map((guest) => ({
-        cardno: cardno,
+      createdGuests.map((guest) => ({
+        cardno,
         guest: guest.cardno,
         type: guest.guest_type,
         updatedBy: cardno
       })),
-      {
-        transaction: t
-      }
+      { transaction: t }
     );
   }
 
-  const allGuests = [...registeredGuests, ...guestsToCreate];
+  const guestsToUpdate = registeredGuests.map((guest) => ({
+    cardno: guest.cardno,
+    issuedto: guest.name,
+    gender: guest.gender,
+    mobno: guest.mobno,
+    dob: guest.dob,
+    guest_type: guest.type,
+    packageid: guest.packageid,
+    updatedBy: cardno
+  }));
+
+  await Promise.all(
+    guestsToUpdate.map((g) =>
+      CardDb.update(
+        {
+          issuedto: g.issuedto,
+          gender: g.gender,
+          mobno: g.mobno,
+          dob: g.dob,
+          guest_type: g.guest_type,
+          updatedBy: g.updatedBy,
+          packageid: g.packageid
+        },
+        {
+          where: { cardno: g.cardno },
+          transaction: t
+        }
+      )
+    )
+  );
+
+  const allGuests = [
+    ...guestsToUpdate.map((g) => ({ ...g })),
+    ...createdGuests
+  ];
+
   return allGuests;
 }
 
@@ -743,7 +773,13 @@ export async function createCardIds(count) {
   return newIds;
 }
 
-export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllowed = true) {
+export function isDateRangeOverlapping(
+  start1,
+  end1,
+  start2,
+  end2,
+  boundaryAllowed = true
+) {
   const startDate1 = new Date(start1);
   const endDate1 = new Date(end1);
   const startDate2 = new Date(start2);
@@ -752,12 +788,17 @@ export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllow
   // No overlap if one range ends before the other starts
   const noOverlap = boundaryAllowed
     ? endDate1 <= startDate2 || endDate2 <= startDate1
-    : endDate1 < startDate2 || endDate2 < startDate1
+    : endDate1 < startDate2 || endDate2 < startDate1;
 
   return !noOverlap;
 }
 
-export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {  
+export function isDateBlocked(
+  blockedDate,
+  startDate,
+  endDate,
+  boundaryAllowed
+) {
   return isDateRangeOverlapping(
     blockedDate.checkin,
     blockedDate.checkout,
@@ -771,10 +812,18 @@ export function validateBlockedDates(blockedDates, dateRanges) {
   const conflictingBlocks = [];
   for (const range of dateRanges) {
     for (const blockedDate of blockedDates) {
-      if (isDateBlocked(blockedDate, range.start, range.end, range.overlappingWithUtsav)) {
+      if (
+        isDateBlocked(
+          blockedDate,
+          range.start,
+          range.end,
+          range.overlappingWithUtsav
+        )
+      ) {
         conflictingBlocks.push(
           `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
-            blockedDate.checkout).format('Do MMMM, YYYY')}`
+            blockedDate.checkout
+          ).format('Do MMMM, YYYY')}`
         );
       }
     }

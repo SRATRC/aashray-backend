@@ -432,6 +432,22 @@ export const createGuests = async (req, res) => {
   const { cardno } = req.user;
   const { guests } = req.body;
 
+  const requiredFields = ['name', 'gender', 'mobno', 'dob', 'type'];
+
+  const missing = guests
+    .map((guest, index) => {
+      const missingFields = requiredFields.filter((field) => !guest[field]);
+      return missingFields.length > 0 ? { index, fields: missingFields } : null;
+    })
+    .filter(Boolean);
+
+  if (missing.length > 0) {
+    const msg = missing
+      .map((m) => `Guest ${m.index + 1} has missing [${m.fields.join(', ')}]`)
+      .join('; ');
+    throw new ApiError(400, msg);
+  }
+
   const t = await database.transaction();
   req.transaction = t;
 
@@ -455,8 +471,10 @@ export const checkGuests = async (req, res) => {
       'mobno',
       'gender',
       'email',
+      'dob',
       'res_status'
     ],
+    raw: true,
     where: { mobno: mobno }
   });
   if (!user) {
@@ -464,7 +482,17 @@ export const checkGuests = async (req, res) => {
   }
 
   if (user.res_status == STATUS_GUEST) {
-    return res.status(200).send({ message: 'Guest found', data: user });
+    const isTypeAvailable = await GuestRelationship.findOne({
+      attributes: ['type'],
+      where: { guest: user.cardno }
+    });
+
+    const resp = {
+      ...user,
+      type: isTypeAvailable && isTypeAvailable.type
+    };
+
+    return res.status(200).send({ message: 'Guest found', data: resp });
   } else {
     throw new ApiError(401, 'User is not a guest');
   }
@@ -475,7 +503,7 @@ async function bookFlat(data, t, user) {
 
   // Handle missing checkout_date
   if (!checkout_date) {
-    throw new ApiError(400, 'checkout_date is required for flat booking');
+    throw new ApiError(400, 'checkout date is required for flat booking');
   }
 
   if (guests.length === 0) {
