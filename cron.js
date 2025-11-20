@@ -12,7 +12,8 @@ import {
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
   TYPE_FOOD,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  TYPE_TRAVEL
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
@@ -30,6 +31,7 @@ import {
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
+import { updateWaitingTravelBooking } from './helpers/travelBooking.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -141,6 +143,13 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
         //Not automatically moving from waiting to payment pending for now
         await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
         
+
+        break;
+        case TYPE_TRAVEL:
+        let newTravelBooking = await updateWaitingTravelBooking(booking,t);
+        if(newTravelBooking){
+          addToOpenBookings(openBookings, newTravelBooking);
+        }
         break;
     }
 

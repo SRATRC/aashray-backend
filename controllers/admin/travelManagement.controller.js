@@ -23,7 +23,7 @@ import {
   cancelTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
-import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
+import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import database from '../../config/database.js';
@@ -440,7 +440,7 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
 
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
-
+  let bookingWhichCameOutOfWaiting = null;
   let transaction = await Transactions.findOne({ where: { bookingid } });
 
   switch (status) {
@@ -492,21 +492,19 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
         );
       }
     }
-    updateWaitingTravelBooking(booking.date);
+    
   }
   break;
 
     case STATUS_SEATSFULL_CANCELLED:
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);
-        updateWaitingTravelBooking(booking.date);
       }
       break;
 
     case STATUS_WRONGFORM_CANCELLED:
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);
-        updateWaitingTravelBooking(booking.date);
       }
       break;
 
@@ -552,6 +550,17 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     { transaction: t }
   );
 
+  const cancelledStatuses = [
+    STATUS_ADMIN_CANCELLED,
+    STATUS_SEATSFULL_CANCELLED,
+    STATUS_WRONGFORM_CANCELLED,
+    STATUS_CANCELLED
+  ];
+  
+  if (cancelledStatuses.includes(newBookingStatus)) {
+    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking, t);
+  }
+
   const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
   if (newBookingStatus === STATUS_ADMIN_CANCELLED) {
     if (booking.admin_comments === 'admin_cancel_seats_full') {
@@ -562,6 +571,10 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
       newBookingStatus = 'Cancelled by admin';
     }
   }
+  
+
+  await t.commit();
+ 
   sendMail({
     email: card.email,
     subject: 'Raj Pravas - Travel Booking Updated',
@@ -575,6 +588,10 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
       status: newBookingStatus
     }
   });
+
+  if (bookingWhichCameOutOfWaiting) {
+    sendTravelBookingStatusUpdateMail(bookingWhichCameOutOfWaiting);
+  }
 
   sendDualUserNotifications({
     primary: {
@@ -591,8 +608,6 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     },
     screen: '/bookings'
   });
-
-  await t.commit();
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 

@@ -9,7 +9,7 @@ import {
   ERR_BOOKING_NOT_FOUND
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
+import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
@@ -63,7 +63,7 @@ export const FetchUpcoming = async (req, res) => {
 
 export const CancelTravel = async (req, res) => {
   const { bookingid } = req.body;
-
+  let bookingWhichCameOutOfWaiting = null;
   const t = await database.transaction();
   req.transaction = t;
 
@@ -86,10 +86,13 @@ export const CancelTravel = async (req, res) => {
   const bookingStatus = booking.status;
 
   await userCancelBooking(req.user, booking, t);
+  // bring people from the waiting to awaiting confirmation.
+  if (bookingStatus != STATUS_WAITING) {
+    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking,t);
+  }
   await t.commit();
 
   const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
-
   sendMail({
     email: req.user.email,
     cc,
@@ -126,9 +129,8 @@ export const CancelTravel = async (req, res) => {
     }
   }
 
-  // bring people from the waiting to awaiting confirmation.
-  if (bookingStatus != STATUS_WAITING) {
-    updateWaitingTravelBooking(booking.date);
+  if (bookingWhichCameOutOfWaiting) {
+    sendTravelBookingStatusUpdateMail(bookingWhichCameOutOfWaiting);
   }
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
