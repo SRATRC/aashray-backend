@@ -21,7 +21,8 @@ import {
   uploadRoomNoExcel,
   updateRoomNo,
   fetchVolunteerOptions,
-  fetchUtsavByLocation
+  fetchUtsavByLocation,
+  ReservationReport
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { createUtsavBookingByAdmin } from '../../controllers/admin/utsavManagement.controller.js';
 
@@ -86,6 +87,9 @@ utsavAdminRouter.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
 utsavAdminRouter.post('/uploadRoomNo', upload.single('file'), CatchAsync(uploadRoomNoExcel));
 utsavAdminRouter.put('/updateRoomNo', CatchAsync(updateRoomNo));
 utsavAdminRouter.get('/fetchVolunteerOptions', CatchAsync(fetchVolunteerOptions));
+utsavAdminRouter.get('/pre_event_room_occupancy', CatchAsync(ReservationReport));
+utsavAdminRouter.get('/post_event_room_occupancy', CatchAsync(ReservationReport));
+
 
 // ✅ Export both routers
 export { utsavPublicRouter, utsavAdminRouter };
