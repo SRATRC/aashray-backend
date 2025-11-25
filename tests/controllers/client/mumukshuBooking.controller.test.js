@@ -86,6 +86,23 @@ describe('Mumukshu Booking Controller', () => {
       });
 
       describe('During Utsav', () => {
+
+        describe('if mumukshu has booked utsav or has utsav booking in progress' , () => {
+          test.todo('should book room in waiting status if staying for 1 night and checking out on Utsav start date');
+          test.todo('should book room in waiting status if staying for 1 night and checking in on Utsav end date');
+          test.todo('should book room in confirmed status if staying for 2+ nights and checking out on Utsav start date');
+          test.todo('should book room in confirmed status if staying for 2+ nights and checking in on Utsav end date');
+        });
+
+        describe('if mumukshu has not booked utsav' , () => {
+          test.todo('should not allow room booking during Utsav');
+          test.todo('should not allow room booking if checking out on Utsav start date');
+          test.todo('should not allow room booking if checking in on Utsav end date');
+          test.todo('should allow room booking if checking in next day after Utsav end date');
+          test.todo('should allow room booking if checking out 1 day before Utsav start date');
+        });
+        
+
         it('should book room in waiting status if checking in on Utsav end date', async () => {
           const utsavStart = nDaysFromToday(3);
           const utsavEnd = nDaysFromToday(5);
@@ -149,6 +166,11 @@ describe('Mumukshu Booking Controller', () => {
             console.log(error);
           }
         });
+
+        test.todo('should book room in waiting status if checking out on Utsav end + 1 date');
+        test.todo('should book room in waiting status if checking in on Utsav start - 1 date');
+
+
       });
     });
 

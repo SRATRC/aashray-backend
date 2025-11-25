@@ -66,11 +66,23 @@ export const mumukshuBooking = async (req, res) => {
 
   const userBookingIdMap = {};
   const waitingBookingCountMap = {};
+
+
+  let utsav = null;
+  if (primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
+
   let amount = await book(
     req.body,
     primary_booking,
     t,
     req.user,
+    utsav,
     userBookingIdMap,
     waitingBookingCountMap
   );
@@ -82,6 +94,7 @@ export const mumukshuBooking = async (req, res) => {
         addon,
         t,
         req.user,
+        utsav,
         userBookingIdMap,
         waitingBookingCountMap
       );
@@ -134,11 +147,19 @@ export const validateBooking = async (req, res) => {
     totalCharge: 0
   };
 
-  await validate(req.body, req.user, primary_booking, response);
+  let utsav = null;
+  if (primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
+  await validate(req.body, req.user, primary_booking, utsav, response);
 
   if (addons) {
     for (const addon of addons) {
-      await validate(req.body, req.user, addon, response);
+      await validate(req.body, req.user, addon, utsav, response);
     }
   }
 
@@ -174,6 +195,7 @@ async function book(
   data,
   t,
   user,
+  utsav,
   userBookingIdMap,
   waitingBookingCountMap
 ) {
@@ -181,7 +203,7 @@ async function book(
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(body, data, t, user);
+      const roomResult = await bookRoom(body, data, t, user, utsav);
       amount += roomResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
@@ -247,15 +269,7 @@ async function book(
   return amount;
 }
 
-async function validate(body, user, data, response) {
-  let utsav = null;
-  if (body.primary_booking.booking_type == TYPE_UTSAV) {
-    utsav = await UtsavDb.findOne({
-      where: {
-        id: body.primary_booking.details.utsavid
-      }
-    });
-  }
+async function validate(body, user, data, utsav, response) {
   let totalCharge = 0;
   switch (data.booking_type) {
     case TYPE_ROOM:
@@ -319,14 +333,15 @@ async function validate(body, user, data, response) {
   return response;
 }
 
-async function bookRoom(body, data, t, user) {
+async function bookRoom(body, data, t, user, utsav) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     mumukshuGroup,
     t,
-    user
+    user,
+    utsav
   );
   return result;
 }

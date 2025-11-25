@@ -2,7 +2,8 @@ import {
   UtsavDb,
   UtsavPackagesDb,
   UtsavBooking,
-  CardDb
+  CardDb,
+  RoomBooking
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
@@ -1104,5 +1105,117 @@ export const updateRoomNo = async (req, res) => {
   } catch (error) {
     console.error("Error updating room number:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const ReservationReport = async (req, res) => {
+  try {
+    const { utsavid, type, statuses } = req.query;
+
+    if (!utsavid) {
+      return res.status(400).send({ message: "utsav_id is required" });
+    }
+
+    if (!["pre_event_room_occupancy", "post_event_room_occupancy"].includes(type)) {
+      return res.status(400).send({ message: "Invalid report type" });
+    }
+
+    // -------------------------------------------------------------
+    // 1. Fetch Utsav Start/End Date
+    // -------------------------------------------------------------
+    const utsav = await UtsavDb.findOne({
+      where: { id: utsavid },
+      attributes: ["start_date", "end_date"]
+    });
+
+    if (!utsav) {
+      return res.status(404).send({ message: "Event not found" });
+    }
+
+    const eventStart = new Date(utsav.start_date);
+    const eventEnd = new Date(utsav.end_date);
+
+    // -------------------------------------------------------------
+    // 2. Compute pre/post date windows (CHECK-IN ONLY)
+    // -------------------------------------------------------------
+    let startDate, endDate;
+
+    if (type === "pre_event_room_occupancy") {
+      startDate = new Date(eventStart);
+      startDate.setDate(startDate.getDate() - 5);
+
+      endDate = new Date(eventStart);
+    }
+
+    if (type === "post_event_room_occupancy") {
+      startDate = new Date(eventEnd);
+
+      endDate = new Date(eventEnd);
+      endDate.setDate(endDate.getDate() + 5);
+    }
+
+    // -------------------------------------------------------------
+    // 3. Fetch Utsav Registrations (cardno only)
+    // -------------------------------------------------------------
+    const utsavRegistrations = await UtsavBooking.findAll({
+      where: { utsavid },
+      attributes: ["cardno"],
+      raw: true
+    });
+
+    if (utsavRegistrations.length === 0) {
+      return res.status(200).send({
+        message: "No registrations found for this event",
+        data: []
+      });
+    }
+
+    const registeredCardNos = utsavRegistrations.map(r => r.cardno);
+
+    // -------------------------------------------------------------
+    // 4. Fetch Room Bookings for registered participants
+    //    IMPORTANT: Check-in must be between the window only
+    // -------------------------------------------------------------
+    const reservations = await RoomBooking.findAll({
+      include: [
+        {
+          model: CardDb,
+          attributes: ["cardno", "issuedto", "mobno", "center", "credits"],
+          required: true
+        }
+      ],
+      attributes: [
+        "bookingid",
+        "roomno",
+        "roomtype",
+        "checkin",
+        "checkout",
+        "bookedBy",
+        "status",
+        "nights"
+      ],
+      where: {
+        status: statuses,
+        cardno: registeredCardNos,
+
+        // ⭐ ONLY checkin matters (your requested logic)
+        checkin: {
+          [Sequelize.Op.between]: [startDate, endDate]
+        }
+      },
+      order: [["checkin", "ASC"]]
+    });
+
+    return res.status(200).send({
+      message: "Fetched reservation report",
+      data: reservations
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send({
+      message: "Server error",
+      error: err.message
+    });
   }
 };

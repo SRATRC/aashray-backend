@@ -17,9 +17,7 @@ import {
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
-  findRoom,
-  roomCharge,
-  checkRoomAvailabilityDuringUtsav
+  checkRoomAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
 import {
   bookAdhyayanForMumukshus,
@@ -38,16 +36,13 @@ import {
 } from '../../helpers/utsavBooking.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions,
-  usableCredits
+  updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
 import {
   bookTravelForMumukshus,
   checkTravelAlreadyBooked
 } from '../../helpers/travelBooking.helper.js';
 import {
-  calculateNights,
-  validateDate,
   setBookingIdMap,
   retrieveBookingIds,
   setWaitingBookingCountMap,
@@ -57,7 +52,6 @@ import { UtsavDb } from '../../models/associations.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import Sequelize from 'sequelize';
 
 export const unifiedBooking = async (req, res) => {
   const { primary_booking, addons } = req.body;
@@ -68,10 +62,22 @@ export const unifiedBooking = async (req, res) => {
   req.transaction = t;
   const userBookingIdMap = {};
   const waitingBookingCountMap = {};
+
+
+  let utsav = null;
+  if (primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
+
   let amount = await book(
     req.user,
     req.body,
     primary_booking,
+    utsav,
     userBookingIdMap,
     waitingBookingCountMap,
     t
@@ -83,6 +89,7 @@ export const unifiedBooking = async (req, res) => {
         req.user,
         req.body,
         addon,
+        utsav,
         userBookingIdMap,
         waitingBookingCountMap,
         t
@@ -141,27 +148,6 @@ export const validateBooking = async (req, res) => {
         id: primary_booking.details.utsavid
       }
     });
-  } else {
-    utsav = await UtsavDb.findOne({
-      where: {
-        [Sequelize.Op.and]: [
-          {
-            end_date: {
-              [Sequelize.Op.gte]:
-                primary_booking.details.checkin_date ||
-                primary_booking.details.date
-            }
-          },
-          {
-            start_date: {
-              [Sequelize.Op.lte]:
-                primary_booking.details.checkout_date ||
-                primary_booking.details.date
-            }
-          }
-        ]
-      }
-    });
   }
   await validate(req.body, req.user, primary_booking, response, utsav);
 
@@ -178,6 +164,7 @@ async function book(
   user,
   body,
   data,
+  utsav,
   userBookingIdMap,
   waitingBookingCountMap,
   t
@@ -186,7 +173,7 @@ async function book(
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(user, body, data, t);
+      const roomResult = await bookRoom(user, body, data, utsav, t);
       amount += roomResult.amount;
 
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
@@ -296,7 +283,7 @@ async function validate(body, user, data, response, utsav) {
   return response;
 }
 
-async function bookRoom(user, body, data, t) {
+async function bookRoom(user, body, data, utsav, t) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
   const result = await bookRoomForMumukshus(
@@ -310,7 +297,8 @@ async function bookRoom(user, body, data, t) {
       }
     ],
     t,
-    user
+    user,
+    utsav
   );
 
   return result;
@@ -421,53 +409,19 @@ async function bookUtsav(user, data, t) {
 async function checkRoomAvailability(user, data, utsav) {
   const { checkin_date, checkout_date, floor_pref, room_type } = data.details;
 
-  validateDate(checkin_date, checkout_date);
+  const result = await checkRoomAvailabilityForMumukshus(
+    checkin_date,
+    checkout_date,
+    [{
+      mumukshus: [user.cardno],
+      roomType: room_type,
+      floorType: floor_pref
+    }],
+    user,
+    utsav
+  );
 
-  const gender = floor_pref ? floor_pref + user.gender : user.gender;
-
-  if (utsav) {
-    return checkRoomAvailabilityDuringUtsav(
-      checkin_date,
-      checkout_date,
-      room_type,
-      gender,
-      utsav,
-      user.cardno,
-      user
-    );
-  } else {
-    const nights = await calculateNights(checkin_date, checkout_date);
-
-    var status = STATUS_WAITING;
-    var charge = 0;
-    var availableCredits = 0;
-
-    if (nights > 0) {
-      const roomno = await findRoom(
-        checkin_date,
-        checkout_date,
-        room_type,
-        gender
-      );
-      if (roomno) {
-        status = STATUS_AVAILABLE;
-        charge = roomCharge(room_type) * nights;
-        availableCredits = usableCredits(user, TYPE_ROOM, charge);
-      }
-    } else {
-      status = STATUS_AVAILABLE;
-    }
-
-    return [
-      {
-        mumukshu: user.cardno,
-        status: status,
-        charge: charge,
-        availableCredits: availableCredits,
-        dates: checkin_date + ' to ' + checkout_date
-      }
-    ];
-  }
+  return result;
 }
 
 async function checkFoodAvailability(body, data, user, utsav) {

@@ -1,7 +1,6 @@
 import {
   CardDb,
   GuestRelationship,
-  FlatDb,
   UtsavDb
 } from '../../models/associations.js';
 import {
@@ -67,11 +66,21 @@ export const guestBooking = async (req, res) => {
   const waitingBookingCountMap = {};
   const transactionIds = [];
 
+  let utsav = null;
+  if (primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
+
   let amount = await book(
     req.body,
     primary_booking,
     t,
     req.user,
+    utsav,
     userBookingIdMap,
     waitingBookingCountMap,
     transactionIds
@@ -84,6 +93,7 @@ export const guestBooking = async (req, res) => {
         addon,
         t,
         req.user,
+        utsav,
         userBookingIdMap,
         waitingBookingCountMap,
         transactionIds
@@ -155,6 +165,7 @@ export const validateBooking = async (req, res) => {
 
   return res.status(200).send({ data: response });
 };
+
 async function book(
   body,
   data,
@@ -168,7 +179,7 @@ async function book(
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(data, t, user);
+      const roomResult = await bookRoom(data, t, user, utsav);
       amount += roomResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
@@ -300,14 +311,15 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function bookRoom(data, t, user) {
+async function bookRoom(data, t, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     guestGroup,
     t,
-    user
+    user,
+    utsav
   );
   return result;
 }

@@ -6,7 +6,9 @@ import {
   STATUS_WAITING,
   STATUS_OPEN,
   ERR_UTSAV_ALREADY_BOOKED,
-  STATUS_AVAILABLE
+  STATUS_AVAILABLE,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../config/constants.js';
 import {
   UtsavDb,
@@ -21,6 +23,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
+import { getBlockedDates, isDateRangeOverlapping, validateBlockedDates } from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
 const SAMVATSARI_PACKAGE_ID = 21;
@@ -333,6 +336,159 @@ export async function validateUtsavPackage(packageId, utsavId) {
   return packageData;
 }
 
+export function isUtsavOverlapping(utsav, startDate, endDate) {
+  if (!utsav) return false;
+
+  return isDateRangeOverlapping(
+    utsav.start_date,
+    utsav.end_date,
+    startDate,
+    endDate,
+    false
+  );
+}
+
+export async function getUtsavBookingsByCardno(cardnos, startDate, endDate) {
+  const bookings = await getUtsavBookings(
+    cardnos,
+    startDate,
+    endDate
+  );
+
+  const grouped = bookings.reduce((acc, booking) => {
+    acc[booking.cardno] = booking;
+    return acc;
+  }, {});
+
+  return grouped;
+}
+
+export async function getUtsavBookings(cardnos, startDate, endDate) {
+  const utsavBookings = await UtsavBooking.findAll({
+    where: {
+      cardno: cardnos,
+      status: {
+        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
+      }
+    },
+    include: [
+      {
+        model: UtsavDb,
+        where: {
+          [Sequelize.Op.or]: [
+            {
+              // utsav starts between start and end date
+              [Sequelize.Op.and]: [
+                { start_date: { [Sequelize.Op.gte]: startDate } },
+                { start_date: { [Sequelize.Op.lte]: endDate } }
+              ]
+            },
+            {
+              // utsav ends between start and end date
+              [Sequelize.Op.and]: [
+                { end_date: { [Sequelize.Op.gte]: startDate } },
+                { end_date: { [Sequelize.Op.lte]: endDate } }
+              ]
+            },
+            {
+              // utsav starts before start and ends after end date
+              [Sequelize.Op.and]: [
+                { start_date: { [Sequelize.Op.lte]: startDate } },
+                { end_date: { [Sequelize.Op.gte]: endDate } }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  });
+
+  return utsavBookings;
+}
+
+export function splitDateRanges(
+  utsavStart,
+  utsavEnd,
+  bookingStart,
+  bookingEnd
+) {
+  const ranges = [];
+
+  if (new Date(bookingStart) < new Date(utsavStart)) {
+    ranges.push({
+      start: bookingStart,
+      end: utsavStart,
+      overlappingWithUtsav: true
+    });
+  }
+
+  if (new Date(bookingEnd) > new Date(utsavEnd)) {
+    ranges.push({
+      start: utsavEnd,
+      end: bookingEnd,
+      overlappingWithUtsav: true
+    });
+  }
+
+  return ranges;
+}
+
+export async function getDateRangesDuringUtsav(
+  mumukshus,
+  startDate,
+  endDate,
+  utsav
+) {
+  const inProgressUtsavOverlapping = isUtsavOverlapping(
+    utsav,
+    startDate,
+    endDate
+  );
+  
+  const existingUtsavBookings = inProgressUtsavOverlapping
+    ? {}
+    : await getUtsavBookingsByCardno(mumukshus, startDate, endDate);
+
+  const blockedDates = await getBlockedDates(startDate, endDate);
+
+  const dateRangesByMumukshu = {};
+  for (const mumukshu of mumukshus) {
+    const utsavBooking = inProgressUtsavOverlapping 
+      ? utsav
+      : existingUtsavBookings[mumukshu]?.UtsavDb;
+    
+    const dateRanges = [];
+    if (utsavBooking) {
+      dateRanges.push(
+        ...splitDateRanges(
+          utsavBooking.start_date,
+          utsavBooking.end_date,
+          startDate,
+          endDate
+        )
+      );
+    } else {
+      // In case, utsav booking is not found for this mumukshu, check if there is any 
+      // utsav starts on checkout or ends on checkin date
+      const utsavOnBoundary = await findUtsavOnBoundaryDates(startDate, endDate);
+      dateRanges.push(
+        {
+          start: startDate,
+          end: endDate,
+          overlappingWithUtsav: utsavOnBoundary ? true : false
+        }
+      )
+    }
+
+    // validate blockedDates
+    validateBlockedDates(blockedDates, dateRanges);
+    
+    dateRangesByMumukshu[mumukshu] = dateRanges;
+  }
+
+  return dateRangesByMumukshu;
+}
+
 export async function sendUtsavBookingUpdateEmail(booking, utsav) {
   // Parallel database queries for better performance
   const [card, bookedByCard, utsavData] = await Promise.all([
@@ -359,4 +515,17 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
       utsavEndDate: utsavData.end_date
     }
   });
+}
+
+export async function findUtsavOnBoundaryDates(checkin, checkout) {
+  const utsav = await UtsavDb.findOne({
+    where: { 
+      [Sequelize.Op.or]: [
+        { end_date: checkin },
+        { start_date: checkout }
+      ]
+    }
+  });
+
+  return utsav;
 }
