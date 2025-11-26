@@ -123,10 +123,10 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
     let bookings = [];
     const bookingid = uuidv4();
 
-    const package_info = packages.find((p) => p.id === Number(mumukshu.packageid));
+    const package_info = packages.find(p => p.id === Number(mumukshu.packageid));
     if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
 
-    // Admin flow: do not check or decrement available seats; set to payment pending
+    // ⭐ Create booking in WAITING status
     const booking = await UtsavBooking.create(
       {
         bookingid,
@@ -138,33 +138,23 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
         carno: mumukshu.carno,
         other: mumukshu.other,
         volunteer: mumukshu.volunteer,
-        status: STATUS_PAYMENT_PENDING,
+        status: STATUS_WAITING,    // ⭐ Changed
         updatedBy: adminUser.username || 'admin'
       },
       { transaction: t }
     );
 
-    // Always create pending/cash transaction for admin
-    const cardRecord = await CardDb.findOne({ where: { cardno: mumukshu.cardno } });
-    if (!cardRecord) throw new ApiError(400, `Card not found for cardno ${mumukshu.cardno}`);
+    // ⭐ NO TRANSACTION CREATION AT ALL
+    // (Admin WAITING → later converted to PENDING, then transaction will be created)
 
-    await createPendingTransaction(
-      cardRecord,
-      booking,
-      TYPE_UTSAV,
-      package_info.amount,
-      adminUser.username || 'admin',
-      t,
-      true
-    );
-
-    total_amount += package_info.amount;
+    // accumulate only for info — optional
+    total_amount += Number(package_info.amount) || 0;
 
     bookings.push(bookingid);
     userBookingIds[mumukshu.cardno] = bookings;
-  }
 
-  // Admin flow: do not adjust available_seats here
+    waitingBookingCount++;
+  }
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }

@@ -593,42 +593,71 @@ export const utsavStatusUpdate = async (req, res) => {
       break;
 
     case STATUS_PAYMENT_PENDING:
-      if (booking.status !== STATUS_WAITING) {
-        throw new ApiError(400, 'Payment Pending can only be set from waiting');
-      }
+  if (booking.status !== STATUS_WAITING) {
+    throw new ApiError(400, 'Payment Pending can only be set from waiting');
+  }
 
-          await reserveUtsavSeat(utsav, t);
+  // Fetch package amount
+  const pkg = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
+  if (!pkg) throw new Error('Utsav Package not found');
 
-          transaction = await Transactions.findOne({
-        where: { bookingid: booking.bookingid },
-        transaction: t
-      });
+  // ⭐ NEW: If amount = 0 → auto-confirm, skip transaction
+  if (Number(pkg.amount) === 0) {
+    console.log('>> Package amount is 0 → skipping transaction, auto-confirming booking.');
 
-      if (!transaction || ['credited', 'cancelled'].includes(transaction.status)) {
-        const packageData = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
-        if (!packageData) throw new Error('Utsav Package not found');
+    // Reserve seat
+    await reserveUtsavSeat(utsav, t);
 
-        const cardnoToUse = booking.bookedBy || booking.cardno;
+    newBookingStatus = STATUS_CONFIRMED;
 
-        const [existingTransaction, created] = await Transactions.findOrCreate({
-          where: { bookingid: booking.bookingid },
-          defaults: {
-            cardno: cardnoToUse,
-            category: TYPE_UTSAV,
-            amount: packageData.amount,
-            discount: 0,
-            razorpay_order_id: null,
-            description: description || 'Payment pending for Utsav',
-            status: STATUS_PAYMENT_PENDING,
-            updatedBy: req.user.username || 'admin'
-          },
-          transaction: t
-        });
+    await booking.update(
+      {
+        status: newBookingStatus,
+        updatedBy: req.user.username,
+        description: 'Since package amount is 0, updating the status to confirmed.'
+      },
+      { transaction: t }
+    );
 
-        transaction = existingTransaction;
-      }
-      newBookingStatus = STATUS_PAYMENT_PENDING;
-      break;
+    await t.commit();
+
+    return res.status(200).send({
+      message: 'Since package amount is 0, updating the status to confirmed.'
+    });
+  }
+
+  // ⭐ Original flow for paid packages
+  await reserveUtsavSeat(utsav, t);
+
+  transaction = await Transactions.findOne({
+    where: { bookingid: booking.bookingid },
+    transaction: t
+  });
+
+  if (!transaction || ['credited', 'cancelled'].includes(transaction.status)) {
+    const cardnoToUse = booking.bookedBy || booking.cardno;
+
+    const [existingTransaction, created] = await Transactions.findOrCreate({
+      where: { bookingid: booking.bookingid },
+      defaults: {
+        cardno: cardnoToUse,
+        category: TYPE_UTSAV,
+        amount: pkg.amount,
+        discount: 0,
+        razorpay_order_id: null,
+        description: description || 'Payment pending for Utsav',
+        status: STATUS_PAYMENT_PENDING,
+        updatedBy: req.user.username || 'admin'
+      },
+      transaction: t
+    });
+
+    transaction = existingTransaction;
+  }
+
+  newBookingStatus = STATUS_PAYMENT_PENDING;
+  break;
+
 
     case STATUS_ADMIN_CANCELLED:
   console.log('>> Admin cancelling booking');
