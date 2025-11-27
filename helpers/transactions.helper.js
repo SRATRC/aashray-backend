@@ -336,6 +336,17 @@ export function usableCredits(card, bookingType, amount) {
   return usableCredits;
 }
 
+export function calculateUsableCredits(card, bookingType, amount) {
+  const creditType = getCreditType(bookingType);
+
+  const totalCredits =
+    card.credits && card.credits[creditType] ? card.credits[creditType] : 0;
+
+  const usableCredits = Math.min(amount, totalCredits);
+
+  return usableCredits;
+}
+
 function getUpdatedCredits(card, creditType, newCredits) {
   const updatedCredits = card.credits
     ? JSON.parse(JSON.stringify(card.credits))
@@ -434,3 +445,4 @@ export async function updateRazorpayTransactions(
     }
   );
 }
+

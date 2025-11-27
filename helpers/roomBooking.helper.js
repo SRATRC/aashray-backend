@@ -26,7 +26,9 @@ import {
 import {
   createPendingTransaction,
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  calculateUsableCredits,
+  usableCredits
 } from './transactions.helper.js';
 import {
   calculateNights,
@@ -37,7 +39,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
-import { usableCredits } from './transactions.helper.js';
+// import { usableCredits } from './transactions.helper.js';
 import {
   findUtsavOnBoundaryDates,
   getDateRangesDuringUtsav
@@ -652,7 +654,7 @@ export async function checkRoomAvailabilityForMumukshus(
           if (roomno) {
             status = STATUS_AVAILABLE;
             charge = roomCharge(roomType) * nights;
-            availableCredits = usableCredits(user, TYPE_ROOM, charge);
+            availableCredits = calculateUsableCredits(user, TYPE_ROOM, charge);
             assignedRoom = roomno.roomno;
             assignedRooms.push(roomno.roomno);
           }
@@ -717,7 +719,7 @@ export async function checkFlatAvailabilityForMumukshus(
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
     const availableCredits =
-      charge > 0 ? usableCredits(user, TYPE_FLAT, charge) : 0;
+  charge > 0 ? calculateUsableCredits(user, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       mumukshu: mumukshu,
