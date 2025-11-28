@@ -31,10 +31,15 @@ export const createTicket = async (req, res) => {
 
 export const getTickets = async (req, res) => {
   const { cardno } = req.user;
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = parseInt(req.query.page_size) || 10;
+  const offset = (page - 1) * pageSize;
 
   const tickets = await Ticket.findAll({
     where: { issued_by: cardno },
-    order: [['createdAt', 'DESC']]
+    order: [['createdAt', 'DESC']],
+    offset,
+    limit: pageSize
   });
 
   res.status(200).send({
