@@ -171,6 +171,7 @@ async function book(
   data,
   t,
   user,
+  utsav,
   userBookingIdMap,
   waitingBookingCountMap,
   transactionIds
