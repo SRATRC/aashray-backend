@@ -14,7 +14,7 @@ router.use(validateCard);
 
 router.post('/', CatchAsync(createTicket));
 router.get('/', CatchAsync(getTickets));
-router.get('/:id', CatchAsync(getTicketDetails));
-router.post('/:id/messages', CatchAsync(addMessage));
+router.get('/:ticket_id', CatchAsync(getTicketDetails));
+router.post('/:ticket_id/messages', CatchAsync(addMessage));
 
 export default router;

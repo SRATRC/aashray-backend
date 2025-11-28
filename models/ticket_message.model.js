@@ -10,7 +10,7 @@ const TicketMessage = sequelize.define(
       autoIncrement: true
     },
     ticket_id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING,
       allowNull: false,
       references: {
         model: 'tickets',

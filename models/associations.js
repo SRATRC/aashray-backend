@@ -35,6 +35,8 @@ import PermanentWifiCodes from './permanent_wifi_codes.model.js';
 import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
+import Ticket from './ticket.model.js';
+import TicketMessage from './ticket_message.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -170,6 +172,18 @@ CardDb.hasMany(SupportTickets, {
 });
 CardDb.hasMany(AdhyayanFeedback, {
   foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(Ticket, {
+  foreignKey: 'issued_by',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(TicketMessage, {
+  foreignKey: 'sender_id',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -459,6 +473,27 @@ GuestRelationship.belongsTo(CardDb, {
 // support
 SupportTickets.belongsTo(CardDb, {
   foreignKey: 'issued_by',
+  targetKey: 'cardno'
+});
+
+// Ticket
+Ticket.belongsTo(CardDb, {
+  foreignKey: 'issued_by',
+  targetKey: 'cardno'
+});
+Ticket.hasMany(TicketMessage, {
+  as: 'messages',
+  foreignKey: 'ticket_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+TicketMessage.belongsTo(Ticket, {
+  foreignKey: 'ticket_id',
+  targetKey: 'id'
+});
+TicketMessage.belongsTo(CardDb, {
+  foreignKey: 'sender_id',
   targetKey: 'cardno'
 });
 

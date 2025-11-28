@@ -10,9 +10,8 @@ const Ticket = sequelize.define(
   'Ticket',
   {
     id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true
+      type: DataTypes.STRING,
+      primaryKey: true
     },
     issued_by: {
       type: DataTypes.STRING,
@@ -39,19 +38,11 @@ const Ticket = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
-    admin_comments: {
-      type: DataTypes.TEXT,
-      allowNull: true
-    },
     status: {
       type: DataTypes.ENUM,
       values: [STATUS_OPEN, STATUS_INPROGRESS, 'resolved', STATUS_CLOSED],
       defaultValue: STATUS_OPEN,
       allowNull: false
-    },
-    updatedBy: {
-      type: DataTypes.STRING,
-      allowNull: true
     }
   },
   {

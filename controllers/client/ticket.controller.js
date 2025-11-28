@@ -3,9 +3,9 @@ import TicketMessage from '../../models/ticket_message.model.js';
 import ApiError from '../../utils/ApiError.js';
 import {
   MSG_FETCH_SUCCESSFUL,
-  MSG_BOOKING_SUCCESSFUL,
   MSG_UPDATE_SUCCESSFUL
 } from '../../config/constants.js';
+import crypto from 'crypto';
 
 export const createTicket = async (req, res) => {
   const { service, description, os, app_version } = req.body;
@@ -15,19 +15,17 @@ export const createTicket = async (req, res) => {
     throw new ApiError(400, 'Service and description are required');
   }
 
-  const ticket = await Ticket.create({
+  await Ticket.create({
+    id: generateTicketId(),
     issued_by: cardno,
     service,
     description,
     os,
-    app_version,
-    updatedBy: cardno
+    app_version
   });
 
-  res.status(201).json({
-    status: 'success',
-    message: MSG_BOOKING_SUCCESSFUL,
-    data: ticket
+  res.status(201).send({
+    message: 'Successfully created ticket'
   });
 };
 
@@ -39,23 +37,22 @@ export const getTickets = async (req, res) => {
     order: [['createdAt', 'DESC']]
   });
 
-  res.status(200).json({
-    status: 'success',
+  res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
     data: tickets
   });
 };
 
 export const getTicketDetails = async (req, res) => {
-  const { id } = req.params;
+  const { ticket_id } = req.params;
   const { cardno } = req.user;
 
   const ticket = await Ticket.findOne({
-    where: { id, issued_by: cardno },
+    where: { id: ticket_id, issued_by: cardno },
     include: [
       {
         model: TicketMessage,
-        as: 'messages', // Note: We need to define associations
+        as: 'messages',
         order: [['createdAt', 'ASC']]
       }
     ]
@@ -65,23 +62,20 @@ export const getTicketDetails = async (req, res) => {
     throw new ApiError(404, 'Ticket not found');
   }
 
-  // Fetch messages separately if association issue persists, but ideally association should work.
-  // For now, let's assume we'll add association in a separate step or here.
-  // Actually, let's fetch messages manually to be safe if associations aren't set up in models yet.
-  const messages = await TicketMessage.findAll({
-    where: { ticket_id: id },
-    order: [['createdAt', 'ASC']]
-  });
+  // const messages = await TicketMessage.findAll({
+  //   where: { ticket_id },
+  //   order: [['createdAt', 'ASC']]
+  // });
 
-  res.status(200).json({
-    status: 'success',
+  res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
-    data: { ...ticket.toJSON(), messages }
+    // data: { ...ticket.toJSON(), messages }
+    data: ticket
   });
 };
 
 export const addMessage = async (req, res) => {
-  const { id } = req.params;
+  const { ticket_id } = req.params;
   const { message } = req.body;
   const { cardno } = req.user;
 
@@ -89,24 +83,25 @@ export const addMessage = async (req, res) => {
     throw new ApiError(400, 'Message is required');
   }
 
-  const ticket = await Ticket.findOne({ where: { id, issued_by: cardno } });
+  const ticket = await Ticket.findOne({
+    where: { id: ticket_id, issued_by: cardno }
+  });
   if (!ticket) {
     throw new ApiError(404, 'Ticket not found');
   }
 
-  const newMessage = await TicketMessage.create({
-    ticket_id: id,
+  await TicketMessage.create({
+    ticket_id,
     sender_id: cardno,
     sender_type: 'user',
     message
   });
 
-  // Update ticket updatedBy and updatedAt
-  await ticket.update({ updatedBy: cardno });
-
-  res.status(201).json({
-    status: 'success',
-    message: MSG_UPDATE_SUCCESSFUL,
-    data: newMessage
+  res.status(201).send({
+    message: MSG_UPDATE_SUCCESSFUL
   });
+};
+
+const generateTicketId = () => {
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
 };
