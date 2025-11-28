@@ -406,7 +406,7 @@ export async function createRoomBooking(
   // This handles the scenario: check-in = utsav.end_date, check-out = utsav.end_date + 1 day.
   const isSingleNight = nights === 1;
   if (isSingleNight) {
-    const utsavOnBoundary = await findUtsavOnBoundaryDates(startDate, endDate);
+    const utsavOnBoundary = await findUtsavOnBoundaryDates(checkin, checkout);
     if (utsavOnBoundary) {
       const result = await bookWaitingRoom(
         cardno,
