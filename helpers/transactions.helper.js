@@ -119,14 +119,14 @@ export async function cancelTransaction(
     card = await validateCard(transaction.cardno);
   }
 
-  if (!admin && [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction))) {
-  // User cancelling via app → no credits, keep transaction as completed
-  console.log('>> User cancellation: keeping transaction completed');
-  return { credits: 0 }; // no credits added
-}
-
-
-
+  if (
+    !admin &&
+    [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction))
+  ) {
+    // User cancelling via app → no credits, keep transaction as completed
+    console.log('>> User cancellation: keeping transaction completed');
+    return { credits: 0 }; // no credits added
+  }
 
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
   var description = transaction.description;
@@ -141,49 +141,53 @@ export async function cancelTransaction(
   const bookingType = getBookingType(transaction);
 
   switch (transaction.status) {
-  case STATUS_PAYMENT_COMPLETED:
-  case STATUS_CASH_COMPLETED:
-  case STATUS_PAYMENT_PENDING:
-  case STATUS_CASH_PENDING:
-  case STATUS_PAYMENT_FAILED:
-    if ([TYPE_ADHYAYAN].includes(bookingType) || ifMigrated(transaction)) {
-      // for bookings that are not credited, keep txn status as completed for reports
-      if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-        status = transaction.status;
+    case STATUS_PAYMENT_COMPLETED:
+    case STATUS_CASH_COMPLETED:
+    case STATUS_PAYMENT_PENDING:
+    case STATUS_CASH_PENDING:
+    case STATUS_PAYMENT_FAILED:
+      if ([TYPE_ADHYAYAN].includes(bookingType) || ifMigrated(transaction)) {
+        // for bookings that are not credited, keep txn status as completed for reports
+        if (
+          [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
+            transaction.status
+          )
+        ) {
+          status = transaction.status;
+        }
+      } else if (credits > 0) {
+        await addCredit(user, card, bookingType, credits, t);
+        status = STATUS_CREDITED;
+        description = `credits added: ${credits}`;
       }
-    } else if (credits > 0) {
-      await addCredit(user, card, bookingType, credits, t);
-      status = STATUS_CREDITED;
-      description = `credits added: ${credits}`;
-    }
-    break;
+      break;
 
-  case STATUS_CANCELLED:
-  if (admin) {
-    // ✅ force credits to full amount if admin chooses to issue credits
-    const creditAmount = transaction.amount + transaction.discount;
-    if (creditAmount > 0) {
-      await addCredit(user, card, bookingType, creditAmount, t);
-      status = STATUS_CREDITED;
-      description = `credits added: ${creditAmount}`;
-    } else {
-      status = STATUS_ADMIN_CANCELLED;
-    }
-  } else {
-    throw new ApiError(400, 'Cannot cancel already cancelled transaction');
+    case STATUS_CANCELLED:
+      if (admin) {
+        // ✅ force credits to full amount if admin chooses to issue credits
+        const creditAmount = transaction.amount + transaction.discount;
+        if (creditAmount > 0) {
+          await addCredit(user, card, bookingType, creditAmount, t);
+          status = STATUS_CREDITED;
+          description = `credits added: ${creditAmount}`;
+        } else {
+          status = STATUS_ADMIN_CANCELLED;
+        }
+      } else {
+        throw new ApiError(400, 'Cannot cancel already cancelled transaction');
+      }
+      break;
+
+    case STATUS_ADMIN_CANCELLED:
+    case STATUS_CREDITED:
+      throw new ApiError(
+        400,
+        'Cannot cancel already admin cancelled or credited transaction'
+      );
+
+    default:
+      throw new ApiError(400, 'Invalid status provided');
   }
-  break;
-  
-  case STATUS_ADMIN_CANCELLED:
-  case STATUS_CREDITED:
-    throw new ApiError(
-      400,
-      'Cannot cancel already admin cancelled or credited transaction'
-    );
-
-  default:
-    throw new ApiError(400, 'Invalid status provided');
-}
 
   await transaction.update(
     {
@@ -327,22 +331,8 @@ export function usableCredits(card, bookingType, amount) {
 
   const usableCredits = Math.min(amount, totalCredits);
 
-  // store the updated credits on the card model itself so that
-  // the next call for the same card will reflect what's available
   card.credits = card.credits || {};
-
   card.credits[creditType] = totalCredits - usableCredits;
-
-  return usableCredits;
-}
-
-export function calculateUsableCredits(card, bookingType, amount) {
-  const creditType = getCreditType(bookingType);
-
-  const totalCredits =
-    card.credits && card.credits[creditType] ? card.credits[creditType] : 0;
-
-  const usableCredits = Math.min(amount, totalCredits);
 
   return usableCredits;
 }
@@ -445,4 +435,3 @@ export async function updateRazorpayTransactions(
     }
   );
 }
-

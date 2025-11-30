@@ -606,6 +606,10 @@ export async function checkRoomAvailabilityForMumukshus(
     utsav
   );
 
+  // Create a temp user with cloned credits to track usage during this validation loop
+  // without mutating the original user object.
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   var roomDetails = [];
   const assignedRooms = [];
 
@@ -643,7 +647,7 @@ export async function checkRoomAvailabilityForMumukshus(
           if (roomno) {
             status = STATUS_AVAILABLE;
             charge = roomCharge(roomType) * nights;
-            availableCredits = usableCredits(user, TYPE_ROOM, charge);
+            availableCredits = usableCredits(tempUser, TYPE_ROOM, charge);
             assignedRoom = roomno.roomno;
             assignedRooms.push(roomno.roomno);
           }
@@ -701,6 +705,9 @@ export async function checkFlatAvailabilityForMumukshus(
     }
   });
 
+  // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const mumukshu of mumukshus) {
     const isFlatOwner = flatOwnerData.some(
       (item) => item.dataValues.owner == mumukshu
@@ -708,7 +715,7 @@ export async function checkFlatAvailabilityForMumukshus(
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
     const availableCredits =
-      charge > 0 ? usableCredits(user, TYPE_FLAT, charge) : 0;
+      charge > 0 ? usableCredits(tempUser, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       mumukshu: mumukshu,

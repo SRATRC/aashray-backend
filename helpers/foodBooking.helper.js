@@ -232,6 +232,9 @@ export async function checkFoodAvailabilityForMumumkshus(
   var availableCredits = 0;
 
   if (isGuestBooking) {
+    // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
+    const tempUser = { ...user, credits: { ...user.credits } };
+
     const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
     const bookings = await getFoodBookings(allDates, mumukshus);
 
@@ -263,7 +266,7 @@ export async function checkFoodAvailabilityForMumumkshus(
       }
     }
 
-    availableCredits = usableCredits(user, TYPE_FOOD, charge);
+    availableCredits = usableCredits(tempUser, TYPE_FOOD, charge);
   }
 
   return {
