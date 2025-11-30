@@ -323,6 +323,15 @@ async function useCredit(card, booking, transaction, amount, updatedBy, t) {
   return discountedAmount;
 }
 
+/**
+ * Calculates and deducts usable credits from a card for a transaction.
+ * **Note:** This function mutates the `card.credits` object.
+ * If you only need to calculate without mutation, pass a deep copy of `card.credits`.
+ * @param {object} card - The card object, which will be mutated.
+ * @param {string} bookingType - The type of booking.
+ * @param {number} amount - The transaction amount.
+ * @returns {number} The amount of credits used.
+ */
 export function usableCredits(card, bookingType, amount) {
   const creditType = getCreditType(bookingType);
 
