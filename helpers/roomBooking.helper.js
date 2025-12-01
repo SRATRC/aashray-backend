@@ -19,7 +19,6 @@ import {
 import {
   RoomBooking,
   RoomDb,
-  UtsavDb,
   FlatBooking,
   FlatDb
 } from '../models/associations.js';
@@ -27,7 +26,6 @@ import {
   createPendingTransaction,
   generateOrderId,
   updateRazorpayTransactions,
-  calculateUsableCredits,
   usableCredits
 } from './transactions.helper.js';
 import {
@@ -35,15 +33,14 @@ import {
   checkFlatAlreadyBooked,
   validateDate
 } from '../controllers/helper.js';
-import { v4 as uuidv4 } from 'uuid';
-import { validateCards } from './card.helper.js';
-import Sequelize from 'sequelize';
-import ApiError from '../utils/ApiError.js';
-// import { usableCredits } from './transactions.helper.js';
 import {
   findUtsavOnBoundaryDates,
   getDateRangesDuringUtsav
 } from './utsavBooking.helper.js';
+import { v4 as uuidv4 } from 'uuid';
+import { validateCards } from './card.helper.js';
+import Sequelize from 'sequelize';
+import ApiError from '../utils/ApiError.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -302,7 +299,6 @@ export async function bookRoomForMumukshus(
   user,
   utsav
 ) {
-
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
   );
@@ -322,21 +318,14 @@ export async function bookRoomForMumukshus(
   const updatedBy = user.cardno;
 
   for (const roomDetail of roomDetails) {
-    const {
-      mumukshu,
-      status,
-      range,
-      nights,
-      roomno,
-      roomType,
-      gender
-    } = roomDetail;
-    
+    const { mumukshu, status, range, nights, roomno, roomType, gender } =
+      roomDetail;
+
     const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
     const bookedBy = card.cardno == user.cardno ? null : user.cardno;
-    
+
     userBookingIds[card.cardno] = userBookingIds[card.cardno] || [];
-    
+
     if (nights == 0) {
       const result = await bookDayVisit(
         card.cardno,
@@ -374,7 +363,7 @@ export async function bookRoomForMumukshus(
         false,
         t
       );
-    
+
       amount += result.discountedAmount;
       userBookingIds[card.cardno].push(result.bookingId);
       assignedRooms.push(result.bookedRoomNo);
@@ -429,7 +418,7 @@ export async function createRoomBooking(
     gender,
     excludeRooms
   );
-  
+
   if (!roomno) {
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
@@ -617,6 +606,10 @@ export async function checkRoomAvailabilityForMumukshus(
     utsav
   );
 
+  // Create a temp user with cloned credits to track usage during this validation loop
+  // without mutating the original user object.
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   var roomDetails = [];
   const assignedRooms = [];
 
@@ -654,7 +647,7 @@ export async function checkRoomAvailabilityForMumukshus(
           if (roomno) {
             status = STATUS_AVAILABLE;
             charge = roomCharge(roomType) * nights;
-            availableCredits = calculateUsableCredits(user, TYPE_ROOM, charge);
+            availableCredits = usableCredits(tempUser, TYPE_ROOM, charge);
             assignedRoom = roomno.roomno;
             assignedRooms.push(roomno.roomno);
           }
@@ -712,6 +705,9 @@ export async function checkFlatAvailabilityForMumukshus(
     }
   });
 
+  // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const mumukshu of mumukshus) {
     const isFlatOwner = flatOwnerData.some(
       (item) => item.dataValues.owner == mumukshu
@@ -719,7 +715,7 @@ export async function checkFlatAvailabilityForMumukshus(
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
     const availableCredits =
-  charge > 0 ? calculateUsableCredits(user, TYPE_FLAT, charge) : 0;
+      charge > 0 ? usableCredits(tempUser, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       mumukshu: mumukshu,

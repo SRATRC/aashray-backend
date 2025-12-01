@@ -23,7 +23,11 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
-import { getBlockedDates, isDateRangeOverlapping, validateBlockedDates } from '../controllers/helper.js';
+import {
+  getBlockedDates,
+  isDateRangeOverlapping,
+  validateBlockedDates
+} from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
 const SAMVATSARI_PACKAGE_ID = 21;
@@ -38,7 +42,8 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 
   let total_amount = 0;
   let available_seats = utsav.available_seats;
-  let userBookingIds = {}, waitingBookingCount = 0;
+  let userBookingIds = {},
+    waitingBookingCount = 0;
 
   for (const mumukshu of mumukshus) {
     let bookings = [];
@@ -47,7 +52,8 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     const package_info = packages.find(
       (p) => p.id === Number(mumukshu.packageid)
     );
-    if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+    if (!package_info)
+      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
 
     // 🟢 NEW LOGIC
     let status;
@@ -58,7 +64,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       status = STATUS_PAYMENT_PENDING;
       available_seats--;
     } else {
-      status = STATUS_CONFIRMED;  // auto-confirm free packages
+      status = STATUS_CONFIRMED; // auto-confirm free packages
       available_seats--;
     }
 
@@ -108,7 +114,12 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
-export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUser) {
+export async function bookUtsavForMumukshusAdmin(
+  utsavid,
+  mumukshus,
+  t,
+  adminUser
+) {
   const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
@@ -117,14 +128,18 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
   await checkUtsavAlreadyBooked(utsavid, mumukshus);
 
   let total_amount = 0;
-  let userBookingIds = {}, waitingBookingCount = 0;
+  let userBookingIds = {},
+    waitingBookingCount = 0;
 
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
 
-    const package_info = packages.find(p => p.id === Number(mumukshu.packageid));
-    if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+    const package_info = packages.find(
+      (p) => p.id === Number(mumukshu.packageid)
+    );
+    if (!package_info)
+      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
 
     // ⭐ Create booking in WAITING status
     const booking = await UtsavBooking.create(
@@ -138,7 +153,7 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
         carno: mumukshu.carno,
         other: mumukshu.other,
         volunteer: mumukshu.volunteer,
-        status: STATUS_WAITING,    // ⭐ Changed
+        status: STATUS_WAITING, // ⭐ Changed
         updatedBy: adminUser.username || 'admin'
       },
       { transaction: t }
@@ -209,12 +224,12 @@ export async function checkOverlapWithSamvatsari(mumukshus) {
         status: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED, STATUS_WAITING],
         samvatsari_package_id: SAMVATSARI_PACKAGE_ID,
         samvatsari_overlapping_packages: SAMVATSARI_OVERLAPPING_PACKAGE_IDS,
-        packages_overlap_with_samvatsari:
-          mumukshu_packages.some((packageid) =>
-            SAMVATSARI_OVERLAPPING_PACKAGE_IDS.includes(packageid)
-          ),
-        packages_include_samvatsari:
-          mumukshu_packages.includes(SAMVATSARI_PACKAGE_ID)
+        packages_overlap_with_samvatsari: mumukshu_packages.some((packageid) =>
+          SAMVATSARI_OVERLAPPING_PACKAGE_IDS.includes(packageid)
+        ),
+        packages_include_samvatsari: mumukshu_packages.includes(
+          SAMVATSARI_PACKAGE_ID
+        )
       },
       type: Sequelize.QueryTypes.SELECT
     }
@@ -238,6 +253,9 @@ export async function validateUtsavs(user, utsavid, mumukshus) {
     where: { utsavid }
   });
 
+  // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const mumukshu of mumukshus) {
     const package_info = packages.find((p) => p.id === mumukshu.packageid);
     if (!package_info) {
@@ -251,7 +269,7 @@ export async function validateUtsavs(user, utsavid, mumukshus) {
     if (utsav.status === STATUS_OPEN) {
       status = STATUS_AVAILABLE;
       charge = package_info.amount;
-      availableCredits = usableCredits(user, TYPE_UTSAV, charge);
+      availableCredits = usableCredits(tempUser, TYPE_UTSAV, charge);
     }
 
     utsavDetails.push({
@@ -339,11 +357,7 @@ export function isUtsavOverlapping(utsav, startDate, endDate) {
 }
 
 export async function getUtsavBookingsByCardno(cardnos, startDate, endDate) {
-  const bookings = await getUtsavBookings(
-    cardnos,
-    startDate,
-    endDate
-  );
+  const bookings = await getUtsavBookings(cardnos, startDate, endDate);
 
   const grouped = bookings.reduce((acc, booking) => {
     acc[booking.cardno] = booking;
@@ -434,7 +448,7 @@ export async function getDateRangesDuringUtsav(
     startDate,
     endDate
   );
-  
+
   const existingUtsavBookings = inProgressUtsavOverlapping
     ? {}
     : await getUtsavBookingsByCardno(mumukshus, startDate, endDate);
@@ -443,10 +457,10 @@ export async function getDateRangesDuringUtsav(
 
   const dateRangesByMumukshu = {};
   for (const mumukshu of mumukshus) {
-    const utsavBooking = inProgressUtsavOverlapping 
+    const utsavBooking = inProgressUtsavOverlapping
       ? utsav
       : existingUtsavBookings[mumukshu]?.UtsavDb;
-    
+
     const dateRanges = [];
     if (utsavBooking) {
       dateRanges.push(
@@ -458,21 +472,22 @@ export async function getDateRangesDuringUtsav(
         )
       );
     } else {
-      // In case, utsav booking is not found for this mumukshu, check if there is any 
+      // In case, utsav booking is not found for this mumukshu, check if there is any
       // utsav starts on checkout or ends on checkin date
-      const utsavOnBoundary = await findUtsavOnBoundaryDates(startDate, endDate);
-      dateRanges.push(
-        {
-          start: startDate,
-          end: endDate,
-          overlappingWithUtsav: utsavOnBoundary ? true : false
-        }
-      )
+      const utsavOnBoundary = await findUtsavOnBoundaryDates(
+        startDate,
+        endDate
+      );
+      dateRanges.push({
+        start: startDate,
+        end: endDate,
+        overlappingWithUtsav: utsavOnBoundary ? true : false
+      });
     }
 
     // validate blockedDates
     validateBlockedDates(blockedDates, dateRanges);
-    
+
     dateRangesByMumukshu[mumukshu] = dateRanges;
   }
 
@@ -483,7 +498,9 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
   // Parallel database queries for better performance
   const [card, bookedByCard, utsavData] = await Promise.all([
     CardDb.findOne({ where: { cardno: booking.cardno } }),
-    booking.bookedBy ? CardDb.findOne({ where: { cardno: booking.bookedBy } }) : null,
+    booking.bookedBy
+      ? CardDb.findOne({ where: { cardno: booking.bookedBy } })
+      : null,
     utsav || UtsavDb.findOne({ where: { id: booking.utsavid } })
   ]);
 
@@ -495,7 +512,7 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
     email: card.email,
     cc: bookedByCard?.email,
     subject: 'Utsav Booking Updated',
-    template: 'utsavStatusUpdate',    
+    template: 'utsavStatusUpdate',
     context: {
       name: card.issuedto,
       bookingid: booking.bookingid,
@@ -509,11 +526,8 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
 
 export async function findUtsavOnBoundaryDates(checkin, checkout) {
   const utsav = await UtsavDb.findOne({
-    where: { 
-      [Sequelize.Op.or]: [
-        { end_date: checkin },
-        { start_date: checkout }
-      ]
+    where: {
+      [Sequelize.Op.or]: [{ end_date: checkin }, { start_date: checkout }]
     }
   });
 
