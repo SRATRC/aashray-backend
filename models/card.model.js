@@ -112,11 +112,16 @@ const CardDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue:
-       '$2b$10$0rv/aoTVqmqruYcStSJ31.hund78qaqGE8CylUak1248ymHC7r/xy'
+        '$2b$10$0rv/aoTVqmqruYcStSJ31.hund78qaqGE8CylUak1248ymHC7r/xy'
     },
     credits: {
       type: DataTypes.JSON,
       allowNull: true
+    },
+    showDevelopmentDashboard: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
     },
 
     username: {
