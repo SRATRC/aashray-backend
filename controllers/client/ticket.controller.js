@@ -107,6 +107,32 @@ export const addMessage = async (req, res) => {
   });
 };
 
+export const resolveTicket = async (req, res) => {
+  const { ticket_id } = req.params;
+  const { cardno } = req.user;
+
+  const ticket = await Ticket.findOne({
+    where: { id: ticket_id, issued_by: cardno }
+  });
+
+  if (!ticket) {
+    throw new ApiError(404, 'Ticket not found');
+  }
+
+  if (ticket.status === 'closed') {
+    throw new ApiError(400, 'Ticket is already closed');
+  }
+
+  await ticket.update({
+    status: 'closed',
+    updatedBy: cardno
+  });
+
+  res.status(200).send({
+    message: MSG_UPDATE_SUCCESSFUL
+  });
+};
+
 const generateTicketId = () => {
   return crypto.randomBytes(4).toString('hex').toUpperCase();
 };
