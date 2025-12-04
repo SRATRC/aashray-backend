@@ -59,6 +59,10 @@ export const adminAddMessage = async (req, res) => {
     throw new ApiError(404, 'Ticket not found');
   }
 
+  if (ticket.status === 'closed') {
+    throw new ApiError(400, 'Cannot reply to a closed ticket');
+  }
+
   const newMessage = await TicketMessage.create({
     ticket_id: id,
     sender_id: adminId, // Or admin name/email
@@ -66,8 +70,13 @@ export const adminAddMessage = async (req, res) => {
     message
   });
 
-  // Update ticket updatedBy
-  await ticket.update({ updatedBy: `Admin-${adminId}` });
+  // Update ticket updatedBy and status if needed
+  const updates = { updatedBy: `Admin-${adminId}` };
+  if (ticket.status === 'open') {
+    updates.status = 'in progress';
+  }
+
+  await ticket.update(updates);
 
   res.status(201).json({
     status: 'success',

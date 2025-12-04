@@ -67,14 +67,8 @@ export const getTicketDetails = async (req, res) => {
     throw new ApiError(404, 'Ticket not found');
   }
 
-  // const messages = await TicketMessage.findAll({
-  //   where: { ticket_id },
-  //   order: [['createdAt', 'ASC']]
-  // });
-
   res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
-    // data: { ...ticket.toJSON(), messages }
     data: ticket
   });
 };
@@ -95,12 +89,24 @@ export const addMessage = async (req, res) => {
     throw new ApiError(404, 'Ticket not found');
   }
 
+  if (ticket.status === 'closed') {
+    throw new ApiError(400, 'Cannot reply to a closed ticket');
+  }
+
   await TicketMessage.create({
     ticket_id,
     sender_id: cardno,
     sender_type: 'user',
     message
   });
+
+  // If ticket was resolved, move back to in progress since user is replying
+  const updates = { updatedBy: cardno };
+  if (ticket.status === 'resolved') {
+    updates.status = 'in progress';
+  }
+
+  await ticket.update(updates);
 
   res.status(201).send({
     message: MSG_UPDATE_SUCCESSFUL
