@@ -14,7 +14,8 @@ import {
   STATUS_APPROVED,
   STATUS_MUMUKSHU,
   STATUS_RESIDENT,
-  STATUS_RESET
+  STATUS_RESET,
+  STATUS_DELETED
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -196,7 +197,7 @@ export const fetchPermanentCodes = async (req, res) => {
   const permanentCodeRequest = await PermanentWifiCodes.findAll({
     where: {
       cardno: req.user.cardno,
-      status: { [Sequelize.Op.ne]: STATUS_RESET }
+      status: { [Sequelize.Op.notIn]: [STATUS_RESET, STATUS_DELETED] }
     },
     attributes: [
       'id',
@@ -265,5 +266,45 @@ export const resetPermanentCode = async (req, res) => {
   return res.status(200).send({
     message:
       'Your permanent WiFi code reset request has been submitted successfully'
+  });
+};
+
+export const deletePermanentCode = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const { id } = req.body;
+
+  if (!id) {
+    throw new APIError(400, 'Permanent WiFi code ID is required for deletion');
+  }
+
+  const existingCode = await PermanentWifiCodes.findOne({
+    where: {
+      id,
+      cardno: req.user.cardno
+    },
+    transaction: t
+  });
+
+  if (!existingCode) {
+    throw new APIError(404, 'WiFi code not found');
+  }
+
+  if (existingCode.status === STATUS_DELETED) {
+    throw new APIError(400, 'WiFi code is already deleted');
+  }
+
+  await existingCode.update(
+    {
+      status: STATUS_DELETED
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+
+  return res.status(200).send({
+    message: 'WiFi code deleted successfully'
   });
 };
