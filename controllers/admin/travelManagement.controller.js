@@ -465,34 +465,29 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
 
   case STATUS_ADMIN_CANCELLED:
   if (transaction) {
-    if (transaction.status === STATUS_CANCELLED) {
-      // user had cancelled, now admin upgrades it
-      if (issueCredits === 'yes') {
-        await cancelTransaction(req.user, bookedByCard, transaction, t, true);
-      } else {
-        await transaction.update(
-          {
-            status: STATUS_ADMIN_CANCELLED,
-            updatedBy: req.user.username,
-          },
-          { transaction: t }
-        );
-      }
-    } else {
-      // normal admin cancel flow
-      if (issueCredits === 'yes') {
-        await cancelTransaction(req.user, bookedByCard, transaction, t, true);
-      } else {
-        await transaction.update(
-          {
-            status: STATUS_ADMIN_CANCELLED,
-            updatedBy: req.user.username,
-          },
-          { transaction: t }
-        );
-      }
+
+    if (issueCredits === 'yes') {
+      // Always cancel + issue credits
+      await cancelTransaction(req.user, bookedByCard, transaction, t, true);
+      break;
     }
-    
+
+    // issueCredits = "no"
+    // ---- IMPORTANT FIX ----
+    // If transaction is already completed, DO NOT update it.
+    if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+      // leave transaction untouched
+      break;
+    }
+
+    // If transaction is pending or cash pending → mark admin cancelled
+    await transaction.update(
+      {
+        status: STATUS_ADMIN_CANCELLED,
+        updatedBy: req.user.username,
+      },
+      { transaction: t }
+    );
   }
   break;
 

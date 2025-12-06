@@ -34,7 +34,8 @@ import {
   ROOM_STATUS_CHECKEDIN,
   RESEARCH_CENTRE,
   STATUS_OPEN,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  ERR_BOOKING_ALREADY_CANCELLED
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
