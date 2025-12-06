@@ -4,7 +4,8 @@ import {
   STATUS_PENDING,
   STATUS_APPROVED,
   STATUS_REJECTED,
-  STATUS_RESET
+  STATUS_RESET,
+  STATUS_DELETED
 } from '../config/constants.js';
 
 const PermanentWifiCodes = sequelize.define('permanent_wifi_codes', {
@@ -30,7 +31,13 @@ const PermanentWifiCodes = sequelize.define('permanent_wifi_codes', {
   status: {
     type: DataTypes.ENUM,
     allowNull: false,
-    values: [STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_RESET],
+    values: [
+      STATUS_PENDING,
+      STATUS_APPROVED,
+      STATUS_REJECTED,
+      STATUS_RESET,
+      STATUS_DELETED
+    ],
     defaultValue: STATUS_PENDING
   },
   requested_at: {
