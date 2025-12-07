@@ -179,12 +179,12 @@ export const updatePermanentCodeRequest = async (req, res) => {
   req.transaction = t;
 
   const { requestId } = req.params;
-  const { action, permanent_code, admin_comments } = req.body;
+  const { action, permanent_code, admin_comments, ssid } = req.body;
 
   if (!action || ![STATUS_APPROVED, STATUS_REJECTED].includes(action)) {
     throw new ApiError(
       400,
-      'Invalid action. Must be either "approve" or "reject"'
+      'Invalid action. Must be either "approved" or "rejected"'
     );
   }
 
@@ -233,6 +233,7 @@ export const updatePermanentCodeRequest = async (req, res) => {
 
   if (action === STATUS_APPROVED) {
     updateData.code = permanent_code;
+    updateData.ssid = ssid || null;
   }
 
   await checkAlreadyrequested.update(updateData, { transaction: t });
@@ -244,31 +245,41 @@ export const updatePermanentCodeRequest = async (req, res) => {
   });
 };
 
-
 function formatDateForMySQL(date) {
   const pad = (n) => n.toString().padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-         `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+      date.getDate()
+    )} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+      date.getSeconds()
+    )}`
+  );
 }
 
 export const uploadPerWiFiCodes = async (req, res) => {
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+    const sheet = XLSX.utils.sheet_to_json(
+      workbook.Sheets[workbook.SheetNames[0]],
+      { defval: '' }
+    );
 
     const updates = sheet
-      .map(row => ({
+      .map((row) => ({
         cardno: row.cardno?.toString().trim(),
         code: row.code?.toString().trim()
       }))
-      .filter(row => row.cardno && row.code);
+      .filter((row) => row.cardno && row.code);
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No valid rows found.' });
     }
 
-    const cases = updates.map(u => `WHEN cardno = '${u.cardno}' THEN '${u.code}'`).join(' ');
-    const cardnos = updates.map(u => `'${u.cardno}'`).join(', ');
+    const cases = updates
+      .map((u) => `WHEN cardno = '${u.cardno}' THEN '${u.code}'`)
+      .join(' ');
+    const cardnos = updates.map((u) => `'${u.cardno}'`).join(', ');
 
     const now = formatDateForMySQL(new Date());
 
