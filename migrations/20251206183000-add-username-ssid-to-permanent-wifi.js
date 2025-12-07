@@ -6,7 +6,6 @@ module.exports = {
     await queryInterface.addColumn('permanent_wifi_codes', 'username', {
       type: Sequelize.STRING,
       allowNull: false,
-      unique: true,
       defaultValue: '', // Default for existing records to avoid errors
       comment: 'The username of the user for that device'
     });

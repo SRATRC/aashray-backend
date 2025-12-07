@@ -26,7 +26,6 @@ const PermanentWifiCodes = sequelize.define('permanent_wifi_codes', {
   username: {
     type: DataTypes.STRING,
     allowNull: false,
-    unique: true,
     comment: 'The username of the user for that device'
   },
   code: {
