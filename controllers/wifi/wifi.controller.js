@@ -148,12 +148,54 @@ export const requestPermanentCode = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  const { username, deviceType } = req.body;
+
+  if (!username || !deviceType) {
+    throw new APIError(400, 'Username and device type are required');
+  }
+
   if (![STATUS_MUMUKSHU, STATUS_RESIDENT].includes(req.user.res_status)) {
     throw new APIError(
       403,
       'You are not eligible to request a permanent WiFi code'
     );
   }
+
+  // Generate unique username
+  const sanitizedUsername = username.replace(/\s+/g, '').toLowerCase();
+  const baseUsername = `${sanitizedUsername}-${deviceType}`;
+
+  const similarUsernames = await PermanentWifiCodes.findAll({
+    attributes: ['username'],
+    where: {
+      username: {
+        [Sequelize.Op.like]: `${baseUsername}%`
+      }
+    },
+    transaction: t
+  });
+
+  let maxCounter = 0;
+  // If we found matches, calculate the next counter
+  if (similarUsernames.length > 0) {
+    similarUsernames.forEach((user) => {
+      const currentUsername = user.username;
+
+      // Exact match means counter is effectively 1
+      if (currentUsername === baseUsername) {
+        maxCounter = Math.max(maxCounter, 1);
+      } else {
+        // Check for numeric suffix
+        const suffix = currentUsername.substring(baseUsername.length);
+        if (/^\d+$/.test(suffix)) {
+          maxCounter = Math.max(maxCounter, parseInt(suffix, 10));
+        }
+      }
+    });
+  }
+
+  const uniqueUsername =
+    maxCounter === 0 ? baseUsername : `${baseUsername}${maxCounter + 1}`;
 
   // Check if user already has a pending or approved request
   const existingRequest = await PermanentWifiCodes.findOne({
@@ -179,6 +221,7 @@ export const requestPermanentCode = async (req, res) => {
   await PermanentWifiCodes.create(
     {
       cardno: req.user.cardno,
+      username: uniqueUsername.toLowerCase(),
       status: STATUS_PENDING,
       requested_at: new Date()
     },
@@ -201,7 +244,9 @@ export const fetchPermanentCodes = async (req, res) => {
     },
     attributes: [
       'id',
+      'username',
       'code',
+      'ssid',
       'status',
       'requested_at',
       'reviewed_at',
@@ -255,6 +300,7 @@ export const resetPermanentCode = async (req, res) => {
   await PermanentWifiCodes.create(
     {
       cardno: req.user.cardno,
+      username: existingCode.username,
       status: STATUS_PENDING,
       requested_at: new Date()
     },
