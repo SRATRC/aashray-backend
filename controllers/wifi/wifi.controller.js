@@ -221,7 +221,7 @@ export const requestPermanentCode = async (req, res) => {
   await PermanentWifiCodes.create(
     {
       cardno: req.user.cardno,
-      username: uniqueUsername,
+      username: uniqueUsername.toLowerCase(),
       status: STATUS_PENDING,
       requested_at: new Date()
     },
