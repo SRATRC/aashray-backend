@@ -15,7 +15,8 @@ import {
   STATUS_MUMUKSHU,
   STATUS_RESIDENT,
   STATUS_RESET,
-  STATUS_DELETED
+  STATUS_DELETED,
+  STATUS_GUEST
 } from '../../config/constants.js';
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -154,11 +155,28 @@ export const requestPermanentCode = async (req, res) => {
     throw new APIError(400, 'Username and device type are required');
   }
 
-  if (![STATUS_MUMUKSHU, STATUS_RESIDENT].includes(req.user.res_status)) {
-    throw new APIError(
-      403,
-      'You are not eligible to request a permanent WiFi code'
-    );
+  // Check if user already has a pending or approved request
+  const existingRequest = await PermanentWifiCodes.findOne({
+    where: {
+      cardno: req.user.cardno,
+      status: [STATUS_PENDING, STATUS_APPROVED]
+    },
+    transaction: t
+  });
+
+  if (
+    existingRequest &&
+    [STATUS_MUMUKSHU, STATUS_GUEST].includes(req.user.res_status)
+  ) {
+    let message = 'You have already requested a permanent WiFi code';
+    if (existingRequest.status === STATUS_APPROVED) {
+      message = 'You already have an approved permanent WiFi code';
+    } else if (existingRequest.status === STATUS_PENDING) {
+      message =
+        'You have a pending permanent WiFi code request. Please wait for admin approval.';
+    }
+
+    throw new APIError(400, message);
   }
 
   // Generate unique username
@@ -196,27 +214,6 @@ export const requestPermanentCode = async (req, res) => {
 
   const uniqueUsername =
     maxCounter === 0 ? baseUsername : `${baseUsername}${maxCounter + 1}`;
-
-  // Check if user already has a pending or approved request
-  const existingRequest = await PermanentWifiCodes.findOne({
-    where: {
-      cardno: req.user.cardno,
-      status: [STATUS_PENDING, STATUS_APPROVED]
-    },
-    transaction: t
-  });
-
-  if (existingRequest && req.user.res_status !== STATUS_RESIDENT) {
-    let message = 'You have already requested a permanent WiFi code';
-    if (existingRequest.status === STATUS_APPROVED) {
-      message = 'You already have an approved permanent WiFi code';
-    } else if (existingRequest.status === STATUS_PENDING) {
-      message =
-        'You have a pending permanent WiFi code request. Please wait for admin approval.';
-    }
-
-    throw new APIError(400, message);
-  }
 
   await PermanentWifiCodes.create(
     {
