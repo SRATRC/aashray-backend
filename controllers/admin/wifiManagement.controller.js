@@ -144,105 +144,140 @@ export const wifiRecord = async (req, res) => {
 };
 
 export const getPermanentCodeRequests = async (req, res) => {
-  const { status } = req.query;
+  try {
+    const { status } = req.query;
 
-  const whereClause = {};
-  if (
-    status &&
-    [STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED].includes(status)
-  ) {
-    whereClause.status = status;
-  }
+    const whereClause = {};
 
-  const rows = await PermanentWifiCodes.findAll({
-    where: whereClause,
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'email', 'mobno', 'res_status']
-      }
-    ],
-    order: [['requested_at', 'DESC']]
-  });
+    // Allow ALL statuses including new ones
+    const allowedStatuses = [
+      'pending',
+      'approved',
+      'deleted',
+      'reset',
+      'rejected'
+    ];
 
-  res.status(200).json({
-    message: 'Permanent WiFi code requests fetched successfully',
-    data: {
-      requests: rows,
-      total: rows.length // Optional: for frontend use
+    if (status && allowedStatuses.includes(status)) {
+      whereClause.status = status;
     }
-  });
+
+    const rows = await PermanentWifiCodes.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: CardDb,
+          attributes: ['cardno', 'issuedto', 'email', 'mobno', 'res_status']
+        }
+      ],
+      order: [['requested_at', 'DESC']]
+    });
+
+    res.status(200).json({
+      message: 'Permanent WiFi code requests fetched successfully',
+      data: {
+        requests: rows,
+        total: rows.length
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching permanent WiFi code requests:', error);
+    res.status(500).json({
+      message: error.message,
+      data: error.stack
+    });
+  }
 };
 
 export const updatePermanentCodeRequest = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { requestId } = req.params;
-  const { action, permanent_code, admin_comments, ssid } = req.body;
+  try {
+    const { requestId } = req.params;
+    const { action, permanent_code, admin_comments, ssid, username } = req.body;
 
-  if (!action || ![STATUS_APPROVED, STATUS_REJECTED].includes(action)) {
-    throw new ApiError(
-      400,
-      'Invalid action. Must be either "approved" or "rejected"'
-    );
-  }
+    if (!action || ![STATUS_APPROVED, STATUS_REJECTED].includes(action)) {
+      throw new ApiError(400, 'Invalid action. Must be either "approved" or "rejected"');
+    }
 
-  if (action === STATUS_APPROVED && !permanent_code) {
-    throw new ApiError(400, 'Permanent code is required for approval');
-  }
+    if (action === STATUS_APPROVED && !permanent_code) {
+      throw new ApiError(400, 'Permanent code is required for approval');
+    }
 
-  const checkAlreadyrequested = await PermanentWifiCodes.findByPk(requestId, {
-    transaction: t
-  });
-
-  if (!checkAlreadyrequested) {
-    throw new ApiError(404, 'Permanent code request not found');
-  }
-
-  if (checkAlreadyrequested.status == STATUS_APPROVED) {
-    throw new ApiError(
-      400,
-      `Request has already been ${checkAlreadyrequested.status}`
-    );
-  }
-
-  if (action === STATUS_APPROVED) {
-    const existingCode = await PermanentWifiCodes.findOne({
-      where: {
-        code: permanent_code,
-        status: STATUS_APPROVED
-      },
-      transaction: t
+    const checkAlreadyrequested = await PermanentWifiCodes.findByPk(requestId, {
+      transaction: t,
+      lock: t.LOCK.UPDATE
     });
 
-    if (existingCode) {
-      throw new ApiError(
-        400,
-        `This permanent code is already assigned to another user: ${existingCode.cardno}`
-      );
+    if (!checkAlreadyrequested) {
+      throw new ApiError(404, 'Permanent code request not found');
     }
+
+    if (checkAlreadyrequested.status == STATUS_APPROVED) {
+      throw new ApiError(400, `Request has already been ${checkAlreadyrequested.status}`);
+    }
+
+    if (action === STATUS_APPROVED) {
+      const existingCode = await PermanentWifiCodes.findOne({
+        where: {
+          code: permanent_code,
+          status: STATUS_APPROVED
+        },
+        transaction: t
+      });
+
+      if (existingCode) {
+        throw new ApiError(400, `This permanent code is already assigned to another user: ${existingCode.cardno}`);
+      }
+    }
+
+    const updateData = {
+      status: action,
+      reviewed_at: new Date(),
+      reviewed_by: req.user?.username,
+      admin_comments
+    };
+
+    // Only set code on approval
+    if (action === STATUS_APPROVED) {
+      updateData.code = permanent_code;
+    }
+
+    // Allow admin to update ssid and username if provided (can be null to clear)
+    if (typeof ssid !== 'undefined') {
+      // set null if empty string explicitly sent as null or empty
+      updateData.ssid = ssid === null ? null : ssid;
+    }
+    if (typeof username !== 'undefined') {
+      updateData.username = username === null ? null : username;
+    }
+
+    await checkAlreadyrequested.update(updateData, { transaction: t });
+
+    await t.commit();
+
+    // reload so returned instance has latest DB values (no transaction needed)
+    await checkAlreadyrequested.reload();
+
+    res.status(200).json({
+      message: `Permanent WiFi code request ${action} successfully`,
+      data: checkAlreadyrequested
+    });
+  } catch (error) {
+    // rollback and forward error
+    try {
+      await t.rollback();
+    } catch (rbErr) {
+      console.error('Rollback error:', rbErr);
+    }
+    console.error('Error updating permanent code request:', error);
+    // If ApiError throw standard json
+    if (error instanceof ApiError) {
+      return res.status(error.statusCode || 400).json({ message: error.message, data: null });
+    }
+    res.status(500).json({ message: error.message || 'Internal server error', data: null });
   }
-
-  const updateData = {
-    status: action,
-    reviewed_at: new Date(),
-    reviewed_by: req.user?.username,
-    admin_comments
-  };
-
-  if (action === STATUS_APPROVED) {
-    updateData.code = permanent_code;
-    updateData.ssid = ssid || null;
-  }
-
-  await checkAlreadyrequested.update(updateData, { transaction: t });
-  await t.commit();
-
-  res.status(200).json({
-    message: `Permanent WiFi code request ${action} successfully`,
-    data: checkAlreadyrequested
-  });
 };
 
 function formatDateForMySQL(date) {
@@ -265,31 +300,71 @@ export const uploadPerWiFiCodes = async (req, res) => {
       { defval: '' }
     );
 
+    // Keep rows that have cardno AND code (same behavior as before),
+    // but also read optional ssid and username columns.
     const updates = sheet
       .map((row) => ({
         cardno: row.cardno?.toString().trim(),
-        code: row.code?.toString().trim()
+        code: row.code?.toString().trim(),
+        ssid: row.ssid?.toString().trim(),
+        username: row.username?.toString().trim()
       }))
-      .filter((row) => row.cardno && row.code);
+      .filter((row) => row.cardno && row.code); // require both cardno and code
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No valid rows found.' });
     }
 
-    const cases = updates
-      .map((u) => `WHEN cardno = '${u.cardno}' THEN '${u.code}'`)
+    // helper to escape single quotes for SQL string literals
+    const esc = (s) => (s === null || typeof s === 'undefined' ? '' : s.replace(/'/g, "\\'"));
+
+    // Build CASE clauses for code, ssid and username
+    const codeCases = updates
+      .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.code)}'`)
       .join(' ');
-    const cardnos = updates.map((u) => `'${u.cardno}'`).join(', ');
+    const ssidCases = updates
+      .filter((u) => u.ssid) // only include ssid when provided
+      .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.ssid)}'`)
+      .join(' ');
+    const usernameCases = updates
+      .filter((u) => u.username) // only include username when provided
+      .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.username)}'`)
+      .join(' ');
+
+    const cardnos = updates.map((u) => `'${esc(u.cardno)}'`).join(', ');
 
     const now = formatDateForMySQL(new Date());
 
+    // Build SET parts conditionally
+    const setParts = [];
+
+    // code CASE is required (since we filtered for rows having code)
+    if (codeCases) {
+      setParts.push(`code = CASE ${codeCases} END`);
+      // if codes are being applied we want to mark approved (same as before)
+      setParts.push(`status = 'approved'`);
+      setParts.push(`reviewed_at = '${now}'`);
+      setParts.push(`reviewed_by = '${esc(req.user?.username || 'wifiAdmin')}'`);
+    }
+
+    // optional ssid
+    if (ssidCases) {
+      setParts.push(`ssid = CASE ${ssidCases} END`);
+    }
+
+    // optional username
+    if (usernameCases) {
+      setParts.push(`username = CASE ${usernameCases} END`);
+    }
+
+    // always update updatedAt
+    setParts.push(`updatedAt = '${now}'`);
+
+    const setClause = setParts.join(',\n          ');
+
     const query = `
       UPDATE permanent_wifi_codes
-      SET code = CASE ${cases} END,
-          status = 'approved',
-          updatedAt = '${now}',
-          reviewed_at = '${now}',
-          reviewed_by = '${req.user?.username || 'wifiAdmin'}'
+      SET ${setClause}
       WHERE cardno IN (${cardnos}) AND status = 'pending' AND code IS NULL
     `;
 
@@ -305,3 +380,4 @@ export const uploadPerWiFiCodes = async (req, res) => {
     });
   }
 };
+
