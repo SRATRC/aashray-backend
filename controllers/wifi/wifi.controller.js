@@ -267,13 +267,6 @@ export const resetPermanentCode = async (req, res) => {
     throw new APIError(400, 'Permanent WiFi code ID is required for reset');
   }
 
-  if (![STATUS_MUMUKSHU, STATUS_RESIDENT].includes(req.user.res_status)) {
-    throw new APIError(
-      403,
-      'You are not eligible to request a permanent WiFi code reset'
-    );
-  }
-
   const existingCode = await PermanentWifiCodes.findOne({
     where: {
       id,
