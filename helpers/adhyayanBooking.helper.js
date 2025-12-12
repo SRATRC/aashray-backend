@@ -20,7 +20,7 @@ import {
   AdhyayanFeedback,
   ShibirBookingDb,
   ShibirDb,
-  UtsavDb,
+  UtsavPackagesDb,
   CardDb
 } from '../models/associations.js';
 import sendMail from '../utils/sendMail.js';
@@ -69,18 +69,16 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
     return true;
   }
 
-  const utsav = await UtsavDb.findOne({
+  const utsavPackage = await UtsavPackagesDb.findOne({
     where: {
       [Sequelize.Op.or]: [
         { start_date: date },
-        { end_date: date },
-        Sequelize.literal(`DATE_ADD(start_date, INTERVAL -1 DAY) = '${date}'`),
-        Sequelize.literal(`DATE_ADD(end_date, INTERVAL 1 DAY) = '${date}'`)
+        { end_date: date }
       ]
     }
   });
 
-  if (utsav) {
+  if (utsavPackage) {
     return true;
   }
 
