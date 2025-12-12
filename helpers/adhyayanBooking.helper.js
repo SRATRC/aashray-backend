@@ -78,7 +78,7 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
     }
   });
 
-  if (utsav) {
+  if (utsavPackage) {
     return true;
   }
 
