@@ -26,6 +26,7 @@ import ApiError from '../utils/ApiError.js';
 import { getBlockedDates, isDateRangeOverlapping, validateBlockedDates } from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
+import { bookFoodForMumukshusDuringUtsav } from './foodBooking.helper.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
@@ -78,7 +79,16 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       },
       { transaction: t }
     );
-
+    
+    if(utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
+      await bookFoodForMumukshusDuringUtsav(
+        package_info.start_date,
+        package_info.end_date,
+        mumukshu.cardno,
+        t,
+        user.cardno
+      );
+    }  
     // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
@@ -93,6 +103,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
+
       total_amount += package_info.amount;
     }
 
@@ -144,6 +155,13 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
       { transaction: t }
     );
 
+    await bookFoodForMumukshusDuringUtsav(
+      package_info.start_date,
+      package_info.end_date,
+      mumukshu.cardno,
+      t,
+      user.cardno
+    );
     // Always create pending/cash transaction for admin
     const cardRecord = await CardDb.findOne({ where: { cardno: mumukshu.cardno } });
     if (!cardRecord) throw new ApiError(400, `Card not found for cardno ${mumukshu.cardno}`);

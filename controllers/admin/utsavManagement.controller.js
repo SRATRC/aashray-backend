@@ -567,6 +567,17 @@ export const utsavStatusUpdate = async (req, res) => {
           t,
           true
         );
+        let package_info = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
+        
+        if (package_info) {
+          await bookFoodForMumukshusDuringUtsav(
+            package_info.start_date,
+            package_info.end_date,
+            card.cardno,
+            t,
+            req.user.username
+          );
+        }
       } else {
         if (transaction.status === STATUS_CANCELLED) {
           await transaction.update(
