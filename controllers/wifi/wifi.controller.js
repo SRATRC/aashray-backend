@@ -57,7 +57,7 @@ export const generateTempCode = async (req, res) => {
     );
   }
 
-  await WifiDb.update(
+  const [updatedCount] = await WifiDb.update(
     {
       cardno: req.user.cardno,
       status: STATUS_INACTIVE,
@@ -70,6 +70,11 @@ export const generateTempCode = async (req, res) => {
       transaction: t
     }
   );
+  if (updatedCount === 0)
+    throw new APIError(
+      404,
+      'No available WiFi codes to assign. Please try again later.'
+    );
 
   const updatedRow = await WifiDb.findOne({
     attributes: ['password'],
@@ -156,6 +161,7 @@ export const requestPermanentCode = async (req, res) => {
 
   // Generate unique username
   const baseUsername = `${req.user.issuedto
+    .trim()
     .split(' ')[0]
     .toLowerCase()}${deviceType}`;
 
