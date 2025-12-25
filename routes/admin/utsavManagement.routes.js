@@ -22,7 +22,8 @@ import {
   updateRoomNo,
   fetchVolunteerOptions,
   fetchUtsavByLocation,
-  ReservationReport
+  ReservationReport,
+  issuePlate
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { createUtsavBookingByAdmin } from '../../controllers/admin/utsavManagement.controller.js';
 
@@ -41,6 +42,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ✅ Public router (NO auth required)
 const utsavPublicRouter = express.Router();
 utsavPublicRouter.post('/utsavCheckin', CatchAsync(utsavCheckin));
+utsavPublicRouter.post('/issue/:cardno', CatchAsync(issuePlate));
 
 // ✅ Admin router (Auth required)
 const utsavAdminRouter = express.Router();

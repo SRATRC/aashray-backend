@@ -1249,3 +1249,69 @@ export const ReservationReport = async (req, res) => {
     });
   }
 };
+
+export const issuePlate = async (req, res) => {
+  const currentTime = moment.utc();
+  const mealTimes = {
+    breakfast: moment.utc().hour(4).minute(30).second(0),
+    lunch: moment.utc().hour(8).minute(30).second(0),
+    dinner: moment.utc().hour(13).minute(30).second(0)
+  };
+
+  // Find booking for today
+  const booking = await FoodDb.findOne({
+    where: {
+      cardno: req.params.cardno,
+      date: currentTime.format('YYYY-MM-DD')
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  // 🔁 NEW: Fetch the card details to get the name
+  const card = await CardDb.findOne({ where: { cardno: req.params.cardno } });
+  if (!card) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  // Determine current meal
+  let currentMeal = req.body.meal;
+  if (!currentMeal) {
+    for (const meal of ['breakfast', 'lunch', 'dinner']) {
+      if (currentTime.isSameOrBefore(mealTimes[meal])) {
+        currentMeal = meal;
+        break;
+      }
+    }
+  } else if (!['breakfast', 'lunch', 'dinner'].includes(currentMeal)) {
+    throw new ApiError(400, 'Invalid meal type provided');
+  }
+
+  if (!currentMeal) {
+    throw new ApiError(400, ERR_INVALID_MEAL_TIME);
+  }
+
+  // Check if meal is booked
+  if (!booking[currentMeal]) {
+    throw new ApiError(400, `${currentMeal} not booked`);
+  }
+
+  // Check if plate already issued
+  const plateField = `${currentMeal}_plate_issued`;
+  if (booking[plateField]) {
+    throw new ApiError(400, `Plate for ${currentMeal} already issued`);
+  }
+
+  // ✅ Issue the plate
+  await booking.update({
+    [plateField]: true
+  });
+
+  // ✅ Send success with name
+  return res.status(200).send({
+    message: `Plate for ${currentMeal} issued successfully`,
+    issuedto: card.issuedto
+  });
+};
