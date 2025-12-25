@@ -24,6 +24,6 @@ router.get('/wifirecords', CatchAsync(wifiRecord));
 router.get('/permanent', CatchAsync(getPermanentCodeRequests));
 router.put('/permanent/:requestId', CatchAsync(updatePermanentCodeRequest));
 router.post('/uploadpercode', upload.single('file'), CatchAsync(uploadPerWiFiCodes));
-router.post('/manual', upload.single('file'), CatchAsync(addPermanentCodeManually));
+router.post('/manual', CatchAsync(addPermanentCodeManually));
 
 export default router;

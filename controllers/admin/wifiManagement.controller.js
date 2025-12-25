@@ -223,14 +223,12 @@ export const updatePermanentCodeRequest = async (req, res) => {
       lock: t.LOCK.UPDATE
     });
 
-    if (action === STATUS_DELETED && checkAlreadyrequested.status !== STATUS_APPROVED) {
-  throw new ApiError(400, 'Only approved requests can be deleted');
-}
-
     if (!checkAlreadyrequested) {
       throw new ApiError(404, 'Permanent code request not found');
     }
-
+    if (action === STATUS_DELETED && checkAlreadyrequested.status !== STATUS_APPROVED) {
+      throw new ApiError(400, 'Only approved requests can be deleted');
+    }
     // Prevent re-approving or re-rejecting an already approved request
 if (
   checkAlreadyrequested.status === STATUS_APPROVED &&
@@ -425,48 +423,55 @@ export const addPermanentCodeManually = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const {
-    mobno,
-    cardno,
-    issuedto,
-    res_status,
-    ssid,
-    deviceType,
-    username,
-    code
-  } = req.body;
-
-  if (!mobno || !cardno || !ssid || !code) {
-    throw new APIError(400, 'Required fields missing');
-  }
-
-  // verify card exists
-  const card = await CardDb.findOne({
-    where: { cardno, mobno },
-    transaction: t
-  });
-
-  if (!card) {
-    throw new APIError(404, 'Card not found');
-  }
-
-  await PermanentWifiCodes.create(
-    {
+  try {
+    const {
+      mobno,
       cardno,
-      username,
+      // issuedto,
+      // res_status,
       ssid,
       deviceType,
-      code,
-      status: STATUS_APPROVED,
-      reviewed_at: new Date(),
-      requested_by: req.user.cardno
-    },
-    { transaction: t }
-  );
+      username,
+      code
+    } = req.body;
 
-  await t.commit();
+    if (!mobno || !cardno || !ssid || !code) {
+      throw new ApiError(400, 'Required fields missing');
+    }
 
-  return res.status(201).json({
-    message: 'Permanent WiFi code added successfully'
-  });
+    // verify card exists
+    const card = await CardDb.findOne({
+      where: { cardno, mobno },
+      transaction: t
+    });
+
+    if (!card) {
+      throw new ApiError(404, 'Card not found');
+    }
+
+    await PermanentWifiCodes.create(
+      {
+        cardno,
+        username,
+        ssid,
+        deviceType,
+        code,
+        status: STATUS_APPROVED,
+        reviewed_at: new Date(),
+        // requested_by: req.user.cardno
+      },
+      { transaction: t }
+    );
+
+    await t.commit();
+
+    return res.status(201).json({
+      message: 'Permanent WiFi code added successfully'
+    });
+
+  } catch (err) {
+    // ✅ IMPORTANT: rollback on ANY failure
+    if (t) await t.rollback();
+    throw err; // let global error handler respond
+  }
 };
