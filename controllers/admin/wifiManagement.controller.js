@@ -9,7 +9,8 @@ import Sequelize from 'sequelize';
 import {
   STATUS_PENDING,
   STATUS_APPROVED,
-  STATUS_REJECTED
+  STATUS_REJECTED,
+  STATUS_DELETED
 } from '../../config/constants.js';
 import ApiError from '../../utils/ApiError.js';
 
@@ -143,13 +144,14 @@ export const wifiRecord = async (req, res) => {
   }
 };
 
+import { Op } from 'sequelize';
+
 export const getPermanentCodeRequests = async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, requestType } = req.query;
 
     const whereClause = {};
 
-    // Allow ALL statuses including new ones
     const allowedStatuses = [
       'pending',
       'approved',
@@ -158,8 +160,20 @@ export const getPermanentCodeRequests = async (req, res) => {
       'rejected'
     ];
 
+    // Normal status filter
     if (status && allowedStatuses.includes(status)) {
       whereClause.status = status;
+    }
+
+    // Admin-only differentiation
+    if (requestType === 'pending-new') {
+      whereClause.status = 'pending';
+      whereClause.code = null;
+    }
+
+    if (requestType === 'pending-reset') {
+      whereClause.status = 'pending';
+      whereClause.code = { [Op.not]: null };
     }
 
     const rows = await PermanentWifiCodes.findAll({
@@ -183,8 +197,7 @@ export const getPermanentCodeRequests = async (req, res) => {
   } catch (error) {
     console.error('Error fetching permanent WiFi code requests:', error);
     res.status(500).json({
-      message: error.message,
-      data: error.stack
+      message: error.message
     });
   }
 };
@@ -197,28 +210,46 @@ export const updatePermanentCodeRequest = async (req, res) => {
     const { requestId } = req.params;
     const { action, permanent_code, admin_comments, ssid, username } = req.body;
 
-    if (!action || ![STATUS_APPROVED, STATUS_REJECTED].includes(action)) {
-      throw new ApiError(400, 'Invalid action. Must be either "approved" or "rejected"');
-    }
+    if (!action || ![STATUS_APPROVED, STATUS_REJECTED, STATUS_DELETED].includes(action)) {
+  throw new ApiError(
+    400,
+    'Invalid action. Must be "approved", "rejected" or "deleted"'
+  );
+}
 
-    if (action === STATUS_APPROVED && !permanent_code) {
-      throw new ApiError(400, 'Permanent code is required for approval');
-    }
-
+    // 🔹 FIRST: fetch record
     const checkAlreadyrequested = await PermanentWifiCodes.findByPk(requestId, {
       transaction: t,
       lock: t.LOCK.UPDATE
     });
 
+    if (action === STATUS_DELETED && checkAlreadyrequested.status !== STATUS_APPROVED) {
+  throw new ApiError(400, 'Only approved requests can be deleted');
+}
+
     if (!checkAlreadyrequested) {
       throw new ApiError(404, 'Permanent code request not found');
     }
 
-    if (checkAlreadyrequested.status == STATUS_APPROVED) {
-      throw new ApiError(400, `Request has already been ${checkAlreadyrequested.status}`);
+    // Prevent re-approving or re-rejecting an already approved request
+if (
+  checkAlreadyrequested.status === STATUS_APPROVED &&
+  action !== STATUS_DELETED
+) {
+  throw new ApiError(400, `Request has already been approved`);
+}
+
+    // 🔹 SECOND: validation based on existing DB state
+    if (
+      action === STATUS_APPROVED &&
+      checkAlreadyrequested.code == null && // pending-new
+      !permanent_code
+    ) {
+      throw new ApiError(400, 'Permanent code is required for approval');
     }
 
-    if (action === STATUS_APPROVED) {
+    // 🔹 THIRD: duplicate code check (only for new)
+    if (action === STATUS_APPROVED && permanent_code) {
       const existingCode = await PermanentWifiCodes.findOne({
         where: {
           code: permanent_code,
@@ -228,10 +259,14 @@ export const updatePermanentCodeRequest = async (req, res) => {
       });
 
       if (existingCode) {
-        throw new ApiError(400, `This permanent code is already assigned to another user: ${existingCode.cardno}`);
+        throw new ApiError(
+          400,
+          `This permanent code is already assigned to another user: ${existingCode.cardno}`
+        );
       }
     }
 
+    // 🔹 FOURTH: prepare update payload
     const updateData = {
       status: action,
       reviewed_at: new Date(),
@@ -239,16 +274,15 @@ export const updatePermanentCodeRequest = async (req, res) => {
       admin_comments
     };
 
-    // Only set code on approval
-    if (action === STATUS_APPROVED) {
+    // Assign code ONLY for pending-new approval
+    if (action === STATUS_APPROVED && checkAlreadyrequested.code == null) {
       updateData.code = permanent_code;
     }
 
-    // Allow admin to update ssid and username if provided (can be null to clear)
     if (typeof ssid !== 'undefined') {
-      // set null if empty string explicitly sent as null or empty
       updateData.ssid = ssid === null ? null : ssid;
     }
+
     if (typeof username !== 'undefined') {
       updateData.username = username === null ? null : username;
     }
@@ -257,7 +291,6 @@ export const updatePermanentCodeRequest = async (req, res) => {
 
     await t.commit();
 
-    // reload so returned instance has latest DB values (no transaction needed)
     await checkAlreadyrequested.reload();
 
     res.status(200).json({
@@ -265,18 +298,24 @@ export const updatePermanentCodeRequest = async (req, res) => {
       data: checkAlreadyrequested
     });
   } catch (error) {
-    // rollback and forward error
     try {
       await t.rollback();
     } catch (rbErr) {
       console.error('Rollback error:', rbErr);
     }
+
     console.error('Error updating permanent code request:', error);
-    // If ApiError throw standard json
+
     if (error instanceof ApiError) {
-      return res.status(error.statusCode || 400).json({ message: error.message, data: null });
+      return res
+        .status(error.statusCode || 400)
+        .json({ message: error.message, data: null });
     }
-    res.status(500).json({ message: error.message || 'Internal server error', data: null });
+
+    res.status(500).json({
+      message: error.message || 'Internal server error',
+      data: null
+    });
   }
 };
 
@@ -381,3 +420,53 @@ export const uploadPerWiFiCodes = async (req, res) => {
   }
 };
 
+
+export const addPermanentCodeManually = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const {
+    mobno,
+    cardno,
+    issuedto,
+    res_status,
+    ssid,
+    deviceType,
+    username,
+    code
+  } = req.body;
+
+  if (!mobno || !cardno || !ssid || !code) {
+    throw new APIError(400, 'Required fields missing');
+  }
+
+  // verify card exists
+  const card = await CardDb.findOne({
+    where: { cardno, mobno },
+    transaction: t
+  });
+
+  if (!card) {
+    throw new APIError(404, 'Card not found');
+  }
+
+  await PermanentWifiCodes.create(
+    {
+      cardno,
+      username,
+      ssid,
+      deviceType,
+      code,
+      status: STATUS_APPROVED,
+      reviewed_at: new Date(),
+      requested_by: req.user.cardno
+    },
+    { transaction: t }
+  );
+
+  await t.commit();
+
+  return res.status(201).json({
+    message: 'Permanent WiFi code added successfully'
+  });
+};

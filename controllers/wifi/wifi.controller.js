@@ -291,6 +291,7 @@ export const resetPermanentCode = async (req, res) => {
     {
       cardno: req.user.cardno,
       username: existingCode.username,
+      code: existingCode.code,
       status: STATUS_PENDING,
       requested_at: new Date()
     },
