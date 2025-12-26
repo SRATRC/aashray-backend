@@ -28,11 +28,16 @@ import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 
 export const issuePlate = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
   const { message, issuedto } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
-    req.user.username
+    t
   );
+
+  await t.commit();
   return res.status(200).send({ message, issuedto });
 };
 

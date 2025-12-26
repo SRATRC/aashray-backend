@@ -1,6 +1,7 @@
 import {
   BREAKFAST_PRICE,
   DINNER_PRICE,
+  ERR_BOOKING_NOT_FOUND,
   ERR_INVALID_MEAL_TIME,
   ERR_ROOM_MUST_BE_BOOKED,
   LUNCH_PRICE,
@@ -539,7 +540,7 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   return t;
 }
 
-export async function issueFoodPlate(cardno, meal, updatedBy) {
+export async function issueFoodPlate(cardno, meal, t) {
   const currentTime = moment.utc();
   const mealTimes = {
     breakfast: moment.utc().hour(4).minute(30).second(0),
@@ -551,7 +552,8 @@ export async function issueFoodPlate(cardno, meal, updatedBy) {
     where: {
       cardno: cardno,
       date: currentTime.format('YYYY-MM-DD')
-    }
+    },
+    transaction: t
   });
 
   if (!booking) {

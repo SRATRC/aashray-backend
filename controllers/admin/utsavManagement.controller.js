@@ -1314,10 +1314,14 @@ export const ReservationReport = async (req, res) => {
 };
 
 export const issuePlate = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
   const { message, issuedto } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
-    req.user.username
+    t
   );
+
+  await t.commit();
   return res.status(200).send({ message, issuedto });
 };
