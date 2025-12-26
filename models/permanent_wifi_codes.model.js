@@ -23,10 +23,20 @@ const PermanentWifiCodes = sequelize.define('permanent_wifi_codes', {
       key: 'cardno'
     }
   },
+  username: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    comment: 'The username of the user for that device'
+  },
   code: {
     type: DataTypes.STRING,
     allowNull: true,
     comment: 'The actual permanent WiFi code assigned by admin'
+  },
+  ssid: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'The SSID of the WiFi network'
   },
   status: {
     type: DataTypes.ENUM,
