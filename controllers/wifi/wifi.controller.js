@@ -171,18 +171,39 @@ export const requestPermanentCode = async (req, res) => {
   const deviceSuffix =
     DEVICE_SUFFIX_MAP[deviceType.toLowerCase()] || 'ot';
 
-  // Extract first name & last name
-  const nameParts = req.user.issuedto.trim().split(/\s+/);
-  const firstName = nameParts[0].toLowerCase();
+  // Prefixes to ignore as first name
+  const IGNORE_FIRST_NAMES = [
+    'rcof',
+    'rchk',
+    'cons',
+    'chak',
+    'divi',
+    'paon'
+  ];
+
+  // Normalize and split name
+  const rawNameParts = req.user.issuedto
+    .trim()
+    .toLowerCase()
+    .split(/\s+/);
+
+  // Remove ignored prefixes from the start
+  while (
+    rawNameParts.length > 1 &&
+    IGNORE_FIRST_NAMES.includes(rawNameParts[0])
+  ) {
+    rawNameParts.shift();
+  }
+
+  const firstName = rawNameParts[0];
   const lastName =
-    nameParts.length > 1
-      ? nameParts[nameParts.length - 1].toLowerCase()
+    rawNameParts.length > 1
+      ? rawNameParts[rawNameParts.length - 1]
       : '';
 
   // Last 4 digits of card number (keeps leading zeros)
   const cardLast4 = req.user.cardno.slice(-4);
 
-  // Base username format:
   // <first><last><cardLast4><deviceSuffix>
   const baseUsername = `${firstName}${lastName}${cardLast4}${deviceSuffix}`;
 
