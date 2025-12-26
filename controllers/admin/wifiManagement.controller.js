@@ -172,7 +172,7 @@ export const getPermanentCodeRequests = async (req, res) => {
     }
 
     if (requestType === 'pending-reset') {
-      whereClause.status = 'pending';
+      whereClause.status = 'reset';
       whereClause.code = { [Op.not]: null };
     }
 
@@ -329,6 +329,95 @@ function formatDateForMySQL(date) {
   );
 }
 
+// export const uploadPerWiFiCodes = async (req, res) => {
+//   try {
+//     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+//     const sheet = XLSX.utils.sheet_to_json(
+//       workbook.Sheets[workbook.SheetNames[0]],
+//       { defval: '' }
+//     );
+
+//     // Keep rows that have cardno AND code (same behavior as before),
+//     // but also read optional ssid and username columns.
+//     const updates = sheet
+//       .map((row) => ({
+//         cardno: row.cardno?.toString().trim(),
+//         code: row.code?.toString().trim(),
+//         ssid: row.ssid?.toString().trim(),
+//         username: row.username?.toString().trim()
+//       }))
+//       .filter((row) => row.cardno && row.code); // require both cardno and code
+
+//     if (updates.length === 0) {
+//       return res.status(400).json({ error: 'No valid rows found.' });
+//     }
+
+//     // helper to escape single quotes for SQL string literals
+//     const esc = (s) => (s === null || typeof s === 'undefined' ? '' : s.replace(/'/g, "\\'"));
+
+//     // Build CASE clauses for code, ssid and username
+//     const codeCases = updates
+//       .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.code)}'`)
+//       .join(' ');
+//     const ssidCases = updates
+//       .filter((u) => u.ssid) // only include ssid when provided
+//       .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.ssid)}'`)
+//       .join(' ');
+//     const usernameCases = updates
+//       .filter((u) => u.username) // only include username when provided
+//       .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.username)}'`)
+//       .join(' ');
+
+//     const cardnos = updates.map((u) => `'${esc(u.cardno)}'`).join(', ');
+
+//     const now = formatDateForMySQL(new Date());
+
+//     // Build SET parts conditionally
+//     const setParts = [];
+
+//     // code CASE is required (since we filtered for rows having code)
+//     if (codeCases) {
+//       setParts.push(`code = CASE ${codeCases} END`);
+//       // if codes are being applied we want to mark approved (same as before)
+//       setParts.push(`status = 'approved'`);
+//       setParts.push(`reviewed_at = '${now}'`);
+//       setParts.push(`reviewed_by = '${esc(req.user?.username || 'wifiAdmin')}'`);
+//     }
+
+//     // optional ssid
+//     if (ssidCases) {
+//       setParts.push(`ssid = CASE ${ssidCases} END`);
+//     }
+
+//     // optional username
+//     if (usernameCases) {
+//       setParts.push(`username = CASE ${usernameCases} END`);
+//     }
+
+//     // always update updatedAt
+//     setParts.push(`updatedAt = '${now}'`);
+
+//     const setClause = setParts.join(',\n          ');
+
+//     const query = `
+//       UPDATE permanent_wifi_codes
+//       SET ${setClause}
+//       WHERE cardno IN (${cardnos}) AND status = 'pending' AND code IS NULL
+//     `;
+
+//     await PermanentWifiCodes.sequelize.query(query);
+
+//     res.status(200).json({
+//       message: `${updates.length} record(s) processed.`
+//     });
+//   } catch (err) {
+//     console.error('Error processing Excel upload:', err);
+//     res.status(500).json({
+//       error: 'Failed to process and update Excel data: ' + err.message
+//     });
+//   }
+// };
+
 export const uploadPerWiFiCodes = async (req, res) => {
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -337,84 +426,76 @@ export const uploadPerWiFiCodes = async (req, res) => {
       { defval: '' }
     );
 
-    // Keep rows that have cardno AND code (same behavior as before),
-    // but also read optional ssid and username columns.
     const updates = sheet
-      .map((row) => ({
-        cardno: row.cardno?.toString().trim(),
+      .map(row => ({
+        id: Number(row.id),
         code: row.code?.toString().trim(),
-        ssid: row.ssid?.toString().trim(),
-        username: row.username?.toString().trim()
+        ssid: row.ssid?.toString().trim() || null,
+        username: row.username?.toString().trim() || null
       }))
-      .filter((row) => row.cardno && row.code); // require both cardno and code
+      .filter(r => r.id && r.code);
 
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'No valid rows found.' });
+    if (!updates.length) {
+      return res.status(400).json({ error: 'No valid rows found' });
     }
 
-    // helper to escape single quotes for SQL string literals
-    const esc = (s) => (s === null || typeof s === 'undefined' ? '' : s.replace(/'/g, "\\'"));
+    const esc = v => v?.replace(/'/g, "\\'");
 
-    // Build CASE clauses for code, ssid and username
     const codeCases = updates
-      .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.code)}'`)
+      .map(u => `WHEN id = ${u.id} THEN '${esc(u.code)}'`)
       .join(' ');
+
     const ssidCases = updates
-      .filter((u) => u.ssid) // only include ssid when provided
-      .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.ssid)}'`)
+      .filter(u => u.ssid)
+      .map(u => `WHEN id = ${u.id} THEN '${esc(u.ssid)}'`)
       .join(' ');
+
     const usernameCases = updates
-      .filter((u) => u.username) // only include username when provided
-      .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.username)}'`)
+      .filter(u => u.username)
+      .map(u => `WHEN id = ${u.id} THEN '${esc(u.username)}'`)
       .join(' ');
 
-    const cardnos = updates.map((u) => `'${esc(u.cardno)}'`).join(', ');
-
+    const ids = updates.map(u => u.id).join(', ');
     const now = formatDateForMySQL(new Date());
-
-    // Build SET parts conditionally
-    const setParts = [];
-
-    // code CASE is required (since we filtered for rows having code)
-    if (codeCases) {
-      setParts.push(`code = CASE ${codeCases} END`);
-      // if codes are being applied we want to mark approved (same as before)
-      setParts.push(`status = 'approved'`);
-      setParts.push(`reviewed_at = '${now}'`);
-      setParts.push(`reviewed_by = '${esc(req.user?.username || 'wifiAdmin')}'`);
-    }
-
-    // optional ssid
-    if (ssidCases) {
-      setParts.push(`ssid = CASE ${ssidCases} END`);
-    }
-
-    // optional username
-    if (usernameCases) {
-      setParts.push(`username = CASE ${usernameCases} END`);
-    }
-
-    // always update updatedAt
-    setParts.push(`updatedAt = '${now}'`);
-
-    const setClause = setParts.join(',\n          ');
+    const reviewer = esc(req.user?.username || 'admin');
 
     const query = `
       UPDATE permanent_wifi_codes
-      SET ${setClause}
-      WHERE cardno IN (${cardnos}) AND status = 'pending' AND code IS NULL
+      SET
+        code = CASE
+          ${codeCases}
+          ELSE code
+        END,
+
+        ssid = CASE
+          ${ssidCases || 'WHEN 1=0 THEN ssid'}
+          ELSE ssid
+        END,
+
+        username = CASE
+          ${usernameCases || 'WHEN 1=0 THEN username'}
+          ELSE username
+        END,
+
+        status = CASE
+          ${codeCases.replace(/THEN\s+'.*?'/g, "THEN 'approved'")}
+          ELSE status
+        END,
+
+        reviewed_by = '${reviewer}',
+        reviewed_at = '${now}',
+        updatedAt = '${now}'
+
+      WHERE id IN (${ids});
     `;
 
     await PermanentWifiCodes.sequelize.query(query);
 
-    res.status(200).json({
-      message: `${updates.length} record(s) processed.`
-    });
+    res.json({ message: `${updates.length} request(s) updated successfully` });
+
   } catch (err) {
-    console.error('Error processing Excel upload:', err);
-    res.status(500).json({
-      error: 'Failed to process and update Excel data: ' + err.message
-    });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 };
 
