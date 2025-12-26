@@ -1,3 +1,351 @@
+// import {
+//   FlatBooking,
+//   RoomBooking,
+//   WifiDb,
+//   PermanentWifiCodes,
+//   UtsavBooking,
+//   UtsavPackagesDb
+// } from '../../models/associations.js';
+// import {
+//   ROOM_STATUS_CHECKEDIN,
+//   STATUS_ACTIVE,
+//   STATUS_INACTIVE,
+//   STATUS_PENDING,
+//   STATUS_APPROVED,
+//   STATUS_MUMUKSHU,
+//   STATUS_RESIDENT,
+//   STATUS_RESET,
+//   STATUS_DELETED,
+//   STATUS_GUEST
+// } from '../../config/constants.js';
+// import APIError from '../../utils/ApiError.js';
+// import Sequelize from 'sequelize';
+// import database from '../../config/database.js';
+// import moment from 'moment';
+
+// const MAX_WIFI_PASS_LIMIT = 3;
+
+// export const generatePassword = async (req, res) => {
+//   const t = await database.transaction();
+//   req.transaction = t;
+
+//   const booking = await fetchBookings(req.user.cardno);
+//   if (!booking) {
+//     throw new APIError(404, 'user not checked in yet.');
+//   }
+
+//   const count = await WifiDb.count({
+//     where: {
+//       cardno: req.user.cardno,
+//       status: STATUS_INACTIVE,
+//       roombookingid: booking?.bookingid
+//     }
+//   });
+//   if (count < MAX_WIFI_PASS_LIMIT) {
+//     const roombookingid = booking?.bookingid;
+
+//     const [updatedRows, updatedRowsCount] = await WifiDb.update(
+//       {
+//         status: STATUS_INACTIVE,
+//         roombookingid,
+//         cardno: req.user.cardno
+//       },
+//       {
+//         where: { status: STATUS_ACTIVE },
+//         order: [['pwd_id', 'ASC']],
+//         limit: 1,
+//         returning: true,
+//         transaction: t
+//       }
+//     );
+
+//     if (updatedRowsCount === 0) {
+//       throw new APIError(404, 'Error updating the status');
+//     }
+
+//     const updatedRow = await WifiDb.findOne({
+//       attributes: ['password'],
+//       where: {
+//         status: STATUS_INACTIVE,
+//         roombookingid,
+//         cardno: req.user.cardno
+//       },
+//       order: [['updatedAt', 'DESC']],
+//       transaction: t
+//     });
+
+//     await t.commit();
+
+//     return res.status(200).send({
+//       data: updatedRow?.password,
+//       message: 'Your wifi password has been generated'
+//     });
+//   } else {
+//     throw new APIError(
+//       400,
+//       `Cannot generate more than ${MAX_WIFI_PASS_LIMIT} passwords`
+//     );
+//   }
+// };
+
+// export const getPassword = async (req, res) => {
+//   const booking = await fetchBookings(req.user.cardno);
+//   if (!booking) {
+//     return res.status(200).send({
+//       message: 'No active bookings found',
+//       data: []
+//     });
+//   }
+
+//   const passwords = await WifiDb.findAll({
+//     attributes: ['password', 'createdAt'],
+//     where: {
+//       cardno: req.user.cardno,
+//       roombookingid: booking?.bookingid
+//     },
+//     order: [['createdAt', 'ASC']]
+//   });
+//   return res.status(200).send({ message: 'Wifi Passwords', data: passwords });
+// };
+
+// const fetchBookings = async (cardno) => {
+//   const today = moment().format('YYYY-MM-DD');
+//   const commonWhereClause = {
+//     cardno,
+//     checkout: { [Sequelize.Op.gte]: today },
+//     status: ROOM_STATUS_CHECKEDIN
+//   };
+
+//   const [isRoomCheckedin, isFlatCheckedin, isUtsavCheckedin] =
+//     await Promise.all([
+//       RoomBooking.findOne({ where: commonWhereClause }),
+//       FlatBooking.findOne({ where: commonWhereClause }),
+//       UtsavBooking.findOne({
+//         include: [
+//           {
+//             model: UtsavPackagesDb,
+//             attributes: ['start_date', 'end_date'],
+//             where: {
+//               end_date: { [Sequelize.Op.gte]: today }
+//             },
+//             required: true
+//           }
+//         ],
+//         where: {
+//           cardno: cardno,
+//           status: ROOM_STATUS_CHECKEDIN
+//         }
+//       })
+//     ]);
+
+//   if (!isRoomCheckedin && !isFlatCheckedin && !isUtsavCheckedin) {
+//     return null;
+//   }
+
+//   return isRoomCheckedin || isFlatCheckedin || isUtsavCheckedin;
+// };
+
+// export const requestPermanentCode = async (req, res) => {
+//   const t = await database.transaction();
+//   req.transaction = t;
+
+//   const { username, deviceType } = req.body;
+
+//   if (!username || !deviceType) {
+//     throw new APIError(400, 'Username and device type are required');
+//   }
+
+//   // Check if user already has a pending or approved request
+//   const existingRequest = await PermanentWifiCodes.findOne({
+//     where: {
+//       cardno: req.user.cardno,
+//       status: [STATUS_PENDING, STATUS_APPROVED]
+//     },
+//     transaction: t
+//   });
+
+//   if (
+//     existingRequest &&
+//     [STATUS_MUMUKSHU, STATUS_GUEST].includes(req.user.res_status)
+//   ) {
+//     let message = 'You have already requested a permanent WiFi code';
+//     if (existingRequest.status === STATUS_APPROVED) {
+//       message = 'You already have an approved permanent WiFi code';
+//     } else if (existingRequest.status === STATUS_PENDING) {
+//       message =
+//         'You have a pending permanent WiFi code request. Please wait for admin approval.';
+//     }
+
+//     throw new APIError(400, message);
+//   }
+
+//   // Generate unique username
+//   const sanitizedUsername = username.replace(/\s+/g, '').toLowerCase();
+//   const baseUsername = `${sanitizedUsername}-${deviceType}`;
+
+//   const similarUsernames = await PermanentWifiCodes.findAll({
+//     attributes: ['username'],
+//     where: {
+//       username: {
+//         [Sequelize.Op.like]: `${baseUsername}%`
+//       }
+//     },
+//     transaction: t
+//   });
+
+//   let maxCounter = 0;
+//   // If we found matches, calculate the next counter
+//   if (similarUsernames.length > 0) {
+//     similarUsernames.forEach((user) => {
+//       const currentUsername = user.username;
+
+//       // Exact match means counter is effectively 1
+//       if (currentUsername === baseUsername) {
+//         maxCounter = Math.max(maxCounter, 1);
+//       } else {
+//         // Check for numeric suffix
+//         const suffix = currentUsername.substring(baseUsername.length);
+//         if (/^\d+$/.test(suffix)) {
+//           maxCounter = Math.max(maxCounter, parseInt(suffix, 10));
+//         }
+//       }
+//     });
+//   }
+
+//   const uniqueUsername =
+//     maxCounter === 0 ? baseUsername : `${baseUsername}${maxCounter + 1}`;
+
+//   await PermanentWifiCodes.create(
+//     {
+//       cardno: req.user.cardno,
+//       username: uniqueUsername.toLowerCase(),
+//       status: STATUS_PENDING,
+//       requested_at: new Date()
+//     },
+//     { transaction: t }
+//   );
+
+//   await t.commit();
+
+//   return res.status(201).send({
+//     message:
+//       'Permanent WiFi code request submitted successfully. It will be reviewed by the admin.'
+//   });
+// };
+
+// export const fetchPermanentCodes = async (req, res) => {
+//   const permanentCodeRequest = await PermanentWifiCodes.findAll({
+//     where: {
+//       cardno: req.user.cardno,
+//       status: { [Sequelize.Op.notIn]: [STATUS_RESET, STATUS_DELETED] }
+//     },
+//     attributes: [
+//       'id',
+//       'username',
+//       'code',
+//       'ssid',
+//       'status',
+//       'requested_at',
+//       'reviewed_at',
+//       'admin_comments'
+//     ]
+//   });
+
+//   return res.status(200).send({
+//     message: 'Permanent WiFi code status',
+//     data: permanentCodeRequest
+//   });
+// };
+
+// export const resetPermanentCode = async (req, res) => {
+//   const t = await database.transaction();
+//   req.transaction = t;
+
+//   const { id } = req.body;
+
+//   if (!id) {
+//     throw new APIError(400, 'Permanent WiFi code ID is required for reset');
+//   }
+
+//   const existingCode = await PermanentWifiCodes.findOne({
+//     where: {
+//       id,
+//       cardno: req.user.cardno,
+//       status: STATUS_APPROVED
+//     },
+//     transaction: t
+//   });
+
+//   if (!existingCode) {
+//     throw new APIError(404, 'No approved permanent WiFi code found to reset');
+//   }
+
+//   await existingCode.update(
+//     {
+//       status: STATUS_RESET
+//     },
+//     { transaction: t }
+//   );
+
+//   await PermanentWifiCodes.create(
+//     {
+//       cardno: req.user.cardno,
+//       username: existingCode.username,
+//       code: existingCode.code,
+//       status: STATUS_PENDING,
+//       requested_at: new Date()
+//     },
+//     { transaction: t }
+//   );
+
+//   await t.commit();
+
+//   return res.status(200).send({
+//     message:
+//       'Your permanent WiFi code reset request has been submitted successfully'
+//   });
+// };
+
+// export const deletePermanentCode = async (req, res) => {
+//   const t = await database.transaction();
+//   req.transaction = t;
+
+//   const { id } = req.body;
+
+//   if (!id) {
+//     throw new APIError(400, 'Permanent WiFi code ID is required for deletion');
+//   }
+
+//   const existingCode = await PermanentWifiCodes.findOne({
+//     where: {
+//       id,
+//       cardno: req.user.cardno
+//     },
+//     transaction: t
+//   });
+
+//   if (!existingCode) {
+//     throw new APIError(404, 'WiFi code not found');
+//   }
+
+//   if (existingCode.status === STATUS_DELETED) {
+//     throw new APIError(400, 'WiFi code is already deleted');
+//   }
+
+//   await existingCode.update(
+//     {
+//       status: STATUS_DELETED
+//     },
+//     { transaction: t }
+//   );
+
+//   await t.commit();
+
+//   return res.status(200).send({
+//     message: 'WiFi code deleted successfully'
+//   });
+// };
+
 import {
   FlatBooking,
   RoomBooking,
@@ -13,7 +361,6 @@ import {
   STATUS_PENDING,
   STATUS_APPROVED,
   STATUS_MUMUKSHU,
-  STATUS_RESIDENT,
   STATUS_RESET,
   STATUS_DELETED,
   STATUS_GUEST
@@ -25,70 +372,87 @@ import moment from 'moment';
 
 const MAX_WIFI_PASS_LIMIT = 3;
 
-export const generatePassword = async (req, res) => {
+export const generateTempCode = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
+
+  if (
+    !validateResStatus(req.user.res_status, [STATUS_MUMUKSHU, STATUS_GUEST])
+  ) {
+    throw new APIError(
+      403,
+      'You are not eligible to generate a temporary WiFi code'
+    );
+  }
 
   const booking = await fetchBookings(req.user.cardno);
   if (!booking) {
     throw new APIError(404, 'user not checked in yet.');
   }
+  const roombookingid = booking?.bookingid;
 
   const count = await WifiDb.count({
     where: {
       cardno: req.user.cardno,
       status: STATUS_INACTIVE,
-      roombookingid: booking?.bookingid
+      roombookingid
     }
   });
-  if (count < MAX_WIFI_PASS_LIMIT) {
-    const roombookingid = booking?.bookingid;
-
-    const [updatedRows, updatedRowsCount] = await WifiDb.update(
-      {
-        status: STATUS_INACTIVE,
-        roombookingid,
-        cardno: req.user.cardno
-      },
-      {
-        where: { status: STATUS_ACTIVE },
-        order: [['pwd_id', 'ASC']],
-        limit: 1,
-        returning: true,
-        transaction: t
-      }
-    );
-
-    if (updatedRowsCount === 0) {
-      throw new APIError(404, 'Error updating the status');
-    }
-
-    const updatedRow = await WifiDb.findOne({
-      attributes: ['password'],
-      where: {
-        status: STATUS_INACTIVE,
-        roombookingid,
-        cardno: req.user.cardno
-      },
-      order: [['updatedAt', 'DESC']],
-      transaction: t
-    });
-
-    await t.commit();
-
-    return res.status(200).send({
-      data: updatedRow?.password,
-      message: 'Your wifi password has been generated'
-    });
-  } else {
+  if (count >= MAX_WIFI_PASS_LIMIT) {
     throw new APIError(
       400,
       `Cannot generate more than ${MAX_WIFI_PASS_LIMIT} passwords`
     );
   }
+
+  const [updatedCount] = await WifiDb.update(
+    {
+      cardno: req.user.cardno,
+      status: STATUS_INACTIVE,
+      roombookingid
+    },
+    {
+      where: { status: STATUS_ACTIVE },
+      order: [['pwd_id', 'ASC']],
+      limit: 1,
+      transaction: t
+    }
+  );
+  if (updatedCount === 0)
+    throw new APIError(
+      404,
+      'No available WiFi codes to assign. Please try again later.'
+    );
+
+  const updatedRow = await WifiDb.findOne({
+    attributes: ['password'],
+    where: {
+      cardno: req.user.cardno,
+      status: STATUS_INACTIVE,
+      roombookingid
+    },
+    order: [['updatedAt', 'DESC']],
+    transaction: t
+  });
+
+  await t.commit();
+
+  return res.status(200).send({
+    data: updatedRow?.password,
+    message: 'Your wifi password has been generated'
+  });
 };
 
-export const getPassword = async (req, res) => {
+export const fetchTempCodes = async (req, res) => {
+  if (
+    !validateResStatus(req.user.res_status, [STATUS_MUMUKSHU, STATUS_GUEST])
+  ) {
+    return res.status(200).send({
+      message: 'You are not eligible to fetch temporary WiFi codes',
+      data: []
+    });
+  }
+
   const booking = await fetchBookings(req.user.cardno);
   if (!booking) {
     return res.status(200).send({
@@ -108,80 +472,46 @@ export const getPassword = async (req, res) => {
   return res.status(200).send({ message: 'Wifi Passwords', data: passwords });
 };
 
-const fetchBookings = async (cardno) => {
-  const today = moment().format('YYYY-MM-DD');
-  const commonWhereClause = {
-    cardno,
-    checkout: { [Sequelize.Op.gte]: today },
-    status: ROOM_STATUS_CHECKEDIN
-  };
-
-  const [isRoomCheckedin, isFlatCheckedin, isUtsavCheckedin] =
-    await Promise.all([
-      RoomBooking.findOne({ where: commonWhereClause }),
-      FlatBooking.findOne({ where: commonWhereClause }),
-      UtsavBooking.findOne({
-        include: [
-          {
-            model: UtsavPackagesDb,
-            attributes: ['start_date', 'end_date'],
-            where: {
-              end_date: { [Sequelize.Op.gte]: today }
-            },
-            required: true
-          }
-        ],
-        where: {
-          cardno: cardno,
-          status: ROOM_STATUS_CHECKEDIN
-        }
-      })
-    ]);
-
-  if (!isRoomCheckedin && !isFlatCheckedin && !isUtsavCheckedin) {
-    return null;
-  }
-
-  return isRoomCheckedin || isFlatCheckedin || isUtsavCheckedin;
-};
-
 export const requestPermanentCode = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { username, deviceType } = req.body;
+  const { deviceType } = req.body;
 
-  if (!username || !deviceType) {
-    throw new APIError(400, 'Username and device type are required');
+  if (!deviceType) {
+    throw new APIError(400, 'Device type is required');
   }
 
-  // Check if user already has a pending or approved request
-  const existingRequest = await PermanentWifiCodes.findOne({
-    where: {
-      cardno: req.user.cardno,
-      status: [STATUS_PENDING, STATUS_APPROVED]
-    },
-    transaction: t
-  });
+  // Check if "Mumukshu" or "Guest" already has a pending or approved request
+  if (validateResStatus(req.user.res_status, [STATUS_MUMUKSHU, STATUS_GUEST])) {
+    const existingRequest = await PermanentWifiCodes.findOne({
+      where: {
+        cardno: req.user.cardno,
+        status: [STATUS_PENDING, STATUS_APPROVED]
+      },
+      transaction: t
+    });
 
-  if (
-    existingRequest &&
-    [STATUS_MUMUKSHU, STATUS_GUEST].includes(req.user.res_status)
-  ) {
-    let message = 'You have already requested a permanent WiFi code';
-    if (existingRequest.status === STATUS_APPROVED) {
-      message = 'You already have an approved permanent WiFi code';
-    } else if (existingRequest.status === STATUS_PENDING) {
-      message =
-        'You have a pending permanent WiFi code request. Please wait for admin approval.';
+    if (existingRequest) {
+      const WIFI_STATUS_MESSAGES = {
+        [STATUS_APPROVED]: 'You already have an approved permanent WiFi code',
+        [STATUS_PENDING]:
+          'You have a pending permanent WiFi code request. Please wait for admin approval.'
+      };
+
+      const message =
+        WIFI_STATUS_MESSAGES[existingRequest.status] ||
+        'You have already requested a permanent WiFi code';
+
+      throw new APIError(400, message);
     }
-
-    throw new APIError(400, message);
   }
 
   // Generate unique username
-  const sanitizedUsername = username.replace(/\s+/g, '').toLowerCase();
-  const baseUsername = `${sanitizedUsername}-${deviceType}`;
+  const baseUsername = `${req.user.issuedto
+    .trim()
+    .split(' ')[0]
+    .toLowerCase()}${deviceType}`;
 
   const similarUsernames = await PermanentWifiCodes.findAll({
     attributes: ['username'],
@@ -237,7 +567,7 @@ export const fetchPermanentCodes = async (req, res) => {
   const permanentCodeRequest = await PermanentWifiCodes.findAll({
     where: {
       cardno: req.user.cardno,
-      status: { [Sequelize.Op.notIn]: [STATUS_RESET, STATUS_DELETED] }
+      status: { [Sequelize.Op.notIn]: [STATUS_DELETED] }
     },
     attributes: [
       'id',
@@ -264,7 +594,7 @@ export const resetPermanentCode = async (req, res) => {
   const { id } = req.body;
 
   if (!id) {
-    throw new APIError(400, 'Permanent WiFi code ID is required for reset');
+    throw new APIError(400, 'WiFi code ID is required for reset');
   }
 
   const existingCode = await PermanentWifiCodes.findOne({
@@ -277,23 +607,12 @@ export const resetPermanentCode = async (req, res) => {
   });
 
   if (!existingCode) {
-    throw new APIError(404, 'No approved permanent WiFi code found to reset');
+    throw new APIError(404, 'No approved WiFi code found to reset');
   }
 
   await existingCode.update(
     {
       status: STATUS_RESET
-    },
-    { transaction: t }
-  );
-
-  await PermanentWifiCodes.create(
-    {
-      cardno: req.user.cardno,
-      username: existingCode.username,
-      code: existingCode.code,
-      status: STATUS_PENDING,
-      requested_at: new Date()
     },
     { transaction: t }
   );
@@ -306,42 +625,47 @@ export const resetPermanentCode = async (req, res) => {
   });
 };
 
-export const deletePermanentCode = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
+const fetchBookings = async (cardno) => {
+  const today = moment().format('YYYY-MM-DD');
+  const commonWhereClause = {
+    cardno,
+    checkout: { [Sequelize.Op.gte]: today },
+    status: ROOM_STATUS_CHECKEDIN
+  };
 
-  const { id } = req.body;
+  const [isRoomCheckedin, isFlatCheckedin, isUtsavCheckedin] =
+    await Promise.all([
+      RoomBooking.findOne({ where: commonWhereClause }),
+      FlatBooking.findOne({ where: commonWhereClause }),
+      UtsavBooking.findOne({
+        include: [
+          {
+            model: UtsavPackagesDb,
+            attributes: ['start_date', 'end_date'],
+            where: {
+              end_date: { [Sequelize.Op.gte]: today }
+            },
+            required: true
+          }
+        ],
+        where: {
+          cardno: cardno,
+          status: ROOM_STATUS_CHECKEDIN
+        }
+      })
+    ]);
 
-  if (!id) {
-    throw new APIError(400, 'Permanent WiFi code ID is required for deletion');
+  if (!isRoomCheckedin && !isFlatCheckedin && !isUtsavCheckedin) {
+    return null;
   }
 
-  const existingCode = await PermanentWifiCodes.findOne({
-    where: {
-      id,
-      cardno: req.user.cardno
-    },
-    transaction: t
-  });
+  return isRoomCheckedin || isFlatCheckedin || isUtsavCheckedin;
+};
 
-  if (!existingCode) {
-    throw new APIError(404, 'WiFi code not found');
+const validateResStatus = (resStatus, validStatuses) => {
+  if (!validStatuses.includes(resStatus)) {
+    return false;
   }
 
-  if (existingCode.status === STATUS_DELETED) {
-    throw new APIError(400, 'WiFi code is already deleted');
-  }
-
-  await existingCode.update(
-    {
-      status: STATUS_DELETED
-    },
-    { transaction: t }
-  );
-
-  await t.commit();
-
-  return res.status(200).send({
-    message: 'WiFi code deleted successfully'
-  });
+  return true;
 };
