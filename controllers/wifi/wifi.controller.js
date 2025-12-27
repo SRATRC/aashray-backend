@@ -178,13 +178,15 @@ export const requestPermanentCode = async (req, res) => {
     'cons',
     'chak',
     'divi',
-    'paon'
+    'paon',
+    'guest'
   ];
 
   // Normalize and split name
   const rawNameParts = req.user.issuedto
     .trim()
     .toLowerCase()
+    .replace(/^guest-/, '')
     .split(/\s+/);
 
   // Remove ignored prefixes from the start
