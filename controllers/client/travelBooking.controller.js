@@ -1,4 +1,4 @@
-import { TravelDb } from '../../models/associations.js';
+import { TravelDb, UtsavDb } from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
@@ -9,7 +9,10 @@ import {
   ERR_BOOKING_NOT_FOUND
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
+import {
+  updateWaitingTravelBooking,
+  sendTravelBookingStatusUpdateMail
+} from '../../helpers/travelBooking.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
@@ -88,7 +91,7 @@ export const CancelTravel = async (req, res) => {
   await userCancelBooking(req.user, booking, t);
   // bring people from the waiting to awaiting confirmation.
   if (bookingStatus != STATUS_WAITING) {
-    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking,t);
+    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking, t);
   }
   await t.commit();
 
@@ -133,4 +136,26 @@ export const CancelTravel = async (req, res) => {
     sendTravelBookingStatusUpdateMail(bookingWhichCameOutOfWaiting);
   }
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
+};
+
+export const checkEventsOnTravelDate = async (req, res) => {
+  const today = moment().format('YYYY-MM-DD');
+
+  const utsavs = await UtsavDb.findAll({
+    where: {
+      end_date: {
+        [Op.gte]: today
+      },
+      location: {
+        [Op.eq]: 'Research Centre'
+      }
+    }
+  });
+
+  return res.status(200).send({
+    message: 'fetched results',
+    data: {
+      utsav: utsavs.length > 0
+    }
+  });
 };
