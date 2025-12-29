@@ -6,7 +6,8 @@ import {
   RAJ_PRAVAS_EMAIL,
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_AWAITING_CONFIRMATION,
-  ERR_BOOKING_NOT_FOUND
+  ERR_BOOKING_NOT_FOUND,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
@@ -144,11 +145,9 @@ export const checkEventsOnTravelDate = async (req, res) => {
   const utsavs = await UtsavDb.findAll({
     where: {
       end_date: {
-        [Op.gte]: today
+        [Sequelize.Op.gte]: today
       },
-      location: {
-        [Op.eq]: 'Research Centre'
-      }
+      location: RESEARCH_CENTRE
     }
   });
 
