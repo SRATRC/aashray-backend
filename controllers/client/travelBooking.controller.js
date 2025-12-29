@@ -153,8 +153,6 @@ export const checkEventsOnTravelDate = async (req, res) => {
 
   return res.status(200).send({
     message: 'fetched results',
-    data: {
-      utsav: utsavs.length > 0
-    }
+    data: utsavs
   });
 };
