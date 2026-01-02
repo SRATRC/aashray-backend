@@ -10,13 +10,14 @@ export const login = async (req, res) => {
   const admin = await AdminUsers.findOne({
     where: { username: username }
   });
-  if (admin.dataValues.status === STATUS_INACTIVE)
-    throw new ApiError(401, 'Account Deactivated');
 
   if (!admin) {
     throw new ApiError(404, 'Invalid Username');
   }
-  
+
+  if (admin.dataValues.status === STATUS_INACTIVE)
+    throw new ApiError(401, 'Account Deactivated');
+
   const roles = await AdminRoles.findAll({
     attributes: ['role_name'],
     where: { user_id: admin.dataValues.id, status: STATUS_ACTIVE }
@@ -80,21 +81,23 @@ export const createAdmin = async (req, res) => {
   return res.status(201).send({ message: 'successfully created admin' });
 };
 
-
-
 export const resetPassword = async (req, res) => {
   const { username, newPassword } = req.body;
 
-    if (!username || !newPassword) {
-    return res.status(400).json({ message: 'Username and new password are required' });
+  if (!username || !newPassword) {
+    return res
+      .status(400)
+      .json({ message: 'Username and new password are required' });
   }
 
   if (newPassword.length < 8) {
-    return res.status(400).json({ message: 'Password must be at least 8 characters long' });
+    return res
+      .status(400)
+      .json({ message: 'Password must be at least 8 characters long' });
   }
 
   try {
-        const user = await AdminUsers.findOne({ where: { username } });
+    const user = await AdminUsers.findOne({ where: { username } });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }

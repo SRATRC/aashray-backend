@@ -48,7 +48,6 @@ export const getTicketDetails = async (req, res) => {
 export const adminAddMessage = async (req, res) => {
   const { id } = req.params;
   const { message } = req.body;
-  const { id: adminId } = req.user; // Assuming admin ID is in req.user
 
   if (!message) {
     throw new ApiError(400, 'Message is required');
@@ -60,18 +59,18 @@ export const adminAddMessage = async (req, res) => {
   }
 
   if (ticket.status === 'closed') {
-    throw new ApiError(400, 'Cannot reply to a closed ticket');
+    throw new ApiError(400, 'ticket is closed');
   }
 
   const newMessage = await TicketMessage.create({
     ticket_id: id,
-    sender_id: adminId, // Or admin name/email
+    sender_id: req.user.username,
     sender_type: 'admin',
     message
   });
 
   // Update ticket updatedBy and status if needed
-  const updates = { updatedBy: `Admin-${adminId}` };
+  const updates = { updatedBy: req.user.username };
   if (ticket.status === 'open') {
     updates.status = 'in progress';
   }
@@ -87,19 +86,14 @@ export const adminAddMessage = async (req, res) => {
 
 export const updateTicketStatus = async (req, res) => {
   const { id } = req.params;
-  const { status, admin_comments } = req.body;
-  const { id: adminId } = req.user;
+  const { status } = req.body;
 
   const ticket = await Ticket.findByPk(id);
   if (!ticket) {
     throw new ApiError(404, 'Ticket not found');
   }
 
-  const updates = { updatedBy: `Admin-${adminId}` };
-  if (status) updates.status = status;
-  if (admin_comments) updates.admin_comments = admin_comments;
-
-  await ticket.update(updates);
+  await ticket.update({ status, updatedBy: req.user.username });
 
   res.status(200).json({
     status: 'success',

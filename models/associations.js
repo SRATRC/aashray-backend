@@ -182,12 +182,6 @@ CardDb.hasMany(Ticket, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
-CardDb.hasMany(TicketMessage, {
-  foreignKey: 'sender_id',
-  sourceKey: 'cardno',
-  onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
-});
 
 // Transactions
 Transactions.belongsTo(CardDb, {
@@ -491,10 +485,6 @@ Ticket.hasMany(TicketMessage, {
 TicketMessage.belongsTo(Ticket, {
   foreignKey: 'ticket_id',
   targetKey: 'id'
-});
-TicketMessage.belongsTo(CardDb, {
-  foreignKey: 'sender_id',
-  targetKey: 'cardno'
 });
 
 export {
