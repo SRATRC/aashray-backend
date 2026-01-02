@@ -6,21 +6,51 @@ import {
   MSG_UPDATE_SUCCESSFUL
 } from '../../config/constants.js';
 
+// export const getAllTickets = async (req, res) => {
+//   const { status, service } = req.query;
+//   const where = {};
+
+//   if (status) where.status = status;
+//   if (service) where.service = service;
+
+//   const tickets = await Ticket.findAll({
+//     where,
+//     order: [['createdAt', 'DESC']]
+//   });
+
+//   res.status(200).json({
+//     status: 'success',
+//     message: MSG_FETCH_SUCCESSFUL,
+//     data: tickets
+//   });
+// };
+import { Sequelize } from 'sequelize';
+
 export const getAllTickets = async (req, res) => {
   const { status, service } = req.query;
   const where = {};
-
   if (status) where.status = status;
   if (service) where.service = service;
 
   const tickets = await Ticket.findAll({
     where,
+    attributes: {
+      include: [
+        [
+          Sequelize.literal(`(
+            SELECT MAX(createdAt)
+            FROM ticket_messages
+            WHERE ticket_messages.ticket_id = Ticket.id
+          )`),
+          'last_message_at'
+        ]
+      ]
+    },
     order: [['createdAt', 'DESC']]
   });
 
   res.status(200).json({
     status: 'success',
-    message: MSG_FETCH_SUCCESSFUL,
     data: tickets
   });
 };

@@ -54,6 +54,10 @@ import ticketManagementRoutes from './routes/admin/ticketManagement.routes.js';
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
 
+import http from 'http';
+import { initSocket } from './config/socket.js';
+const app = express();
+
 // Ensure logs directory exists
 const logsDir = path.join(process.cwd(), 'logs');
 if (!fs.existsSync(logsDir)) {
@@ -100,7 +104,7 @@ const corsOptions = {
   optionSuccessStatus: 200
 };
 
-const app = express();
+
 app.use(urlencoded({ extended: true }));
 app.use(json());
 app.use(cors(corsOptions));
@@ -207,9 +211,14 @@ app.use(ErrorHandler);
 
 if (process.env.NODE_ENV != 'test') {
   const port = process.env.PORT || 3000;
-  const server = app.listen(port, () => {
-    logger.info(`Server is listening on port ${port}...`);
-  });
+  const server = http.createServer(app);
+
+// 🔌 attach socket.io to the SAME server
+initSocket(server);
+
+server.listen(port, () => {
+  logger.info(`Server is listening on port ${port}...`);
+});
 
   // Graceful shutdown handling
   const gracefulShutdown = async (signal) => {

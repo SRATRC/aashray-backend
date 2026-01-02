@@ -36,6 +36,7 @@
     "nodemailer-express-handlebars": "^6.1.2",
     "razorpay": "^2.9.5",
     "sequelize": "^6.37.7",
+    "socket.io": "^4.8.3",
     "uuid": "^9.0.1",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
