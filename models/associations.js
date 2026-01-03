@@ -521,6 +521,8 @@ export {
   RazorpayWebhook,
   RazorpaySettlement,
   SupportTickets,
+  Ticket,
+  TicketMessage,
   BlockDates,
   Updates,
   AdhyayanFeedback,
