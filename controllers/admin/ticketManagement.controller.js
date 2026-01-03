@@ -1,10 +1,13 @@
-import Ticket from '../../models/ticket.model.js';
-import TicketMessage from '../../models/ticket_message.model.js';
-import ApiError from '../../utils/ApiError.js';
+import { Ticket, TicketMessage } from '../../models/associations.js';
+import { Sequelize } from 'sequelize';
 import {
   MSG_FETCH_SUCCESSFUL,
-  MSG_UPDATE_SUCCESSFUL
+  MSG_UPDATE_SUCCESSFUL,
+  STATUS_INPROGRESS,
+  STATUS_OPEN
 } from '../../config/constants.js';
+import ticketStreamManager from '../../utils/ticketStreamManager.js';
+import ApiError from '../../utils/ApiError.js';
 
 // export const getAllTickets = async (req, res) => {
 //   const { status, service } = req.query;
@@ -24,7 +27,6 @@ import {
 //     data: tickets
 //   });
 // };
-import { Sequelize } from 'sequelize';
 
 export const getAllTickets = async (req, res) => {
   const { status, service } = req.query;
@@ -75,6 +77,32 @@ export const getTicketDetails = async (req, res) => {
   });
 };
 
+export const streamTicketMessages = async (req, res) => {
+  const { id } = req.params;
+
+  const ticket = await Ticket.findByPk(id);
+  if (!ticket) {
+    throw new ApiError(404, 'Ticket not found');
+  }
+
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  // Add admin to manager
+  ticketStreamManager.addClient(id, res, 'admin');
+
+  // Initial connection message
+  res.write(
+    `data: ${JSON.stringify({
+      type: 'connected',
+      user: req.user.username
+    })}\n\n`
+  );
+};
+
 export const adminAddMessage = async (req, res) => {
   const { id } = req.params;
   const { message } = req.body;
@@ -99,10 +127,12 @@ export const adminAddMessage = async (req, res) => {
     message
   });
 
+  ticketStreamManager.broadcastMessage(id, newMessage);
+
   // Update ticket updatedBy and status if needed
   const updates = { updatedBy: req.user.username };
-  if (ticket.status === 'open') {
-    updates.status = 'in progress';
+  if (ticket.status === STATUS_OPEN) {
+    updates.status = STATUS_INPROGRESS;
   }
 
   await ticket.update(updates);

@@ -3,7 +3,8 @@ import {
   getAllTickets,
   getTicketDetails,
   adminAddMessage,
-  updateTicketStatus
+  updateTicketStatus,
+  streamTicketMessages
 } from '../../controllers/admin/ticketManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import {
@@ -18,6 +19,7 @@ router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_MAINTENANCE_ADMIN));
 
 router.get('/', CatchAsync(getAllTickets));
+router.get('/:id/stream', CatchAsync(streamTicketMessages));
 router.get('/:id', CatchAsync(getTicketDetails));
 router.post('/:id/messages', CatchAsync(adminAddMessage));
 router.patch('/:id/status', CatchAsync(updateTicketStatus));
