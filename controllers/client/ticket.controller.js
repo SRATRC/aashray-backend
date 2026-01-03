@@ -1,7 +1,10 @@
 import Ticket from '../../models/ticket.model.js';
 import TicketMessage from '../../models/ticket_message.model.js';
 import ApiError from '../../utils/ApiError.js';
-import { MSG_UPDATE_SUCCESSFUL } from '../../config/constants.js';
+import {
+  MSG_UPDATE_SUCCESSFUL,
+  MSG_FETCH_SUCCESSFUL
+} from '../../config/constants.js';
 import crypto from 'crypto';
 import ticketStreamManager from '../../utils/ticketStreamManager.js';
 
