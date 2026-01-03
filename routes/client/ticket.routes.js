@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   createTicket,
+  getTickets,
   getTicketDetails,
   addMessage,
   resolveTicket,

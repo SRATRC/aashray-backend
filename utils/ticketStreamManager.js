@@ -36,7 +36,11 @@ class TicketStreamManager {
       const clients = this.clients.get(ticketId);
       const data = `data: ${JSON.stringify(message)}\n\n`;
       clients.forEach((client) => {
-        client.write(data);
+        try {
+          client.write(data);
+        } catch (e) {
+          this.removeClient(ticketId, client);
+        }
       });
     }
   }
