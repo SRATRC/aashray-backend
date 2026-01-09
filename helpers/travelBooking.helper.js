@@ -54,19 +54,6 @@ export async function checkTravelAlreadyBooked(
   }
 }
 
-async function getTravelBookingStatus(type, date, travelBookingCount) {
-  //if regular travel and more than 5 bookings for the date, then waiting.
-  // But if it is a gyan sabha or utsav, then return awaiting confirmation.
-  if (type!= null && type.toLowerCase() == TRAVEL_TYPE_REGULAR.toLowerCase() 
-    && travelBookingCount > 4) {
-    if (!await checkAdhyayanParamGyanSabhaOrUtsav(date)){
-      return STATUS_WAITING;
-    }
-  }
-
-  return STATUS_AWAITING_CONFIRMATION;
-}
-
 export async function updateWaitingTravelBooking(booking, t) {
   const { date, drop_point, pickup_point } = booking;
 
@@ -147,8 +134,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
   if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
-  let userBookingIds = {},
-    waitingBookingCount = 0;
+  let userBookingIds = {};
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
   await validateCards(mumukshus);
 
@@ -181,8 +167,6 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     }
   }
 
-  let travelBookingCountFromRC = bookingsGoingFromRC.length;
-  let travelBookingCountToRC = bookingGoingToRC.length;
   var bookingsToCreate = [],
     bookingId;
   for (const group of mumukshuGroup) {
@@ -200,21 +184,8 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
 
     for (const mumukshu of mumukshus) {
       bookingId = uuidv4();
-    
-      const travelBookingCount = drop_point === RESEARCH_CENTRE 
-        ? travelBookingCountToRC 
-        : pickup_point === RESEARCH_CENTRE 
-          ? travelBookingCountFromRC 
-          : 0;
+      const travelbookingStatus = STATUS_AWAITING_CONFIRMATION;
       
-      const travelbookingStatus = await getTravelBookingStatus(
-        type,
-        date,
-        travelBookingCount
-      );
-      if (travelbookingStatus == STATUS_WAITING) {
-        waitingBookingCount++;
-      }
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
@@ -234,14 +205,10 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
       if(travelbookingStatus === STATUS_PAYMENT_PENDING) {
         createPendingTransaction(bookingId, TYPE_TRAVEL, t);
       }
-      if(drop_point === RESEARCH_CENTRE) {
-        travelBookingCountToRC++;
-      } else if(pickup_point === RESEARCH_CENTRE) {
-        travelBookingCountFromRC++;
-      }
+      
       userBookingIds[mumukshu] = [bookingId];
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return { userBookingIds, waitingBookingCount };
+  return { userBookingIds, 0 };
 }
