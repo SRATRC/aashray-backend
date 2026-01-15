@@ -10,7 +10,8 @@ import {
   STATUS_PENDING,
   STATUS_APPROVED,
   STATUS_REJECTED,
-  STATUS_DELETED
+  STATUS_DELETED,
+  STATUS_RESET
 } from '../../config/constants.js';
 import ApiError from '../../utils/ApiError.js';
 
@@ -210,13 +211,21 @@ export const updatePermanentCodeRequest = async (req, res) => {
     const { requestId } = req.params;
     const { action, permanent_code, admin_comments, ssid, username } = req.body;
 
-    if (!action || ![STATUS_APPROVED, STATUS_REJECTED, STATUS_DELETED].includes(action)) {
+if (
+  !action ||
+  ![
+    STATUS_APPROVED,
+    STATUS_REJECTED,
+    STATUS_DELETED,
+    STATUS_RESET,
+    STATUS_PENDING
+  ].includes(action)
+) {
   throw new ApiError(
     400,
-    'Invalid action. Must be "approved", "rejected" or "deleted"'
+    'Invalid action. Must be approved, rejected, deleted, reset or pending'
   );
 }
-
     // 🔹 FIRST: fetch record
     const checkAlreadyrequested = await PermanentWifiCodes.findByPk(requestId, {
       transaction: t,
@@ -226,16 +235,26 @@ export const updatePermanentCodeRequest = async (req, res) => {
     if (!checkAlreadyrequested) {
       throw new ApiError(404, 'Permanent code request not found');
     }
-    if (action === STATUS_DELETED && checkAlreadyrequested.status !== STATUS_APPROVED) {
-      throw new ApiError(400, 'Only approved requests can be deleted');
-    }
-    // Prevent re-approving or re-rejecting an already approved request
-if (
-  checkAlreadyrequested.status === STATUS_APPROVED &&
-  action !== STATUS_DELETED
+    if (
+  checkAlreadyrequested.status === STATUS_DELETED &&
+  action === STATUS_DELETED
 ) {
-  throw new ApiError(400, `Request has already been approved`);
+  throw new ApiError(400, 'Request is already deleted');
 }
+if (
+  action === STATUS_RESET &&
+  checkAlreadyrequested.status !== STATUS_APPROVED
+) {
+  throw new ApiError(
+    400,
+    'Only approved requests can be moved to reset'
+  );
+}
+
+
+    // Prevent re-approving or re-rejecting an already approved request
+// Allow admin to change status freely
+// Backend remains authoritative for validations
 
     // 🔹 SECOND: validation based on existing DB state
     if (
@@ -266,24 +285,29 @@ if (
 
     // 🔹 FOURTH: prepare update payload
     const updateData = {
-      status: action,
-      reviewed_at: new Date(),
-      reviewed_by: req.user?.username,
-      admin_comments
-    };
+  status: action,
+  reviewed_at: new Date(),
+  reviewed_by: req.user?.username,
+  admin_comments
+};
 
-    // Assign code ONLY for pending-new approval
-    if (action === STATUS_APPROVED && checkAlreadyrequested.code == null) {
-      updateData.code = permanent_code;
-    }
+// Assign code only when approving a record without one
+if (action === STATUS_APPROVED && checkAlreadyrequested.code == null) {
+  updateData.code = permanent_code;
+}
 
-    if (typeof ssid !== 'undefined') {
-      updateData.ssid = ssid === null ? null : ssid;
-    }
+// Optional: clear code when going to reset
+if (action === STATUS_RESET) {
+  updateData.code = null;
+}
 
-    if (typeof username !== 'undefined') {
-      updateData.username = username === null ? null : username;
-    }
+if (typeof ssid !== 'undefined') {
+  updateData.ssid = ssid === null ? null : ssid;
+}
+
+if (typeof username !== 'undefined') {
+  updateData.username = username === null ? null : username;
+}
 
     await checkAlreadyrequested.update(updateData, { transaction: t });
 
@@ -329,135 +353,152 @@ function formatDateForMySQL(date) {
   );
 }
 
-// export const uploadPerWiFiCodes = async (req, res) => {
-//   try {
-//     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-//     const sheet = XLSX.utils.sheet_to_json(
-//       workbook.Sheets[workbook.SheetNames[0]],
-//       { defval: '' }
-//     );
-
-//     // Keep rows that have cardno AND code (same behavior as before),
-//     // but also read optional ssid and username columns.
-//     const updates = sheet
-//       .map((row) => ({
-//         cardno: row.cardno?.toString().trim(),
-//         code: row.code?.toString().trim(),
-//         ssid: row.ssid?.toString().trim(),
-//         username: row.username?.toString().trim()
-//       }))
-//       .filter((row) => row.cardno && row.code); // require both cardno and code
-
-//     if (updates.length === 0) {
-//       return res.status(400).json({ error: 'No valid rows found.' });
-//     }
-
-//     // helper to escape single quotes for SQL string literals
-//     const esc = (s) => (s === null || typeof s === 'undefined' ? '' : s.replace(/'/g, "\\'"));
-
-//     // Build CASE clauses for code, ssid and username
-//     const codeCases = updates
-//       .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.code)}'`)
-//       .join(' ');
-//     const ssidCases = updates
-//       .filter((u) => u.ssid) // only include ssid when provided
-//       .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.ssid)}'`)
-//       .join(' ');
-//     const usernameCases = updates
-//       .filter((u) => u.username) // only include username when provided
-//       .map((u) => `WHEN cardno = '${esc(u.cardno)}' THEN '${esc(u.username)}'`)
-//       .join(' ');
-
-//     const cardnos = updates.map((u) => `'${esc(u.cardno)}'`).join(', ');
-
-//     const now = formatDateForMySQL(new Date());
-
-//     // Build SET parts conditionally
-//     const setParts = [];
-
-//     // code CASE is required (since we filtered for rows having code)
-//     if (codeCases) {
-//       setParts.push(`code = CASE ${codeCases} END`);
-//       // if codes are being applied we want to mark approved (same as before)
-//       setParts.push(`status = 'approved'`);
-//       setParts.push(`reviewed_at = '${now}'`);
-//       setParts.push(`reviewed_by = '${esc(req.user?.username || 'wifiAdmin')}'`);
-//     }
-
-//     // optional ssid
-//     if (ssidCases) {
-//       setParts.push(`ssid = CASE ${ssidCases} END`);
-//     }
-
-//     // optional username
-//     if (usernameCases) {
-//       setParts.push(`username = CASE ${usernameCases} END`);
-//     }
-
-//     // always update updatedAt
-//     setParts.push(`updatedAt = '${now}'`);
-
-//     const setClause = setParts.join(',\n          ');
-
-//     const query = `
-//       UPDATE permanent_wifi_codes
-//       SET ${setClause}
-//       WHERE cardno IN (${cardnos}) AND status = 'pending' AND code IS NULL
-//     `;
-
-//     await PermanentWifiCodes.sequelize.query(query);
-
-//     res.status(200).json({
-//       message: `${updates.length} record(s) processed.`
-//     });
-//   } catch (err) {
-//     console.error('Error processing Excel upload:', err);
-//     res.status(500).json({
-//       error: 'Failed to process and update Excel data: ' + err.message
-//     });
-//   }
-// };
-
 export const uploadPerWiFiCodes = async (req, res) => {
+  const transaction = await PermanentWifiCodes.sequelize.transaction();
+
   try {
+    /* =====================================================
+       1. READ EXCEL
+       ===================================================== */
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheet = XLSX.utils.sheet_to_json(
       workbook.Sheets[workbook.SheetNames[0]],
       { defval: '' }
     );
 
-    const updates = sheet
-      .map(row => ({
-        id: Number(row.id),
-        code: row.code?.toString().trim(),
-        ssid: row.ssid?.toString().trim() || null,
-        username: row.username?.toString().trim() || null
-      }))
-      .filter(r => r.id && r.code);
-
-    if (!updates.length) {
-      return res.status(400).json({ error: 'No valid rows found' });
+    if (!sheet.length) {
+      return res.status(400).json({ error: 'Excel file is empty' });
     }
 
-    const esc = v => v?.replace(/'/g, "\\'");
+    /* =====================================================
+       2. NORMALIZE & VALIDATE EXCEL ROWS
+       ===================================================== */
+    const allowedStatuses = new Set(['approved', 'deleted', 'rejected', 'reset']);
 
-    const codeCases = updates
-      .map(u => `WHEN id = ${u.id} THEN '${esc(u.code)}'`)
-      .join(' ');
+    const parsed = sheet.map((row, index) => {
+      const rawId = row.id?.toString().trim();
+      const cardno = row.cardno?.toString().trim();
+      const code = row.code?.toString().trim();
+      const excelStatus = row.status?.toString().trim().toLowerCase();
 
-    const ssidCases = updates
-      .filter(u => u.ssid)
-      .map(u => `WHEN id = ${u.id} THEN '${esc(u.ssid)}'`)
-      .join(' ');
+      return {
+        rowNumber: index + 2,
+        rawId,
+        id: /^\d+$/.test(rawId) ? parseInt(rawId, 10) : null,
+        cardno,
+        code,
+        ssid: row.ssid?.toString().trim() || null,
+        username: row.username?.toString().trim() || null,
+        status: allowedStatuses.has(excelStatus) ? excelStatus : null
+      };
+    });
 
-    const usernameCases = updates
-      .filter(u => u.username)
-      .map(u => `WHEN id = ${u.id} THEN '${esc(u.username)}'`)
-      .join(' ');
+    const invalidRows = parsed.filter(
+      r => !r.id || !r.cardno || !r.code
+    );
 
-    const ids = updates.map(u => u.id).join(', ');
+    const validRows = parsed.filter(
+      r => r.id && r.cardno && r.code
+    );
+
+    if (!validRows.length) {
+      return res.status(400).json({
+        error: 'No valid rows found',
+        invalidRows
+      });
+    }
+
+    /* =====================================================
+       3. VERIFY id + cardno EXISTS IN DB
+       ===================================================== */
+    const dbRows = await PermanentWifiCodes.findAll({
+      where: {
+        id: validRows.map(r => r.id)
+      },
+      attributes: ['id', 'cardno', 'status'],
+      transaction
+    });
+
+    const dbMap = new Map(
+      dbRows.map(r => [`${r.id}|${r.cardno}`, r.status])
+    );
+
+    const matched = [];
+    const mismatched = [];
+
+    for (const r of validRows) {
+      if (dbMap.has(`${r.id}|${r.cardno}`)) {
+        matched.push(r);
+      } else {
+        mismatched.push(r);
+      }
+    }
+
+    /* =====================================================
+       4. DRY RUN MODE
+       ===================================================== */
+    if (req.query.dryRun === 'true') {
+      await transaction.rollback();
+      return res.json({
+        dryRun: true,
+        summary: {
+          totalRows: sheet.length,
+          validRows: validRows.length,
+          matched: matched.length,
+          mismatched: mismatched.length,
+          invalidRows: invalidRows.length
+        },
+        matched,
+        mismatched,
+        invalidRows
+      });
+    }
+
+    if (!matched.length) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: 'No matching id + cardno pairs found in DB',
+        mismatched
+      });
+    }
+
+    /* =====================================================
+       5. BUILD SAFE CASE STATEMENTS
+       ===================================================== */
+    const esc = v => v.replace(/'/g, "\\'");
     const now = formatDateForMySQL(new Date());
     const reviewer = esc(req.user?.username || 'admin');
+
+    const codeCases = matched
+      .map(r =>
+        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.code)}'`
+      )
+      .join(' ');
+
+    const ssidCases = matched
+      .filter(r => r.ssid)
+      .map(r =>
+        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.ssid)}'`
+      )
+      .join(' ');
+
+    const usernameCases = matched
+      .filter(r => r.username)
+      .map(r =>
+        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.username)}'`
+      )
+      .join(' ');
+
+    const statusCases = matched
+      .filter(r => r.status)
+      .map(r =>
+        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.status)}'`
+      )
+      .join(' ');
+
+    const whereClause = matched
+      .map(r => `(id = ${r.id} AND cardno = '${esc(r.cardno)}')`)
+      .join(' OR ');
 
     const query = `
       UPDATE permanent_wifi_codes
@@ -478,27 +519,42 @@ export const uploadPerWiFiCodes = async (req, res) => {
         END,
 
         status = CASE
-          ${codeCases.replace(/THEN\s+'.*?'/g, "THEN 'approved'")}
+          ${statusCases || 'WHEN 1=0 THEN status'}
           ELSE status
         END,
 
         reviewed_by = '${reviewer}',
         reviewed_at = '${now}',
         updatedAt = '${now}'
-
-      WHERE id IN (${ids});
+      WHERE ${whereClause};
     `;
 
-    await PermanentWifiCodes.sequelize.query(query);
+    /* =====================================================
+       6. EXECUTE UPDATE
+       ===================================================== */
+    await PermanentWifiCodes.sequelize.query(query, { transaction });
+    await transaction.commit();
 
-    res.json({ message: `${updates.length} request(s) updated successfully` });
+    /* =====================================================
+       7. RESPONSE
+       ===================================================== */
+    res.json({
+      success: true,
+      updatedCount: matched.length,
+      skipped: {
+        invalidRows: invalidRows.length,
+        mismatched: mismatched.length
+      },
+      mismatched,
+      invalidRows
+    });
 
   } catch (err) {
+    await transaction.rollback();
     console.error(err);
     res.status(500).json({ error: err.message });
   }
 };
-
 
 export const addPermanentCodeManually = async (req, res) => {
   const t = await database.transaction();
@@ -554,5 +610,151 @@ export const addPermanentCodeManually = async (req, res) => {
     // ✅ IMPORTANT: rollback on ANY failure
     if (t) await t.rollback();
     throw err; // let global error handler respond
+  }
+};
+
+export const insertPerWiFiCodesFromExcel = async (req, res) => {
+  // 🔐 ROLE CHECK
+  // 🔒 EXPLICIT CONFIRMATION REQUIRED
+  if (req.query.allowInsert !== 'true') {
+    return res.status(400).json({
+      error: 'Insert not allowed. Confirm by sending allowInsert=true'
+    });
+  }
+
+  const transaction = await PermanentWifiCodes.sequelize.transaction();
+
+  try {
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheet = XLSX.utils.sheet_to_json(
+      workbook.Sheets[workbook.SheetNames[0]],
+      { defval: '' }
+    );
+
+    if (!sheet.length) {
+      return res.status(400).json({ error: 'Excel file is empty' });
+    }
+
+    /* =====================================================
+       1. PARSE & VALIDATE
+       ===================================================== */
+    const allowedStatuses = new Set(['approved', 'pending']);
+
+    const parsed = sheet.map((row, index) => {
+      const rawId = row.id?.toString().trim();
+      const cardno = row.cardno?.toString().trim();
+
+      return {
+        rowNumber: index + 2,
+        id: /^\d+$/.test(rawId) ? parseInt(rawId, 10) : null,
+        cardno,
+        code: row.code?.toString().trim() || null,
+        ssid: row.ssid?.toString().trim() || null,
+        username: row.username?.toString().trim() || null,
+        status: allowedStatuses.has(
+          row.status?.toString().trim().toLowerCase()
+        )
+          ? row.status.toLowerCase()
+          : 'approved'
+      };
+    });
+
+    const invalidRows = parsed.filter(r => !r.id || !r.cardno);
+
+    const validRows = parsed.filter(r => r.id && r.cardno);
+
+    if (!validRows.length) {
+      return res.status(400).json({
+        error: 'No valid rows to insert',
+        invalidRows
+      });
+    }
+
+    /* =====================================================
+       2. CHECK EXISTING DB ROWS
+       ===================================================== */
+    const existing = await PermanentWifiCodes.findAll({
+      where: {
+        id: validRows.map(r => r.id)
+      },
+      attributes: ['id', 'cardno'],
+      transaction
+    });
+
+    const existingSet = new Set(
+      existing.map(r => `${r.id}|${r.cardno}`)
+    );
+
+    const toInsert = validRows.filter(
+      r => !existingSet.has(`${r.id}|${r.cardno}`)
+    );
+
+    const skippedExisting = validRows.filter(
+      r => existingSet.has(`${r.id}|${r.cardno}`)
+    );
+
+    /* =====================================================
+       3. DRY RUN PREVIEW
+       ===================================================== */
+    if (req.query.dryRun === 'true') {
+      await transaction.rollback();
+      return res.json({
+        dryRun: true,
+        summary: {
+          totalRows: sheet.length,
+          validRows: validRows.length,
+          toInsert: toInsert.length,
+          skippedExisting: skippedExisting.length,
+          invalidRows: invalidRows.length
+        },
+        toInsert,
+        skippedExisting,
+        invalidRows
+      });
+    }
+
+    if (!toInsert.length) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: 'No new rows to insert',
+        skippedExisting
+      });
+    }
+
+    /* =====================================================
+       4. INSERT
+       ===================================================== */
+    const now = formatDateForMySQL(new Date());
+
+    await PermanentWifiCodes.bulkCreate(
+      toInsert.map(r => ({
+        id: r.id,
+        cardno: r.cardno,
+        code: r.code,
+        ssid: r.ssid,
+        username: r.username,
+        status: r.status,
+        reviewed_by: req.user.username,
+        reviewed_at: now
+      })),
+      { transaction }
+    );
+
+    await transaction.commit();
+
+    /* =====================================================
+       5. RESPONSE
+       ===================================================== */
+    res.json({
+      success: true,
+      insertedCount: toInsert.length,
+      skippedExisting: skippedExisting.length,
+      invalidRows: invalidRows.length
+    });
+
+  } catch (err) {
+    await transaction.rollback();
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 };
