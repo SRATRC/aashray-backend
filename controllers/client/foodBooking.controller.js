@@ -2,6 +2,7 @@ import Sequelize, { QueryTypes } from 'sequelize';
 import { cancelFood } from '../../helpers/foodBooking.helper.js';
 import { Menu } from '../../models/associations.js';
 import { MSG_CANCEL_SUCCESSFUL } from '../../config/constants.js';
+import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import moment from 'moment';
 
@@ -174,7 +175,7 @@ export const CancelFood = async (req, res) => {
   const { cardno, food_data } = req.body;
 
   if (!cardno || !Array.isArray(food_data)) {
-    return res.status(400).json({ message: 'Invalid request data' });
+    throw new ApiError(400, 'Invalid request data');
   }
 
   await cancelFood(req.user, cardno, food_data, t);
