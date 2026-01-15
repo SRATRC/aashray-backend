@@ -636,89 +636,76 @@ export const updateTransactionStatus = async (req, res) => {
 };
 
 
-import sequelize from '../../config/database.js';
 
 export async function updateBooking(req, res) {
-  const t = await sequelize.transaction();
-  try {
-    const {
-      bookingid,
-      amount,
-      pickup_point,
-      drop_point,
-      type,
-    } = req.body;
+  const t = await database.transaction();
+  req.transaction = t;
 
-    if (!bookingid) {
-      await t.rollback();
-      return res.status(400).json({ message: 'Booking ID is required' });
-    }
+  const {
+    bookingid,
+    amount,
+    pickup_point,
+    drop_point,
+    type,
+  } = req.body;
 
-    const updatedFields = [];
-
-    /* 1️⃣ TRANSACTION TABLE (amount) */
-    if (amount !== undefined) {
-      const transaction = await Transactions.findOne({
-        where: { bookingid },
-        transaction: t,
-      });
-
-      if (!transaction) {
-        await t.rollback();
-        return res.status(404).json({ message: 'Transaction not found' });
-      }
-
-      await transaction.update(
-        {
-          amount,
-          updatedBy: req.user.username,
-        },
-        { transaction: t }
-      );
-
-      updatedFields.push('amount');
-    }
-
-    /* 2️⃣ TRAVEL TABLE (pickup / drop / type) */
-    if (
-      pickup_point !== undefined ||
-      drop_point !== undefined ||
-      type !== undefined
-    ) {
-      const travelBooking = await TravelDb.findOne({
-        where: { bookingid },
-        transaction: t,
-      });
-
-      if (!travelBooking) {
-        await t.rollback();
-        return res.status(404).json({ message: 'Travel booking not found' });
-      }
-
-      const travelUpdate = {};
-      if (pickup_point !== undefined) travelUpdate.pickup_point = pickup_point;
-      if (drop_point !== undefined) travelUpdate.drop_point = drop_point;
-      if (type !== undefined) travelUpdate.type = type;
-
-      await travelBooking.update(travelUpdate, { transaction: t });
-
-      updatedFields.push(...Object.keys(travelUpdate));
-    }
-
-    if (updatedFields.length === 0) {
-      await t.rollback();
-      return res.status(400).json({ message: 'No fields provided to update' });
-    }
-
-    await t.commit();
-
-    return res.json({
-      message: 'Booking updated successfully',
-      updatedFields,
-    });
-  } catch (error) {
-    await t.rollback();
-    console.error('Error updating booking:', error);
-    return res.status(500).json({ message: 'Internal server error' });
+  if (!bookingid) {
+    throw new ApiError(400, 'Booking ID is required');
   }
+
+  const updatedFields = [];
+
+  /* 1️⃣ TRANSACTION TABLE (amount) */
+  if (amount !== undefined) {
+    const transaction = await Transactions.findOne({
+      where: { bookingid },
+      transaction: t,
+    });
+
+    if (!transaction) {
+      throw new ApiError(404, 'Transaction not found');
+    }
+
+    await transaction.update(
+      {
+        amount,
+        updatedBy: req.user.username,
+      },
+      { transaction: t }
+    );
+
+    updatedFields.push('amount');
+  }
+
+  /* 2️⃣ TRAVEL TABLE (pickup / drop / type) */
+  const travelUpdate = {};
+  if (pickup_point !== undefined) travelUpdate.pickup_point = pickup_point;
+  if (drop_point !== undefined) travelUpdate.drop_point = drop_point;
+  if (type !== undefined) travelUpdate.type = type;
+
+  if (Object.keys(travelUpdate).length > 0) {
+    const travelBooking = await TravelDb.findOne({
+      where: { bookingid },
+      transaction: t,
+    });
+
+    if (!travelBooking) {
+      throw new ApiError(404, 'Travel booking not found');
+    }
+
+    await travelBooking.update(travelUpdate, { transaction: t });
+
+    updatedFields.push(...Object.keys(travelUpdate));
+  }
+
+  if (updatedFields.length === 0) {
+    throw new ApiError(400, 'No fields provided to update');
+  }
+
+  await t.commit();
+
+  return res.json({
+    message: 'Booking updated successfully',
+    updatedFields,
+  });
 }
