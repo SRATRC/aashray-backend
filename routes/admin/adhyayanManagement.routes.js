@@ -15,7 +15,8 @@ import {
   adhyayanPendinglist,
   fetchALLAdhyayan,
   softDeleteShibir,
-  getAdhyayanFeedback
+  getAdhyayanFeedback,
+  markAdhyayanAttendance
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -61,5 +62,6 @@ router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 router.get('/fetchList', CatchAsync(fetchAllAdhyayanList));
 router.delete('/:id', CatchAsync(softDeleteShibir));
 router.get('/feedback/:shibir_id', CatchAsync(getAdhyayanFeedback));
+router.post('/attendance/:shibir_id/:session_no/:cardno', CatchAsync(markAdhyayanAttendance));
 
 export default router;
