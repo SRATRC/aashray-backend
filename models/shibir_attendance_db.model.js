@@ -30,59 +30,33 @@ const ShibirAttendanceDb = sequelize.define(
       allowNull: false
     },
 
-    session_1: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true
-    },
-    session_1_attendance: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false
-    },
+    // ---------- Sessions 1–9 ----------
+    session_1: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_1_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
 
-    session_2: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true
-    },
-    session_2_attendance: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false
-    },
+    session_2: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_2_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
 
-    session_3: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true
-    },
-    session_3_attendance: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false
-    },
+    session_3: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_3_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
 
-    session_4: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true
-    },
-    session_4_attendance: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false
-    },
+    session_4: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_4_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
 
-    session_5: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true
-    },
-    session_5_attendance: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false
-    },
+    session_5: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_5_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
 
-    session_6: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true
-    },
-    session_6_attendance: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false
-    },
+    session_6: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_6_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
+
+    session_7: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_7_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
+
+    session_8: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_8_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
+
+    session_9: { type: DataTypes.BOOLEAN, defaultValue: false },
+    session_9_attendance: { type: DataTypes.BOOLEAN, defaultValue: false },
 
     updatedBy: {
       type: DataTypes.STRING(255),

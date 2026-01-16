@@ -466,26 +466,22 @@ export async function createShibirAttendanceEntry(
   const days =
     Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-  // Base: all sessions disabled
-  const sessionFlags = {
-    session_1: false,
-    session_2: false,
-    session_3: false,
-    session_4: false,
-    session_5: false,
-    session_6: false
-  };
+  // Base: all sessions disabled (1 → 9)
+  const sessionFlags = {};
+  for (let i = 1; i <= 9; i++) {
+    sessionFlags[`session_${i}`] = false;
+  }
 
-  // Determine number of enabled sessions
+  // Decide enabled sessions count
   let enabledSessions = 0;
 
   if (days === 1) {
-    enabledSessions = 2;
+    enabledSessions = 3;
   } else if (days === 2) {
-    enabledSessions = 4;
+    enabledSessions = 6;
   } else {
     // 3 days or more
-    enabledSessions = 6;
+    enabledSessions = 9;
   }
 
   // Enable sessions dynamically
