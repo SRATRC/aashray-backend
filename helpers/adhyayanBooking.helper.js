@@ -21,7 +21,8 @@ import {
   ShibirBookingDb,
   ShibirDb,
   UtsavPackagesDb,
-  CardDb
+  CardDb,
+  ShibirAttendanceDb
 } from '../models/associations.js';
 import sendMail from '../utils/sendMail.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -144,6 +145,9 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
           { transaction: t }
         );
 
+        if (booking.status === STATUS_CONFIRMED) {
+    await createShibirAttendanceEntry(booking, user, t);
+  }
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
             user,
@@ -439,4 +443,65 @@ export async function getFeedbackStats(shibir_id) {
   });
 
   return stats[0];
+}
+
+
+
+export async function createShibirAttendanceEntry(
+  booking,
+  user,
+  transaction
+) {
+  const shibir = await ShibirDb.findOne({
+    where: { id: booking.shibir_id },
+    transaction
+  });
+
+  // Only Research Centre for now
+  if (shibir.location !== 'Research Centre') return;
+
+  const startDate = new Date(shibir.start_date);
+  const endDate = new Date(shibir.end_date);
+
+  const days =
+    Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+
+  // Base: all sessions disabled
+  const sessionFlags = {
+    session_1: false,
+    session_2: false,
+    session_3: false,
+    session_4: false,
+    session_5: false,
+    session_6: false
+  };
+
+  // Determine number of enabled sessions
+  let enabledSessions = 0;
+
+  if (days === 1) {
+    enabledSessions = 2;
+  } else if (days === 2) {
+    enabledSessions = 4;
+  } else {
+    // 3 days or more
+    enabledSessions = 6;
+  }
+
+  // Enable sessions dynamically
+  for (let i = 1; i <= enabledSessions; i++) {
+    sessionFlags[`session_${i}`] = true;
+  }
+
+  await ShibirAttendanceDb.create(
+    {
+      shibir_id: booking.shibir_id,
+      bookingid: booking.bookingid,
+      cardno: booking.cardno,
+      days,
+      ...sessionFlags,
+      updatedBy: user.cardno
+    },
+    { transaction }
+  );
 }
