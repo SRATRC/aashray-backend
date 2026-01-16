@@ -784,3 +784,103 @@ export const markAdhyayanAttendance = async (req, res) => {
     throw err;
   }
 };
+
+export const fetchAdhyayanAttendanceReport = async (req, res) => {
+  const { shibir_id } = req.params;
+
+  // Fetch shibir
+  const shibir = await ShibirDb.findByPk(shibir_id);
+  if (!shibir) {
+    throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  // Calculate days
+  const startDate = new Date(shibir.start_date);
+  const endDate = new Date(shibir.end_date);
+  const days =
+    Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+
+  let maxSessions = 0;
+  if (days === 1) maxSessions = 3;
+  else if (days === 2) maxSessions = 6;
+  else maxSessions = 9;
+
+  // Fetch attendance + card data
+  const attendanceRows = await ShibirAttendanceDb.findAll({
+    where: { shibir_id },
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'center', 'res_status']
+      }
+    ],
+    order: [['cardno', 'ASC']]
+  });
+
+  const reportData = attendanceRows.map(row => {
+    const data = {
+      cardno: row.cardno,
+      name: row.CardDb?.issuedto || '',
+      mobno: row.CardDb?.mobno || '',
+      gender: row.CardDb?.gender || '',
+      centre: row.CardDb?.center || '',
+      res_status: row.CardDb?.res_status || ''
+    };
+
+    for (let i = 1; i <= maxSessions; i++) {
+      data[`session_${i}`] = row[`session_${i}_attendance`] ? 'Yes' : 'No';
+    }
+
+    return data;
+  });
+
+  return res.status(200).send({
+    shibirName: shibir.name,
+    days,
+    maxSessions,
+    data: reportData
+  });
+};
+
+export async function fetchAdhyayanAttendanceSummary(req, res) {
+  const { shibir_id } = req.params;
+
+  const shibir = await ShibirDb.findByPk(shibir_id);
+  if (!shibir) {
+    return res.status(404).json({ message: 'Shibir not found' });
+  }
+
+  const startDate = new Date(shibir.start_date);
+  const endDate = new Date(shibir.end_date);
+  const days =
+    Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+
+  let totalSessions = 3;
+  if (days === 2) totalSessions = 6;
+  else if (days >= 3) totalSessions = 9;
+
+  const attendanceRows = await ShibirAttendanceDb.findAll({
+    where: { shibir_id }
+  });
+
+  const summary = [];
+
+  for (let i = 1; i <= totalSessions; i++) {
+    const attendedCount = attendanceRows.filter(
+      r => r[`session_${i}`] && r[`session_${i}_attendance`]
+    ).length;
+
+    summary.push({
+      session: `Session ${i}`,
+      total_registrants: attendanceRows.length,
+      total_attended: attendedCount
+    });
+  }
+
+  return res.status(200).json({
+    data: {
+      shibir_name: shibir.name,
+      summary
+    }
+  });
+}

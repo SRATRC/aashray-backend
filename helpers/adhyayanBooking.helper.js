@@ -14,7 +14,8 @@ import {
   TYPE_ADHYAYAN,
   STATUS_CASH_COMPLETED,
   ERR_FEEDBACK_ALREADY_SUBMITTED,
-  FEEDBACK_ELIGIBILITY_HOUR
+  FEEDBACK_ELIGIBILITY_HOUR,
+  RESEARCH_CENTRE
 } from '../config/constants.js';
 import {
   AdhyayanFeedback,
@@ -458,8 +459,7 @@ export async function createShibirAttendanceEntry(
   });
 
   // Only Research Centre for now
-  if (shibir.location !== 'Research Centre') return;
-
+if (shibir.location !== RESEARCH_CENTRE) return;
   const startDate = new Date(shibir.start_date);
   const endDate = new Date(shibir.end_date);
 
