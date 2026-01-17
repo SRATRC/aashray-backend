@@ -26,7 +26,7 @@ import ApiError from '../utils/ApiError.js';
 import { getBlockedDates, isDateRangeOverlapping, validateBlockedDates } from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
-import { bookFoodForMumukshusDuringUtsav } from './foodBooking.helper.js';
+import { bookFoodForAllMeals, cancelAllMeals } from './foodBooking.helper.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
@@ -80,15 +80,6 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       { transaction: t }
     );
     
-    if(utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
-      await bookFoodForMumukshusDuringUtsav(
-        package_info.start_date,
-        package_info.end_date,
-        mumukshu.cardno,
-        t,
-        user.cardno
-      );
-    }  
     // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
@@ -103,8 +94,9 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-
+      
       total_amount += package_info.amount;
+      await bookFoodForUtsav(package_info , utsav, mumukshu, t, user.cardno);
     }
 
     bookings.push(bookingid);
@@ -117,6 +109,21 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   );
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
+}
+
+export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
+
+  const lastDayOnlyBreakfast = package_info.endDate == utsav.end_date;
+
+  await bookFoodForAllMeals(
+    package_info.start_date,
+    package_info.end_date,
+    lastDayOnlyBreakfast,
+    mumukshu.cardno,
+    t,
+    updatedBy
+  );
+
 }
 
 export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUser) {
@@ -155,13 +162,6 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
       { transaction: t }
     );
 
-    await bookFoodForMumukshusDuringUtsav(
-      package_info.start_date,
-      package_info.end_date,
-      mumukshu.cardno,
-      t,
-      user.cardno
-    );
     // Always create pending/cash transaction for admin
     const cardRecord = await CardDb.findOne({ where: { cardno: mumukshu.cardno } });
     if (!cardRecord) throw new ApiError(400, `Card not found for cardno ${mumukshu.cardno}`);
@@ -546,4 +546,13 @@ export async function findUtsavOnBoundaryDates(checkin, checkout) {
   });
 
   return utsav;
+}
+
+export async function cancelUtsavFoodBookings(booking, updatedBy, t) {
+ 
+  const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
+  const utsavPackage = await UtsavPackagesDb.findOne({ where: { id: utsav.packageid } });
+
+  await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
+  
 }

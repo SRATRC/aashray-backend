@@ -11,13 +11,13 @@ import {
   reserveUtsavSeat,
   openUtsavSeat,
   validateUtsavPackage,
-  bookUtsavForMumukshus,
-  bookUtsavForMumukshusAdmin
+  bookUtsavForMumukshusAdmin, 
+  cancelUtsavFoodBookings,
+  bookFoodForUtsav
 } from '../../helpers/utsavBooking.helper.js';
 import { sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import {
-  adminCancelTransaction,
   createPendingTransaction,
   cancelTransaction
 } from '../../helpers/transactions.helper.js';
@@ -42,6 +42,7 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
+
 
 
 export const createUtsavBookingByAdmin = async (req, res) => {
@@ -570,13 +571,7 @@ export const utsavStatusUpdate = async (req, res) => {
         let package_info = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
         
         if (package_info) {
-          await bookFoodForMumukshusDuringUtsav(
-            package_info.start_date,
-            package_info.end_date,
-            card.cardno,
-            t,
-            req.user.username
-          );
+          await bookFoodForUtsav(package_info , utsav, booking, t, req.user.username);
         }
       } else {
         if (transaction.status === STATUS_CANCELLED) {
@@ -656,6 +651,7 @@ export const utsavStatusUpdate = async (req, res) => {
     );
   }
 
+  await cancelUtsavFoodBookings(booking,req.user.username,t);
   // 🪑 Free seat if applicable
   if (
     booking.status === STATUS_CONFIRMED ||

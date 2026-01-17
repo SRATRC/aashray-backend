@@ -30,7 +30,7 @@ import {
   getBookingTypeFromBooking
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
-import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
+import { openUtsavSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
 import { updateWaitingTravelBooking } from './helpers/travelBooking.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
@@ -137,6 +137,8 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
         }
         break;
       case TYPE_UTSAV:
+        //cancel food bookings for the utsav
+        await cancelUtsavFoodBookings(booking,systemUser.username, t);
         const utsav = await UtsavDb.findOne({
           where: { id: booking.utsavid }
         });

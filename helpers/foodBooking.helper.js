@@ -531,14 +531,17 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   return t;
 }
 
-export async function bookFoodForMumukshusDuringUtsav( 
+export async function bookFoodForAllMeals( 
   start_date,
   end_date,
+  lastDayOnlyBreakfast = false,
   cardno,
   t,
   updatedBy
 ) {
+
   const allDates = getDates(start_date, end_date);
+
   const foodBookings = await FoodDb.findAll({
     where: {
       cardno: cardno,
@@ -546,11 +549,31 @@ export async function bookFoodForMumukshusDuringUtsav(
     }
   });
 
+  const bookingsToCreate = [],bookingsToUpdate = [];
 
-  const bookingsToCreate = [];
+  let dinner=1,lunch=1;
+
+  const lastDay = allDates.at(-1);
+  
   for (const date of allDates) {
     const foodBooking = foodBookings.find((item) => item.date === date);
+
+    if( date == lastDay && lastDayOnlyBreakfast) {
+      lunch = 0;
+      dinner = 0;
+    }
+
+    
     if (foodBooking) {
+      foodBooking.breakfast = 1;
+      foodBooking.lunch = lunch;
+      foodBooking.dinner = dinner;
+      foodBooking.spicy = 1;
+      foodBooking.hightea = 1;
+      foodBooking.plateissued = 0;
+      foodBooking.updatedBy = updatedBy;
+      bookingsToUpdate.push(foodBooking);
+
       continue;
     }
     bookingsToCreate.push({
@@ -558,8 +581,8 @@ export async function bookFoodForMumukshusDuringUtsav(
       cardno: cardno,
       date: date,
       breakfast: 1,
-      lunch: 1,
-      dinner: 1,
+      lunch: lunch,
+      dinner: dinner,
       spicy: 1,
       hightea: 1,
       plateissued: 0,
@@ -569,10 +592,13 @@ export async function bookFoodForMumukshusDuringUtsav(
   if (bookingsToCreate.length > 0) {
     await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   }
+  if (bookingsToUpdate.length > 0) {
+    await FoodDb.bulkUpdate(bookingsToUpdate, { transaction: t });
+  }
 
 }
 
-export async function cancelUtsavFoodBookings(start_date,
+export async function cancelAllMeals(start_date,
   end_date,
   cardno, updatedBy, t) {
   const allDates = getDates(start_date, end_date);
