@@ -147,26 +147,6 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     });
   }
   
-  const bookings = await TravelDb.findAll({
-    where: {
-      type: TRAVEL_TYPE_REGULAR,
-      status: {
-        [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED, STATUS_CANCELLED]
-      },
-      date: date,
-    }
-  });
-
-  const bookingGoingToRC = [], bookingsGoingFromRC = [];
-  for(const booking of bookings) {
-    if(booking.drop_point === RESEARCH_CENTRE) {
-      bookingGoingToRC.push(booking);
-    } 
-    if(booking.pickup_point === RESEARCH_CENTRE) {
-      bookingsGoingFromRC.push(booking);
-    }
-  }
-
   var bookingsToCreate = [],
     bookingId;
   for (const group of mumukshuGroup) {
@@ -184,13 +164,11 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
 
     for (const mumukshu of mumukshus) {
       bookingId = uuidv4();
-      const travelbookingStatus = STATUS_AWAITING_CONFIRMATION;
-      
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
         bookedBy: user.cardno !== mumukshu ? user.cardno : null,
-        status: travelbookingStatus,
+        status: STATUS_AWAITING_CONFIRMATION,
         date,
         type,
         pickup_point,
@@ -202,13 +180,9 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         comments,
         updatedBy: user.cardno
       });
-      if(travelbookingStatus === STATUS_PAYMENT_PENDING) {
-        createPendingTransaction(bookingId, TYPE_TRAVEL, t);
-      }
-      
       userBookingIds[mumukshu] = [bookingId];
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return { userBookingIds, 0 };
+  return { userBookingIds, waitingBookingCount:0 };
 }
