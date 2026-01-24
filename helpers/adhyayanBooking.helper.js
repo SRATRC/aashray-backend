@@ -459,33 +459,17 @@ export async function createShibirAttendanceEntry(
   });
 
   // Only Research Centre for now
-if (shibir.location !== RESEARCH_CENTRE) return;
+  if (shibir.location !== RESEARCH_CENTRE) return;
+
   const startDate = new Date(shibir.start_date);
   const endDate = new Date(shibir.end_date);
 
   const days =
     Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-  // Base: all sessions disabled (1 → 9)
+  // All 9 sessions enabled for any number of days
   const sessionFlags = {};
   for (let i = 1; i <= 9; i++) {
-    sessionFlags[`session_${i}`] = false;
-  }
-
-  // Decide enabled sessions count
-  let enabledSessions = 0;
-
-  if (days === 1) {
-    enabledSessions = 3;
-  } else if (days === 2) {
-    enabledSessions = 6;
-  } else {
-    // 3 days or more
-    enabledSessions = 9;
-  }
-
-  // Enable sessions dynamically
-  for (let i = 1; i <= enabledSessions; i++) {
     sessionFlags[`session_${i}`] = true;
   }
 

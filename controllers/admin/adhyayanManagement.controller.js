@@ -788,24 +788,14 @@ export const markAdhyayanAttendance = async (req, res) => {
 export const fetchAdhyayanAttendanceReport = async (req, res) => {
   const { shibir_id } = req.params;
 
-  // Fetch shibir
   const shibir = await ShibirDb.findByPk(shibir_id);
   if (!shibir) {
     throw new ApiError(404, 'Adhyayan not found');
   }
 
-  // Calculate days
-  const startDate = new Date(shibir.start_date);
-  const endDate = new Date(shibir.end_date);
-  const days =
-    Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  // Always 9 sessions
+  const maxSessions = 9;
 
-  let maxSessions = 0;
-  if (days === 1) maxSessions = 3;
-  else if (days === 2) maxSessions = 6;
-  else maxSessions = 9;
-
-  // Fetch attendance + card data
   const attendanceRows = await ShibirAttendanceDb.findAll({
     where: { shibir_id },
     include: [
@@ -827,8 +817,12 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
       res_status: row.CardDb?.res_status || ''
     };
 
-    for (let i = 1; i <= maxSessions; i++) {
-      data[`session_${i}`] = row[`session_${i}_attendance`] ? 'Yes' : 'No';
+    for (let i = 1; i <= 9; i++) {
+      const attended = row[`session_${i}_attendance`];
+      data[`session_${i}`] =
+        attended === true ? 'Yes' :
+        attended === false ? 'No' :
+        'No'; // backfill-safe
     }
 
     return data;
@@ -836,8 +830,7 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
 
   return res.status(200).send({
     shibirName: shibir.name,
-    days,
-    maxSessions,
+    maxSessions: 9,
     data: reportData
   });
 };
@@ -850,30 +843,25 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
     return res.status(404).json({ message: 'Shibir not found' });
   }
 
-  const startDate = new Date(shibir.start_date);
-  const endDate = new Date(shibir.end_date);
-  const days =
-    Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
-
-  let totalSessions = 3;
-  if (days === 2) totalSessions = 6;
-  else if (days >= 3) totalSessions = 9;
-
   const attendanceRows = await ShibirAttendanceDb.findAll({
     where: { shibir_id }
   });
 
+  const totalRegistrants = attendanceRows.length;
   const summary = [];
 
-  for (let i = 1; i <= totalSessions; i++) {
+  for (let i = 1; i <= 9; i++) {
     const attendedCount = attendanceRows.filter(
-      r => r[`session_${i}`] && r[`session_${i}_attendance`]
+      r => r[`session_${i}_attendance`] === true
     ).length;
+
+    const absenteesCount = totalRegistrants - attendedCount;
 
     summary.push({
       session: `Session ${i}`,
-      total_registrants: attendanceRows.length,
-      total_attended: attendedCount
+      total_registrants: totalRegistrants,
+      total_attended: attendedCount,
+      total_absentees: absenteesCount
     });
   }
 
