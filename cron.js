@@ -116,7 +116,9 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
       const booking = await getBooking(bookingType, transaction.bookingid);
-      bookings.push(booking);
+      if (booking) {
+        bookings.push(booking);
+      }
     }
     transactions.push(transaction);
   }
