@@ -98,20 +98,24 @@ export const verifyPayment = async (req, res) => {
               ? ROOM_STATUS_PENDING_CHECKIN
               : STATUS_CONFIRMED;
 
-          await booking.update(
-            {
-              status: bookingStatus,
-              updatedBy
-            },
-            { transaction: t }
-          );
+          // for late-checkout-fee, while a transaction is created, 
+          // a corresponding booking is not created.
+          if (booking) {
+            await booking.update(
+              {
+                status: bookingStatus,
+                updatedBy
+              },
+              { transaction: t }
+            );
 
-          setBookingIdMap(
-            userBookingIdMap,
-            bookingType,
-            booking.cardno,
-            transaction.bookingid
-          );
+            setBookingIdMap(
+              userBookingIdMap,
+              bookingType,
+              booking.cardno,
+              transaction.bookingid
+            );
+          }
           break;
 
         case STATUS_PAYMENT_FAILED:
