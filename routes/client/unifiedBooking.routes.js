@@ -7,7 +7,7 @@ const router = express.Router();
 const deprecatedEndpoint = (req, res, next) => {
   throw new ApiError(
     410,
-    'Please reinstall Aashray app to continue using it.',
+    'Please update Aashray app to continue using it.',
     {}
   );
 };
