@@ -3,7 +3,8 @@ import {
   CardDb,
   ShibirDb,
   ShibirBookingDb,
-  Transactions
+  Transactions,
+  ShibirAttendanceDb
 } from '../../models/associations.js';
 import {
   STATUS_WAITING,
@@ -723,3 +724,151 @@ export const getAdhyayanFeedback = async (req, res) => {
     }
   });
 };
+
+export const markAdhyayanAttendance = async (req, res) => {
+  const t = await database.transaction();
+
+  try {
+    const { shibir_id, session_no, cardno } = req.params;
+    const sessionNo = Number(session_no);
+
+    if (!sessionNo || sessionNo < 1 || sessionNo > 9) {
+      throw new ApiError(400, 'Invalid session number');
+    }
+
+    const attendance = await ShibirAttendanceDb.findOne({
+      where: { shibir_id, cardno },
+      transaction: t
+    });
+
+    if (!attendance) {
+      throw new ApiError(404, 'Attendance record not found');
+    }
+
+    const sessionField = `session_${sessionNo}`;
+    const attendanceField = `session_${sessionNo}_attendance`;
+
+    if (!attendance[sessionField]) {
+      throw new ApiError(400, `Session ${sessionNo} not applicable`);
+    }
+
+    if (attendance[attendanceField]) {
+      throw new ApiError(400, `Attendance already marked for session ${sessionNo}`);
+    }
+
+    const shibir = await ShibirDb.findByPk(shibir_id, { transaction: t });
+    const card = await CardDb.findOne({ where: { cardno }, transaction: t });
+
+    await attendance.update(
+      {
+        [attendanceField]: true,
+        updatedBy: req.user.cardno
+      },
+      { transaction: t }
+    );
+
+    await t.commit();
+
+    return res.status(200).send({
+      message: 'Attendance marked successfully',
+      participantName: card?.issuedto || cardno,
+      shibirName: shibir?.name || `Shibir ${shibir_id}`,
+      session: sessionNo
+    });
+
+  } catch (err) {
+    // ✅ rollback ONLY if transaction not finished
+    if (t && !t.finished) {
+      await t.rollback();
+    }
+    throw err;
+  }
+};
+
+export const fetchAdhyayanAttendanceReport = async (req, res) => {
+  const { shibir_id } = req.params;
+
+  const shibir = await ShibirDb.findByPk(shibir_id);
+  if (!shibir) {
+    throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  // Always 9 sessions
+  const maxSessions = 9;
+
+  const attendanceRows = await ShibirAttendanceDb.findAll({
+    where: { shibir_id },
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'center', 'res_status']
+      }
+    ],
+    order: [['cardno', 'ASC']]
+  });
+
+  const reportData = attendanceRows.map(row => {
+    const data = {
+      cardno: row.cardno,
+      name: row.CardDb?.issuedto || '',
+      mobno: row.CardDb?.mobno || '',
+      gender: row.CardDb?.gender || '',
+      centre: row.CardDb?.center || '',
+      res_status: row.CardDb?.res_status || ''
+    };
+
+    for (let i = 1; i <= 9; i++) {
+      const attended = row[`session_${i}_attendance`];
+      data[`session_${i}`] =
+        attended === true ? 'Yes' :
+        attended === false ? 'No' :
+        'No'; // backfill-safe
+    }
+
+    return data;
+  });
+
+  return res.status(200).send({
+    shibirName: shibir.name,
+    maxSessions: 9,
+    data: reportData
+  });
+};
+
+export async function fetchAdhyayanAttendanceSummary(req, res) {
+  const { shibir_id } = req.params;
+
+  const shibir = await ShibirDb.findByPk(shibir_id);
+  if (!shibir) {
+    return res.status(404).json({ message: 'Shibir not found' });
+  }
+
+  const attendanceRows = await ShibirAttendanceDb.findAll({
+    where: { shibir_id }
+  });
+
+  const totalRegistrants = attendanceRows.length;
+  const summary = [];
+
+  for (let i = 1; i <= 9; i++) {
+    const attendedCount = attendanceRows.filter(
+      r => r[`session_${i}_attendance`] === true
+    ).length;
+
+    const absenteesCount = totalRegistrants - attendedCount;
+
+    summary.push({
+      session: `Session ${i}`,
+      total_registrants: totalRegistrants,
+      total_attended: attendedCount,
+      total_absentees: absenteesCount
+    });
+  }
+
+  return res.status(200).json({
+    data: {
+      shibir_name: shibir.name,
+      summary
+    }
+  });
+}

@@ -14,14 +14,16 @@ import {
   TYPE_ADHYAYAN,
   STATUS_CASH_COMPLETED,
   ERR_FEEDBACK_ALREADY_SUBMITTED,
-  FEEDBACK_ELIGIBILITY_HOUR
+  FEEDBACK_ELIGIBILITY_HOUR,
+  RESEARCH_CENTRE
 } from '../config/constants.js';
 import {
   AdhyayanFeedback,
   ShibirBookingDb,
   ShibirDb,
   UtsavPackagesDb,
-  CardDb
+  CardDb,
+  ShibirAttendanceDb
 } from '../models/associations.js';
 import sendMail from '../utils/sendMail.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -144,6 +146,9 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
           { transaction: t }
         );
 
+        if (booking.status === STATUS_CONFIRMED) {
+    await createShibirAttendanceEntry(booking, user, t);
+  }
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
             user,
@@ -439,4 +444,44 @@ export async function getFeedbackStats(shibir_id) {
   });
 
   return stats[0];
+}
+
+
+
+export async function createShibirAttendanceEntry(
+  booking,
+  user,
+  transaction
+) {
+  const shibir = await ShibirDb.findOne({
+    where: { id: booking.shibir_id },
+    transaction
+  });
+
+  // Only Research Centre for now
+  if (shibir.location !== RESEARCH_CENTRE) return;
+
+  const startDate = new Date(shibir.start_date);
+  const endDate = new Date(shibir.end_date);
+
+  const days =
+    Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+
+  // All 9 sessions enabled for any number of days
+  const sessionFlags = {};
+  for (let i = 1; i <= 9; i++) {
+    sessionFlags[`session_${i}`] = true;
+  }
+
+  await ShibirAttendanceDb.create(
+    {
+      shibir_id: booking.shibir_id,
+      bookingid: booking.bookingid,
+      cardno: booking.cardno,
+      days,
+      ...sessionFlags,
+      updatedBy: user.cardno
+    },
+    { transaction }
+  );
 }
