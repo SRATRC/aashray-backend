@@ -93,14 +93,15 @@ export const verifyPayment = async (req, res) => {
           const booking = await getBooking(bookingType, transaction.bookingid);
 
           transactionStatus = STATUS_PAYMENT_COMPLETED;
-          bookingStatus =
-            bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
-              ? ROOM_STATUS_PENDING_CHECKIN
-              : STATUS_CONFIRMED;
 
           // for late-checkout-fee, while a transaction is created, 
           // a corresponding booking is not created.
           if (booking) {
+            bookingStatus =
+              bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
+                ? ROOM_STATUS_PENDING_CHECKIN
+                : STATUS_CONFIRMED;
+
             await booking.update(
               {
                 status: bookingStatus,
