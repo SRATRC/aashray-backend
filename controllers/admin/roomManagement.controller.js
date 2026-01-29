@@ -1760,17 +1760,35 @@ export const updateFlatBookingStatus = async (req, res) => {
 export const fetchLateCheckoutFees = async (req, res) => {
   const { payment_type } = req.query;
 
-  // payment_pending or payment_done
-  const status = payment_type === "payment_done" ? "completed" : "cash pending";
+  const statusMap = {
+    payment_pending: 'cash pending',
+    payment_done: 'completed',
+    fees_revoked: 'admin cancelled'
+  };
 
-  const transactions = await Transactions.findAll({
-    where: {
-      description: { [Op.like]: "Late checkout fee%" },
-      status
-    }
-  });
+  const status = statusMap[payment_type];
 
-  const finalData = [];
+  if (!status) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid payment_type: ${payment_type}`
+    });
+  }
+
+  try {
+    const transactions = await Transactions.findAll({
+      where: {
+        amt_type: 'late_checkout_room',   // ✅ NEW ENUM FILTER
+        status: status                    // ✅ SAME AS BEFORE
+      },
+      order: [['createdAt', 'DESC']]
+    });
+
+    console.log(
+      `Payment type: ${payment_type}, Status: ${status}, Found: ${transactions.length} records`
+    );
+
+    const finalData = [];
 
   for (const tr of transactions) {
     // Description looks like: "Late checkout fee for booking <bookingid>"
@@ -1788,6 +1806,7 @@ export const fetchLateCheckoutFees = async (req, res) => {
       (1000 * 60 * 60 * 24);
 
     finalData.push({
+      id: tr.id,
       amount: tr.amount,
       bookingid,
       guest_name: card?.issuedto,
@@ -1802,4 +1821,39 @@ export const fetchLateCheckoutFees = async (req, res) => {
   }
 
   res.json({ success: true, data: finalData });
+  } catch (error) {
+    console.error('Error fetching late checkout fees:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
 };
+
+
+export const revokeLateCheckoutFee = async (req, res) => {
+  const { transactionId, status } = req.body;
+
+  try {
+    console.log(`Updating transaction ${transactionId} to status: ${status}`);
+    
+    const result = await Transactions.update(
+      { status },
+      { where: { id: transactionId } }
+    );
+
+    if (result[0] === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Transaction not found or already updated' 
+      });
+    }
+
+    console.log(`Successfully updated transaction ${transactionId}`);
+    res.json({ success: true, message: 'Transaction updated successfully' });
+  } catch (error) {
+    console.error('Error updating transaction:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
