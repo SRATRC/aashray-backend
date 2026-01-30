@@ -288,7 +288,8 @@ if (status === 'waiting') {
       t2.center, 
       t2.res_status,
       t3.name,
-      t4.status AS transaction_status
+      t4.status AS transaction_status,
+      t4.description as comments 
    FROM shibir_booking_db AS t1
    LEFT JOIN card_db AS t2 
       ON t1.cardno = t2.cardno 
