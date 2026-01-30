@@ -485,3 +485,117 @@ export async function createShibirAttendanceEntry(
     { transaction }
   );
 }
+
+
+export async function bookAdhyayanForMumukshusAdmin(
+  shibir_ids,
+  mumukshus,
+  t,
+  adminUser
+) {
+  // Same validations as user flow
+  await validateCards(mumukshus);
+  await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
+
+  const shibirs = await validateAdhyayans(shibir_ids);
+
+  const result = await createAdhyayanBookingAdmin(
+    shibirs,
+    t,
+    adminUser,
+    ...mumukshus
+  );
+
+  return result;
+}
+
+
+export async function createAdhyayanBookingAdmin(
+  adhyayans,
+  t,
+  adminUser,
+  ...users
+) {
+  let amount = 0;
+  let waitingBookingCount = 0;
+  const userBookingIds = {};
+
+  for (const booking_user of users) {
+    const bookingIds = [];
+
+    for (const adhyayan of adhyayans) {
+      const bookingId = uuidv4();
+
+      if (adhyayan.available_seats > 0 && adhyayan.status === STATUS_OPEN) {
+
+        // ✅ Seat reservation
+        await reserveAdhyayanSeat(adhyayan, t);
+
+        const status =
+          adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED;
+       
+        const card = await CardDb.findOne({
+          where: { cardno: booking_user }
+        });
+
+        if (!card) {
+          throw new ApiError(400, `Card not found: ${booking_user}`);
+        }
+
+        // 🔹 bookedBy = admin (difference)
+        const booking = await ShibirBookingDb.create(
+          {
+            bookingid: bookingId,
+            cardno: booking_user,
+            bookedBy: null,
+            shibir_id: adhyayan.id,
+            status,
+            updatedBy: adminUser.username
+          },
+          { transaction: t }
+        );
+
+        // ✅ Attendance entry if confirmed
+        if (booking.status === STATUS_CONFIRMED) {
+          await createShibirAttendanceEntry(booking, adminUser, t);
+        }
+
+
+        // ✅ Pending transaction if payable
+        if (adhyayan.amount > 0) {
+          const { discountedAmount } = await createPendingTransaction(
+            card,          
+            booking,
+            TYPE_ADHYAYAN,
+            adhyayan.amount,
+            adminUser.username,
+            t
+          );
+          amount += discountedAmount;
+        }
+
+      } else {
+        // fallback WAITING (same as user flow)
+        await ShibirBookingDb.create(
+          {
+            bookingid: bookingId,
+            cardno: booking_user,
+            bookedBy: null,
+            shibir_id: adhyayan.id,
+            status: STATUS_WAITING,
+            updatedBy: adminUser.username || adminUser.cardno
+          },
+          { transaction: t }
+        );
+
+        waitingBookingCount++;
+      }
+
+      bookingIds.push(bookingId);
+    }
+
+    userBookingIds[booking_user] = bookingIds;
+  }
+
+  return { amount, userBookingIds, waitingBookingCount };
+}

@@ -333,7 +333,8 @@ export const fetchUtsavBookings = async (req, res) => {
       TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
       t3.location, t3.name AS utsav_name,
       t4.name AS package_name,
-      t5.status AS transaction_status  -- 👈 fetch status from transactions table
+      t5.status AS transaction_status,  -- 👈 fetch status from transactions table
+      t5.description as comments
     FROM utsav_booking AS t1
     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id

@@ -561,6 +561,12 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
       SELECT 
         t.bookingid,
         t.category,
+        
+        CASE 
+          WHEN t.category = 'utsav' THEN ub.utsavid
+          ELSE '-' 
+        END AS utsav_id,
+
         CASE 
           WHEN t.category = 'room' THEN rb.nights
           WHEN t.category = 'flat' THEN fb.nights
@@ -645,6 +651,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
       -- 2. Satshrut Transactions from Webhook (only captured)
       SELECT 
         CAST(JSON_UNQUOTE(JSON_EXTRACT(rw.json, '$.account_id')) AS CHAR) COLLATE utf8mb4_general_ci AS bookingid,
+         '-' COLLATE utf8mb4_general_ci AS utsav_id,
         'satshrut' COLLATE utf8mb4_general_ci AS category,
         1 AS quantity,
         CAST(JSON_UNQUOTE(JSON_EXTRACT(rw.json, '$.payload.payment.entity.amount')) AS UNSIGNED) / 100 AS amount,

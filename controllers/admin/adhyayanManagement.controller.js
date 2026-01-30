@@ -28,7 +28,9 @@ import {
   openAdhyayanSeat,
   validateAdhyayanBooking,
   validateAdhyayans, 
-  sendAdhyayanBookingUpdateNotification
+  sendAdhyayanBookingUpdateNotification,
+  bookAdhyayanForMumukshusAdmin,
+  createShibirAttendanceEntry
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
@@ -288,7 +290,8 @@ if (status === 'waiting') {
       t2.center, 
       t2.res_status,
       t3.name,
-      t4.status AS transaction_status
+      t4.status AS transaction_status,
+      t4.description as comments 
    FROM shibir_booking_db AS t1
    LEFT JOIN card_db AS t2 
       ON t1.cardno = t2.cardno 
@@ -481,6 +484,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
           { transaction: t }
         );
       }
+      await ensureAttendanceEntry(booking, req.user, t);
 
       break;
 
@@ -512,7 +516,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
         // then confirm the booking.
         if (transaction.status == STATUS_PAYMENT_COMPLETED) {
           newBookingStatus = STATUS_CONFIRMED;
-
+          await ensureAttendanceEntry(booking, req.user, t);
+          
           sendDualUserNotifications({
             primary: {
               cardno: booking.cardno,
@@ -871,4 +876,53 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
       summary
     }
   });
+}
+
+export const createAdhyayanBookingByAdmin = async (req, res) => {
+  const { shibir_ids, mumukshus } = req.body;
+
+  // ✅ STRICT validation
+  if (
+    !Array.isArray(shibir_ids) ||
+    shibir_ids.length === 0 ||
+    !Array.isArray(mumukshus) ||
+    mumukshus.length === 0
+  ) {
+    return res.status(400).send({
+      message: 'Invalid input'
+    });
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  try {
+    const result = await bookAdhyayanForMumukshusAdmin(
+      shibir_ids,
+      mumukshus,
+      t,
+      req.user
+    );
+
+    await t.commit();
+
+    return res.status(200).send({
+      message: 'Adhyayan bookings created by admin',
+      data: result
+    });
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
+};
+
+async function ensureAttendanceEntry(booking, user, t) {
+  const existing = await ShibirAttendanceDb.findOne({
+    where: { bookingid: booking.bookingid },
+    transaction: t
+  });
+
+  if (!existing) {
+    await createShibirAttendanceEntry(booking, user, t);
+  }
 }
