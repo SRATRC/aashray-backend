@@ -647,6 +647,7 @@ export async function updateBooking(req, res) {
     pickup_point,
     drop_point,
     type,
+    date
   } = req.body;
 
   if (!bookingid) {
@@ -682,6 +683,7 @@ export async function updateBooking(req, res) {
   if (pickup_point !== undefined) travelUpdate.pickup_point = pickup_point;
   if (drop_point !== undefined) travelUpdate.drop_point = drop_point;
   if (type !== undefined) travelUpdate.type = type;
+  if (date !== undefined) travelUpdate.date = date; // ✅ NEW
 
   if (Object.keys(travelUpdate).length > 0) {
     const travelBooking = await TravelDb.findOne({
