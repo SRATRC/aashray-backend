@@ -41,6 +41,25 @@ export const issuePlate = async (req, res) => {
   return res.status(200).send({ message, issuedto });
 };
 
+
+export const bulkIssuePlate = async (req, res) => {
+  const t = await database.transaction();
+  try {
+    const { cardnos, meal, date } = req.body; // ✅ Now accepts date from frontend
+    
+    for (const cardno of cardnos) {
+      await issueFoodPlate(cardno, meal, t, date); // ✅ Pass date to helper
+    }
+    
+    await t.commit();
+    res.status(200).send({ message: 'Plates issued successfully' });
+  } catch (err) {
+    await t.rollback();
+    res.status(400).send({ message: err.message });
+  }
+};
+
+
 export const physicalPlatesIssued = async (req, res) => {
   const { date, type, count } = req.body;
 

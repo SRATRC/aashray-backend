@@ -20,7 +20,8 @@ import {
   editBulkBooking,
   updatePlateIssued,
   foodReportDetailsGuests,
-  cancelMultipleMeals
+  cancelMultipleMeals,
+  bulkIssuePlate
   } from '../../controllers/admin/foodManagement.controller.js';
 import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -28,6 +29,7 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN));
 
+router.post('/issue/bulk', CatchAsync(bulkIssuePlate));
 router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));
 router.get('/physicalPlates', CatchAsync(fetchPhysicalPlateIssued));
