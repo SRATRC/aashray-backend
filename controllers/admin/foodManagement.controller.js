@@ -45,15 +45,14 @@ export const issuePlate = async (req, res) => {
 export const bulkIssuePlate = async (req, res) => {
   const t = await database.transaction();
   try {
-    const { cardnos, meal } = req.body;
-
+    const { cardnos, meal, date } = req.body; // ✅ Now accepts date from frontend
+    
     for (const cardno of cardnos) {
-      await issueFoodPlate(cardno, meal, t);
+      await issueFoodPlate(cardno, meal, t, date); // ✅ Pass date to helper
     }
-
+    
     await t.commit();
     res.status(200).send({ message: 'Plates issued successfully' });
-
   } catch (err) {
     await t.rollback();
     res.status(400).send({ message: err.message });

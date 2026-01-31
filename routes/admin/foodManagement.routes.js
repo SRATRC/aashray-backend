@@ -29,8 +29,8 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN));
 
-router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/issue/bulk', CatchAsync(bulkIssuePlate));
+router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));
 router.get('/physicalPlates', CatchAsync(fetchPhysicalPlateIssued));
 router.get('/fetch_food_bookings', CatchAsync(fetchFoodBookings));

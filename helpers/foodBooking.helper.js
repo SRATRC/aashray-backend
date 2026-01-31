@@ -540,7 +540,13 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   return t;
 }
 
-export async function issueFoodPlate(cardno, meal, t) {
+
+export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
+  // ✅ Use provided date or fallback to current date
+  const targetDate = providedDate 
+    ? moment.utc(providedDate).format('YYYY-MM-DD')
+    : moment.utc().format('YYYY-MM-DD');
+  
   const currentTime = moment.utc();
   const mealTimes = {
     breakfast: moment.utc().hour(4).minute(30).second(0),
@@ -548,10 +554,11 @@ export async function issueFoodPlate(cardno, meal, t) {
     dinner: moment.utc().hour(13).minute(30).second(0)
   };
 
+  // ✅ Find booking for the TARGET DATE (not always today)
   const booking = await FoodDb.findOne({
     where: {
       cardno: cardno,
-      date: currentTime.format('YYYY-MM-DD')
+      date: targetDate // ✅ CRITICAL FIX: Use target date instead of currentTime
     },
     transaction: t
   });
@@ -560,16 +567,21 @@ export async function issueFoodPlate(cardno, meal, t) {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const card = await CardDb.findOne({ where: { cardno: cardno } });
+  const card = await CardDb.findOne({
+    where: { cardno: cardno }
+  });
+
   if (!card) {
     throw new ApiError(404, 'Card not found');
   }
 
   let currentMeal = meal;
+  
+  // Only auto-detect meal if not provided
   if (!currentMeal) {
-    for (const meal of ['breakfast', 'lunch', 'dinner']) {
-      if (currentTime.isSameOrBefore(mealTimes[meal])) {
-        currentMeal = meal;
+    for (const mealType of ['breakfast', 'lunch', 'dinner']) {
+      if (currentTime.isSameOrBefore(mealTimes[mealType])) {
+        currentMeal = mealType;
         break;
       }
     }
@@ -584,14 +596,14 @@ export async function issueFoodPlate(cardno, meal, t) {
   if (!booking[currentMeal]) {
     throw new ApiError(400, `${currentMeal} not booked`);
   }
+
   const plateField = `${currentMeal}_plate_issued`;
+  
   if (booking[plateField]) {
     throw new ApiError(400, `Plate for ${currentMeal} already issued`);
   }
 
-  await booking.update({
-    [plateField]: true
-  });
+  await booking.update({ [plateField]: true }, { transaction: t });
 
   return {
     message: `Plate for ${currentMeal} issued successfully`,
