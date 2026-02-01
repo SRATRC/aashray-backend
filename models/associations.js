@@ -36,6 +36,7 @@ import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js'
+import UtsavFeedback from './utsav_feedback_model.js'
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -541,5 +542,7 @@ export {
   Updates,
   AdhyayanFeedback,
   RazorpaySettlementRecon,
-  ShibirAttendanceDb
+  ShibirAttendanceDb,
+  UtsavFeedback
 };
+

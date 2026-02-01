@@ -5,7 +5,8 @@ import {
 import {
   UtsavBooking,
   UtsavDb,
-  UtsavPackagesDb
+  UtsavPackagesDb,
+  UtsavFeedback
 } from '../../models/associations.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { openUtsavSeat, sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
@@ -233,3 +234,147 @@ export const FetchUtsavById = async (req, res) => {
 
   return res.status(200).send({ data: utsav[0] });
 };
+
+
+import { Op } from 'sequelize';
+// import db from '../../models/index.js';
+// import APIError from '../../utils/APIError.js';
+
+// const { UtsavFeedback, UtsavBooking } = db;
+
+/* -------------------------------------------------------------------------- */
+/*                     VALIDATE FEEDBACK ACCESS                                */
+/* -------------------------------------------------------------------------- */
+
+export const validateUtsavFeedback = async (req, res) => {
+  const { utsavid, cardno } = req.query;
+
+  if (!utsavid || !cardno) {
+    throw new ApiError(400, 'utsavid and cardno are required');
+  }
+
+  // 1️⃣ Check booking using utsavid (booking table)
+  const booking = await UtsavBooking.findOne({
+    where: {
+      utsavid,        // ✅ booking table column
+      cardno,
+      status: {
+        [Op.in]: ['completed', 'checkedin'],
+      },
+    },
+  });
+
+  if (!booking) {
+    throw new ApiError(
+      403,
+      'You are not authorized to submit feedback for this utsav'
+    );
+  }
+
+  // 2️⃣ Check feedback using utsav_id (feedback table column)
+  const existing = await UtsavFeedback.findOne({
+    where: {
+      utsav_id: utsavid,   // ✅ explicit mapping
+      cardno,
+    },
+  });
+
+  if (existing) {
+    throw new ApiError(409, 'Feedback already submitted');
+  }
+
+  res.json({ success: true });
+};
+
+/* -------------------------------------------------------------------------- */
+/*                          SUBMIT FEEDBACK                                    */
+/* -------------------------------------------------------------------------- */
+
+export const submitUtsavFeedback = async (req, res) => {
+  const {
+    cardno,
+    utsav_id,
+    mumukshu_name,
+    accommodation_type,
+    room_number,
+
+    accommodation_rating,
+    qr_rating,
+    food_rating,
+    program_rating,
+    volunteer_rating,
+    infrastructure_rating,
+    decor_rating,
+    internal_transport_rating,
+    raj_pravas_rating,
+    sparsh_rating,
+    av_rating,
+
+    loved_most,
+    improvement_suggestions,
+  } = req.body;
+
+  if (!cardno || !utsav_id) {
+    throw new APIError(400, 'cardno and utsav_id are required');
+  }
+
+  const requiredFields = [
+    mumukshu_name,
+    accommodation_type,
+    room_number,
+    accommodation_rating,
+    qr_rating,
+    food_rating,
+    program_rating,
+    volunteer_rating,
+    infrastructure_rating,
+    decor_rating,
+    internal_transport_rating,
+    raj_pravas_rating,
+    sparsh_rating,
+    av_rating,
+    loved_most,
+    improvement_suggestions,
+  ];
+
+  if (requiredFields.some((f) => f === null || f === undefined || f === '')) {
+    throw new APIError(400, 'All feedback fields are required');
+  }
+
+  const existing = await UtsavFeedback.findOne({
+    where: { utsav_id, cardno },
+  });
+
+  if (existing) {
+    throw new APIError(409, 'Feedback already submitted');
+  }
+
+  await UtsavFeedback.create({
+    cardno,
+    utsav_id,
+    mumukshu_name,
+    accommodation_type,
+    room_number,
+
+    accommodation_rating,
+    qr_rating,
+    food_rating,
+    program_rating,
+    volunteer_rating,
+    infrastructure_rating,
+    decor_rating,
+    internal_transport_rating,
+    raj_pravas_rating,
+    sparsh_rating,
+    av_rating,
+
+    loved_most,
+    improvement_suggestions,
+  });
+
+  res.json({
+    success: true,
+    message: 'Utsav feedback submitted successfully',
+  });
+};
+
