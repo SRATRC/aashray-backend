@@ -8,13 +8,19 @@ import {
   ERR_UTSAV_ALREADY_BOOKED,
   STATUS_AVAILABLE,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  ERR_UTSAV_NOT_FOUND,
+  FEEDBACK_ELIGIBILITY_HOUR,
+  ERR_UTSAV_FEEDBACK_NOT_ALLOWED,
+  STATUS_CASH_COMPLETED,
+  ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED
 } from '../config/constants.js';
 import {
   UtsavDb,
   UtsavPackagesDb,
   UtsavBooking,
-  CardDb
+  CardDb,
+  UtsavFeedback
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -28,6 +34,7 @@ import {
   isDateRangeOverlapping,
   validateBlockedDates
 } from '../controllers/helper.js';
+import moment from 'moment';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
 const SAMVATSARI_PACKAGE_ID = 21;
@@ -532,4 +539,61 @@ export async function findUtsavOnBoundaryDates(checkin, checkout) {
   });
 
   return utsav;
+}
+
+export async function validateFeedbackEligibility(cardno, utsav_id) {
+  const utsav = await UtsavDb.findOne({
+    where: { id: utsav_id }
+  });
+
+  if (!utsav) {
+    throw new ApiError(404, ERR_UTSAV_NOT_FOUND);
+  }
+
+  const now = moment().tz('Asia/Kolkata');
+  const feedbackStartDate = moment(utsav.end_date)
+    .tz('Asia/Kolkata')
+    .hour(FEEDBACK_ELIGIBILITY_HOUR)
+    .minute(0)
+    .second(0);
+
+  // Check if feedback period has started
+  if (now.isBefore(feedbackStartDate)) {
+    throw new ApiError(400, ERR_UTSAV_FEEDBACK_NOT_ALLOWED);
+  }
+
+  // Check if more than 15 days have passed since adhyayan ended
+  const daysSinceEnd = now.diff(feedbackStartDate, 'days');
+  if (daysSinceEnd > 8) {
+    throw new ApiError(
+      400,
+      'Feedback submission is only allowed within 8 days after the utsav ends'
+    );
+  }
+
+  // Check if user has a confirmed booking for this adhyayan
+  const booking = await UtsavBooking.findOne({
+    where: {
+      cardno,
+      utsavid: utsav_id,
+      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED]
+    }
+  });
+
+  if (!booking) {
+    throw new ApiError(403, ERR_UTSAV_FEEDBACK_NOT_ALLOWED);
+  }
+
+  const existingFeedback = await UtsavFeedback.findOne({
+    where: {
+      cardno,
+      utsav_id
+    }
+  });
+
+  if (existingFeedback) {
+    throw new ApiError(400, ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED);
+  }
+
+  return { utsav, booking };
 }

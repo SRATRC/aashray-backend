@@ -20,6 +20,4 @@ router.get('/:id', CatchAsync(FetchUtsavById));
 router.post('/feedback', CatchAsync(submitUtsavFeedback));
 router.get('/feedback/validate', CatchAsync(validateUtsavFeedback));
 
-
 export default router;
-

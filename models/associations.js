@@ -35,8 +35,8 @@ import PermanentWifiCodes from './permanent_wifi_codes.model.js';
 import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
-import ShibirAttendanceDb from './shibir_attendance_db.model.js'
-import UtsavFeedback from './utsav_feedback_model.js'
+import ShibirAttendanceDb from './shibir_attendance_db.model.js';
+import UtsavFeedback from './utsav_feedback.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -115,6 +115,12 @@ CardDb.hasMany(MaintenanceDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasOne(UtsavBooking, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(UtsavFeedback, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -363,6 +369,12 @@ UtsavDb.hasMany(UtsavBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+UtsavDb.hasMany(UtsavFeedback, {
+  foreignKey: 'utsav_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 UtsavBooking.belongsTo(UtsavDb, {
   foreignKey: 'utsavid',
   targetKey: 'id'
@@ -503,7 +515,6 @@ ShibirAttendanceDb.belongsTo(ShibirBookingDb, {
   targetKey: 'bookingid'
 });
 
-
 export {
   CardDb,
   Transactions,
@@ -545,4 +556,3 @@ export {
   ShibirAttendanceDb,
   UtsavFeedback
 };
-

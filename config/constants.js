@@ -64,7 +64,6 @@ export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
 export const AMT_TYPE_LATE_CHECKOUT_ROOM = 'late_checkout_room';
 
-
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
 export const ROOM_WL = 'WL';
@@ -142,6 +141,11 @@ export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
 export const ERR_FLAT_ALREADY_BOOKED =
   'Flat already booked for one or more mumukshus during selected dates';
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
+export const ERR_UTSAV_NOT_FOUND = 'Utsav not found';
+export const ERR_UTSAV_FEEDBACK_NOT_ALLOWED =
+  'You are not eligible to submit feedback for this utsav';
+export const ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED =
+  'Feedback already submitted for this utsav';
 
 export const ERR_FEEDBACK_ALREADY_SUBMITTED =
   'Feedback already submitted for this adhyayan';
