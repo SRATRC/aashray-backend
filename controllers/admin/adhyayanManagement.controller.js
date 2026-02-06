@@ -835,6 +835,7 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
 
   return res.status(200).send({
     shibirName: shibir.name,
+    speaker: shibir.speaker,
     maxSessions: 9,
     data: reportData
   });
