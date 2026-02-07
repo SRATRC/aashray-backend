@@ -834,8 +834,8 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
     for (let i = 1; i <= 9; i++) {
       const attended = row[`session_${i}_attendance`];
 
-      data[`session_${i}`] =
-        attended === 1 ? 'Yes' : 'No';  // Tinyint → Yes/No
+      data[`session_${i}`] = Number(attended) === 1 ? 'Yes' : 'No';
+
     }
 
     return data;
