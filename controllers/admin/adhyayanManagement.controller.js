@@ -927,3 +927,53 @@ async function ensureAttendanceEntry(booking, user, t) {
     await createShibirAttendanceEntry(booking, user, t);
   }
 }
+
+
+export const toggleAttendance = async (req, res) => {
+  try {
+    const { shibir_id, cardno, sessionNumber, value } = req.body;
+
+    if (!shibir_id || !cardno || !sessionNumber) {
+      return res.status(400).json({
+        message: "shibir_id, cardno and sessionNumber required"
+      });
+    }
+
+    // Validate session number
+    if (sessionNumber < 1 || sessionNumber > 9) {
+      return res.status(400).json({
+        message: "Invalid session number"
+      });
+    }
+
+    const columnName = `session_${sessionNumber}_attendance`;
+
+    const record = await ShibirAttendanceDb.findOne({
+      where: { 
+        cardno,
+        shibir_id  // Add shibir_id to the where clause
+      }
+    });
+
+    if (!record) {
+      return res.status(404).json({
+        message: "Attendance record not found"
+      });
+    }
+
+    await record.update({
+      [columnName]: value
+    });
+
+    return res.json({
+      message: "Attendance updated successfully"
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message  // Add this to see the actual SQL error
+    });
+  }
+};

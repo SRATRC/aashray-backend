@@ -19,7 +19,8 @@ import {
   markAdhyayanAttendance,
   fetchAdhyayanAttendanceReport,
   fetchAdhyayanAttendanceSummary,
-  createAdhyayanBookingByAdmin
+  createAdhyayanBookingByAdmin,
+  toggleAttendance
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -61,6 +62,7 @@ router.get('/waitlist/:id', CatchAsync(adhyayanWaitlist));
 router.get('/pendinglist/:id', CatchAsync(adhyayanPendinglist));
 router.get('/bookings', CatchAsync(fetchAdhyayanBookings));
 router.put('/status', CatchAsync(adhyayanStatusUpdate));
+router.put('/attendance/toggle', CatchAsync(toggleAttendance));
 router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 router.get('/fetchList', CatchAsync(fetchAllAdhyayanList));
 router.delete('/:id', CatchAsync(softDeleteShibir));
