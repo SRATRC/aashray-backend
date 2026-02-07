@@ -985,3 +985,53 @@ export const toggleAttendance = async (req, res) => {
     });
   }
 };
+
+
+export const createAttendanceEntryManually = async (req, res) => {
+  const { bookingid } = req.body;
+
+  const t = await database.transaction();
+
+  try {
+    const booking = await ShibirBookingDb.findOne({
+      where: { bookingid },
+      transaction: t
+    });
+
+    if (!booking) {
+      throw new ApiError(404, "Booking not found");
+    }
+
+    // Check if already exists
+    const existing = await ShibirAttendanceDb.findOne({
+      where: {
+        shibir_id: booking.shibir_id,
+        cardno: booking.cardno
+      },
+      transaction: t
+    });
+
+    if (existing) {
+      await t.rollback();
+      return res.status(409).json({
+        message: "Attendance record already exists"
+      });
+    }
+
+    await createShibirAttendanceEntry(
+      booking,
+      req.user,
+      t
+    );
+
+    await t.commit();
+
+    return res.status(201).json({
+      message: "Attendance record created"
+    });
+
+  } catch (error) {
+    await t.rollback();
+    throw error;
+  }
+};

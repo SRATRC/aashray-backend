@@ -20,7 +20,8 @@ import {
   fetchAdhyayanAttendanceReport,
   fetchAdhyayanAttendanceSummary,
   createAdhyayanBookingByAdmin,
-  toggleAttendance
+  toggleAttendance,
+  createAttendanceEntryManually
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -71,5 +72,6 @@ router.post('/attendance/:shibir_id/:session_no/:cardno', CatchAsync(markAdhyaya
 router.get('/attendance/report/:shibir_id', CatchAsync(fetchAdhyayanAttendanceReport));
 router.get('/attendance/summary/:shibir_id', CatchAsync(fetchAdhyayanAttendanceSummary));
 router.post('/booking/admin', CatchAsync(createAdhyayanBookingByAdmin));
+router.post('/attendance/create', CatchAsync(createAttendanceEntryManually));
 
 export default router;
