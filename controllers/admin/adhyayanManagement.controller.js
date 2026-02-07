@@ -793,16 +793,25 @@ export const markAdhyayanAttendance = async (req, res) => {
 export const fetchAdhyayanAttendanceReport = async (req, res) => {
   const { shibir_id } = req.params;
 
+  const { Op } = Sequelize;
+
   const shibir = await ShibirDb.findByPk(shibir_id);
   if (!shibir) {
     throw new ApiError(404, 'Adhyayan not found');
   }
 
-  // Always 9 sessions
-  const maxSessions = 9;
+  // Build dynamic OR condition for active sessions
+  const sessionConditions = [];
+  for (let i = 1; i <= 9; i++) {
+    sessionConditions.push({ [`session_${i}`]: 1 });
+  }
 
   const attendanceRows = await ShibirAttendanceDb.findAll({
-    where: { shibir_id },
+    where: {
+  shibir_id,
+  session_1: 1   // just check one session
+}
+,
     include: [
       {
         model: CardDb,
@@ -824,10 +833,9 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
 
     for (let i = 1; i <= 9; i++) {
       const attended = row[`session_${i}_attendance`];
+
       data[`session_${i}`] =
-        attended === true ? 'Yes' :
-        attended === false ? 'No' :
-        'No'; // backfill-safe
+        attended === 1 ? 'Yes' : 'No';  // Tinyint → Yes/No
     }
 
     return data;
