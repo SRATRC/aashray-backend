@@ -629,7 +629,7 @@ export async function checkRoomAvailabilityForMumukshus(
         var assignedRoom = null;
 
         const nights = await calculateNights(range.start, range.end);
-        const minNights = range.overlappingWithUtsav ? 1 : 0;
+        const minNights =  range.overlappingWithUtsav && nights > 0 ? 1 : 0;
 
         if (nights == 0) {
           // 1 day visit
