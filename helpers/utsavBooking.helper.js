@@ -457,6 +457,19 @@ export async function getDateRangesDuringUtsav(
 
   const dateRangesByMumukshu = {};
   for (const mumukshu of mumukshus) {
+    const isDayVisit = startDate === endDate;
+
+if (isDayVisit) {
+  dateRangesByMumukshu[mumukshu] = [
+    {
+      start: startDate,
+      end: endDate,
+      overlappingWithUtsav: false
+    }
+  ];
+  continue;
+}
+
     const utsavBooking = inProgressUtsavOverlapping
       ? utsav
       : existingUtsavBookings[mumukshu]?.UtsavDb;
