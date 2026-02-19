@@ -2,7 +2,8 @@ import {
   ERR_BOOKING_NOT_FOUND,
   MSG_CANCEL_SUCCESSFUL,
   STATUS_CONFIRMED,
-  ROOM_STATUS_CHECKEDIN
+  ROOM_STATUS_CHECKEDIN,
+  FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import {
   UtsavBooking,
