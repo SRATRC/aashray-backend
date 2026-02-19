@@ -13,7 +13,8 @@ import {
   FEEDBACK_ELIGIBILITY_HOUR,
   ERR_UTSAV_FEEDBACK_NOT_ALLOWED,
   STATUS_CASH_COMPLETED,
-  ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED
+  ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED,
+  ROOM_STATUS_CHECKEDIN
 } from '../config/constants.js';
 import {
   UtsavDb,
@@ -576,7 +577,7 @@ export async function validateFeedbackEligibility(cardno, utsav_id) {
     where: {
       cardno,
       utsavid: utsav_id,
-      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED]
+      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN]
     }
   });
 
