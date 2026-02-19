@@ -171,6 +171,130 @@ export const createUtsav = async (req, res) => {
   return res.status(200).send({ message: 'Created Utsav', data: utsavDetails });
 };
 
+export const addUtsavPackagesBulk = async (req, res) => {
+  const { packages } = req.body;
+
+  // ✅ Basic payload check
+  if (!Array.isArray(packages) || packages.length === 0) {
+    return res.status(400).send({
+      message: 'No packages provided'
+    });
+  }
+
+  // ✅ In-request duplicate name check (NEW — IMPORTANT)
+  const names = packages.map(p =>
+    p?.name?.trim()?.toLowerCase()
+  );
+
+  const duplicateNames = names.filter(
+    (name, index) => name && names.indexOf(name) !== index
+  );
+
+  if (duplicateNames.length) {
+    return res.status(400).send({
+      message: `Duplicate package names in request: ${[
+        ...new Set(duplicateNames)
+      ].join(', ')}`
+    });
+  }
+
+  const t = await database.transaction();
+
+  try {
+    for (const pkg of packages) {
+      const {
+        utsavid,
+        name,
+        start_date,
+        end_date,
+        amount
+      } = pkg;
+
+      // ✅ Required field validation (NEW)
+      if (!utsavid || !name || !start_date || !end_date || !amount) {
+        throw new ApiError(
+          400,
+          `All fields required for package "${name || 'unknown'}"`
+        );
+      }
+
+      // ✅ Amount validation (NEW recommended)
+      if (Number(amount) <= 0) {
+        throw new ApiError(
+          400,
+          `Invalid amount for package "${name}"`
+        );
+      }
+
+      // ✅ Validate utsav exists
+      const utsav = await validateUtsav(utsavid);
+
+      const packageStart = moment(start_date);
+      const packageEnd = moment(end_date);
+      const utsavStart = moment(utsav.start_date);
+      const utsavEnd = moment(utsav.end_date);
+
+      // ✅ Package within utsav range
+      if (
+        packageStart.isBefore(utsavStart, 'day') ||
+        packageEnd.isAfter(utsavEnd, 'day')
+      ) {
+        throw new ApiError(
+          400,
+          `Package "${name}" dates must be within the Utsav dates`
+        );
+      }
+
+      // ✅ End >= Start
+      if (packageEnd.isBefore(packageStart, 'day')) {
+        throw new ApiError(
+          400,
+          `Package "${name}" end date cannot be before start date`
+        );
+      }
+
+      // ✅ Duplicate check in DB (same as old API)
+      const exists = await UtsavPackagesDb.findOne({
+        where: {
+          utsavid,
+          name
+        },
+        transaction: t
+      });
+
+      if (exists) {
+        throw new ApiError(
+          400,
+          `Package "${name}" already exists for this Utsav`
+        );
+      }
+
+      // ✅ Create package
+      await UtsavPackagesDb.create(
+        {
+          utsavid,
+          name,
+          start_date,
+          end_date,
+          amount,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+    }
+
+    await t.commit();
+
+    return res.status(200).send({
+      message: 'Packages Created Successfully'
+    });
+
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
+};
+
 export const addUtsavPackage = async (req, res) => {
   const { utsavid, name, start_date, end_date, amount } = req.body;
 
@@ -796,9 +920,13 @@ export const fetchUtsav = async (req, res) => {
 
 export const updateUtsavPackage = async (req, res) => {
   const { name, start_date, end_date, amount } = req.body;
-  const { id: packageId, utsavId } = req.params;
+  const { id: packageId } = req.params;
 
-  const utsavPackage = await validateUtsavPackage(packageId, utsavId);
+  const utsavPackage = await UtsavPackagesDb.findByPk(packageId);
+
+  if (!utsavPackage) {
+    return res.status(404).send({ message: 'Package not found' });
+  }
 
   await utsavPackage.update({
     name,
@@ -814,40 +942,40 @@ export const updateUtsavPackage = async (req, res) => {
 export const fetchAllPackages = async (req, res) => {
   const packages = await database.query(
     `SELECT 
-      utsav_packages_db.id,
-      utsav_packages_db.utsavid,
-      utsav_packages_db.name,
-      utsav_packages_db.start_date,
-      utsav_packages_db.end_date,
-      utsav_packages_db.amount,
-      utsav_db.name AS utsav_name,
-      COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count
-    FROM 
-      utsav_packages_db
-    LEFT JOIN 
-      utsav_db ON utsav_packages_db.utsavid = utsav_db.id
-    LEFT JOIN 
-      utsav_booking ON utsav_packages_db.id = utsav_booking.packageid
-    WHERE 
-      utsav_packages_db.start_date > CURRENT_DATE
-    GROUP BY 
-      utsav_packages_db.id,
-      utsav_packages_db.utsavid,
-      utsav_packages_db.name,
-      utsav_packages_db.start_date,
-      utsav_packages_db.end_date,
-      utsav_packages_db.amount,
-      utsav_db.name
-    ORDER BY 
-      utsav_packages_db.start_date ASC;`,
+        up.id,
+        up.utsavid,
+        up.name,
+        up.start_date,
+        up.end_date,
+        up.amount,
+        u.name AS utsav_name,
+        COUNT(
+          CASE WHEN ub.status = '${STATUS_WAITING}' THEN 1 END
+        ) AS waitlist_count
+     FROM utsav_packages_db up
+     LEFT JOIN utsav_db u 
+        ON up.utsavid = u.id
+     LEFT JOIN utsav_booking ub 
+        ON up.id = ub.packageid
+     WHERE up.start_date > CURRENT_DATE
+     GROUP BY 
+        up.id,
+        up.utsavid,
+        up.name,
+        up.start_date,
+        up.end_date,
+        up.amount,
+        u.name
+     ORDER BY up.start_date ASC`,
     {
       type: QueryTypes.SELECT
     }
   );
 
-  return res
-    .status(200)
-    .send({ message: 'Fetched Package Records', data: packages });
+  return res.status(200).send({
+    message: 'Fetched Package Records',
+    data: packages
+  });
 };
 
 export const fetchPackagesByUtsav = async (req, res) => {

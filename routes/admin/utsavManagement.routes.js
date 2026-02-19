@@ -30,7 +30,8 @@ import {
   fetchUtsavByLocation,
   ReservationReport,
   issuePlate,
-  createUtsavBookingByAdmin
+  createUtsavBookingByAdmin,
+  addUtsavPackagesBulk
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
@@ -59,6 +60,7 @@ utsavAdminRouter.use(
 
 utsavAdminRouter.post('/create', CatchAsync(createUtsav));
 utsavAdminRouter.post('/package', CatchAsync(addUtsavPackage));
+utsavAdminRouter.post('/package/bulk', CatchAsync(addUtsavPackagesBulk));
 utsavAdminRouter.post(
   '/booking',
   authorizeRoles(
@@ -71,7 +73,7 @@ utsavAdminRouter.post(
 );
 utsavAdminRouter.put('/update/:id', CatchAsync(updateUtsav));
 utsavAdminRouter.put(
-  '/updatepackage/:id/:utsavId',
+  '/updatepackage/:id',
   CatchAsync(updateUtsavPackage)
 );
 utsavAdminRouter.get('/bookings', CatchAsync(fetchUtsavBookings));
