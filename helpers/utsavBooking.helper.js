@@ -552,7 +552,7 @@ export async function validateFeedbackEligibility(cardno, utsav_id) {
   }
 
   const now = moment().tz('Asia/Kolkata');
-  const feedbackStartDate = moment(utsav.end_date)
+  const feedbackStartDate = moment(utsav.start_date)
     .tz('Asia/Kolkata')
     .hour(FEEDBACK_ELIGIBILITY_HOUR)
     .minute(0)
