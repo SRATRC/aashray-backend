@@ -4,7 +4,8 @@ import {
   FoodDb,
   FoodPhysicalPlate,
   Menu,
-  Transactions
+  Transactions,
+  UtsavDb
 } from '../../models/associations.js';
 import {
   MSG_CANCEL_SUCCESSFUL,
@@ -16,7 +17,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import moment from 'moment';
-import Sequelize, { Op } from 'sequelize';
+import Sequelize, { Op,  fn, col } from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import {
   bookFoodForMumukshus,
@@ -771,5 +772,94 @@ export const addBulkMenu = async (req, res) => {
   } catch (err) {
     console.error('Bulk Upload Error:', err);
     res.status(500).json({ message: 'Server error while uploading menus' });
+  }
+};
+
+
+
+
+export const getMealCountByMobile = async (req, res) => {
+  try {
+    const { mobno, fromDate, toDate } = req.body;
+
+    // 🔥 STEP 1 — find overlapping utsavs
+    const utsavs = await UtsavDb.findAll({
+  where: {
+    start_date: { [Op.lte]: toDate },
+    end_date: { [Op.gte]: fromDate },
+    location: "Research Centre", // ⭐ NEW FILTER
+  },
+  attributes: ["id", "name", "start_date", "end_date", "location"],
+  raw: true,
+});
+    // 🔥 STEP 2 — build exclusion conditions
+    const exclusionConditions = [];
+
+    if (utsavs.length > 0) {
+      utsavs.forEach((u) => {
+        exclusionConditions.push({
+          date: {
+            [Op.between]: [
+              u.start_date > fromDate ? u.start_date : fromDate,
+              u.end_date < toDate ? u.end_date : toDate,
+            ],
+          },
+        });
+      });
+    }
+
+    // 🔥 STEP 3 — main meal query (excluding utsav dates)
+    const result = await FoodDb.findAll({
+      attributes: [
+        [fn("COALESCE", fn("SUM", col("breakfast")), 0), "breakfastBooked"],
+        [fn("COALESCE", fn("SUM", col("breakfast_plate_issued")), 0), "breakfastIssued"],
+        [fn("COALESCE", fn("SUM", col("lunch")), 0), "lunchBooked"],
+        [fn("COALESCE", fn("SUM", col("lunch_plate_issued")), 0), "lunchIssued"],
+        [fn("COALESCE", fn("SUM", col("dinner")), 0), "dinnerBooked"],
+        [fn("COALESCE", fn("SUM", col("dinner_plate_issued")), 0), "dinnerIssued"],
+      ],
+      include: [
+        {
+          model: CardDb,
+          attributes: [],
+          required: true,
+          where: { mobno },
+        },
+      ],
+      where: {
+        date: {
+          [Op.between]: [fromDate, toDate],
+        },
+        ...(exclusionConditions.length > 0 && {
+          [Op.not]: {
+            [Op.or]: exclusionConditions,
+          },
+        }),
+      },
+      raw: true,
+    });
+
+    const summary = result[0] || {};
+
+    // 🔥 STEP 4 — person info
+    const person = await CardDb.findOne({
+      where: { mobno },
+      attributes: ["issuedto", "mobno", "cardno"],
+      raw: true,
+    });
+
+    return res.json({
+      success: true,
+      data: summary,
+      person,
+      utsavExcluded: utsavs, // ⭐ IMPORTANT FOR FRONTEND
+    });
+
+  } catch (error) {
+    console.error("Meal count error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };

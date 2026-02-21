@@ -21,7 +21,8 @@ import {
   updatePlateIssued,
   foodReportDetailsGuests,
   cancelMultipleMeals,
-  bulkIssuePlate
+  bulkIssuePlate,
+  getMealCountByMobile
   } from '../../controllers/admin/foodManagement.controller.js';
 import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -34,6 +35,7 @@ router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));
 router.get('/physicalPlates', CatchAsync(fetchPhysicalPlateIssued));
 router.get('/fetch_food_bookings', CatchAsync(fetchFoodBookings));
+router.post("/meal-count", getMealCountByMobile);
 
 router.post('/book', CatchAsync(bookFood));
 router.put('/cancel/:bookingid', CatchAsync(cancelBooking));
