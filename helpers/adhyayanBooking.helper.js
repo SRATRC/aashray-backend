@@ -146,9 +146,14 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
           { transaction: t }
         );
 
-        if (booking.status === STATUS_CONFIRMED) {
-    await createShibirAttendanceEntry(booking, user, t);
-  }
+        if (
+  [
+    STATUS_CONFIRMED,
+    STATUS_PAYMENT_PENDING
+  ].includes(booking.status)
+) {
+  await createShibirAttendanceEntry(booking, user, t);
+}
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
             user,
@@ -453,13 +458,21 @@ export async function createShibirAttendanceEntry(
   user,
   transaction
 ) {
+  // 🔒 Prevent duplicates (CRITICAL)
+  const existing = await ShibirAttendanceDb.findOne({
+    where: { bookingid: booking.bookingid },
+    transaction
+  });
+
+  if (existing) return;
+
   const shibir = await ShibirDb.findOne({
     where: { id: booking.shibir_id },
     transaction
   });
 
   // Only Research Centre for now
-  if (shibir.location !== RESEARCH_CENTRE) return;
+  if (!shibir || shibir.location !== RESEARCH_CENTRE) return;
 
   const startDate = new Date(shibir.start_date);
   const endDate = new Date(shibir.end_date);
@@ -467,10 +480,10 @@ export async function createShibirAttendanceEntry(
   const days =
     Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-  // All 9 sessions enabled for any number of days
+  // ✅ Use integers for TINYINT
   const sessionFlags = {};
   for (let i = 1; i <= 9; i++) {
-    sessionFlags[`session_${i}`] = true;
+    sessionFlags[`session_${i}`] = 1;
   }
 
   await ShibirAttendanceDb.create(
@@ -480,7 +493,7 @@ export async function createShibirAttendanceEntry(
       cardno: booking.cardno,
       days,
       ...sessionFlags,
-      updatedBy: user.cardno
+      updatedBy: user?.cardno || user?.username || 'system'
     },
     { transaction }
   );
@@ -598,4 +611,25 @@ export async function createAdhyayanBookingAdmin(
   }
 
   return { amount, userBookingIds, waitingBookingCount };
+}
+
+export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
+  await ShibirAttendanceDb.update(
+    {
+      session_1: 0,
+      session_2: 0,
+      session_3: 0,
+      session_4: 0,
+      session_5: 0,
+      session_6: 0,
+      session_7: 0,
+      session_8: 0,
+      session_9: 0,
+      updatedBy
+    },
+    {
+      where: { bookingid: bookingId },
+      transaction
+    }
+  );
 }

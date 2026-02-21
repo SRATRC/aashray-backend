@@ -130,15 +130,32 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
 
     switch (bookingType) {
       case TYPE_ADHYAYAN:
-        const adhyayan = await ShibirDb.findOne({
-          where: { id: booking.shibir_id }
-        });
-        let newBooking = await openAdhyayanSeat(adhyayan, systemUser.username, t);
-        if(newBooking){
-          addToOpenBookings(openBookings, newBooking);
-        }
-        break;
-      case TYPE_UTSAV:
+  const adhyayan = await ShibirDb.findOne({
+    where: { id: booking.shibir_id }
+  });
+
+  let newBooking = await openAdhyayanSeat(
+    adhyayan,
+    systemUser.username,
+    t
+  );
+
+  if (newBooking) {
+    addToOpenBookings(openBookings, newBooking);
+
+    // 🔥 CREATE ATTENDANCE FOR PROMOTED USER
+    const { createShibirAttendanceEntry } = await import(
+      './helpers/adhyayanBooking.helper.js'
+    );
+
+    await createShibirAttendanceEntry(
+      newBooking,
+      systemUser,
+      t
+    );
+  }
+  break;
+    case TYPE_UTSAV:
         const utsav = await UtsavDb.findOne({
           where: { id: booking.utsavid }
         });
@@ -162,6 +179,16 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
       },
       { transaction: t }
     );
+
+    // 🔥 ADD THIS
+if (bookingType === TYPE_ADHYAYAN) {
+  const { resetShibirAttendance } = await import('./helpers/adhyayanBooking.helper.js');
+  await resetShibirAttendance(
+    booking.bookingid,
+    systemUser.username,
+    t
+  );
+}
     addToUserBookingIdMap(userBookingIds, booking);
   }
 }
