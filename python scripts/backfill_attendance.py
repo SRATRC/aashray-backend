@@ -3,11 +3,11 @@ from datetime import datetime
 
 # 🔧 DB CONFIG — update
 DB_CONFIG = {
-    "host": "13.126.96.89",
-    "port": "3306",
-    "user": "admin",
-    "password": "Sratrc@123",
-    "database": "aashray",
+    "host": "-",
+    "port": "-",
+    "user": "-",
+    "password": "-",
+    "database": "-",
 }
 
 RESEARCH_CENTRE = "Research Centre"  # verify exact value
