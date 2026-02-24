@@ -50,6 +50,11 @@ mock.module("../models/associations.js", () => ({
 const { getBookings } = await import('../helpers/booking.helper.js');
 
 describe('getBookings', () => {
+  it('should return empty array for empty bookingids', async () => {
+    const result = await getBookings(TYPE_ROOM, []);
+    expect(result).toEqual([]);
+  });
+
   it('should call RoomBooking.findAll for TYPE_ROOM', async () => {
     const ids = ['room1'];
     const result = await getBookings(TYPE_ROOM, ids);

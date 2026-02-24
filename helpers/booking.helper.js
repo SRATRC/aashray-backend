@@ -85,7 +85,11 @@ export async function getBooking(bookingType, bookingid) {
 }
 
 export async function getBookings(bookingType, bookingids) {
-  var bookings = [];
+  if (!bookingids || bookingids.length === 0) {
+    return [];
+  }
+
+  let bookings = [];
 
   switch (bookingType) {
     case TYPE_ROOM:

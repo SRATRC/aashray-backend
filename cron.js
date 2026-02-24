@@ -118,15 +118,15 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
       if (!bookingsByType[bookingType]) {
-        bookingsByType[bookingType] = [];
+        bookingsByType[bookingType] = new Set();
       }
-      bookingsByType[bookingType].push(transaction.bookingid);
+      bookingsByType[bookingType].add(transaction.bookingid);
     }
     transactions.push(transaction);
   }
 
-  for (const bookingType in bookingsByType) {
-    const bookingIds = bookingsByType[bookingType];
+  for (const [bookingType, bookingIdsSet] of Object.entries(bookingsByType)) {
+    const bookingIds = Array.from(bookingIdsSet);
     const fetchedBookings = await getBookings(bookingType, bookingIds);
     bookings.push(...fetchedBookings);
   }
