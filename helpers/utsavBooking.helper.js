@@ -113,7 +113,9 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 
 export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
 
-  const lastDayOnlyBreakfast = package_info.endDate == utsav.end_date;
+  const date1 = new Date(package_info.end_date).toDateString();
+  const date2 = new Date(utsav.end_date).toDateString();
+  const lastDayOnlyBreakfast = date1 == date2;
 
   await bookFoodForAllMeals(
     package_info.start_date,
@@ -550,9 +552,8 @@ export async function findUtsavOnBoundaryDates(checkin, checkout) {
 
 export async function cancelUtsavFoodBookings(booking, updatedBy, t) {
  
-  const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
-  const utsavPackage = await UtsavPackagesDb.findOne({ where: { id: utsav.packageid } });
-
+  const utsavPackage = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
+  
   await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
   
 }

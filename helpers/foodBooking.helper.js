@@ -613,9 +613,6 @@ export async function cancelAllMeals(start_date,
     breakfast: 0,
     lunch: 0,
     dinner: 0,
-    spicy: 0,
-    hightea: 0,
-    plateissued: 0,
     updatedBy: updatedBy
   };
 
