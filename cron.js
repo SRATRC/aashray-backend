@@ -37,7 +37,7 @@ const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 let isRunning = false; // Track task status
 
 // Schedule the cron job to run every 30 minutes
-const job = cron.schedule('* * * * *', async () => {
+const job = cron.schedule('*/30 * * * *', async () => {
   logger.info('Cron job started.');
   isRunning = true;
 
