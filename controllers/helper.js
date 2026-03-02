@@ -596,7 +596,7 @@ export async function sendUnifiedEmail(
   ) {
     sendMail({
       email: RAJ_PRAVAS_EMAIL,
-      subject: getSubject(bookingStatus) + name,
+      subject: getSubject(bookingStatus) +" "+ name,
       template: template,
       context: {
         showTravelDetail: wasRajprvasBooked,

@@ -31,7 +31,8 @@ import {
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
   STATUS_CREDITED,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  AMT_TYPE_LATE_CHECKOUT_ROOM
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -60,6 +61,8 @@ import BlockDates from '../../models/block_dates.model.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import { QueryTypes } from 'sequelize';
+import sequelize from '../../config/database.js';
 import moment from 'moment';
 
 const CHECKOUT_DEADLINE = '11:00:00';
@@ -99,6 +102,7 @@ const handleSameDayCheckout = async ({
       bookingid: uuidv4(),
       category: TYPE_ROOM,
       amount: lateCheckoutAmount,
+      amt_type: AMT_TYPE_LATE_CHECKOUT_ROOM,
       status: STATUS_CASH_PENDING,
       description: `Late checkout fee for booking ${booking.bookingid} dated ${booking.checkout}`,
       updatedBy: user.username
@@ -1760,46 +1764,159 @@ export const updateFlatBookingStatus = async (req, res) => {
 export const fetchLateCheckoutFees = async (req, res) => {
   const { payment_type } = req.query;
 
-  // payment_pending or payment_done
-  const status = payment_type === "payment_done" ? "completed" : "cash pending";
+  const statusMap = {
+    payment_pending: ['cash pending'],
+    payment_done: ['completed'],
+    fees_revoked: ['admin cancelled']
+  };
 
-  const transactions = await Transactions.findAll({
-    where: {
-      description: { [Op.like]: "Late checkout fee%" },
-      status
-    }
-  });
+  const statuses = statusMap[payment_type];
 
-  const finalData = [];
-
-  for (const tr of transactions) {
-    // Description looks like: "Late checkout fee for booking <bookingid>"
-    const match = tr.description.match(/booking\s(.+)$/);
-    const bookingid = match ? match[1].trim() : null;
-    if (!bookingid) continue;
-
-    const booking = await RoomBooking.findOne({ where: { bookingid: bookingid } });
-    if (!booking) continue;
-
-    const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
-
-    const nights =
-      (new Date(booking.checkout) - new Date(booking.checkin)) /
-      (1000 * 60 * 60 * 24);
-
-    finalData.push({
-      amount: tr.amount,
-      bookingid,
-      guest_name: card?.issuedto,
-      mobile: card?.mobno || "—",
-
-      roomno: booking.roomno,
-      roomtype: booking.roomtype,
-      nights,
-      checkin: booking.checkin,
-      checkout: booking.checkout
+  if (!statuses) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid payment_type: ${payment_type}`
     });
   }
 
-  res.json({ success: true, data: finalData });
+  try {
+    const rows = await sequelize.query(
+      `
+      SELECT
+        t.id,
+        t.amount,
+
+        /* which booking id we finally used */
+        COALESCE(
+          rb_from_desc.bookingid,
+          rb_from_txn.bookingid
+        ) AS bookingid,
+
+        COALESCE(
+          rb_from_desc.roomno,
+          rb_from_txn.roomno
+        ) AS roomno,
+
+        COALESCE(
+          rb_from_desc.roomtype,
+          rb_from_txn.roomtype
+        ) AS roomtype,
+
+        COALESCE(
+          rb_from_desc.checkin,
+          rb_from_txn.checkin
+        ) AS checkin,
+
+        COALESCE(
+          rb_from_desc.checkout,
+          rb_from_txn.checkout
+        ) AS checkout,
+
+        c.issuedto AS guest_name,
+        c.mobno    AS mobile
+
+      FROM transactions t
+
+      /* 🔹 Join using bookingid FROM DESCRIPTION (newer data) */
+      LEFT JOIN room_booking rb_from_desc
+  ON rb_from_desc.bookingid =
+     CASE
+       WHEN t.description LIKE 'Late checkout fee for booking %'
+       THEN SUBSTRING_INDEX(
+              SUBSTRING_INDEX(t.description, 'booking ', -1),
+              ' ',
+              1
+            )
+       ELSE NULL
+     END
+
+      /* 🔹 Join using transaction.bookingid (legacy data) */
+      LEFT JOIN room_booking rb_from_txn
+        ON rb_from_txn.bookingid = t.bookingid
+
+      /* card from whichever booking we got */
+      LEFT JOIN card_db c
+        ON c.cardno = COALESCE(
+          rb_from_desc.cardno,
+          rb_from_txn.cardno
+        )
+
+      WHERE t.amt_type = 'late_checkout_room'
+        AND t.status IN (:statuses)
+
+      ORDER BY t.createdAt DESC
+      `,
+      {
+        replacements: { statuses },
+        type: QueryTypes.SELECT
+      }
+    );
+
+    const data = rows.map(row => {
+      let nights = null;
+      if (row.checkin && row.checkout) {
+        nights =
+          (new Date(row.checkout) - new Date(row.checkin)) /
+          (1000 * 60 * 60 * 24);
+      }
+
+      return {
+        id: row.id,
+        amount: row.amount,
+        bookingid: row.bookingid || '—',
+
+        guest_name: row.guest_name || '—',
+        mobile: row.mobile || '—',
+
+        roomno: row.roomno || '—',
+        roomtype: row.roomtype || '—',
+        nights,
+        checkin: row.checkin,
+        checkout: row.checkout
+      };
+    });
+
+    res.json({
+      success: true,
+      data,
+      meta: {
+        count: data.length,
+        payment_type
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching late checkout fees:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
 };
+
+
+export const revokeLateCheckoutFee = async (req, res) => {
+  const { transactionId, status } = req.body;
+
+  try {
+    console.log(`Updating transaction ${transactionId} to status: ${status}`);
+    
+    const result = await Transactions.update(
+      { status },
+      { where: { id: transactionId } }
+    );
+
+    if (result[0] === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Transaction not found or already updated' 
+      });
+    }
+
+    console.log(`Successfully updated transaction ${transactionId}`);
+    res.json({ success: true, message: 'Transaction updated successfully' });
+  } catch (error) {
+    console.error('Error updating transaction:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+

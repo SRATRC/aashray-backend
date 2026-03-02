@@ -1,6 +1,8 @@
 import {
   BREAKFAST_PRICE,
   DINNER_PRICE,
+  ERR_BOOKING_NOT_FOUND,
+  ERR_INVALID_MEAL_TIME,
   ERR_ROOM_MUST_BE_BOOKED,
   LUNCH_PRICE,
   ROLE_FOOD_ADMIN,
@@ -23,7 +25,12 @@ import {
   checkSpecialAllowance,
   validateDate
 } from '../controllers/helper.js';
-import { FoodDb, Transactions, UtsavDb } from '../models/associations.js';
+import {
+  CardDb,
+  FoodDb,
+  Transactions,
+  UtsavDb
+} from '../models/associations.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -232,6 +239,9 @@ export async function checkFoodAvailabilityForMumumkshus(
   var availableCredits = 0;
 
   if (isGuestBooking) {
+    // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
+    const tempUser = { ...user, credits: { ...user.credits } };
+
     const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
     const bookings = await getFoodBookings(allDates, mumukshus);
 
@@ -263,7 +273,7 @@ export async function checkFoodAvailabilityForMumumkshus(
       }
     }
 
-    availableCredits = usableCredits(user, TYPE_FOOD, charge);
+    availableCredits = usableCredits(tempUser, TYPE_FOOD, charge);
   }
 
   return {
@@ -625,4 +635,73 @@ export async function cancelAllMeals(start_date,
   }
 
 
+
+export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
+  // ✅ Use provided date or fallback to current date
+  const targetDate = providedDate 
+    ? moment.utc(providedDate).format('YYYY-MM-DD')
+    : moment.utc().format('YYYY-MM-DD');
+  
+  const currentTime = moment.utc();
+  const mealTimes = {
+    breakfast: moment.utc().hour(4).minute(30).second(0),
+    lunch: moment.utc().hour(8).minute(30).second(0),
+    dinner: moment.utc().hour(13).minute(30).second(0)
+  };
+
+  // ✅ Find booking for the TARGET DATE (not always today)
+  const booking = await FoodDb.findOne({
+    where: {
+      cardno: cardno,
+      date: targetDate // ✅ CRITICAL FIX: Use target date instead of currentTime
+    },
+    transaction: t
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  const card = await CardDb.findOne({
+    where: { cardno: cardno }
+  });
+
+  if (!card) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  let currentMeal = meal;
+  
+  // Only auto-detect meal if not provided
+  if (!currentMeal) {
+    for (const mealType of ['breakfast', 'lunch', 'dinner']) {
+      if (currentTime.isSameOrBefore(mealTimes[mealType])) {
+        currentMeal = mealType;
+        break;
+      }
+    }
+  } else if (!['breakfast', 'lunch', 'dinner'].includes(currentMeal)) {
+    throw new ApiError(400, 'Invalid meal type provided');
+  }
+
+  if (!currentMeal) {
+    throw new ApiError(400, ERR_INVALID_MEAL_TIME);
+  }
+
+  if (!booking[currentMeal]) {
+    throw new ApiError(400, `${currentMeal} not booked`);
+  }
+
+  const plateField = `${currentMeal}_plate_issued`;
+  
+  if (booking[plateField]) {
+    throw new ApiError(400, `Plate for ${currentMeal} already issued`);
+  }
+
+  await booking.update({ [plateField]: true }, { transaction: t });
+
+  return {
+    message: `Plate for ${currentMeal} issued successfully`,
+    issuedto: card.issuedto
+  };
 }

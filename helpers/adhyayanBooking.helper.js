@@ -14,14 +14,16 @@ import {
   TYPE_ADHYAYAN,
   STATUS_CASH_COMPLETED,
   ERR_FEEDBACK_ALREADY_SUBMITTED,
-  FEEDBACK_ELIGIBILITY_HOUR
+  FEEDBACK_ELIGIBILITY_HOUR,
+  RESEARCH_CENTRE
 } from '../config/constants.js';
 import {
   AdhyayanFeedback,
   ShibirBookingDb,
   ShibirDb,
-  UtsavDb,
-  CardDb
+  UtsavPackagesDb,
+  CardDb,
+  ShibirAttendanceDb
 } from '../models/associations.js';
 import sendMail from '../utils/sendMail.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -69,18 +71,16 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
     return true;
   }
 
-  const utsav = await UtsavDb.findOne({
+  const utsavPackage = await UtsavPackagesDb.findOne({
     where: {
       [Sequelize.Op.or]: [
         { start_date: date },
-        { end_date: date },
-        Sequelize.literal(`DATE_ADD(start_date, INTERVAL -1 DAY) = '${date}'`),
-        Sequelize.literal(`DATE_ADD(end_date, INTERVAL 1 DAY) = '${date}'`)
+        { end_date: date }
       ]
     }
   });
 
-  if (utsav) {
+  if (utsavPackage) {
     return true;
   }
 
@@ -146,6 +146,14 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
           { transaction: t }
         );
 
+        if (
+  [
+    STATUS_CONFIRMED,
+    STATUS_PAYMENT_PENDING
+  ].includes(booking.status)
+) {
+  await createShibirAttendanceEntry(booking, user, t);
+}
         if (adhyayan.amount > 0) {
           const { discountedAmount } = await createPendingTransaction(
             user,
@@ -365,7 +373,7 @@ export async function validateFeedbackEligibility(cardno, shibir_id) {
   }
 
   const now = moment().tz('Asia/Kolkata');
-  const feedbackStartDate = moment(adhyayan.end_date)
+  const feedbackStartDate = moment(adhyayan.start_date)
     .tz('Asia/Kolkata')
     .hour(FEEDBACK_ELIGIBILITY_HOUR)
     .minute(0)
@@ -441,4 +449,187 @@ export async function getFeedbackStats(shibir_id) {
   });
 
   return stats[0];
+}
+
+
+
+export async function createShibirAttendanceEntry(
+  booking,
+  user,
+  transaction
+) {
+  // 🔒 Prevent duplicates (CRITICAL)
+  const existing = await ShibirAttendanceDb.findOne({
+    where: { bookingid: booking.bookingid },
+    transaction
+  });
+
+  if (existing) return;
+
+  const shibir = await ShibirDb.findOne({
+    where: { id: booking.shibir_id },
+    transaction
+  });
+
+  // Only Research Centre for now
+  if (!shibir || shibir.location !== RESEARCH_CENTRE) return;
+
+  const startDate = new Date(shibir.start_date);
+  const endDate = new Date(shibir.end_date);
+
+  const days =
+    Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+
+  // ✅ Use integers for TINYINT
+  const sessionFlags = {};
+  for (let i = 1; i <= 9; i++) {
+    sessionFlags[`session_${i}`] = 1;
+  }
+
+  await ShibirAttendanceDb.create(
+    {
+      shibir_id: booking.shibir_id,
+      bookingid: booking.bookingid,
+      cardno: booking.cardno,
+      days,
+      ...sessionFlags,
+      updatedBy: user?.cardno || user?.username || 'system'
+    },
+    { transaction }
+  );
+}
+
+
+export async function bookAdhyayanForMumukshusAdmin(
+  shibir_ids,
+  mumukshus,
+  t,
+  adminUser
+) {
+  // Same validations as user flow
+  await validateCards(mumukshus);
+  await checkAdhyayanAlreadyBooked(shibir_ids, mumukshus);
+
+  const shibirs = await validateAdhyayans(shibir_ids);
+
+  const result = await createAdhyayanBookingAdmin(
+    shibirs,
+    t,
+    adminUser,
+    ...mumukshus
+  );
+
+  return result;
+}
+
+
+export async function createAdhyayanBookingAdmin(
+  adhyayans,
+  t,
+  adminUser,
+  ...users
+) {
+  let amount = 0;
+  let waitingBookingCount = 0;
+  const userBookingIds = {};
+
+  for (const booking_user of users) {
+    const bookingIds = [];
+
+    for (const adhyayan of adhyayans) {
+      const bookingId = uuidv4();
+
+      if (adhyayan.available_seats > 0 && adhyayan.status === STATUS_OPEN) {
+
+        // ✅ Seat reservation
+        await reserveAdhyayanSeat(adhyayan, t);
+
+        const status =
+          adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED;
+       
+        const card = await CardDb.findOne({
+          where: { cardno: booking_user }
+        });
+
+        if (!card) {
+          throw new ApiError(400, `Card not found: ${booking_user}`);
+        }
+
+        // 🔹 bookedBy = admin (difference)
+        const booking = await ShibirBookingDb.create(
+          {
+            bookingid: bookingId,
+            cardno: booking_user,
+            bookedBy: null,
+            shibir_id: adhyayan.id,
+            status,
+            updatedBy: adminUser.username
+          },
+          { transaction: t }
+        );
+
+        // ✅ Attendance entry if confirmed
+        if (booking.status === STATUS_CONFIRMED) {
+          await createShibirAttendanceEntry(booking, adminUser, t);
+        }
+
+
+        // ✅ Pending transaction if payable
+        if (adhyayan.amount > 0) {
+          const { discountedAmount } = await createPendingTransaction(
+            card,          
+            booking,
+            TYPE_ADHYAYAN,
+            adhyayan.amount,
+            adminUser.username,
+            t
+          );
+          amount += discountedAmount;
+        }
+
+      } else {
+        // fallback WAITING (same as user flow)
+        await ShibirBookingDb.create(
+          {
+            bookingid: bookingId,
+            cardno: booking_user,
+            bookedBy: null,
+            shibir_id: adhyayan.id,
+            status: STATUS_WAITING,
+            updatedBy: adminUser.username || adminUser.cardno
+          },
+          { transaction: t }
+        );
+
+        waitingBookingCount++;
+      }
+
+      bookingIds.push(bookingId);
+    }
+
+    userBookingIds[booking_user] = bookingIds;
+  }
+
+  return { amount, userBookingIds, waitingBookingCount };
+}
+
+export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
+  await ShibirAttendanceDb.update(
+    {
+      session_1: 0,
+      session_2: 0,
+      session_3: 0,
+      session_4: 0,
+      session_5: 0,
+      session_6: 0,
+      session_7: 0,
+      session_8: 0,
+      session_9: 0,
+      updatedBy
+    },
+    {
+      where: { bookingid: bookingId },
+      transaction
+    }
+  );
 }

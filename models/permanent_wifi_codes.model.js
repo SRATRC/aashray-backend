@@ -4,7 +4,8 @@ import {
   STATUS_PENDING,
   STATUS_APPROVED,
   STATUS_REJECTED,
-  STATUS_RESET
+  STATUS_RESET,
+  STATUS_DELETED
 } from '../config/constants.js';
 
 const PermanentWifiCodes = sequelize.define('permanent_wifi_codes', {
@@ -22,15 +23,31 @@ const PermanentWifiCodes = sequelize.define('permanent_wifi_codes', {
       key: 'cardno'
     }
   },
+  username: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    comment: 'The username of the user for that device'
+  },
   code: {
     type: DataTypes.STRING,
     allowNull: true,
     comment: 'The actual permanent WiFi code assigned by admin'
   },
+  ssid: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'The SSID of the WiFi network'
+  },
   status: {
     type: DataTypes.ENUM,
     allowNull: false,
-    values: [STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED, STATUS_RESET],
+    values: [
+      STATUS_PENDING,
+      STATUS_APPROVED,
+      STATUS_REJECTED,
+      STATUS_RESET,
+      STATUS_DELETED
+    ],
     defaultValue: STATUS_PENDING
   },
   requested_at: {

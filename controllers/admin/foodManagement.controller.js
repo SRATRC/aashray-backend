@@ -4,95 +4,62 @@ import {
   FoodDb,
   FoodPhysicalPlate,
   Menu,
-  Transactions
+  Transactions,
+  UtsavDb
 } from '../../models/associations.js';
 import {
   MSG_CANCEL_SUCCESSFUL,
   ERR_BOOKING_NOT_FOUND,
-  ERR_INVALID_MEAL_TIME,
   MSG_BOOKING_SUCCESSFUL,
   MSG_FETCH_SUCCESSFUL,
-  MSG_UPDATE_SUCCESSFUL,
-  STATUS_GUEST
+  MSG_UPDATE_SUCCESSFUL
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
 import moment from 'moment';
-import Sequelize, { Op } from 'sequelize';
+import Sequelize, { Op,  fn, col } from 'sequelize';
 import ApiError from '../../utils/ApiError.js';
 import {
   bookFoodForMumukshus,
   cancelMeal,
-  createGroupFoodRequest
+  createGroupFoodRequest,
+  issueFoodPlate
 } from '../../helpers/foodBooking.helper.js';
 import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 
 export const issuePlate = async (req, res) => {
-  const currentTime = moment.utc();
-  const mealTimes = {
-    breakfast: moment.utc().hour(4).minute(30).second(0),
-    lunch: moment.utc().hour(8).minute(30).second(0),
-    dinner: moment.utc().hour(13).minute(30).second(0)
-  };
+  const t = await database.transaction();
+  req.transaction = t;
 
-  // Find booking for today
-  const booking = await FoodDb.findOne({
-    where: {
-      cardno: req.params.cardno,
-      date: currentTime.format('YYYY-MM-DD')
-    }
-  });
+  const { message, issuedto } = await issueFoodPlate(
+    req.params.cardno,
+    req.body.meal,
+    t
+  );
 
-  if (!booking) {
-    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
-  }
-
-  // 🔁 NEW: Fetch the card details to get the name
-  const card = await CardDb.findOne({ where: { cardno: req.params.cardno } });
-  if (!card) {
-    throw new ApiError(404, 'Card not found');
-  }
-
-  // Determine current meal
-  let currentMeal = req.body.meal;
-  if (!currentMeal) {
-    for (const meal of ['breakfast', 'lunch', 'dinner']) {
-      if (currentTime.isSameOrBefore(mealTimes[meal])) {
-        currentMeal = meal;
-        break;
-      }
-    }
-  } else if (!['breakfast', 'lunch', 'dinner'].includes(currentMeal)) {
-    throw new ApiError(400, 'Invalid meal type provided');
-  }
-
-  if (!currentMeal) {
-    throw new ApiError(400, ERR_INVALID_MEAL_TIME);
-  }
-
-  // Check if meal is booked
-  if (!booking[currentMeal]) {
-    throw new ApiError(400, `${currentMeal} not booked`);
-  }
-
-  // Check if plate already issued
-  const plateField = `${currentMeal}_plate_issued`;
-  if (booking[plateField]) {
-    throw new ApiError(400, `Plate for ${currentMeal} already issued`);
-  }
-
-  // ✅ Issue the plate
-  await booking.update({
-    [plateField]: true
-  });
-
-  // ✅ Send success with name
-  return res.status(200).send({
-    message: `Plate for ${currentMeal} issued successfully`,
-    issuedto: card.issuedto
-  });
+  await t.commit();
+  return res.status(200).send({ message, issuedto });
 };
+
+
+export const bulkIssuePlate = async (req, res) => {
+  const t = await database.transaction();
+  try {
+    const { cardnos, meal, date } = req.body; // ✅ Now accepts date from frontend
+    
+    for (const cardno of cardnos) {
+      await issueFoodPlate(cardno, meal, t, date); // ✅ Pass date to helper
+    }
+    
+    await t.commit();
+    res.status(200).send({ message: 'Plates issued successfully' });
+  } catch (err) {
+    await t.rollback();
+    res.status(400).send({ message: err.message });
+  }
+};
+
 
 export const physicalPlatesIssued = async (req, res) => {
   const { date, type, count } = req.body;
@@ -171,7 +138,7 @@ export const bookFood = async (req, res) => {
     req.roles,
     true
   );
-  
+
   await t.commit();
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
@@ -251,7 +218,7 @@ export const cancelMultipleMeals = async (req, res) => {
   const { meals } = req.body;
 
   if (!Array.isArray(meals) || meals.length === 0) {
-    throw new ApiError(400, "No meals provided");
+    throw new ApiError(400, 'No meals provided');
   }
 
   const t = await database.transaction();
@@ -285,21 +252,33 @@ export const cancelMultipleMeals = async (req, res) => {
     }
 
     await t.commit();
-    return res.status(200).send({ message: "Selected meals cancelled successfully" });
-
+    return res
+      .status(200)
+      .send({ message: 'Selected meals cancelled successfully' });
   } catch (err) {
     await t.rollback();
     console.error('Bulk cancel failed:', err);
-    throw new ApiError(500, "Failed to cancel selected meals");
+    throw new ApiError(500, 'Failed to cancel selected meals');
   }
 };
 
 export const bulkBooking = async (req, res) => {
-  const { cardno, mobno, date, guestCount, breakfast, lunch, dinner, department } = req.body;
+  const {
+    cardno,
+    mobno,
+    date,
+    guestCount,
+    breakfast,
+    lunch,
+    dinner,
+    department
+  } = req.body;
 
   // Ensure at least cardno or mobno is provided
   if (!cardno && !mobno) {
-    return res.status(400).send({ message: 'Either cardno or mobno is required.' });
+    return res
+      .status(400)
+      .send({ message: 'Either cardno or mobno is required.' });
   }
 
   // Time restriction for smilesAdmin role
@@ -319,7 +298,7 @@ export const bulkBooking = async (req, res) => {
       now > cutoff
     ) {
       return res.status(403).send({
-        message: "You can't book food for tomorrow after 11:00 AM today.",
+        message: "You can't book food for tomorrow after 11:00 AM today."
       });
     }
   }
@@ -333,7 +312,9 @@ export const bulkBooking = async (req, res) => {
   });
 
   if (!cardEntry) {
-    return res.status(404).send({ message: 'No card found for the given cardno or mobno.' });
+    return res
+      .status(404)
+      .send({ message: 'No card found for the given cardno or mobno.' });
   }
 
   const finalCardNo = cardEntry.cardno;
@@ -371,18 +352,18 @@ export const fetchBulkBookings = async (req, res) => {
     const bookings = await BulkFoodBooking.findAll({
       where: {
         date: {
-          [Op.gte]: today, // 👉 date >= today
-        },
+          [Op.gte]: today // 👉 date >= today
+        }
       },
       include: [
         {
           model: CardDb,
           required: true,
           where: cardWhereClause,
-          attributes: ['cardno', 'issuedto', 'mobno'],
-        },
+          attributes: ['cardno', 'issuedto', 'mobno']
+        }
       ],
-      order: [['date', 'ASC']],
+      order: [['date', 'ASC']]
     });
 
     return res
@@ -421,7 +402,7 @@ export const editBulkBooking = async (req, res) => {
       now > cutoff
     ) {
       return res.status(403).send({
-        message: "You can't edit tomorrow's booking after 8:00 PM today.",
+        message: "You can't edit tomorrow's booking after 8:00 PM today."
       });
     }
   }
@@ -432,7 +413,7 @@ export const editBulkBooking = async (req, res) => {
     breakfast,
     lunch,
     dinner,
-    guestCount: maxCount,
+    guestCount: maxCount
   });
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
@@ -463,7 +444,7 @@ export const updatePlateIssued = async (req, res) => {
 
     if (bookingDateStr !== todayStr) {
       return res.status(403).json({
-        message: 'Plates can only be issued for today\'s bookings.',
+        message: "Plates can only be issued for today's bookings."
       });
     }
 
@@ -471,25 +452,26 @@ export const updatePlateIssued = async (req, res) => {
 
     if (plateIssued > bookedCount) {
       return res.status(400).json({
-        message: `Cannot issue more than ${bookedCount} plates for ${mealType}.`,
+        message: `Cannot issue more than ${bookedCount} plates for ${mealType}.`
       });
     }
 
     const updateFields = {
-      [`${mealType}_plate_issued`]: plateIssued,
+      [`${mealType}_plate_issued`]: plateIssued
     };
 
     if (updatedBy) updateFields.updatedBy = updatedBy;
 
     await booking.update(updateFields);
 
-    return res.status(200).json({ message: 'Plate issued status updated successfully' });
+    return res
+      .status(200)
+      .json({ message: 'Plate issued status updated successfully' });
   } catch (err) {
     console.error('Error updating plate issued:', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
-
 
 export const foodReport = async (req, res) => {
   const start_date = req.query.start_date;
@@ -616,11 +598,13 @@ export const foodReportDetailsGuests = async (req, res) => {
   }
 
   const mealField = Sequelize.col(`BulkFoodBooking.${meal}`);
-  const plateIssuedField = Sequelize.col(`BulkFoodBooking.${meal}_plate_issued`);
+  const plateIssuedField = Sequelize.col(
+    `BulkFoodBooking.${meal}_plate_issued`
+  );
 
   const whereConditions = {
     date,
-    [Op.and]: Sequelize.where(mealField, '>', 0),
+    [Op.and]: Sequelize.where(mealField, '>', 0)
   };
 
   if (is_issued === '1') {
@@ -639,33 +623,35 @@ export const foodReportDetailsGuests = async (req, res) => {
 
   try {
     const bookings = await BulkFoodBooking.findAll({
-  attributes: [
-    'bookingid',
-    'cardno',
-    'date',
-    'breakfast',
-    'lunch',
-    'dinner',
-    'breakfast_plate_issued',
-    'lunch_plate_issued',
-    'dinner_plate_issued',
-    'department',
-    [
-      // Calculate pending plates dynamically
-      Sequelize.literal(`BulkFoodBooking.${meal} - BulkFoodBooking.${meal}_plate_issued`),
-      'pending_plates'
-    ]
-  ],
-  include: [
-    {
-      model: CardDb,
-      attributes: ['issuedto', 'mobno'],
-      required: true
-    }
-  ],
-  where: whereConditions,
-  order: [[CardDb, 'issuedto', 'ASC']]
-});
+      attributes: [
+        'bookingid',
+        'cardno',
+        'date',
+        'breakfast',
+        'lunch',
+        'dinner',
+        'breakfast_plate_issued',
+        'lunch_plate_issued',
+        'dinner_plate_issued',
+        'department',
+        [
+          // Calculate pending plates dynamically
+          Sequelize.literal(
+            `BulkFoodBooking.${meal} - BulkFoodBooking.${meal}_plate_issued`
+          ),
+          'pending_plates'
+        ]
+      ],
+      include: [
+        {
+          model: CardDb,
+          attributes: ['issuedto', 'mobno'],
+          required: true
+        }
+      ],
+      where: whereConditions,
+      order: [[CardDb, 'issuedto', 'ASC']]
+    });
 
     return res.status(200).send({ data: bookings });
   } catch (error) {
@@ -786,5 +772,94 @@ export const addBulkMenu = async (req, res) => {
   } catch (err) {
     console.error('Bulk Upload Error:', err);
     res.status(500).json({ message: 'Server error while uploading menus' });
+  }
+};
+
+
+
+
+export const getMealCountByMobile = async (req, res) => {
+  try {
+    const { mobno, fromDate, toDate } = req.body;
+
+    // 🔥 STEP 1 — find overlapping utsavs
+    const utsavs = await UtsavDb.findAll({
+  where: {
+    start_date: { [Op.lte]: toDate },
+    end_date: { [Op.gte]: fromDate },
+    location: "Research Centre", // ⭐ NEW FILTER
+  },
+  attributes: ["id", "name", "start_date", "end_date", "location"],
+  raw: true,
+});
+    // 🔥 STEP 2 — build exclusion conditions
+    const exclusionConditions = [];
+
+    if (utsavs.length > 0) {
+      utsavs.forEach((u) => {
+        exclusionConditions.push({
+          date: {
+            [Op.between]: [
+              u.start_date > fromDate ? u.start_date : fromDate,
+              u.end_date < toDate ? u.end_date : toDate,
+            ],
+          },
+        });
+      });
+    }
+
+    // 🔥 STEP 3 — main meal query (excluding utsav dates)
+    const result = await FoodDb.findAll({
+      attributes: [
+        [fn("COALESCE", fn("SUM", col("breakfast")), 0), "breakfastBooked"],
+        [fn("COALESCE", fn("SUM", col("breakfast_plate_issued")), 0), "breakfastIssued"],
+        [fn("COALESCE", fn("SUM", col("lunch")), 0), "lunchBooked"],
+        [fn("COALESCE", fn("SUM", col("lunch_plate_issued")), 0), "lunchIssued"],
+        [fn("COALESCE", fn("SUM", col("dinner")), 0), "dinnerBooked"],
+        [fn("COALESCE", fn("SUM", col("dinner_plate_issued")), 0), "dinnerIssued"],
+      ],
+      include: [
+        {
+          model: CardDb,
+          attributes: [],
+          required: true,
+          where: { mobno },
+        },
+      ],
+      where: {
+        date: {
+          [Op.between]: [fromDate, toDate],
+        },
+        ...(exclusionConditions.length > 0 && {
+          [Op.not]: {
+            [Op.or]: exclusionConditions,
+          },
+        }),
+      },
+      raw: true,
+    });
+
+    const summary = result[0] || {};
+
+    // 🔥 STEP 4 — person info
+    const person = await CardDb.findOne({
+      where: { mobno },
+      attributes: ["issuedto", "mobno", "cardno"],
+      raw: true,
+    });
+
+    return res.json({
+      success: true,
+      data: summary,
+      person,
+      utsavExcluded: utsavs, // ⭐ IMPORTANT FOR FRONTEND
+    });
+
+  } catch (error) {
+    console.error("Meal count error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };

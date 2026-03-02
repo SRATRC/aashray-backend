@@ -2,7 +2,8 @@ import {
   ShibirDb,
   ShibirBookingDb,
   AdhyayanFeedback,
-  CardDb
+  CardDb,
+  ShibirAttendanceDb
 } from '../../models/associations.js';
 
 import {
@@ -162,6 +163,18 @@ export const CancelShibir = async (req, res) => {
   if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
     newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
   }
+
+  const resetData = {};
+  for (let i = 1; i <= 9; i++) {
+    resetData[`session_${i}`] = 0;
+  }
+  await ShibirAttendanceDb.update(resetData, {
+    where: {
+      shibir_id: booking.shibir_id,
+      cardno: booking.cardno
+    },
+    transaction: t
+  });
 
   await userCancelBooking(req.user, booking, t);
   await t.commit();

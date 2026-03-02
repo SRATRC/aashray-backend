@@ -465,34 +465,29 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
 
   case STATUS_ADMIN_CANCELLED:
   if (transaction) {
-    if (transaction.status === STATUS_CANCELLED) {
-      // user had cancelled, now admin upgrades it
-      if (issueCredits === 'yes') {
-        await cancelTransaction(req.user, bookedByCard, transaction, t, true);
-      } else {
-        await transaction.update(
-          {
-            status: STATUS_ADMIN_CANCELLED,
-            updatedBy: req.user.username,
-          },
-          { transaction: t }
-        );
-      }
-    } else {
-      // normal admin cancel flow
-      if (issueCredits === 'yes') {
-        await cancelTransaction(req.user, bookedByCard, transaction, t, true);
-      } else {
-        await transaction.update(
-          {
-            status: STATUS_ADMIN_CANCELLED,
-            updatedBy: req.user.username,
-          },
-          { transaction: t }
-        );
-      }
+
+    if (issueCredits === 'yes') {
+      // Always cancel + issue credits
+      await cancelTransaction(req.user, bookedByCard, transaction, t, true);
+      break;
     }
-    
+
+    // issueCredits = "no"
+    // ---- IMPORTANT FIX ----
+    // If transaction is already completed, DO NOT update it.
+    if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+      // leave transaction untouched
+      break;
+    }
+
+    // If transaction is pending or cash pending → mark admin cancelled
+    await transaction.update(
+      {
+        status: STATUS_ADMIN_CANCELLED,
+        updatedBy: req.user.username,
+      },
+      { transaction: t }
+    );
   }
   break;
 
@@ -640,28 +635,79 @@ export const updateTransactionStatus = async (req, res) => {
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
-export async function updateTransactionAmount(req, res) {
-  try {
-    const { bookingid, amount } = req.body;
 
-    if (!bookingid || !amount) {
-      return res.status(400).json({ message: 'Booking ID and amount are required' });
-    }
 
-    const transaction = await Transactions.findOne({ where: { bookingid } });
+export async function updateBooking(req, res) {
+  const t = await database.transaction();
+  req.transaction = t;
 
-    if (!transaction) {
-      return res.status(404).json({ message: 'Transaction not found for this booking' });
-    }
+  const {
+    bookingid,
+    amount,
+    pickup_point,
+    drop_point,
+    type,
+    date
+  } = req.body;
 
-    await transaction.update({
-      amount,
-      updatedBy: req.user.username, // if you track updater
+  if (!bookingid) {
+    throw new ApiError(400, 'Booking ID is required');
+  }
+
+  const updatedFields = [];
+
+  /* 1️⃣ TRANSACTION TABLE (amount) */
+  if (amount !== undefined) {
+    const transaction = await Transactions.findOne({
+      where: { bookingid },
+      transaction: t,
     });
 
-    return res.json({ message: 'Transaction amount updated successfully' });
-  } catch (error) {
-    console.error('Error updating transaction amount:', error);
-    return res.status(500).json({ message: 'Internal server error' });
+    if (!transaction) {
+      throw new ApiError(404, 'Transaction not found');
+    }
+
+    await transaction.update(
+      {
+        amount,
+        updatedBy: req.user.username,
+      },
+      { transaction: t }
+    );
+
+    updatedFields.push('amount');
   }
+
+  /* 2️⃣ TRAVEL TABLE (pickup / drop / type) */
+  const travelUpdate = {};
+  if (pickup_point !== undefined) travelUpdate.pickup_point = pickup_point;
+  if (drop_point !== undefined) travelUpdate.drop_point = drop_point;
+  if (type !== undefined) travelUpdate.type = type;
+  if (date !== undefined) travelUpdate.date = date; // ✅ NEW
+
+  if (Object.keys(travelUpdate).length > 0) {
+    const travelBooking = await TravelDb.findOne({
+      where: { bookingid },
+      transaction: t,
+    });
+
+    if (!travelBooking) {
+      throw new ApiError(404, 'Travel booking not found');
+    }
+
+    await travelBooking.update(travelUpdate, { transaction: t });
+
+    updatedFields.push(...Object.keys(travelUpdate));
+  }
+
+  if (updatedFields.length === 0) {
+    throw new ApiError(400, 'No fields provided to update');
+  }
+
+  await t.commit();
+
+  return res.json({
+    message: 'Booking updated successfully',
+    updatedFields,
+  });
 }
