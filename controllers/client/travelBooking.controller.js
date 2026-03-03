@@ -9,7 +9,10 @@ import {
   ERR_BOOKING_NOT_FOUND
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
+import {
+  updateWaitingTravelBooking,
+  sendTravelBookingStatusUpdateMail
+} from '../../helpers/travelBooking.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
@@ -35,6 +38,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.drop_point,
        t1.type,
        t1.luggage,
+       t1.arrival_time,
        t1.comments,
        t1.admin_comments,
        t1.status,
@@ -88,7 +92,7 @@ export const CancelTravel = async (req, res) => {
   await userCancelBooking(req.user, booking, t);
   // bring people from the waiting to awaiting confirmation.
   if (bookingStatus != STATUS_WAITING) {
-    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking,t);
+    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking, t);
   }
   await t.commit();
 
