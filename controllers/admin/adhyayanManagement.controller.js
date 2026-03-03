@@ -283,6 +283,8 @@ if (status === 'waiting') {
       t1.shibir_id, 
       t1.bookedby, 
       t1.status, 
+      t1.createdAt,
+      t1.updatedAt,
       t2.cardno, 
       t2.issuedto, 
       t2.mobno, 
@@ -302,6 +304,7 @@ if (status === 'waiting') {
    WHERE 
       t1.shibir_id = :shibirId 
       AND t1.status IN (:status)
+      ORDER BY t1.createdAt ASC
    `,
   {
     replacements: {
