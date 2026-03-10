@@ -11,13 +11,15 @@ import {
   reserveUtsavSeat,
   openUtsavSeat,
   validateUtsavPackage,
-  bookUtsavForMumukshusAdmin, 
+  bookUtsavForMumukshus,
   cancelUtsavFoodBookings,
-  bookFoodForUtsav
+  bookFoodForUtsav,
+  bookUtsavForMumukshusAdmin
 } from '../../helpers/utsavBooking.helper.js';
 import { sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import {
+  adminCancelTransaction,
   createPendingTransaction,
   cancelTransaction
 } from '../../helpers/transactions.helper.js';
@@ -44,7 +46,6 @@ import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
 import { issueFoodPlate } from '../../helpers/foodBooking.helper.js';
-
 
 export const createUtsavBookingByAdmin = async (req, res) => {
   const { utsavid, mumukshus } = req.body;
@@ -717,11 +718,6 @@ export const utsavStatusUpdate = async (req, res) => {
           t,
           true
         );
-        let package_info = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
-        
-        if (package_info) {
-          await bookFoodForUtsav(package_info , utsav, booking, t, req.user.username);
-        }
       } else {
         if (transaction.status === STATUS_CANCELLED) {
           await transaction.update(
@@ -825,42 +821,6 @@ export const utsavStatusUpdate = async (req, res) => {
     case STATUS_ADMIN_CANCELLED:
       console.log('>> Admin cancelling booking');
 
-
-  if (
-    booking.status !== STATUS_WAITING &&
-    booking.status !== STATUS_PAYMENT_PENDING &&
-    booking.status !== STATUS_CONFIRMED &&
-    booking.status !== STATUS_CANCELLED
-  ) {
-    throw new ApiError(
-      400,
-      'Admin Cancelled can only be set from waiting, payment pending, confirmed or cancelled'
-    );
-  }
-
-  await cancelUtsavFoodBookings(booking,req.user.username,t);
-  // 🪑 Free seat if applicable
-  if (
-    booking.status === STATUS_CONFIRMED ||
-    booking.status === STATUS_PAYMENT_PENDING
-  ) {
-    const utsavRecord = await UtsavDb.findByPk(booking.utsavid, { transaction: t });
-    if (!utsavRecord) throw new ApiError(404, 'Utsav not found');
-    await openUtsavSeat(utsavRecord, booking.cardno, req.user.username, t);
-  }
-
-  if (transaction) {
-    if (transaction.status === STATUS_CANCELLED) {
-      // 🔁 user had cancelled earlier, now admin upgrades it
-      if (issueCredits === true || issueCredits === 'yes') {
-        console.log('>> Issuing credits for previously cancelled transaction');
-        await cancelTransaction(req.user, null, transaction, t, true); // ✅ adds credits + sets status=credited
-      } else {
-        console.log('>> Marking previously cancelled transaction as admin cancelled (no credits)');
-        await transaction.update(
-          { status: STATUS_ADMIN_CANCELLED, updatedBy: req.user.username },
-          { transaction: t }
-
       if (
         booking.status !== STATUS_WAITING &&
         booking.status !== STATUS_PAYMENT_PENDING &&
@@ -870,10 +830,9 @@ export const utsavStatusUpdate = async (req, res) => {
         throw new ApiError(
           400,
           'Admin Cancelled can only be set from waiting, payment pending, confirmed or cancelled'
-dev
         );
       }
-
+      await cancelUtsavFoodBookings(booking,req.user.username,t);
       // 🪑 Free seat if applicable
       if (
         booking.status === STATUS_CONFIRMED ||
