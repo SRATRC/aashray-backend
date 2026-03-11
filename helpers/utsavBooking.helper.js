@@ -134,7 +134,6 @@ export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, update
 
 }
 
-export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUser) {
 export async function bookUtsavForMumukshusAdmin(
   utsavid,
   mumukshus,

@@ -75,7 +75,6 @@ export const createUtsavBookingByAdmin = async (req, res) => {
       t,
       req.user
     );
-
     await t.commit();
 
     // send emails outside transaction
@@ -718,6 +717,8 @@ export const utsavStatusUpdate = async (req, res) => {
           t,
           true
         );
+        let utsav_packages_db = await UtsavPackagesDb.findOne({ where: { id: booking.packageid, utsavid: utsav.id } });
+        await bookFoodForUtsav(utsav_packages_db, utsav, card, t, req.user.username);
       } else {
         if (transaction.status === STATUS_CANCELLED) {
           await transaction.update(
