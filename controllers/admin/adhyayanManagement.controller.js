@@ -746,6 +746,13 @@ export const markAdhyayanAttendance = async (req, res) => {
 
     const attendance = await ShibirAttendanceDb.findOne({
       where: { shibir_id, cardno },
+      include: [
+        {
+          model: ShibirBookingDb,
+          required: true,
+          where: { status: 'confirmed' }
+        }
+      ],
       transaction: t
     });
 
@@ -765,7 +772,11 @@ export const markAdhyayanAttendance = async (req, res) => {
     }
 
     const shibir = await ShibirDb.findByPk(shibir_id, { transaction: t });
-    const card = await CardDb.findOne({ where: { cardno }, transaction: t });
+
+    const card = await CardDb.findOne({
+      where: { cardno },
+      transaction: t
+    });
 
     await attendance.update(
       {
@@ -785,7 +796,6 @@ export const markAdhyayanAttendance = async (req, res) => {
     });
 
   } catch (err) {
-    // ✅ rollback ONLY if transaction not finished
     if (t && !t.finished) {
       await t.rollback();
     }
