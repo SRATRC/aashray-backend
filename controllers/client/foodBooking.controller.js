@@ -2,6 +2,7 @@ import Sequelize, { QueryTypes } from 'sequelize';
 import { cancelFood } from '../../helpers/foodBooking.helper.js';
 import { Menu } from '../../models/associations.js';
 import { MSG_CANCEL_SUCCESSFUL } from '../../config/constants.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import moment from 'moment';
@@ -13,6 +14,7 @@ const mealTimes = {
 };
 
 export const FetchFoodBookings = async (req, res) => {
+  attachUserContext(req);
   const {
     date,
     meal = 'all',
@@ -24,6 +26,16 @@ export const FetchFoodBookings = async (req, res) => {
   const page_no = parseInt(page) || 1;
   const pageSize = parseInt(page_size) || 15;
   const offset = (page_no - 1) * pageSize;
+
+  req.log.info('fetch_food_bookings_start', {
+    cardno: req.user.cardno,
+    date,
+    meal,
+    spice,
+    bookedFor,
+    page: page_no,
+    pageSize
+  });
 
   const today = moment().format('YYYY-MM-DD');
 
@@ -134,11 +146,14 @@ export const FetchFoodBookings = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_food_bookings_success', { cardno: req.user.cardno, count: foodData.length });
   return res.status(200).send({ message: 'fetched results', data: foodData });
 };
 
 export const FetchGuestsForFilter = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
+  req.log.info('fetch_food_guests_filter_start', { cardno });
 
   const guests = await database.query(
     `
@@ -162,6 +177,7 @@ export const FetchGuestsForFilter = async (req, res) => {
   guestNames.push({ key: 'self', value: 'Self' });
   guestNames.push(...formattedGuests);
 
+  req.log.info('fetch_food_guests_filter_success', { cardno, count: formattedGuests.length });
   return res.status(200).send({
     message: 'fetched results',
     data: guestNames
@@ -169,22 +185,36 @@ export const FetchGuestsForFilter = async (req, res) => {
 };
 
 export const CancelFood = async (req, res) => {
+  attachUserContext(req);
   const t = await database.transaction();
   req.transaction = t;
 
   const { cardno, food_data } = req.body;
+  req.log.info('cancel_food_start', {
+    requestedBy: req.user.cardno,
+    cancelForCardno: cardno,
+    mealCount: Array.isArray(food_data) ? food_data.length : 0
+  });
 
   if (!cardno || !Array.isArray(food_data)) {
+    req.log.warn('cancel_food_invalid_data', { cardno: req.user.cardno });
     throw new ApiError(400, 'Invalid request data');
   }
 
   await cancelFood(req.user, cardno, food_data, t);
+  req.log.info('cancel_food_cancelled', {
+    requestedBy: req.user.cardno,
+    cancelForCardno: cardno,
+    mealCount: food_data.length
+  });
 
   await t.commit();
+  req.log.info('cancel_food_success', { requestedBy: req.user.cardno, cancelForCardno: cardno });
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const fetchMenu = async (req, res) => {
+  req.log.info('fetch_menu_start');
   const menuItems = await Menu.findAll({
     attributes: ['date', 'breakfast', 'lunch', 'dinner'],
     where: {
@@ -196,6 +226,7 @@ export const fetchMenu = async (req, res) => {
   });
 
   if (menuItems.length === 0) {
+    req.log.info('fetch_menu_empty');
     return res.status(200).json({ data: null });
   }
 
@@ -211,5 +242,6 @@ export const fetchMenu = async (req, res) => {
     {}
   );
 
+  req.log.info('fetch_menu_success', { dateCount: Object.keys(formattedMenu).length });
   return res.status(200).send({ data: formattedMenu });
 };

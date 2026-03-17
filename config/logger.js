@@ -1,6 +1,6 @@
 import winston from 'winston';
-import 'winston-daily-rotate-file';
 import path from 'path';
+import 'winston-daily-rotate-file';
 
 // Define log levels
 const levels = {
@@ -52,7 +52,6 @@ const fileTransport = new winston.transports.DailyRotateFile({
   zippedArchive: true,
   maxSize: '20m',
   maxFiles: '90d',
-  level: 'debug',
   format: jsonFormat
 });
 

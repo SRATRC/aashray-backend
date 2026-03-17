@@ -48,7 +48,10 @@ import { issueFoodPlate } from '../../helpers/foodBooking.helper.js';
 export const createUtsavBookingByAdmin = async (req, res) => {
   const { utsavid, mumukshus } = req.body;
 
+  req.log.info('create_utsav_booking_by_admin_start', { utsavid, mumukshuCount: mumukshus?.length });
+
   if (!utsavid || !Array.isArray(mumukshus) || mumukshus.length === 0) {
+    req.log.warn('create_utsav_booking_by_admin_invalid_input', { utsavid });
     return res
       .status(400)
       .send({ message: 'utsavid and mumukshus are required' });
@@ -57,6 +60,7 @@ export const createUtsavBookingByAdmin = async (req, res) => {
   // basic per-item validation
   for (const m of mumukshus) {
     if (!m?.cardno || !m?.packageid) {
+      req.log.warn('create_utsav_booking_by_admin_missing_fields', { utsavid });
       return res
         .status(400)
         .send({ message: 'Each mumukshu must include cardno and packageid' });
@@ -90,9 +94,10 @@ export const createUtsavBookingByAdmin = async (req, res) => {
         }
       }
     } catch (e) {
-      console.warn('Email sending failed for some bookings:', e?.message || e);
+      req.log.warn('create_utsav_booking_by_admin_email_failed', { utsavid, error: e?.message });
     }
 
+    req.log.info('create_utsav_booking_by_admin_success', { utsavid, mumukshuCount: mumukshus.length });
     return res.status(200).send({
       message: 'Utsav booking(s) created by admin',
       data: result
@@ -113,12 +118,15 @@ export const createUtsav = async (req, res) => {
     registration_deadline
   } = req.body;
 
+  req.log.info('create_utsav_start', { name, start_date, end_date, total_seats, location });
+
   if (
     !moment(registration_deadline, 'YYYY-MM-DD').isBefore(
       moment(start_date, 'YYYY-MM-DD'),
       'day'
     )
   ) {
+    req.log.warn('create_utsav_invalid_deadline', { name, registration_deadline, start_date });
     return res.status(400).send({
       message: 'Registration deadline must be before the start date'
     });
@@ -131,7 +139,10 @@ export const createUtsav = async (req, res) => {
     }
   });
 
-  if (alreadyExists) throw new ApiError(400, 'Utsav Already Exists');
+  if (alreadyExists) {
+    req.log.warn('create_utsav_already_exists', { name, start_date });
+    throw new ApiError(400, 'Utsav Already Exists');
+  }
 
   const month = moment(start_date).format('MMMM');
 
@@ -168,14 +179,18 @@ export const createUtsav = async (req, res) => {
 
   await t.commit();
 
+  req.log.info('create_utsav_success', { utsavId: utsavDetails.id, name, start_date, end_date });
   return res.status(200).send({ message: 'Created Utsav', data: utsavDetails });
 };
 
 export const addUtsavPackagesBulk = async (req, res) => {
   const { packages } = req.body;
 
+  req.log.info('add_utsav_packages_bulk_start', { count: packages?.length });
+
   // ✅ Basic payload check
   if (!Array.isArray(packages) || packages.length === 0) {
+    req.log.warn('add_utsav_packages_bulk_no_packages');
     return res.status(400).send({
       message: 'No packages provided'
     });
@@ -285,6 +300,7 @@ export const addUtsavPackagesBulk = async (req, res) => {
 
     await t.commit();
 
+    req.log.info('add_utsav_packages_bulk_success', { count: packages.length });
     return res.status(200).send({
       message: 'Packages Created Successfully'
     });
@@ -298,10 +314,13 @@ export const addUtsavPackagesBulk = async (req, res) => {
 export const addUtsavPackage = async (req, res) => {
   const { utsavid, name, start_date, end_date, amount } = req.body;
 
+  req.log.info('add_utsav_package_start', { utsavid, name, start_date, end_date, amount });
+
   // 1. Get the Utsav details first
   const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
 
   if (!utsav) {
+    req.log.warn('add_utsav_package_utsav_not_found', { utsavid });
     return res.status(404).send({ message: 'Utsav not found' });
   }
 
@@ -351,6 +370,7 @@ export const addUtsavPackage = async (req, res) => {
     updatedBy: req.user.username
   });
 
+  req.log.info('add_utsav_package_success', { utsavid, name });
   return res
     .status(200)
     .send({ message: 'Package Created', data: packageData });
@@ -376,6 +396,8 @@ export const updateUtsav = async (req, res) => {
   } = req.body;
 
   const utsavId = req.params.id;
+  req.log.info('update_utsav_start', { utsavId, name, start_date, end_date, status, total_seats });
+
   const utsav = await validateUtsav(utsavId);
   const month = moment(start_date).format('MMMM');
 
@@ -410,12 +432,14 @@ export const updateUtsav = async (req, res) => {
     updatedBy: req.user.username
   });
 
+  req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
   return res.status(200).send({ message: 'Updated Utsav' });
 };
 
 export const fetchUtsavBookings = async (req, res) => {
   const utsavid = req.query.utsavid;
   let status = req.query.status;
+  req.log.info('fetch_utsav_bookings_start', { utsavid, status });
 
   if (status != null || status != undefined) {
     status = status.replace(/^"|"$/g, '').trim();
@@ -478,6 +502,7 @@ export const fetchUtsavBookings = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_utsav_bookings_success', { utsavid, count: utsavData.length });
   return res
     .status(200)
     .send({ message: 'Found Utsav Bookings', data: utsavData });
@@ -485,7 +510,12 @@ export const fetchUtsavBookings = async (req, res) => {
 
 export const fetchUtsavBookingsVolunteer = async (req, res) => {
   const utsavid = req.query.utsavid;
-  if (!utsavid) return res.status(400).send({ message: 'Missing utsavid' });
+  req.log.info('fetch_utsav_bookings_volunteer_start', { utsavid });
+
+  if (!utsavid) {
+    req.log.warn('fetch_utsav_bookings_volunteer_missing_utsavid');
+    return res.status(400).send({ message: 'Missing utsavid' });
+  }
 
   const statusToBeIncluded = [
     ROOM_STATUS_CHECKEDIN,
@@ -522,6 +552,7 @@ ORDER BY
     }
   );
 
+  req.log.info('fetch_utsav_bookings_volunteer_success', { utsavid, count: result.length });
   return res.status(200).send({
     message: 'Volunteer Access List Fetched',
     data: result
@@ -529,6 +560,8 @@ ORDER BY
 };
 
 export const fetchAllUtsav = async (req, res) => {
+  req.log.info('fetch_all_utsav_start');
+
   const utsavs = await database.query(
     `SELECT
       utsav_db.id,
@@ -574,6 +607,7 @@ END) AS volunteer_opted_count
     }
   );
 
+  req.log.info('fetch_all_utsav_success', { count: utsavs.length });
   return res
     .status(200)
     .send({ message: 'Fetched Utsav Records', data: utsavs });
@@ -582,9 +616,10 @@ END) AS volunteer_opted_count
 export const fetchUtsavByLocation = async (req, res) => {
   try {
     const { location } = req.query;
-    console.log('Selected location:', location);
+    req.log.info('fetch_utsav_by_location_start', { location });
 
     if (!location) {
+      req.log.warn('fetch_utsav_by_location_missing_param');
       return res.status(400).send({ message: 'Location is required' });
     }
 
@@ -635,17 +670,20 @@ export const fetchUtsavByLocation = async (req, res) => {
       }
     );
 
+    req.log.info('fetch_utsav_by_location_success', { location, count: utsavs.length });
     return res.status(200).send({
       message: 'Fetched Utsav Records by Location',
       data: utsavs
     });
   } catch (error) {
-    console.error('Error fetching Utsavs:', error);
+    req.log.error('fetch_utsav_by_location_error', { error: error.message });
     return res.status(500).send({ message: 'Error fetching utsav data' });
   }
 };
 
 export const activateUtsav = async (req, res) => {
+  req.log.info('activate_utsav_start', { id: req.params.id, activate: req.params.activate });
+
   const itemUpdated = await UtsavDb.update(
     {
       status: req.params.activate,
@@ -658,9 +696,12 @@ export const activateUtsav = async (req, res) => {
     }
   );
 
-  if (itemUpdated[0] !== 1)
+  if (itemUpdated[0] !== 1) {
+    req.log.warn('activate_utsav_not_found', { id: req.params.id });
     throw new ApiError(500, 'Error occurred while updating Utsav status');
+  }
 
+  req.log.info('activate_utsav_success', { id: req.params.id, status: req.params.activate });
   res.status(200).send({ message: 'Utsav status updated' });
 };
 
@@ -668,7 +709,7 @@ export const utsavStatusUpdate = async (req, res) => {
   const { utsav_id, bookingid, status, description, issueCredits } = req.body;
 
   let newBookingStatus = status;
-  console.log('Received status:', status);
+  req.log.info('utsav_status_update_start', { utsav_id, bookingid, status, issueCredits });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -677,11 +718,13 @@ export const utsavStatusUpdate = async (req, res) => {
   const booking = await validateUtsavBooking(bookingid, utsav_id);
 
   if (status === booking.status) {
+    req.log.warn('utsav_status_update_same_status', { bookingid, status });
     throw new ApiError(400, 'Status is same as before');
   }
 
   // Cannot change any status if already admin cancelled
   if (booking.status === STATUS_ADMIN_CANCELLED) {
+    req.log.warn('utsav_status_update_already_cancelled', { bookingid });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
@@ -727,7 +770,7 @@ export const utsavStatusUpdate = async (req, res) => {
             { transaction: t }
           );
         } else if (transaction.status === STATUS_CONFIRMED) {
-          console.log('Transaction already confirmed. No action needed.');
+          req.log.info('utsav_status_update_tx_already_confirmed', { bookingid });
         } else if (transaction.status === STATUS_PAYMENT_PENDING) {
           await transaction.update(
             {
@@ -754,9 +797,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
       // ⭐ NEW: If amount = 0 → auto-confirm, skip transaction
       if (Number(pkg.amount) === 0) {
-        console.log(
-          '>> Package amount is 0 → skipping transaction, auto-confirming booking.'
-        );
+        req.log.info('utsav_status_update_zero_amount_auto_confirm', { bookingid, packageid: booking.packageid });
 
         // Reserve seat
         await reserveUtsavSeat(utsav, t);
@@ -817,7 +858,7 @@ export const utsavStatusUpdate = async (req, res) => {
       break;
 
     case STATUS_ADMIN_CANCELLED:
-      console.log('>> Admin cancelling booking');
+      req.log.info('utsav_status_update_admin_cancelling', { bookingid, issueCredits });
 
       if (
         booking.status !== STATUS_WAITING &&
@@ -845,16 +886,12 @@ export const utsavStatusUpdate = async (req, res) => {
 
       if (transaction) {
         if (transaction.status === STATUS_CANCELLED) {
-          // 🔁 user had cancelled earlier, now admin upgrades it
+          // user had cancelled earlier, now admin upgrades it
           if (issueCredits === true || issueCredits === 'yes') {
-            console.log(
-              '>> Issuing credits for previously cancelled transaction'
-            );
-            await cancelTransaction(req.user, null, transaction, t, true); // ✅ adds credits + sets status=credited
+            req.log.info('utsav_status_update_issuing_credits_prev_cancelled', { bookingid });
+            await cancelTransaction(req.user, null, transaction, t, true);
           } else {
-            console.log(
-              '>> Marking previously cancelled transaction as admin cancelled (no credits)'
-            );
+            req.log.info('utsav_status_update_marking_admin_cancelled_no_credits', { bookingid });
             await transaction.update(
               { status: STATUS_ADMIN_CANCELLED, updatedBy: req.user.username },
               { transaction: t }
@@ -867,10 +904,10 @@ export const utsavStatusUpdate = async (req, res) => {
         ) {
           // Normal admin cancel
           if (issueCredits === true || issueCredits === 'yes') {
-            console.log('>> Issuing credits for admin cancellation');
+            req.log.info('utsav_status_update_issuing_credits', { bookingid, amount: transaction.amount });
             await cancelTransaction(req.user, null, transaction, t, true);
           } else {
-            console.log('>> Admin cancelled without credits');
+            req.log.info('utsav_status_update_admin_cancelled_no_credits', { bookingid });
             await transaction.update(
               {
                 status: STATUS_ADMIN_CANCELLED,
@@ -881,12 +918,10 @@ export const utsavStatusUpdate = async (req, res) => {
             );
           }
         } else {
-          console.log(
-            '>> Transaction already credited/admin-cancelled, skipping'
-          );
+          req.log.info('utsav_status_update_tx_already_cancelled_skipping', { bookingid });
         }
       } else {
-        console.log('>> No transaction found for this booking');
+        req.log.info('utsav_status_update_no_transaction', { bookingid });
       }
 
       newBookingStatus = STATUS_ADMIN_CANCELLED;
@@ -905,16 +940,19 @@ export const utsavStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('utsav_status_update_transition', { bookingid, utsav_id, fromStatus: booking.status, toStatus: newBookingStatus });
   return res.status(200).send({ message: 'Updated booking status' });
 };
 
 export const fetchUtsav = async (req, res) => {
   const { id } = req.params;
+  req.log.info('fetch_utsav_start', { id });
 
   const utsav = await UtsavDb.findOne({
     where: { id: id }
   });
 
+  req.log.info('fetch_utsav_success', { id, found: !!utsav });
   return res.status(200).send({ message: 'Fetched Adhyayan', data: utsav });
 };
 
@@ -922,9 +960,12 @@ export const updateUtsavPackage = async (req, res) => {
   const { name, start_date, end_date, amount } = req.body;
   const { id: packageId } = req.params;
 
+  req.log.info('update_utsav_package_start', { packageId, name, amount });
+
   const utsavPackage = await UtsavPackagesDb.findByPk(packageId);
 
   if (!utsavPackage) {
+    req.log.warn('update_utsav_package_not_found', { packageId });
     return res.status(404).send({ message: 'Package not found' });
   }
 
@@ -936,10 +977,13 @@ export const updateUtsavPackage = async (req, res) => {
     updatedBy: req.user.username
   });
 
+  req.log.info('update_utsav_package_success', { packageId, name });
   return res.status(200).send({ message: 'Updated Utsav Package' });
 };
 
 export const fetchAllPackages = async (req, res) => {
+  req.log.info('fetch_all_utsav_packages_start');
+
   const packages = await database.query(
     `SELECT 
         up.id,
@@ -972,6 +1016,7 @@ export const fetchAllPackages = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_all_utsav_packages_success', { count: packages.length });
   return res.status(200).send({
     message: 'Fetched Package Records',
     data: packages
@@ -980,8 +1025,10 @@ export const fetchAllPackages = async (req, res) => {
 
 export const fetchPackagesByUtsav = async (req, res) => {
   const { utsavid } = req.query;
+  req.log.info('fetch_packages_by_utsav_start', { utsavid });
 
   if (!utsavid) {
+    req.log.warn('fetch_packages_by_utsav_missing_param');
     return res.status(400).send({ message: 'utsavid is required' });
   }
 
@@ -990,6 +1037,7 @@ export const fetchPackagesByUtsav = async (req, res) => {
     order: [['start_date', 'ASC']]
   });
 
+  req.log.info('fetch_packages_by_utsav_success', { utsavid, count: packages.length });
   return res
     .status(200)
     .send({ message: 'Fetched packages for utsav', data: packages });
@@ -997,15 +1045,18 @@ export const fetchPackagesByUtsav = async (req, res) => {
 
 export const fetchPackage = async (req, res) => {
   const { id } = req.params;
+  req.log.info('fetch_utsav_package_start', { id });
 
   const packageData = await UtsavPackagesDb.findOne({
     where: { id: id }
   });
 
   if (!packageData) {
+    req.log.warn('fetch_utsav_package_not_found', { id });
     return res.status(404).send({ message: 'Package not found' });
   }
 
+  req.log.info('fetch_utsav_package_success', { id });
   return res
     .status(200)
     .send({ message: 'Fetched Package', data: packageData });
@@ -1013,6 +1064,8 @@ export const fetchPackage = async (req, res) => {
 
 export const fetchAllUtsavList = async (req, res) => {
   try {
+    req.log.info('fetch_all_utsav_list_start');
+
     const adhyayans = await database.query(
       `SELECT id, name FROM utsav_db ORDER BY id ASC`,
       {
@@ -1021,12 +1074,13 @@ export const fetchAllUtsavList = async (req, res) => {
       }
     );
 
+    req.log.info('fetch_all_utsav_list_success', { count: adhyayans.length });
     return res.status(200).json({
       message: 'Fetched adhyayan list',
       data: adhyayans
     });
   } catch (error) {
-    console.error('Error fetching adhyayans:', error);
+    req.log.error('fetch_all_utsav_list_error', { error: error.message });
     return res.status(500).json({
       message: 'Failed to fetch adhyayan list',
       error: error.message
@@ -1035,13 +1089,11 @@ export const fetchAllUtsavList = async (req, res) => {
 };
 
 export const utsavCheckin = async (req, res) => {
-  console.log('📥 Received utsavid:', req.body.utsavid);
-  console.log('📥 Received cardno:', req.body.cardno);
-
   const t = await database.transaction();
   req.transaction = t;
 
   const { cardno, utsavid } = req.body;
+  req.log.info('utsav_checkin_start', { cardno, utsavid });
 
   const booking = await UtsavBooking.findOne({
     where: {
@@ -1060,16 +1112,19 @@ export const utsavCheckin = async (req, res) => {
 
   if (!booking) {
     await t.rollback();
+    req.log.warn('utsav_checkin_not_found', { cardno, utsavid });
     throw new ApiError(404, 'Booking not found for this user');
   }
 
   if ([STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(booking.status)) {
     await t.rollback();
+    req.log.warn('utsav_checkin_payment_pending', { cardno, utsavid, bookingStatus: booking.status });
     throw new ApiError(400, "User haven't paid yet, cannot checkin");
   }
 
   if (booking.status === ROOM_STATUS_CHECKEDIN) {
     await t.rollback();
+    req.log.info('utsav_checkin_already_checkedin', { cardno, utsavid });
     return res.status(200).send({
       message: 'Already checked in'
     });
@@ -1078,6 +1133,7 @@ export const utsavCheckin = async (req, res) => {
   await booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t });
 
   await t.commit();
+  req.log.info('utsav_checkin_success', { cardno, utsavid, bookingid: booking.bookingid });
   return res.status(200).send({
     message: 'Utsav booking status updated to checkedin.'
   });
@@ -1086,6 +1142,7 @@ export const utsavCheckin = async (req, res) => {
 export const utsavCheckinReport = async (req, res) => {
   const utsavid = req.query.utsavid;
   let status = req.query.status;
+  req.log.info('utsav_checkin_report_start', { utsavid, status });
 
   if (status != null || status != undefined) {
     status = status.replace(/^"|"$/g, '').trim();
@@ -1147,6 +1204,7 @@ export const utsavCheckinReport = async (req, res) => {
     }
   );
 
+  req.log.info('utsav_checkin_report_success', { utsavid, count: utsavData.length });
   return res.status(200).send({
     message: 'Filtered Utsav Bookings',
     data: utsavData
@@ -1169,7 +1227,10 @@ export const fetchVolunteerOptions = async (_req, res) => {
 };
 
 export const uploadRoomNoExcel = async (req, res) => {
+  req.log.info('upload_room_no_excel_start');
+
   if (!req.file) {
+    req.log.warn('upload_room_no_excel_no_file');
     return res.status(400).json({ error: 'No file uploaded.' });
   }
 
@@ -1278,17 +1339,18 @@ export const uploadRoomNoExcel = async (req, res) => {
       await database.query(query, { transaction });
       await transaction.commit();
 
+      req.log.info('upload_room_no_excel_success', { updated: validRows.length, skipped: skippedRows.length });
       res.status(200).json({
         message: `${validRows.length} record(s) updated successfully.`,
         skippedRows
       });
     } catch (err) {
       await transaction.rollback();
-      console.error(err);
+      req.log.error('upload_room_no_excel_update_error', { error: err.message });
       res.status(500).json({ error: 'Error updating room numbers.' });
     }
   } catch (err) {
-    console.error(err);
+    req.log.error('upload_room_no_excel_processing_error', { error: err.message });
     res.status(500).json({ error: 'Error processing file.' });
   }
 };
@@ -1297,11 +1359,12 @@ export const uploadRoomNoExcel = async (req, res) => {
 export const updateRoomNo = async (req, res) => {
   try {
     const { bookingid, roomno } = req.body;
+    req.log.info('update_utsav_room_no_start', { bookingid, roomno });
 
-    // assuming you’re attaching logged-in user info in req.user
     const updatedBy = req.user?.username || req.user?.id || 'system';
 
     if (!bookingid || !roomno) {
+      req.log.warn('update_utsav_room_no_missing_params', { bookingid, roomno });
       return res
         .status(400)
         .json({ error: 'bookingid and roomno are required' });
@@ -1311,6 +1374,7 @@ export const updateRoomNo = async (req, res) => {
     const booking = await UtsavBooking.findOne({ where: { bookingid } });
 
     if (!booking) {
+      req.log.warn('update_utsav_room_no_not_found', { bookingid });
       return res.status(404).json({ error: 'Booking not found' });
     }
 
@@ -1319,12 +1383,13 @@ export const updateRoomNo = async (req, res) => {
     booking.updatedBy = updatedBy;
     await booking.save();
 
+    req.log.info('update_utsav_room_no_success', { bookingid, roomno });
     return res.status(200).json({
       message: 'Room number updated successfully',
       booking
     });
   } catch (error) {
-    console.error('Error updating room number:', error);
+    req.log.error('update_utsav_room_no_error', { error: error.message });
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -1332,14 +1397,17 @@ export const updateRoomNo = async (req, res) => {
 export const ReservationReport = async (req, res) => {
   try {
     const { utsavid, type, statuses } = req.query;
+    req.log.info('utsav_reservation_report_start', { utsavid, type, statuses });
 
     if (!utsavid) {
+      req.log.warn('utsav_reservation_report_missing_utsavid');
       return res.status(400).send({ message: 'utsav_id is required' });
     }
 
     if (
       !['pre_event_room_occupancy', 'post_event_room_occupancy'].includes(type)
     ) {
+      req.log.warn('utsav_reservation_report_invalid_type', { type });
       return res.status(400).send({ message: 'Invalid report type' });
     }
 
@@ -1429,12 +1497,13 @@ export const ReservationReport = async (req, res) => {
       order: [['checkin', 'ASC']]
     });
 
+    req.log.info('utsav_reservation_report_success', { utsavid, type, count: reservations.length });
     return res.status(200).send({
       message: 'Fetched reservation report',
       data: reservations
     });
   } catch (err) {
-    console.error(err);
+    req.log.error('utsav_reservation_report_error', { error: err.message });
     return res.status(500).send({
       message: 'Server error',
       error: err.message
@@ -1445,6 +1514,9 @@ export const ReservationReport = async (req, res) => {
 export const issuePlate = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
+
+  req.log.info('utsav_issue_plate_start', { cardno: req.params.cardno, meal: req.body.meal });
+
   const { message, issuedto } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
@@ -1452,5 +1524,6 @@ export const issuePlate = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('utsav_issue_plate_success', { cardno: req.params.cardno, meal: req.body.meal, issuedto });
   return res.status(200).send({ message, issuedto });
 };

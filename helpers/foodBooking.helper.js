@@ -38,6 +38,7 @@ import { cancelTransactions, usableCredits } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
+import logger from '../config/logger.js';
 
 const mealTypeMapping = {
   breakfast: TYPE_GUEST_BREAKFAST,
@@ -87,8 +88,16 @@ export async function bookFoodForMumukshus(
   t,
   updatedBy,
   userRoles = [],
-  cashAllowed = false
+  cashAllowed = false,
+  log = logger
 ) {
+  const mumukshus_peek = mumukshuGroup.flatMap((g) => g.mumukshus || g.guests);
+  log.info('food_booking_start', {
+    start_date,
+    end_date,
+    mumukshu_count: mumukshus_peek.length,
+    bookedBy
+  });
   if (!end_date) {
     end_date = start_date;
   }
@@ -208,6 +217,11 @@ export async function bookFoodForMumukshus(
     transaction: t
   });
   const transactionIds = transactions.map((item) => item.id);
+  log.info('food_booking_result', {
+    created: bookingsToCreate.length,
+    transactions: transactionIds.length,
+    amount
+  });
   return { amount, userBookingIds, transactionIds };
 }
 
@@ -540,13 +554,12 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   return t;
 }
 
-
 export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
   // ✅ Use provided date or fallback to current date
-  const targetDate = providedDate 
+  const targetDate = providedDate
     ? moment.utc(providedDate).format('YYYY-MM-DD')
     : moment.utc().format('YYYY-MM-DD');
-  
+
   const currentTime = moment.utc();
   const mealTimes = {
     breakfast: moment.utc().hour(4).minute(30).second(0),
@@ -576,7 +589,7 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
   }
 
   let currentMeal = meal;
-  
+
   // Only auto-detect meal if not provided
   if (!currentMeal) {
     for (const mealType of ['breakfast', 'lunch', 'dinner']) {
@@ -598,12 +611,14 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
   }
 
   const plateField = `${currentMeal}_plate_issued`;
-  
+
   if (booking[plateField]) {
     throw new ApiError(400, `Plate for ${currentMeal} already issued`);
   }
 
   await booking.update({ [plateField]: true }, { transaction: t });
+
+  logger.info('food_plate_issued', { cardno, meal: currentMeal, targetDate });
 
   return {
     message: `Plate for ${currentMeal} issued successfully`,

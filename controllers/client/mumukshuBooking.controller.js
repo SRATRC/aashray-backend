@@ -52,12 +52,19 @@ import {
   sendUnifiedEmail,
   setWaitingBookingCountMap
 } from '../helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
 
 export const mumukshuBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+  req.log.info('mumukshu_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   validateFlatBookingConstraints(primary_booking, addons);
 
@@ -103,11 +110,14 @@ export const mumukshuBooking = async (req, res) => {
 
   var order = null;
   if (req.user.country == 'India' && amount > 0) {
+    req.log.info('mumukshu_booking_creating_order', { cardno: req.user.cardno, amount });
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, [], order.id, t);
+    req.log.info('mumukshu_booking_order_created', { cardno: req.user.cardno, orderId: order.id, amount });
   }
   await t.commit();
+  req.log.info('mumukshu_booking_committed', { cardno: req.user.cardno });
 
   //Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(
@@ -127,6 +137,19 @@ export const mumukshuBooking = async (req, res) => {
       ? MSG_BOOKING_WAITING
       : MSG_BOOKING_SUCCESSFUL;
 
+  if (Object.keys(waitingBookingCountMap).length > 0) {
+    req.log.info('mumukshu_booking_waiting', {
+      cardno: req.user.cardno,
+      waitingBookingCountMap
+    });
+  }
+  req.log.info('mumukshu_booking_success', {
+    cardno: req.user.cardno,
+    totalAmount: amount,
+    orderId: order?.id,
+    message
+  });
+
   return res.status(200).send({
     message: message,
     order: order ? order : { amount: 0 },
@@ -135,7 +158,13 @@ export const mumukshuBooking = async (req, res) => {
 };
 
 export const validateBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+  req.log.info('validate_mumukshu_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   const response = {
     roomDetails: [],
@@ -163,11 +192,17 @@ export const validateBooking = async (req, res) => {
     }
   }
 
+  req.log.info('validate_mumukshu_booking_success', {
+    cardno: req.user.cardno,
+    totalCharge: response.totalCharge
+  });
   return res.status(200).send({ data: response });
 };
 
 export const checkMumukshuOrGuest = async (req, res) => {
   const { mobno } = req.query;
+  req.log.info('check_mumukshu_or_guest_start', { mobno });
+
   const cardDb = await CardDb.findOne({
     where: {
       mobno: mobno
@@ -176,6 +211,7 @@ export const checkMumukshuOrGuest = async (req, res) => {
   });
 
   if (!cardDb) {
+    req.log.warn('check_mumukshu_or_guest_not_found', { mobno });
     throw new ApiError(404, ERR_CARD_NOT_FOUND);
   }
 
@@ -184,9 +220,15 @@ export const checkMumukshuOrGuest = async (req, res) => {
       cardDb.res_status
     )
   ) {
+    req.log.warn('check_mumukshu_or_guest_not_mumukshu', {
+      mobno,
+      cardno: cardDb.cardno,
+      resStatus: cardDb.res_status
+    });
     throw new ApiError(401, 'User is not a mumukshu');
   }
 
+  req.log.info('check_mumukshu_or_guest_success', { mobno, cardno: cardDb.cardno, resStatus: cardDb.res_status });
   return res.status(200).send({ data: cardDb });
 };
 

@@ -17,6 +17,7 @@ import {
   getOtherBookingUser,
   notifyCardno
 } from '../../helpers/notification.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
@@ -24,9 +25,13 @@ import Sequelize from 'sequelize';
 import moment from 'moment';
 
 export const ViewAllBookings = async (req, res) => {
+  attachUserContext(req);
+  const { cardno } = req.user;
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * (pageSize - 1);
+
+  req.log.info('fetch_room_bookings_start', { cardno, page, pageSize });
 
   const user_bookings = await database.query(
     `
@@ -80,11 +85,14 @@ FROM
       type: Sequelize.QueryTypes.SELECT
     }
   );
+  req.log.info('fetch_room_bookings_success', { cardno, count: user_bookings.length });
   return res.status(200).send(user_bookings);
 };
 
 export const CancelBooking = async (req, res) => {
+  attachUserContext(req);
   const { bookingid } = req.body;
+  req.log.info('cancel_room_booking_start', { bookingid, cardno: req.user.cardno });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -121,10 +129,24 @@ export const CancelBooking = async (req, res) => {
     });
   }
 
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    req.log.warn('cancel_room_booking_not_found', { bookingid, cardno: req.user.cardno });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  req.log.info('cancel_room_booking_found', {
+    bookingid,
+    cardno: req.user.cardno,
+    currentStatus: booking.status,
+    roomno: booking.roomno || booking.flatno,
+    checkin: booking.checkin,
+    checkout: booking.checkout
+  });
 
   await userCancelBooking(req.user, booking, t);
+  req.log.info('cancel_room_booking_cancelled', { bookingid, cardno: req.user.cardno });
   await t.commit();
+  req.log.info('cancel_room_booking_committed', { bookingid });
 
   sendMail({
     email: req.user.email,
@@ -158,6 +180,7 @@ export const CancelBooking = async (req, res) => {
     }
   }
 
+  req.log.info('cancel_room_booking_success', { bookingid, cardno: req.user.cardno });
   res.status(200).send({ message: 'Room booking cancelled' });
 };
 
@@ -167,12 +190,19 @@ export const CancelBooking = async (req, res) => {
  * New implementations should use: POST /api/mumukshu-booking/booking with primary_booking.booking_type = 'flat'
  */
 export const FlatBookingMumukshu = async (req, res) => {
-  // Log deprecation warning
-  console.warn(
-    '[DEPRECATED] FlatBookingMumukshu endpoint is deprecated. Use unified booking endpoint instead.'
-  );
+  attachUserContext(req);
+  req.log.warn('flat_booking_mumukshu_deprecated', {
+    cardno: req.user.cardno,
+    message: 'FlatBookingMumukshu endpoint is deprecated. Use unified booking endpoint instead.'
+  });
 
   const { mumukshus, startDay, endDay } = req.body;
+  req.log.info('flat_booking_mumukshu_start', {
+    cardno: req.user.cardno,
+    startDay,
+    endDay,
+    mumukshuCount: mumukshus?.length
+  });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -188,6 +218,11 @@ export const FlatBookingMumukshu = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('flat_booking_mumukshu_committed', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
 
   sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
 
@@ -202,6 +237,11 @@ export const FlatBookingMumukshu = async (req, res) => {
       );
     });
 
+  req.log.info('flat_booking_mumukshu_success', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
   return res.status(200).send({
     message: MSG_BOOKING_SUCCESSFUL,
     data: order

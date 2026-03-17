@@ -39,17 +39,8 @@ function getAdditionalConditions(
 ) {
   let additionalWhereClause = '';
 
-  console.log('🔍 getAdditionalConditions called with:', {
-    whereClauses,
-    pickupRC,
-    dropRC,
-    replacementMap
-  });
-
   if (Array.isArray(whereClauses) && whereClauses.length > 0) {
     additionalWhereClause += ` AND ${whereClauses.join(' AND ')}`;
-  } else if (whereClauses && !Array.isArray(whereClauses)) {
-    console.warn('⚠️ Warning: whereClauses is not an array:', whereClauses);
   }
 
   if (pickupRC === 'true') {
@@ -60,17 +51,14 @@ function getAdditionalConditions(
     additionalWhereClause += " AND t1.drop_point = 'RC'";
   }
 
-  console.log('✅ Final additionalWhereClause:', additionalWhereClause);
-
   return additionalWhereClause;
 }
 
 export const fetchSummary = async (req, res) => {
-  console.log('🚀 fetchSummary triggered');
-
   try {
     const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
       req.query;
+    req.log.info('travel_fetch_summary_start', { start_date, end_date, statuses, pickupRC, dropRC });
 
     const normalizedStatuses = Array.isArray(statuses)
       ? statuses
@@ -185,16 +173,15 @@ export const fetchSummary = async (req, res) => {
       ORDER BY destination, status
     `;
 
-    console.log('📥 Replacements:', replacements);
     const data = await database.query(sql, {
       replacements,
       type: Sequelize.QueryTypes.SELECT
     });
 
-    console.log('📊 fetchSummary data:', data);
+    req.log.info('travel_fetch_summary_success', { start_date, end_date, count: data.length });
     return res.status(200).send({ message: 'Fetched data', data });
   } catch (error) {
-    console.error('❌ fetchSummary error:', error);
+    req.log.error('travel_fetch_summary_error', { error: error.message });
     return res.status(500).send({
       statusCode: 500,
       message: error.message,
@@ -206,6 +193,7 @@ export const fetchSummary = async (req, res) => {
 export const fetchUpcomingBookings = async (req, res) => {
   const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
     req.query;
+  req.log.info('travel_fetch_upcoming_bookings_start', { start_date, end_date, statuses, pickupRC, dropRC });
 
   const normalizedStatuses = statuses
     ? Array.isArray(statuses)
@@ -282,11 +270,14 @@ export const fetchUpcomingBookings = async (req, res) => {
     }
   );
 
+  req.log.info('travel_fetch_upcoming_bookings_success', { start_date, end_date, count: data.length });
   return res.status(200).send({ message: 'Fetched data', data });
 };
 
 export const fetchBookingForDriver = async (req, res) => {
   try {
+    req.log.info('travel_fetch_booking_for_driver_start');
+
     // --- Get current IST time ---
     const now = new Date();
     const istNow = new Date(
@@ -400,9 +391,10 @@ export const fetchBookingForDriver = async (req, res) => {
       }
     );
 
+    req.log.info('travel_fetch_booking_for_driver_success', { fetchDate, count: data.length });
     return res.status(200).send({ message: 'Fetched data', data });
   } catch (error) {
-    console.error('Error fetching data for driver:', error);
+    req.log.error('travel_fetch_booking_for_driver_error', { error: error.message });
     return res.status(500).send({ message: 'Something went wrong', error });
   }
 };
@@ -410,6 +402,8 @@ export const fetchBookingForDriver = async (req, res) => {
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status, adminComments,  description, charges, issueCredits } = req.body;
   let newBookingStatus = status;
+
+  req.log.info('travel_update_booking_status_start', { bookingid, status, adminComments, issueCredits });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -423,17 +417,22 @@ export const updateBookingStatus = async (req, res) => {
     ],
     where: {
       bookingid
-      // status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED, STATUS_PAYMENT_PENDING, STATUS_PROCEED_FOR_PAYMENT]
     }
   });
 
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    req.log.warn('travel_update_booking_status_not_found', { bookingid });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
-  if (status == booking.status)
-  throw new ApiError(400, 'Status is same as before');
+  if (status == booking.status) {
+    req.log.warn('travel_update_booking_status_same', { bookingid, status });
+    throw new ApiError(400, 'Status is same as before');
+  }
 
 if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
   if (!(booking.status === STATUS_CANCELLED && status === STATUS_ADMIN_CANCELLED)) {
+    req.log.warn('travel_update_booking_status_already_cancelled', { bookingid, currentStatus: booking.status });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 }
@@ -569,7 +568,8 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
   
 
   await t.commit();
- 
+  req.log.info('travel_update_booking_status_transition', { bookingid, fromStatus: booking.status, toStatus: newBookingStatus });
+
   sendMail({
     email: card.email,
     subject: 'Raj Pravas - Travel Booking Updated',
@@ -603,11 +603,14 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     },
     screen: '/bookings'
   });
+  req.log.info('travel_update_booking_status_success', { bookingid });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateTransactionStatus = async (req, res) => {
   const { cardno, bookingid, type } = req.body;
+
+  req.log.info('travel_update_transaction_status_start', { cardno, bookingid, type });
 
   const booking = await TravelDb.findOne({
     where: {
@@ -616,7 +619,10 @@ export const updateTransactionStatus = async (req, res) => {
     }
   });
 
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    req.log.warn('travel_update_transaction_status_booking_not_found', { bookingid });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
   const t = await database.transaction();
   req.transaction = t;
@@ -625,13 +631,17 @@ export const updateTransactionStatus = async (req, res) => {
     where: { cardno, bookingid, type }
   });
 
-  if (!transaction) throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
+  if (!transaction) {
+    req.log.warn('travel_update_transaction_status_transaction_not_found', { cardno, bookingid });
+    throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
+  }
 
   await adminCancelTransaction(req.user, null, transaction, t);
 
   //TODO: send notification
 
   await t.commit();
+  req.log.info('travel_update_transaction_status_success', { cardno, bookingid, amount: transaction.amount });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -649,6 +659,8 @@ export async function updateBooking(req, res) {
     type,
     date
   } = req.body;
+
+  req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date });
 
   if (!bookingid) {
     throw new ApiError(400, 'Booking ID is required');
@@ -706,6 +718,7 @@ export async function updateBooking(req, res) {
 
   await t.commit();
 
+  req.log.info('travel_update_booking_success', { bookingid, updatedFields });
   return res.json({
     message: 'Booking updated successfully',
     updatedFields,

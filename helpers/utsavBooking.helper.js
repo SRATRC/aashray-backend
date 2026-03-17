@@ -10,6 +10,7 @@ import {
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED
 } from '../config/constants.js';
+import logger from '../config/logger.js';
 import {
   UtsavDb,
   UtsavPackagesDb,
@@ -312,7 +313,7 @@ export async function reserveUtsavSeat(utsav, t) {
 }
 
 export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
-  console.log('Input to openUtsavSeat:', utsav, cardno, updatedBy);
+  logger.info('open_utsav_seat_start', { utsavid: utsav?.id, cardno, updatedBy, utsavStatus: utsav?.status });
 
   // Only increase available seats if utsav is in "open" status
   if (utsav.status !== STATUS_OPEN) return;
