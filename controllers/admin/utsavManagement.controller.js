@@ -719,7 +719,7 @@ export const utsavStatusUpdate = async (req, res) => {
           true
         );
         let utsav_packages_db = await UtsavPackagesDb.findOne({ where: { id: booking.packageid, utsavid: utsav.id } });
-
+        await bookFoodForUtsav(utsav_packages_db, utsav, card, t, req.user.username);
       } else {
         if (transaction.status === STATUS_CANCELLED) {
           await transaction.update(
