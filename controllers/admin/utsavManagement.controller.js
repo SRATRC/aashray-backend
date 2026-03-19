@@ -23,6 +23,7 @@ import {
   createPendingTransaction,
   cancelTransaction
 } from '../../helpers/transactions.helper.js';
+
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -718,7 +719,7 @@ export const utsavStatusUpdate = async (req, res) => {
           true
         );
         let utsav_packages_db = await UtsavPackagesDb.findOne({ where: { id: booking.packageid, utsavid: utsav.id } });
-        await bookFoodForUtsav(utsav_packages_db, utsav, card, t, req.user.username);
+
       } else {
         if (transaction.status === STATUS_CANCELLED) {
           await transaction.update(
@@ -812,7 +813,7 @@ export const utsavStatusUpdate = async (req, res) => {
           },
           transaction: t
         });
-
+        await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
         transaction = existingTransaction;
       }
 
