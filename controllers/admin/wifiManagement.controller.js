@@ -823,7 +823,7 @@ export const generateUsername = async (req, res) => {
       attributes: ['username'],
       where: {
         username: {
-          [Sequelize.Op.like]: `${baseUsername}%`
+          [Op.like]: `${baseUsername}%`
         },
         status: ['approved', 'reset', 'pending'] // ✅ YOUR RULE
       }
