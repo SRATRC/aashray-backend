@@ -210,14 +210,15 @@ export const requestPermanentCode = async (req, res) => {
   const baseUsername = `${firstName}${lastName}${cardLast4}${deviceSuffix}`;
 
   const similarUsernames = await PermanentWifiCodes.findAll({
-    attributes: ['username'],
-    where: {
-      username: {
-        [Sequelize.Op.like]: `${baseUsername}%`
-      }
+  attributes: ['username', 'status'],
+  where: {
+    username: {
+      [Sequelize.Op.like]: `${baseUsername}%`
     },
-    transaction: t
-  });
+    status: [STATUS_APPROVED, STATUS_RESET, STATUS_PENDING] // ✅ ONLY THESE
+  },
+  transaction: t
+});
 
   let maxCounter = 0;
 
