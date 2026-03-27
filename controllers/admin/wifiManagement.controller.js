@@ -177,6 +177,13 @@ export const getPermanentCodeRequests = async (req, res) => {
       whereClause.code = { [Op.not]: null };
     }
 
+    // 🔥 Decide order dynamically
+    let orderField = 'requested_at';
+
+    if (requestType === 'pending-reset') {
+      orderField = 'updatedAt';
+    }
+
     const rows = await PermanentWifiCodes.findAll({
       where: whereClause,
       include: [
@@ -185,7 +192,7 @@ export const getPermanentCodeRequests = async (req, res) => {
           attributes: ['cardno', 'issuedto', 'email', 'mobno', 'res_status']
         }
       ],
-      order: [['requested_at', 'DESC']]
+      order: [[orderField, 'DESC']]
     });
 
     res.status(200).json({
@@ -195,6 +202,7 @@ export const getPermanentCodeRequests = async (req, res) => {
         total: rows.length
       }
     });
+
   } catch (error) {
     console.error('Error fetching permanent WiFi code requests:', error);
     res.status(500).json({
@@ -756,5 +764,99 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
     await transaction.rollback();
     console.error(err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+
+export const generateUsername = async (req, res) => {
+  try {
+    const { cardno, issuedto, deviceType } = req.query;
+
+    if (!cardno || !issuedto || !deviceType) {
+      return res.status(400).json({
+        message: 'cardno, issuedto and deviceType are required'
+      });
+    }
+
+    /* ================= USERNAME BASE ================= */
+
+    const DEVICE_SUFFIX_MAP = {
+      mobile: 'ph',
+      laptop: 'pc',
+      tablet: 'tb'
+    };
+
+    const deviceSuffix =
+      DEVICE_SUFFIX_MAP[deviceType.toLowerCase()] || 'ot';
+
+    const IGNORE_FIRST_NAMES = [
+      'rcof', 'rchk', 'cons', 'chak', 'divi', 'paon', 'guest'
+    ];
+
+    let nameParts = issuedto
+      .trim()
+      .toLowerCase()
+      .replace(/^guest-/, '')
+      .split(/\s+/);
+
+    while (
+      nameParts.length > 1 &&
+      IGNORE_FIRST_NAMES.includes(nameParts[0])
+    ) {
+      nameParts.shift();
+    }
+
+    const firstName = nameParts[0] || '';
+    const lastName =
+      nameParts.length > 1
+        ? nameParts[nameParts.length - 1]
+        : '';
+
+    const cardLast4 = cardno.slice(-4);
+
+    const baseUsername =
+      `${firstName}${lastName}${cardLast4}${deviceSuffix}`;
+
+    /* ================= INCREMENT LOGIC ================= */
+
+    const similarUsernames = await PermanentWifiCodes.findAll({
+      attributes: ['username'],
+      where: {
+        username: {
+          [Op.like]: `${baseUsername}%`
+        },
+        status: ['approved', 'reset', 'pending'] // ✅ YOUR RULE
+      }
+    });
+
+    let maxCounter = 0;
+
+    similarUsernames.forEach((user) => {
+      const currentUsername = user.username;
+      const suffix = currentUsername.substring(baseUsername.length);
+
+      if (suffix === '') {
+        maxCounter = Math.max(maxCounter, 1);
+      } else if (/^\d+$/.test(suffix)) {
+        maxCounter = Math.max(maxCounter, parseInt(suffix, 10));
+      }
+    });
+
+    const finalUsername =
+      maxCounter === 0
+        ? baseUsername
+        : `${baseUsername}${maxCounter + 1}`;
+
+    return res.status(200).json({
+      data: {
+        username: finalUsername.toLowerCase()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generating username:', error);
+    return res.status(500).json({
+      message: error.message
+    });
   }
 };
