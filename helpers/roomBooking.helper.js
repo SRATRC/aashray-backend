@@ -214,7 +214,7 @@ export async function findRoom(
           [Sequelize.Op.notIn]: Sequelize.literal(`(
             SELECT roomno 
             FROM room_booking 
-            WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
+            WHERE (checkout < '${checkin}' AND checkin > '${checkout}')
             AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
           )`)
         }
