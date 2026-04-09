@@ -214,8 +214,8 @@ export async function findRoom(
           [Sequelize.Op.notIn]: Sequelize.literal(`(
             SELECT roomno 
             FROM room_booking 
-            WHERE NOT (checkout <= '${checkin}' OR checkin >= '${checkout}')
-            AND status NOT IN ('${STATUS_CANCELLED}', '${STATUS_ADMIN_CANCELLED}')
+            WHERE (checkout > :reqCheckin AND checkin < :reqCheckout)
+          AND status NOT IN (:excludeStatus1, :excludeStatus2)
           )`)
         }
       }
@@ -227,7 +227,7 @@ export async function findRoom(
       roomno: { [Sequelize.Op.notIn]: excludeRooms }
     });
   }
-
+ 
   return RoomDb.findOne({
     attributes: ['roomno'],
     where: whereConditions,
@@ -237,6 +237,12 @@ export async function findRoom(
       ),
       Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
     ],
+    replacements: {
+      reqCheckin: checkin,    // Your variable for the requested check-in
+      reqCheckout: checkout,  // Your variable for the requested check-out
+      excludeStatus1: 'cancelled',           // Statuses that mean the room is actually free
+      excludeStatus2: 'admin cancelled'
+    },
     limit: 1
   });
 }
