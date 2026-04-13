@@ -8,7 +8,8 @@ import {
   ERR_UTSAV_ALREADY_BOOKED,
   STATUS_AVAILABLE,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  RESEARCH_CENTRE
 } from '../config/constants.js';
 import {
   UtsavDb,
@@ -103,6 +104,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       
       total_amount += package_info.amount;
       await bookFoodForUtsav(package_info , utsav, mumukshu, t, user.cardno);
+      
     }
 
     bookings.push(bookingid);
@@ -118,6 +120,9 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 }
 
 export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
+
+  if(utsav.location !== RESEARCH_CENTRE) 
+    return;
 
   const date1 = new Date(package_info.end_date).toDateString();
   const date2 = new Date(utsav.end_date).toDateString();
