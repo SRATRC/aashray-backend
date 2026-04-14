@@ -776,7 +776,7 @@ export const utsavStatusUpdate = async (req, res) => {
           },
           { transaction: t }
         );
-
+        await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
         await t.commit();
 
         return res.status(200).send({
