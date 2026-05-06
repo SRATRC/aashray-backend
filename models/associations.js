@@ -502,6 +502,27 @@ ShibirAttendanceDb.belongsTo(ShibirBookingDb, {
   targetKey: 'bookingid'
 });
 
+RoomBooking.hasMany(Transactions, {
+  foreignKey: 'bookingid',
+  sourceKey: 'bookingid',
+  as: 'transactions'
+});
+
+Transactions.belongsTo(RoomBooking, {
+  foreignKey: 'bookingid',
+  targetKey: 'bookingid'
+});
+
+FlatBooking.hasMany(Transactions, {
+  foreignKey: 'bookingid',
+  sourceKey: 'bookingid',
+  as: 'transactions'
+});
+
+Transactions.belongsTo(FlatBooking, {
+  foreignKey: 'bookingid',
+  targetKey: 'bookingid'
+});
 
 export {
   CardDb,

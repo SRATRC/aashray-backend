@@ -1063,24 +1063,33 @@ export const flatReservationReport = async (req, res) => {
   }
 
   const bookings = await FlatBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
-        required: true
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'flatno',
-      'checkin',
-      'checkout',
-      'status',
-      'nights'
-    ],
-    where: whereClause,
-    order: [['checkin', 'ASC']]
-  });
+  include: [
+    {
+      model: CardDb,
+      attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+      required: true
+    },
+    {
+      model: Transactions,
+      as: 'transactions',
+      attributes: ['status', 'description'],
+      required: false,
+      separate: true,
+      limit: 1,
+      order: [['createdAt', 'DESC']]
+    }
+  ],
+  attributes: [
+    'bookingid',
+    'flatno',
+    'checkin',
+    'checkout',
+    'status',
+    'nights'
+  ],
+  where: whereClause,
+  order: [['checkin', 'ASC']]
+});
 
   return res
     .status(200)
@@ -1146,7 +1155,16 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'center', 'credits'],
         required: true
-      }
+      },
+        {
+          model: Transactions,
+          as: 'transactions',
+          attributes: ['status', 'description'],
+          required: false,
+          separate: true,
+          limit: 1,
+          order: [['createdAt', 'DESC']]
+        }
     ],
     attributes: [
       'bookingid',
@@ -1167,7 +1185,7 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
     },
     order: [['checkin', 'ASC']]
   });
-
+  console.log(JSON.stringify(data[0], null, 2));
   return data;
 }
 
