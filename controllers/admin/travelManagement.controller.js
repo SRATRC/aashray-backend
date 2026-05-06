@@ -122,7 +122,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.pickup_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)', 'railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -131,7 +131,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.drop_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)','railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -158,7 +158,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.pickup_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)','railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -167,7 +167,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.drop_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)','railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -310,7 +310,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.pickup_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', ''railway station (ltt - kurla terminus)',', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
@@ -319,7 +319,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.drop_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', ''railway station (ltt - kurla terminus)',', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
@@ -332,7 +332,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.pickup_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', ''railway station (ltt - kurla terminus)',','Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
@@ -353,7 +353,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.drop_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', ''railway station (ltt - kurla terminus)',', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
