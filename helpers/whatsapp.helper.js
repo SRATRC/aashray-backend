@@ -24,42 +24,50 @@ const TEMPLATE_PARAM_COUNTS = {
  */
 async function sendWithTemplateFallback(phone, template, components) {
   try {
-    await sendWhatsAppMessage(phone, template, components);
-    return { ok: true, usedTemplate: template };
+    const result = await sendWhatsAppMessage(phone, template, components);
+    return { ok: true, usedTemplate: template, responseData: result.responseData };
   } catch (err) {
-    // try detect "template missing" error from FB API
-    const status = err?.response?.status;
-    const details = err?.response?.data;
+    const status = err?.response?.status || err?.whatsappContext?.status;
+    const details = err?.response?.data || err?.whatsappContext?.responseData;
+
     const isTemplateMissing =
       status === 404 &&
       details &&
       details.error &&
       String(details.error.details || "").toLowerCase().includes("does not exist");
 
-    console.warn(`WA SEND FAILED for ${phone} template=${template}:`, err && (err.message || err));
+    console.warn(`WA SEND FAILED for ${phone} template=${template}:`, err.message || err);
 
     if (isTemplateMissing) {
-      // Create a reasonable fallback: replace waiting/pending variants with 'confirmed'
       let fallbackTemplate = template;
-      fallbackTemplate = fallbackTemplate.replace(/_pending_for|_pending|_waiting_for|_waiting/gi, "_confirmed");
-      // if nothing changed, try a generic fallback (adhyayan confirmed)
+      fallbackTemplate = fallbackTemplate.replace(
+        /_pending_for|_pending|_waiting_for|_waiting/gi,
+        "_confirmed"
+      );
+
       if (fallbackTemplate === template) {
         fallbackTemplate = "booking_adhyayan_self_confirmed";
       }
 
       try {
         console.log(`WA SEND: retrying with fallback template '${fallbackTemplate}' for phone ${phone}`);
-        await sendWhatsAppMessage(phone, fallbackTemplate, components);
-        return { ok: true, usedTemplate: fallbackTemplate, fallback: true };
+        const retryResult = await sendWhatsAppMessage(phone, fallbackTemplate, components);
+        return {
+          ok: true,
+          usedTemplate: fallbackTemplate,
+          fallback: true,
+          responseData: retryResult.responseData,
+        };
       } catch (innerErr) {
-        console.error(`WA fallback also failed for ${phone} template=${fallbackTemplate}:`, innerErr && (innerErr.message || innerErr));
+        console.error(
+          `WA fallback also failed for ${phone} template=${fallbackTemplate}:`,
+          innerErr.message || innerErr
+        );
         return { ok: false, error: innerErr };
       }
-    } else {
-      // other error (network/rate-limit/etc.)
-      console.error("WA send error (non-template):", err && (err.message || err));
-      return { ok: false, error: err };
     }
+
+    return { ok: false, error: err };
   }
 }
 
