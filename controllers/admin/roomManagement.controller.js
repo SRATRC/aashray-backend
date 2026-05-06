@@ -1071,8 +1071,12 @@ export const flatReservationReport = async (req, res) => {
     },
     {
       model: Transactions,
+      as: 'transactions',
       attributes: ['status', 'description'],
-      required: false
+      required: false,
+      separate: true,
+      limit: 1,
+      order: [['createdAt', 'DESC']]
     }
   ],
   attributes: [
@@ -1152,11 +1156,15 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
         attributes: ['cardno', 'issuedto', 'mobno', 'center', 'credits'],
         required: true
       },
-      {
-        model: Transactions,
-        attributes: ['status', 'description'],
-        required: false
-      }
+        {
+          model: Transactions,
+          as: 'transactions',
+          attributes: ['status', 'description'],
+          required: false,
+          separate: true,
+          limit: 1,
+          order: [['createdAt', 'DESC']]
+        }
     ],
     attributes: [
       'bookingid',
@@ -1177,7 +1185,7 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
     },
     order: [['checkin', 'ASC']]
   });
-
+  console.log(JSON.stringify(data[0], null, 2));
   return data;
 }
 
