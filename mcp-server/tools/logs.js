@@ -1,0 +1,275 @@
+import fs from 'fs';
+import path from 'path';
+import readline from 'readline';
+import zlib from 'zlib';
+import { LOG_DIR } from '../config.js';
+
+/**
+ * Resolves the file path for a given log prefix and date.
+ * Checks for plain file first, then gzipped variant.
+ * Returns { filePath, compressed } or null if neither exists.
+ */
+function resolveLogFile(prefix, date) {
+  const plain = path.join(LOG_DIR, `${prefix}-${date}.log`);
+  const gzipped = `${plain}.gz`;
+  if (fs.existsSync(plain)) return { filePath: plain, compressed: false };
+  if (fs.existsSync(gzipped)) return { filePath: gzipped, compressed: true };
+  return null;
+}
+
+/**
+ * Async generator that streams a log file (plain or gzipped), parses each
+ * line as JSON, and silently skips malformed lines.
+ * Throws with a clear message on I/O or decompression errors.
+ */
+async function* readLines(filePath, compressed) {
+  let stream;
+  try {
+    const raw = fs.createReadStream(filePath);
+    stream = compressed ? raw.pipe(zlib.createGunzip()) : raw;
+  } catch (err) {
+    throw new Error(`Failed to open log file "${filePath}": ${err.message}`);
+  }
+
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        yield JSON.parse(line);
+      } catch {
+        // skip malformed lines silently
+      }
+    }
+  } catch (err) {
+    throw new Error(`Error reading log file "${filePath}": ${err.message}`);
+  }
+}
+
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Tool 1: get_recent_logs
+// ---------------------------------------------------------------------------
+const getRecentLogs = {
+  name: 'get_recent_logs',
+  description:
+    "Returns the last N entries from today's application log. Optionally filter by log level.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      n: {
+        type: 'integer',
+        description: 'Number of log entries to return (default 50, max 500).',
+        default: 50,
+        minimum: 1,
+        maximum: 500,
+      },
+      level: {
+        type: 'string',
+        description: 'Filter by log level.',
+        enum: ['error', 'warn', 'info', 'http', 'debug'],
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async ({ n = 50, level } = {}) => {
+    try {
+      const limit = Math.min(Math.max(1, n), 500);
+      const date = todayDate();
+      const resolved = resolveLogFile('application', date);
+
+      if (!resolved) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No application log found for ${date} in ${LOG_DIR}.`,
+            },
+          ],
+        };
+      }
+
+      const entries = [];
+      for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
+        if (level && entry.level !== level) continue;
+        entries.push(entry);
+      }
+
+      const slice = entries.slice(-limit);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(slice, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error: ${err.message}` }],
+        isError: true,
+      };
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Tool 2: search_logs
+// ---------------------------------------------------------------------------
+const searchLogs = {
+  name: 'search_logs',
+  description:
+    "Searches a single day's application log for entries matching the given filters. All filters are ANDed together.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      keyword: {
+        type: 'string',
+        description: 'Substring to match anywhere in the serialised log entry.',
+      },
+      level: {
+        type: 'string',
+        description: 'Filter by log level.',
+        enum: ['error', 'warn', 'info', 'http', 'debug'],
+      },
+      userId: {
+        type: 'string',
+        description: 'Filter by userId field.',
+      },
+      correlationId: {
+        type: 'string',
+        description: 'Filter by correlationId field.',
+      },
+      date: {
+        type: 'string',
+        description: 'Date to search in YYYY-MM-DD format (defaults to today).',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+      },
+      limit: {
+        type: 'integer',
+        description: 'Maximum number of matching entries to return (default 100, max 500).',
+        default: 100,
+        minimum: 1,
+        maximum: 500,
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async ({ keyword, level, userId, correlationId, date, limit = 100 } = {}) => {
+    try {
+      const cap = Math.min(Math.max(1, limit), 500);
+      const targetDate = date || todayDate();
+      const resolved = resolveLogFile('application', targetDate);
+
+      if (!resolved) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No application log found for ${targetDate} in ${LOG_DIR}.`,
+            },
+          ],
+        };
+      }
+
+      const results = [];
+      for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
+        if (level && entry.level !== level) continue;
+        if (userId && entry.userId !== userId) continue;
+        if (correlationId && entry.correlationId !== correlationId) continue;
+        if (keyword) {
+          const serialised = JSON.stringify(entry);
+          if (!serialised.includes(keyword)) continue;
+        }
+        results.push(entry);
+        if (results.length >= cap) break;
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(results, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error: ${err.message}` }],
+        isError: true,
+      };
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Tool 3: get_error_logs
+// ---------------------------------------------------------------------------
+const getErrorLogs = {
+  name: 'get_error_logs',
+  description:
+    'Returns the last N entries from the error log for a given date (defaults to today).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      n: {
+        type: 'integer',
+        description: 'Number of error log entries to return (default 50, max 200).',
+        default: 50,
+        minimum: 1,
+        maximum: 200,
+      },
+      date: {
+        type: 'string',
+        description: 'Date in YYYY-MM-DD format (defaults to today).',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async ({ n = 50, date } = {}) => {
+    try {
+      const limit = Math.min(Math.max(1, n), 200);
+      const targetDate = date || todayDate();
+      const resolved = resolveLogFile('error', targetDate);
+
+      if (!resolved) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No error log found for ${targetDate} in ${LOG_DIR}.`,
+            },
+          ],
+        };
+      }
+
+      const entries = [];
+      for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
+        entries.push(entry);
+      }
+
+      const slice = entries.slice(-limit);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(slice, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error: ${err.message}` }],
+        isError: true,
+      };
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+export const logTools = [getRecentLogs, searchLogs, getErrorLogs];
