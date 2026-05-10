@@ -4,11 +4,6 @@ import readline from 'readline';
 import zlib from 'zlib';
 import { LOG_DIR } from '../config.js';
 
-/**
- * Resolves the file path for a given log prefix and date.
- * Checks for plain file first, then gzipped variant.
- * Returns { filePath, compressed } or null if neither exists.
- */
 function resolveLogFile(prefix, date) {
   const plain = path.join(LOG_DIR, `${prefix}-${date}.log`);
   const gzipped = `${plain}.gz`;
@@ -17,21 +12,16 @@ function resolveLogFile(prefix, date) {
   return null;
 }
 
-/**
- * Async generator that streams a log file (plain or gzipped), parses each
- * line as JSON, and silently skips malformed lines.
- * Throws with a clear message on I/O or decompression errors.
- */
 async function* readLines(filePath, compressed) {
-  let stream;
+  let raw;
   try {
-    const raw = fs.createReadStream(filePath);
-    stream = compressed ? raw.pipe(zlib.createGunzip()) : raw;
+    raw = fs.createReadStream(filePath);
   } catch (err) {
     throw new Error(`Failed to open log file "${filePath}": ${err.message}`);
   }
 
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const source = compressed ? raw.pipe(zlib.createGunzip()) : raw;
+  const rl = readline.createInterface({ input: source, crlfDelay: Infinity });
 
   try {
     for await (const line of rl) {
@@ -44,6 +34,9 @@ async function* readLines(filePath, compressed) {
     }
   } catch (err) {
     throw new Error(`Error reading log file "${filePath}": ${err.message}`);
+  } finally {
+    rl.close();
+    raw.destroy(); // safe to call even if already ended
   }
 }
 
@@ -51,9 +44,6 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// ---------------------------------------------------------------------------
-// Tool 1: get_recent_logs
-// ---------------------------------------------------------------------------
 const getRecentLogs = {
   name: 'get_recent_logs',
   description:
@@ -117,9 +107,6 @@ const getRecentLogs = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// Tool 2: search_logs
-// ---------------------------------------------------------------------------
 const searchLogs = {
   name: 'search_logs',
   description:
@@ -186,14 +173,13 @@ const searchLogs = {
           if (!serialised.includes(keyword)) continue;
         }
         results.push(entry);
-        if (results.length >= cap) break;
       }
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(results, null, 2),
+            text: JSON.stringify(results.slice(-cap), null, 2),
           },
         ],
       };
@@ -206,9 +192,6 @@ const searchLogs = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// Tool 3: get_error_logs
-// ---------------------------------------------------------------------------
 const getErrorLogs = {
   name: 'get_error_logs',
   description:
