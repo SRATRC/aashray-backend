@@ -16,15 +16,9 @@ if (!BEARER_TOKEN) {
   process.exit(1);
 }
 
-// ---------------------------------------------------------------------------
-// Build tool registry
-// ---------------------------------------------------------------------------
 const allTools = [...logTools, ...dbTools];
 const toolMap = new Map(allTools.map(t => [t.name, t]));
 
-// ---------------------------------------------------------------------------
-// Build MCP server (low-level) with manual tool handlers
-// ---------------------------------------------------------------------------
 const server = new Server(
   { name: 'aashray-mcp-server', version: '1.0.0' },
   { capabilities: { tools: {} } },
@@ -46,9 +40,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   return tool.handler(request.params.arguments ?? {});
 });
 
-// ---------------------------------------------------------------------------
-// Express HTTP server
-// ---------------------------------------------------------------------------
 const app = express();
 app.use(express.json());
 app.use(bearerAuth);
@@ -63,23 +54,7 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', tools: allTools.length });
 });
 
-// ---------------------------------------------------------------------------
-// Start listening
-// ---------------------------------------------------------------------------
-const httpServer = app.listen(PORT, '0.0.0.0', () => {
-  process.stderr.write(`MCP server listening on port ${PORT}\n`);
-});
-
-// ---------------------------------------------------------------------------
-// Graceful shutdown
-// ---------------------------------------------------------------------------
-const shutdown = () => httpServer.close(() => process.exit(0));
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
-
-// ---------------------------------------------------------------------------
-// Error handling
-// ---------------------------------------------------------------------------
+// Register process error handlers before starting the server
 process.on('unhandledRejection', (reason) => {
   process.stderr.write(`Unhandled rejection: ${reason}\n`);
   process.exit(1);
@@ -89,3 +64,11 @@ process.on('uncaughtException', (err) => {
   process.stderr.write(`Uncaught exception: ${err.message}\n`);
   process.exit(1);
 });
+
+const httpServer = app.listen(PORT, '0.0.0.0', () => {
+  process.stderr.write(`MCP server listening on port ${PORT}\n`);
+});
+
+const shutdown = () => httpServer.close(() => process.exit(0));
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
