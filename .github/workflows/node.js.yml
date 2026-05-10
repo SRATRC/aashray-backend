@@ -36,6 +36,9 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
+    - name: Install MCP server dependencies
+      run: cd mcp-server && npm ci
+
     - name: Set environment file
       run: |
         touch .env.prod
@@ -49,6 +52,7 @@ jobs:
       run: |
         sudo pm2 reload BackendAPI --update-env
         sudo pm2 reload CronJob --update-env
+        sudo pm2 reload MCPServer --update-env || sudo pm2 start mcp-server/index.js --name MCPServer --interpreter node --update-env
 
     - name: Status PM2 process    
       run: |
