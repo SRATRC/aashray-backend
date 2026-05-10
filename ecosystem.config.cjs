@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'MCPServer',
       script: './mcp-server/index.js',
-      cwd: '/home/ubuntu/actions-runner-api/_work/aashray-backend/aashray-backend',
+      cwd: process.env.APP_CWD || '/home/ubuntu/actions-runner-api/_work/aashray-backend/aashray-backend',
       interpreter: 'node',
       env_prod: {
         NODE_ENV: 'prod',

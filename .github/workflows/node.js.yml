@@ -52,7 +52,7 @@ jobs:
       run: |
         sudo pm2 reload BackendAPI --update-env
         sudo pm2 reload CronJob --update-env
-        sudo pm2 reload MCPServer --update-env || sudo pm2 start mcp-server/index.js --name MCPServer --interpreter node --update-env
+        sudo pm2 reload MCPServer --update-env || sudo pm2 start mcp-server/index.js --name MCPServer --interpreter node --cwd /home/ubuntu/actions-runner-api/_work/aashray-backend/aashray-backend --update-env
 
     - name: Status PM2 process    
       run: |
