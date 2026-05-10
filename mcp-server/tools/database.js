@@ -40,27 +40,34 @@ const getSchema = {
     required: [],
   },
   handler: async (_args) => {
-    const rows = await executeQuery(
-      `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-       FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE()
-       ORDER BY TABLE_NAME, ORDINAL_POSITION`
-    );
+    try {
+      const rows = await executeQuery(
+        `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+         ORDER BY TABLE_NAME, ORDINAL_POSITION`
+      );
 
-    const schema = {};
-    for (const row of rows) {
-      const table = row.TABLE_NAME;
-      if (!schema[table]) schema[table] = [];
-      schema[table].push({
-        column: row.COLUMN_NAME,
-        type: row.DATA_TYPE,
-        nullable: row.IS_NULLABLE === 'YES',
-      });
+      const schema = {};
+      for (const row of rows) {
+        const table = row.TABLE_NAME;
+        if (!schema[table]) schema[table] = [];
+        schema[table].push({
+          column: row.COLUMN_NAME,
+          type: row.DATA_TYPE,
+          nullable: row.IS_NULLABLE === 'YES',
+        });
+      }
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify(schema, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error: ${err.message}` }],
+        isError: true,
+      };
     }
-
-    return {
-      content: [{ type: 'text', text: JSON.stringify(schema, null, 2) }],
-    };
   },
 };
 
@@ -80,6 +87,11 @@ const queryDb = {
   },
   handler: async ({ sql }) => {
     const normalised = sql.trim().toUpperCase();
+
+    if (normalised.includes(';')) {
+      return { content: [{ type: 'text', text: 'Multi-statement queries are not allowed.' }], isError: true };
+    }
+
     const allowed =
       normalised.startsWith('SELECT') ||
       normalised.startsWith('SHOW') ||
@@ -152,10 +164,9 @@ const getTableSample = {
         content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }],
       };
     } catch (err) {
-      process.stderr.write(`get_table_sample error: ${err.message}\n`);
       return {
+        content: [{ type: 'text', text: `Error: ${err.message}` }],
         isError: true,
-        content: [{ type: 'text', text: `Database error: ${err.message}` }],
       };
     }
   },
