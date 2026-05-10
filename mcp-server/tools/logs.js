@@ -147,6 +147,9 @@ const searchLogs = {
     additionalProperties: false,
   },
   handler: async ({ keyword, level, userId, correlationId, date, limit = 100 } = {}) => {
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return { content: [{ type: 'text', text: 'Invalid date format. Use YYYY-MM-DD.' }], isError: true };
+    }
     try {
       const cap = Math.min(Math.max(1, limit), 500);
       const targetDate = date || todayDate();
@@ -215,6 +218,9 @@ const getErrorLogs = {
     additionalProperties: false,
   },
   handler: async ({ n = 50, date } = {}) => {
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return { content: [{ type: 'text', text: 'Invalid date format. Use YYYY-MM-DD.' }], isError: true };
+    }
     try {
       const limit = Math.min(Math.max(1, n), 200);
       const targetDate = date || todayDate();

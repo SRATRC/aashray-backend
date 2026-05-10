@@ -110,7 +110,8 @@ const queryDb = {
     }
 
     try {
-      const rows = await executeQuery(sql);
+      const safeSql = /\bLIMIT\b/i.test(sql) ? sql : `${sql} LIMIT 1000`;
+      const rows = await executeQuery(safeSql);
       return {
         content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }],
       };
@@ -171,5 +172,9 @@ const getTableSample = {
     }
   },
 };
+
+export async function closePool() {
+  if (pool) await pool.end();
+}
 
 export const dbTools = [getSchema, queryDb, getTableSample];

@@ -6,7 +6,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema, ErrorCode, McpError } fr
 import { PORT, BEARER_TOKEN } from './config.js';
 import { bearerAuth } from './auth.js';
 import { logTools } from './tools/logs.js';
-import { dbTools } from './tools/database.js';
+import { dbTools, closePool } from './tools/database.js';
 
 // ---------------------------------------------------------------------------
 // Startup validation
@@ -46,8 +46,16 @@ app.use(bearerAuth);
 
 app.post('/mcp', async (req, res) => {
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
+    }
+  } finally {
+    await transport.close();
+  }
 });
 
 app.get('/health', (_req, res) => {
@@ -69,6 +77,11 @@ const httpServer = app.listen(PORT, '0.0.0.0', () => {
   process.stderr.write(`MCP server listening on port ${PORT}\n`);
 });
 
-const shutdown = () => httpServer.close(() => process.exit(0));
+const shutdown = () => {
+  httpServer.close(async () => {
+    await closePool();
+    process.exit(0);
+  });
+};
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
