@@ -11,7 +11,6 @@ export function bearerAuth(req, res, next) {
   if (!token) {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  // Timing-safe comparison to prevent token oracle attacks
   const a = Buffer.from(token);
   const b = Buffer.from(BEARER_TOKEN);
   const valid = a.length === b.length && timingSafeEqual(a, b);
