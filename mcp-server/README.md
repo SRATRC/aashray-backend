@@ -276,8 +276,7 @@ Add both to `~/.mcp.json`:
     },
     "sentry": {
       "type": "http",
-      "url": "https://mcp.sentry.dev/mcp",
-      "headers": { "Authorization": "Bearer <SENTRY_TOKEN>" }
+      "url": "https://mcp.sentry.dev/mcp"
     }
   }
 }
