@@ -41,6 +41,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
+import logger from '../config/logger.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
@@ -303,11 +304,18 @@ export async function bookRoomForMumukshus(
   mumukshuGroup,
   t,
   user,
-  utsav
+  utsav,
+  log = logger
 ) {
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
   );
+  log.info('room_booking_start', {
+    checkin: checkin_date,
+    checkout: checkout_date,
+    mumukshu_count: mumukshus.length,
+    bookedBy: user.cardno
+  });
   const cardDb = await validateCards(mumukshus);
 
   const roomDetails = await checkRoomAvailabilityForMumukshus(
@@ -376,6 +384,10 @@ export async function bookRoomForMumukshus(
     }
   }
 
+  log.info('room_booking_result', {
+    amount,
+    bookingCount: Object.keys(userBookingIds).length
+  });
   return { amount, userBookingIds };
 }
 
@@ -403,6 +415,11 @@ export async function createRoomBooking(
   if (isSingleNight) {
     const utsavOnBoundary = await findUtsavOnBoundaryDates(checkin, checkout);
     if (utsavOnBoundary) {
+      logger.debug('room_booking_utsav_boundary_waiting', {
+        cardno,
+        checkin,
+        checkout
+      });
       const result = await bookWaitingRoom(
         cardno,
         checkin,
@@ -429,6 +446,13 @@ export async function createRoomBooking(
     throw new ApiError(400, ERR_ROOM_NO_BED_AVAILABLE);
   }
 
+  logger.debug('room_assigned', {
+    cardno,
+    roomno: roomno.roomno,
+    roomtype,
+    checkin,
+    checkout
+  });
   const result = await bookAvailableRoom(
     cardno,
     checkin,
@@ -457,10 +481,15 @@ export async function bookFlatForMumukshus(
   mumukshus,
   user,
   t,
-  createOrder = true // adding this for backwards compatibility.
-  // once we are not using flat booking end points in guest and room booking controllers
-  // we can remove this argument
+  createOrder = true,
+  log = logger
 ) {
+  log.info('flat_booking_start', {
+    startDay,
+    endDay,
+    mumukshu_count: mumukshus.length,
+    bookedBy: user.cardno
+  });
   const flat = await FlatDb.findOne({
     attributes: ['flatno'],
     where: {
@@ -635,7 +664,7 @@ export async function checkRoomAvailabilityForMumukshus(
         var assignedRoom = null;
 
         const nights = await calculateNights(range.start, range.end);
-        const minNights =  range.overlappingWithUtsav && nights > 0 ? 1 : 0;
+        const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
 
         if (nights == 0) {
           // 1 day visit

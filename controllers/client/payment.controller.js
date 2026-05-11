@@ -20,7 +20,7 @@ import {
 } from '../../helpers/transactions.helper.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
-import logger from '../../config/logger.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 
@@ -28,6 +28,12 @@ export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
   const razorpay_payment_id = req.body.payload.payment.entity.id;
   const razorpay_status = req.body.payload.payment.entity.status;
+
+  req.log.info('razorpay_webhook_received', {
+    orderId: razorpay_order_id,
+    paymentId: razorpay_payment_id,
+    status: razorpay_status
+  });
 
   await RazorpayWebhook.create({
     order_id: razorpay_order_id,
@@ -45,15 +51,19 @@ export const verifyPayment = async (req, res) => {
       STATUS_PAYMENT_AUTHORIZED
     ].includes(razorpay_status)
   ) {
-    logger.error(
-      `Razorpay: Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`
-    );
+    req.log.error('razorpay_invalid_status', {
+      orderId: razorpay_order_id,
+      status: razorpay_status
+    });
     message = `Invalid status '${razorpay_status}' for order id: ${razorpay_order_id}`;
     return res.status(200).json({ message, status: 'ok' });
   }
 
   if (razorpay_status == STATUS_PAYMENT_FAILED) {
-    logger.error(`Razorpay: Payment failed for order id: ${razorpay_order_id}`);
+    req.log.error('razorpay_payment_failed', {
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id
+    });
   }
 
   const t = await database.transaction();
@@ -136,20 +146,31 @@ export const verifyPayment = async (req, res) => {
         { transaction: t }
       );
 
-      logger.info(
-        `Razorpay: order id: ${razorpay_order_id}, razorpay status: ${razorpay_status}, transaction: ${transaction.id}, transaction status: ${transactionStatus}, booking: ${transaction.bookingid}, booking status: ${bookingStatus}`
-      );
+      req.log.info('razorpay_transaction_updated', {
+        orderId: razorpay_order_id,
+        razorpayStatus: razorpay_status,
+        transactionId: transaction.id,
+        transactionStatus: transactionStatus,
+        bookingId: transaction.bookingid,
+        bookingStatus: bookingStatus
+      });
     }
 
     await t.commit();
+    req.log.info('razorpay_webhook_committed', {
+      orderId: razorpay_order_id,
+      transactionCount: transactions.length
+    });
 
     for (const cardno in userBookingIdMap) {
       const bookings = userBookingIdMap[cardno];
       await sendUnifiedEmail(cardno, bookings, bookedBy);
     }
     message = `Payment ${razorpay_status} for order id: ${razorpay_order_id}`;
+    req.log.info('razorpay_webhook_processed', { orderId: razorpay_order_id, status: razorpay_status });
   } else {
     await t.rollback();
+    req.log.warn('razorpay_no_pending_bookings', { orderId: razorpay_order_id });
     message = `No pending bookings found for order id: ${razorpay_order_id}`;
   }
 
@@ -157,7 +178,12 @@ export const verifyPayment = async (req, res) => {
 };
 
 export const createOrderIdForPendingPayments = async (req, res) => {
+  attachUserContext(req);
   const { bookingids } = req.body;
+  req.log.info('create_order_pending_payments_start', {
+    cardno: req.user.cardno,
+    bookingIds: bookingids
+  });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -180,6 +206,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
   });
 
   if (hasDisallowedCategory) {
+    req.log.warn('create_order_disallowed_food_category', { cardno: req.user.cardno, bookingIds: bookingids });
     throw new ApiError(
       400,
       'Payment is not allowed for breakfast, lunch, or dinner bookings'
@@ -191,19 +218,30 @@ export const createOrderIdForPendingPayments = async (req, res) => {
     0
   );
 
+  req.log.info('create_order_total_amount', { cardno: req.user.cardno, totalAmount, transactionCount: transactions.length });
+
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
+    req.log.info('create_order_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
     await updateRazorpayTransactions(bookingids, [], order.id, t);
     await t.commit();
+    req.log.info('create_order_success', { cardno: req.user.cardno, orderId: order.id });
 
     return res.status(200).send({ message: 'payment successful', data: order });
   } else {
+    req.log.warn('create_order_nothing_to_pay', { cardno: req.user.cardno, bookingIds: bookingids });
     throw new ApiError(404, 'nothing to pay for');
   }
 };
 
 export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
+  attachUserContext(req);
   const { data } = req.body;
+  req.log.info('create_order_pending_payments_v2_start', {
+    cardno: req.user.cardno,
+    bookingCount: data?.length
+  });
+
   const t = await database.transaction();
   req.transaction = t;
 
@@ -224,7 +262,10 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     }
   });
 
-  logger.info(`Transactions found: ${JSON.stringify(transactions)}`);
+  req.log.info('create_order_v2_transactions_found', {
+    cardno: req.user.cardno,
+    transactionCount: transactions.length
+  });
 
   const { totalAmount, validTransactionIds } = transactions.reduce(
     (acc, transaction) => {
@@ -242,14 +283,23 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     { totalAmount: 0, validTransactionIds: [] }
   );
 
+  req.log.info('create_order_v2_total_amount', {
+    cardno: req.user.cardno,
+    totalAmount,
+    validTransactionCount: validTransactionIds.length
+  });
+
   if (totalAmount > 0) {
     const order = await generateOrderId(totalAmount);
+    req.log.info('create_order_v2_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
 
     await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();
+    req.log.info('create_order_v2_success', { cardno: req.user.cardno, orderId: order.id });
 
     return res.status(200).send({ message: 'payment successful', data: order });
   } else {
+    req.log.warn('create_order_v2_nothing_to_pay', { cardno: req.user.cardno });
     throw new ApiError(404, 'nothing to pay for');
   }
 };

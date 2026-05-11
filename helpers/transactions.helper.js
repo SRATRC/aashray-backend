@@ -50,6 +50,8 @@ export async function createPendingTransaction(
     { transaction: t }
   );
 
+  logger.info('create_pending_transaction', { transactionId: transaction.id, cardno: card.cardno, bookingid: booking.bookingid, category, amount, cashAllowed });
+
   const discountedAmount = await useCredit(
     card,
     booking,
@@ -113,7 +115,7 @@ export async function cancelTransaction(
   t,
   admin = false
 ) {
-  console.log('>> Cancel Transaction: Current status =', transaction.status);
+  logger.info('cancel_transaction_start', { transactionId: transaction.id, status: transaction.status, admin });
 
   if (!card) {
     card = await validateCard(transaction.cardno);
@@ -123,8 +125,8 @@ export async function cancelTransaction(
     !admin &&
     [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction))
   ) {
-    // User cancelling via app → no credits, keep transaction as completed
-    console.log('>> User cancellation: keeping transaction completed');
+    // User cancelling via app — no credits, keep transaction as completed
+    logger.info('cancel_transaction_user_no_credits', { transactionId: transaction.id, bookingType: getBookingType(transaction) });
     return { credits: 0 }; // no credits added
   }
 
@@ -200,6 +202,7 @@ export async function cancelTransaction(
     { transaction: t }
   );
 
+  logger.info('cancel_transaction_success', { transactionId: transaction.id, fromStatus: transaction.status, toStatus: status, credits });
   return { credits };
 }
 
@@ -428,9 +431,7 @@ export async function updateRazorpayTransactions(
     transaction: t
   });
 
-  logger.info(
-    `Updating razorpay order id for ${JSON.stringify(transactionsToUpdate)}`
-  );
+  logger.info('update_razorpay_transactions_start', { razorpay_order_id, count: transactionsToUpdate.length });
 
   await Transactions.update(
     {
