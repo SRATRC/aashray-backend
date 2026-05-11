@@ -20,7 +20,12 @@ async function* readLines(filePath, compressed) {
     raw.once('error', reject);
   });
 
-  const source = compressed ? raw.pipe(zlib.createGunzip()) : raw;
+  let source = raw;
+  if (compressed) {
+    const gunzip = zlib.createGunzip();
+    raw.on('error', (err) => gunzip.destroy(err));
+    source = raw.pipe(gunzip);
+  }
   const rl = readline.createInterface({ input: source, crlfDelay: Infinity });
 
   try {
