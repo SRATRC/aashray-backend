@@ -80,8 +80,8 @@ These steps run **once** on the production server and are not part of CI/CD.
 **1. Create the read-only MySQL user:**
 
 ```sql
-CREATE USER 'mcp_readonly'@'%' IDENTIFIED BY '<strong-password>';
-GRANT SELECT ON aashray.* TO 'mcp_readonly'@'%';
+CREATE USER 'mcp_readonly'@'localhost' IDENTIFIED BY '<strong-password>';
+GRANT SELECT ON aashray.* TO 'mcp_readonly'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
