@@ -135,13 +135,7 @@ Add `"aashray"` to `enabledMcpjsonServers` in `~/.claude/settings.json`:
 }
 ```
 
-Restart Claude Code. Verify:
-
-```bash
-curl -s https://aashray.vitraagvigyaan.org/health \
-  -H "Authorization: Bearer <token>"
-# → {"status":"ok","tools":6}
-```
+Restart Claude Code.
 
 ---
 
