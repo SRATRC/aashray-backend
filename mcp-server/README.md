@@ -142,23 +142,32 @@ curl -X POST http://localhost:4000/mcp \
 
 **4. Connect Claude Code to localhost:**
 
-Add to `~/.claude/settings.json`:
+Add to `~/.mcp.json` (create if it doesn't exist):
 
 ```json
 {
   "mcpServers": {
     "aashray-local": {
-      "type": "http",
-      "url": "http://localhost:4000/mcp",
-      "headers": {
-        "Authorization": "Bearer local-dev-token"
-      }
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "--env-file=/absolute/path/to/mcp-server/.env",
+        "/absolute/path/to/mcp-server/stdio.js"
+      ]
     }
   }
 }
 ```
 
-Then restart Claude Code. You can now ask it things like:
+Then add `"aashray-local"` to `enabledMcpjsonServers` in `~/.claude/settings.json`:
+
+```json
+{
+  "enabledMcpjsonServers": ["aashray-local"]
+}
+```
+
+Restart Claude Code. You can now ask it things like:
 - *"Show me the last 20 error logs"*
 - *"Search logs for correlationId abc123"*
 - *"What tables are in the database?"*
@@ -213,7 +222,7 @@ location /mcp {
 
 ## Connecting Claude Code (per engineer)
 
-Add to `~/.claude/settings.json`:
+Add to `~/.mcp.json`:
 
 ```json
 {
@@ -226,6 +235,14 @@ Add to `~/.claude/settings.json`:
       }
     }
   }
+}
+```
+
+Then add `"aashray"` to `enabledMcpjsonServers` in `~/.claude/settings.json`:
+
+```json
+{
+  "enabledMcpjsonServers": ["aashray"]
 }
 ```
 
@@ -247,7 +264,7 @@ The MCP server is designed to work alongside the [Sentry MCP server](https://doc
 2. **`search_logs`** → pass the `correlationId` or `userId` from Sentry to get the full request lifecycle from our structured logs
 3. **`query_db`** → look up the booking, room, or user record involved to understand the data state at the time of the crash
 
-Add both to `~/.claude/settings.json`:
+Add both to `~/.mcp.json`:
 
 ```json
 {
@@ -259,10 +276,18 @@ Add both to `~/.claude/settings.json`:
     },
     "sentry": {
       "type": "http",
-      "url": "https://mcp.sentry.io/mcp",
+      "url": "https://mcp.sentry.dev/mcp",
       "headers": { "Authorization": "Bearer <SENTRY_TOKEN>" }
     }
   }
+}
+```
+
+Then add both to `enabledMcpjsonServers` in `~/.claude/settings.json`:
+
+```json
+{
+  "enabledMcpjsonServers": ["aashray", "sentry"]
 }
 ```
 
