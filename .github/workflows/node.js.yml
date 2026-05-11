@@ -54,17 +54,18 @@ jobs:
           [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
           [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && export "$line"
         done < .env.prod
+        export PM2_HOME=/root/.pm2
         sudo -E pm2 reload BackendAPI --update-env
         sudo -E pm2 reload CronJob --update-env
         sudo -E pm2 reload MCPServer --update-env --env prod || sudo -E pm2 start mcp-server/index.js --name MCPServer --interpreter node --cwd /home/ubuntu/actions-runner-api/_work/aashray-backend/aashray-backend --update-env --env prod
 
-    - name: Status PM2 process    
+    - name: Status PM2 process
       run: |
-        sudo pm2 list
+        sudo PM2_HOME=/root/.pm2 pm2 list
 
     - name: Show PM2 process
       run: |
-        sudo pm2 show BackendAPI
-        sudo pm2 show CronJob
-        sudo pm2 show MCPServer
+        sudo PM2_HOME=/root/.pm2 pm2 show BackendAPI
+        sudo PM2_HOME=/root/.pm2 pm2 show CronJob
+        sudo PM2_HOME=/root/.pm2 pm2 show MCPServer
     
