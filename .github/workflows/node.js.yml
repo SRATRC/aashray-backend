@@ -48,6 +48,11 @@ jobs:
       run: |
         NODE_ENV=prod npx sequelize db:migrate --debug
 
+    - name: Ensure log directory exists
+      run: |
+        mkdir -p ${LOG_DIR:-/home/ubuntu/logs}
+        sudo chown ubuntu:ubuntu ${LOG_DIR:-/home/ubuntu/logs}
+
     - name: Reload PM2 process to avoid downtime
       run: |
         while IFS= read -r line || [[ -n "$line" ]]; do

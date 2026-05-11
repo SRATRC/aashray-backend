@@ -5,15 +5,22 @@ export const ErrorHandler = (err, req, res, next) => {
   const message = err.message || 'Something went wrong';
   const data = err.data || err.stack;
 
-  // Log the error with Winston
-  const logMessage = `${req.method} ${req.originalUrl} - ${statusCode} - ${message}`;
+  // Use req.log (child logger) if available — it carries correlationId + userId automatically
+  const log = req.log || logger;
 
   if (statusCode >= 500) {
-    logger.error(logMessage);
-    if (data) logger.error(data);
+    log.error('unhandled_error', {
+      statusCode,
+      message,
+      stack: err.stack,
+      ...(data && data !== err.stack && { data })
+    });
   } else if (statusCode >= 400) {
-    logger.warn(logMessage);
-    if (data) logger.warn(data);
+    log.warn('client_error', {
+      statusCode,
+      message,
+      ...(data && { data })
+    });
   }
 
   return res.status(statusCode).json({

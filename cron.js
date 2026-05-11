@@ -252,7 +252,7 @@ job.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
-  console.log('Gracefully shutting down cron service...');
+  logger.info('cron_shutdown_initiated');
 
   // Stop future jobs from being triggered
   job.stop();
@@ -260,11 +260,11 @@ const gracefulShutdown = async () => {
   // Wait for the current task to finish if it's running
   const waitInterval = setInterval(() => {
     if (!isRunning) {
-      console.log('All tasks completed. Exiting...');
+      logger.info('cron_shutdown_complete');
       clearInterval(waitInterval);
       process.exit(0);
     } else {
-      console.log('Waiting for current task to finish...');
+      logger.info('cron_shutdown_waiting_for_task');
     }
   }, 10000);
 };

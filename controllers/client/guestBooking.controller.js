@@ -50,12 +50,18 @@ import {
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import logger from '../../config/logger.js';
 
 export const guestBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+  req.log.info('guest_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   validateFlatBookingConstraints(primary_booking, addons);
 
@@ -103,12 +109,15 @@ export const guestBooking = async (req, res) => {
 
   var order = null;
   if (req.user.country == 'India' && amount > 0) {
+    req.log.info('guest_booking_creating_order', { cardno: req.user.cardno, amount });
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
+    req.log.info('guest_booking_order_created', { cardno: req.user.cardno, orderId: order.id, amount });
   }
 
   await t.commit();
+  req.log.info('guest_booking_committed', { cardno: req.user.cardno });
 
   // Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(
@@ -126,7 +135,17 @@ export const guestBooking = async (req, res) => {
   let message = MSG_BOOKING_SUCCESSFUL;
   if (Object.keys(waitingBookingCountMap).length > 0) {
     message = MSG_BOOKING_WAITING;
+    req.log.info('guest_booking_waiting', {
+      cardno: req.user.cardno,
+      waitingBookingCountMap
+    });
   }
+  req.log.info('guest_booking_success', {
+    cardno: req.user.cardno,
+    totalAmount: amount,
+    orderId: order?.id,
+    message
+  });
   return res.status(200).send({
     message: message,
     data: order ? order : { amount: 0 },
@@ -135,7 +154,13 @@ export const guestBooking = async (req, res) => {
 };
 
 export const validateBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+  req.log.info('validate_guest_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   const response = {
     roomDetails: [],
@@ -163,6 +188,10 @@ export const validateBooking = async (req, res) => {
     }
   }
 
+  req.log.info('validate_guest_booking_success', {
+    cardno: req.user.cardno,
+    totalCharge: response.totalCharge
+  });
   return res.status(200).send({ data: response });
 };
 
@@ -368,11 +397,19 @@ async function bookAdhyayan(data, t, user) {
  * @deprecated This endpoint is deprecated. Use the unified booking endpoint with TYPE_FLAT as primary_booking instead.
  */
 export const guestBookingFlat = async (req, res) => {
-  logger.warn(
-    '[DEPRECATED] guestBookingFlat endpoint is deprecated. Use unified booking endpoint instead.'
-  );
+  attachUserContext(req);
+  req.log.warn('guest_booking_flat_deprecated', {
+    cardno: req.user.cardno,
+    message: 'guestBookingFlat endpoint is deprecated. Use unified booking endpoint instead.'
+  });
 
   const { guests, startDay, endDay } = req.body;
+  req.log.info('guest_booking_flat_start', {
+    cardno: req.user.cardno,
+    startDay,
+    endDay,
+    guestCount: guests?.length
+  });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -386,6 +423,11 @@ export const guestBookingFlat = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('guest_booking_flat_committed', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
 
   sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
 
@@ -400,6 +442,11 @@ export const guestBookingFlat = async (req, res) => {
       );
     });
 
+  req.log.info('guest_booking_flat_success', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
   return res.status(200).send({
     message: MSG_BOOKING_SUCCESSFUL,
     data: order
@@ -407,7 +454,9 @@ export const guestBookingFlat = async (req, res) => {
 };
 
 export const fetchGuests = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
+  req.log.info('fetch_guests_start', { cardno });
 
   const guests = await CardDb.findAll({
     attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'updatedAt'],
@@ -423,6 +472,7 @@ export const fetchGuests = async (req, res) => {
     limit: 10
   });
 
+  req.log.info('fetch_guests_success', { cardno, count: guests.length });
   return res.status(200).send({
     message: 'fetched results',
     data: guests
@@ -430,8 +480,10 @@ export const fetchGuests = async (req, res) => {
 };
 
 export const createGuests = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
   const { guests } = req.body;
+  req.log.info('create_guests_start', { cardno, guestCount: guests?.length });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -439,6 +491,7 @@ export const createGuests = async (req, res) => {
   const allGuests = await createGuestsHelper(cardno, guests, t);
 
   await t.commit();
+  req.log.info('create_guests_success', { cardno, createdCount: allGuests?.length });
 
   return res.status(200).send({
     message: MSG_UPDATE_SUCCESSFUL,
@@ -448,6 +501,7 @@ export const createGuests = async (req, res) => {
 
 export const checkGuests = async (req, res) => {
   const { mobno } = req.params;
+  req.log.info('check_guests_start', { mobno });
 
   const user = await CardDb.findOne({
     attributes: [
@@ -461,12 +515,15 @@ export const checkGuests = async (req, res) => {
     where: { mobno: mobno }
   });
   if (!user) {
+    req.log.info('check_guests_not_found', { mobno });
     return res.status(200).send({ message: 'Guest not found', data: null });
   }
 
   if (user.res_status == STATUS_GUEST) {
+    req.log.info('check_guests_found', { mobno, cardno: user.cardno });
     return res.status(200).send({ message: 'Guest found', data: user });
   } else {
+    req.log.warn('check_guests_not_a_guest', { mobno, cardno: user.cardno, resStatus: user.res_status });
     throw new ApiError(401, 'User is not a guest');
   }
 };
