@@ -6,7 +6,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node --env-file=.env index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.0",

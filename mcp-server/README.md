@@ -99,6 +99,73 @@ mcp-server/
 
 ---
 
+## Local development
+
+**1. Create `mcp-server/.env`** (already gitignored):
+
+```
+MCP_PORT=4000
+MCP_BEARER_TOKEN=local-dev-token
+
+LOG_DIR=../logs
+
+MCP_DB_HOST=localhost
+MCP_DB_PORT=3306
+MCP_DB_NAME=aashray
+MCP_DB_USER=root
+MCP_DB_PASSWORD=<your local root password>
+```
+
+`LOG_DIR=../logs` points to the `logs/` folder at the project root, which already has local log files from past dev sessions.
+
+**2. Start the server:**
+
+```bash
+cd mcp-server
+npm run dev
+# MCP server listening on port 4000
+```
+
+**3. Verify it's working:**
+
+```bash
+# Health check
+curl http://localhost:4000/health -H "Authorization: Bearer local-dev-token"
+# → {"status":"ok","tools":6}
+
+# Call a tool
+curl -X POST http://localhost:4000/mcp \
+  -H "Authorization: Bearer local-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_recent_logs","arguments":{"n":5}}}'
+```
+
+**4. Connect Claude Code to localhost:**
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "aashray-local": {
+      "type": "http",
+      "url": "http://localhost:4000/mcp",
+      "headers": {
+        "Authorization": "Bearer local-dev-token"
+      }
+    }
+  }
+}
+```
+
+Then restart Claude Code. You can now ask it things like:
+- *"Show me the last 20 error logs"*
+- *"Search logs for correlationId abc123"*
+- *"What tables are in the database?"*
+- *"Show me the last 5 room bookings"*
+
+---
+
 ## First-time server setup
 
 These steps run once on the production server. They are not part of the CI/CD pipeline.
