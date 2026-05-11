@@ -1,13 +1,18 @@
 import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { PORT, BEARER_TOKEN } from './config.js';
+import { PORT, BEARER_TOKEN, DB } from './config.js';
 import { bearerAuth } from './auth.js';
 import { closePool } from './tools/database.js';
 import { createServer, allTools } from './server.js';
 
 if (!BEARER_TOKEN) {
   process.stderr.write('FATAL: MCP_BEARER_TOKEN env var is required\n');
+  process.exit(1);
+}
+
+if (!DB.user || !DB.password) {
+  process.stderr.write('FATAL: MCP_DB_USER and MCP_DB_PASSWORD env vars are required\n');
   process.exit(1);
 }
 

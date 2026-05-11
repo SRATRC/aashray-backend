@@ -74,13 +74,13 @@ const getSchema = {
 const queryDb = {
   name: 'query_db',
   description:
-    'Executes a read-only SQL query against the database. Only SELECT, SHOW, and DESCRIBE statements are permitted. Use get_schema first to understand the available tables. Returns the result rows as JSON.',
+    'Executes a read-only SQL query against the database. Only SELECT, SHOW, DESCRIBE, and WITH (CTE) statements are permitted. Use get_schema first to understand the available tables. Returns the result rows as JSON.',
   inputSchema: {
     type: 'object',
     properties: {
       sql: {
         type: 'string',
-        description: 'The SQL query to execute. Must start with SELECT, SHOW, or DESCRIBE.',
+        description: 'The SQL query to execute. Must start with SELECT, SHOW, DESCRIBE, or WITH.',
       },
     },
     required: ['sql'],
@@ -95,7 +95,8 @@ const queryDb = {
     const allowed =
       normalised.startsWith('SELECT') ||
       normalised.startsWith('SHOW') ||
-      normalised.startsWith('DESCRIBE');
+      normalised.startsWith('DESCRIBE') ||
+      normalised.startsWith('WITH');
 
     if (!allowed) {
       return {
@@ -103,14 +104,18 @@ const queryDb = {
         content: [
           {
             type: 'text',
-            text: 'Only SELECT, SHOW, and DESCRIBE statements are permitted. The provided query was rejected without execution.',
+            text: 'Only SELECT, SHOW, DESCRIBE, and WITH statements are permitted. The provided query was rejected without execution.',
           },
         ],
       };
     }
 
     try {
-      const safeSql = /\bLIMIT\b/i.test(sql) ? sql : `${sql} LIMIT 1000`;
+      let safeSql = sql;
+      if (normalised.startsWith('SELECT') && !/\bLIMIT\b/i.test(sql)) {
+        safeSql = `${sql}\nLIMIT 1000`;
+      }
+      safeSql = safeSql.replace(/\bLIMIT\s+(\d+)/i, (_, n) => `LIMIT ${Math.min(parseInt(n, 10), 1000)}`);
       const rows = await executeQuery(safeSql);
       return {
         content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }],
@@ -137,9 +142,11 @@ const getTableSample = {
         description: 'The name of the table to sample.',
       },
       limit: {
-        type: 'number',
+        type: 'integer',
         description: 'Number of rows to return (default 10, max 50).',
         default: 10,
+        minimum: 1,
+        maximum: 50,
       },
     },
     required: ['table'],

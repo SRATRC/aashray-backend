@@ -232,7 +232,7 @@ Add to `~/.claude/settings.json`:
 Verify it's working:
 
 ```bash
-curl -s https://your-server-domain.com/mcp-health \
+curl -s https://your-server-domain.com/health \
   -H "Authorization: Bearer <token>"
 # → {"status":"ok","tools":6}
 ```

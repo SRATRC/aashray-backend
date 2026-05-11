@@ -13,12 +13,12 @@ function resolveLogFile(prefix, date) {
 }
 
 async function* readLines(filePath, compressed) {
-  let raw;
-  try {
-    raw = fs.createReadStream(filePath);
-  } catch (err) {
-    throw new Error(`Failed to open log file "${filePath}": ${err.message}`);
-  }
+  const raw = fs.createReadStream(filePath);
+
+  await new Promise((resolve, reject) => {
+    raw.once('ready', resolve);
+    raw.once('error', reject);
+  });
 
   const source = compressed ? raw.pipe(zlib.createGunzip()) : raw;
   const rl = readline.createInterface({ input: source, crlfDelay: Infinity });
@@ -36,7 +36,7 @@ async function* readLines(filePath, compressed) {
     throw new Error(`Error reading log file "${filePath}": ${err.message}`);
   } finally {
     rl.close();
-    raw.destroy(); // safe to call even if already ended
+    raw.destroy();
   }
 }
 
@@ -83,18 +83,18 @@ const getRecentLogs = {
         };
       }
 
-      const entries = [];
+      const buf = [];
       for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
         if (level && entry.level !== level) continue;
-        entries.push(entry);
+        if (buf.length >= limit) buf.shift();
+        buf.push(entry);
       }
 
-      const slice = entries.slice(-limit);
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(slice, null, 2),
+            text: JSON.stringify(buf, null, 2),
           },
         ],
       };
@@ -166,7 +166,7 @@ const searchLogs = {
         };
       }
 
-      const results = [];
+      const buf = [];
       for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
         if (level && entry.level !== level) continue;
         if (userId && entry.userId !== userId) continue;
@@ -175,14 +175,15 @@ const searchLogs = {
           const serialised = JSON.stringify(entry);
           if (!serialised.includes(keyword)) continue;
         }
-        results.push(entry);
+        if (buf.length >= cap) buf.shift();
+        buf.push(entry);
       }
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(results.slice(-cap), null, 2),
+            text: JSON.stringify(buf, null, 2),
           },
         ],
       };
@@ -237,17 +238,17 @@ const getErrorLogs = {
         };
       }
 
-      const entries = [];
+      const buf = [];
       for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
-        entries.push(entry);
+        if (buf.length >= limit) buf.shift();
+        buf.push(entry);
       }
 
-      const slice = entries.slice(-limit);
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(slice, null, 2),
+            text: JSON.stringify(buf, null, 2),
           },
         ],
       };
