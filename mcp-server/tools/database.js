@@ -33,7 +33,7 @@ async function executeQuery(sql, params = []) {
 const getSchema = {
   name: 'get_schema',
   description:
-    'Returns the full database schema for the connected MySQL database, grouped by table name. Each table lists its columns with their type and nullability. Use this before writing queries to understand the available tables and fields.',
+    'Returns the full database schema: columns (with type, nullability, default, enum values), primary keys, and foreign key relationships. Use this once before writing queries — it gives you everything needed to write correct JOINs without extra round-trips.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -41,22 +41,60 @@ const getSchema = {
   },
   handler: async (_args) => {
     try {
-      const rows = await executeQuery(
-        `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-         FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE()
-         ORDER BY TABLE_NAME, ORDINAL_POSITION`
-      );
+      const [colRows, fkRows] = await Promise.all([
+        executeQuery(
+          `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE,
+                  COLUMN_DEFAULT, COLUMN_KEY
+           FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+           ORDER BY TABLE_NAME, ORDINAL_POSITION`
+        ),
+        executeQuery(
+          `SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+           FROM information_schema.KEY_COLUMN_USAGE
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND REFERENCED_TABLE_NAME IS NOT NULL`
+        ),
+      ]);
+
+      // Build FK lookup: "table.column" -> "ref_table.ref_column"
+      const fkMap = {};
+      for (const fk of fkRows) {
+        fkMap[`${fk.TABLE_NAME}.${fk.COLUMN_NAME}`] = `${fk.REFERENCED_TABLE_NAME}.${fk.REFERENCED_COLUMN_NAME}`;
+      }
 
       const schema = {};
-      for (const row of rows) {
+      for (const row of colRows) {
         const table = row.TABLE_NAME;
-        if (!schema[table]) schema[table] = [];
-        schema[table].push({
+        if (!schema[table]) schema[table] = { columns: [], foreignKeys: [] };
+
+        const col = {
           column: row.COLUMN_NAME,
           type: row.DATA_TYPE,
           nullable: row.IS_NULLABLE === 'YES',
-        });
+        };
+
+        if (row.COLUMN_DEFAULT !== null) col.default = row.COLUMN_DEFAULT;
+        if (row.COLUMN_KEY === 'PRI') col.primaryKey = true;
+
+        // Expand enum/set values from COLUMN_TYPE e.g. "enum('a','b')"
+        if (row.DATA_TYPE === 'enum' || row.DATA_TYPE === 'set') {
+          const match = row.COLUMN_TYPE.match(/^(?:enum|set)\((.+)\)$/i);
+          if (match) col.values = match[1].replace(/'/g, '').split(',');
+        }
+
+        const fkRef = fkMap[`${table}.${row.COLUMN_NAME}`];
+        if (fkRef) col.references = fkRef;
+
+        schema[table].columns.push(col);
+      }
+
+      // Attach FK summary per table for quick join lookup
+      for (const fk of fkRows) {
+        const entry = schema[fk.TABLE_NAME];
+        if (entry) {
+          entry.foreignKeys.push(`${fk.COLUMN_NAME} → ${fk.REFERENCED_TABLE_NAME}.${fk.REFERENCED_COLUMN_NAME}`);
+        }
       }
 
       return {
@@ -122,9 +160,39 @@ const queryDb = {
       };
     } catch (err) {
       process.stderr.write(`query_db error: ${err.message}\n`);
+
+      let hint = '';
+      // "Table 'db.foo' doesn't exist" → suggest similar table names
+      const tableMatch = err.message.match(/Table '[\w.]*?\.(\w+)' doesn't exist/i);
+      if (tableMatch) {
+        try {
+          const tables = await executeQuery(`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`);
+          const names = tables.map((r) => r.TABLE_NAME);
+          const target = tableMatch[1].toLowerCase();
+          const similar = names.filter((n) => n.toLowerCase().includes(target) || target.includes(n.toLowerCase()));
+          if (similar.length) hint = ` Did you mean one of: ${similar.join(', ')}?`;
+          else hint = ` Available tables: ${names.join(', ')}.`;
+        } catch (_) { /* ignore */ }
+      }
+
+      // "Unknown column 'foo'" → include the table's actual columns if identifiable
+      const colMatch = err.message.match(/Unknown column '([^']+)'/i);
+      if (colMatch && !hint) {
+        const fromMatch = sql.match(/\bFROM\s+`?(\w+)`?/i);
+        if (fromMatch) {
+          try {
+            const cols = await executeQuery(
+              `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+              [fromMatch[1]]
+            );
+            if (cols.length) hint = ` Columns in ${fromMatch[1]}: ${cols.map((c) => c.COLUMN_NAME).join(', ')}.`;
+          } catch (_) { /* ignore */ }
+        }
+      }
+
       return {
         isError: true,
-        content: [{ type: 'text', text: `Database error: ${err.message}` }],
+        content: [{ type: 'text', text: `Database error: ${err.message}${hint}` }],
       };
     }
   },
