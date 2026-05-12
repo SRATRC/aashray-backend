@@ -22,8 +22,12 @@ export const httpLogger = (req, res, next) => {
 
   // Log the incoming request (sanitize sensitive fields)
   const sanitizedBody = sanitizeBody(req.body);
+  const hasBody =
+    sanitizedBody &&
+    typeof sanitizedBody === 'object' &&
+    Object.keys(sanitizedBody).length > 0;
   req.log.info('request_received', {
-    body: JSON.stringify(sanitizedBody),
+    ...(hasBody && { body: JSON.stringify(sanitizedBody) }),
     ip: req.ip,
     userAgent: req.headers['user-agent']
   });
