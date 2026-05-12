@@ -10,9 +10,11 @@ import {
 import { logTools } from './tools/logs.js';
 import { dbTools, executeQuery } from './tools/database.js';
 import { SCHEMA_RESOURCE_URI, buildSchemaResource } from './resources/schema.js';
+import logger from './logger.js';
 
 export const allTools = [...logTools, ...dbTools];
 const toolMap = new Map(allTools.map(t => [t.name, t]));
+
 
 export function createServer() {
   const server = new Server(
@@ -28,12 +30,33 @@ export function createServer() {
     })),
   }));
 
+  const SLOW_TOOL_MS = 3000;
+
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const tool = toolMap.get(request.params.name);
+    const { name, arguments: args = {} } = request.params;
+    const tool = toolMap.get(name);
+
     if (!tool) {
-      throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${request.params.name}`);
+      logger.warn('tool_not_found', { tool: name });
+      throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${name}`);
     }
-    return tool.handler(request.params.arguments ?? {});
+
+    const start = Date.now();
+    try {
+      const result = await tool.handler(args);
+      const durationMs = Date.now() - start;
+
+      if (result?.isError) {
+        logger.warn('tool_error', { tool: name, durationMs, message: result?.content?.[0]?.text?.slice(0, 300) });
+      } else if (durationMs > SLOW_TOOL_MS) {
+        logger.warn('tool_slow', { tool: name, durationMs });
+      }
+
+      return result;
+    } catch (err) {
+      logger.error('tool_exception', { tool: name, durationMs: Date.now() - start, error: err.message, stack: err.stack });
+      throw err;
+    }
   });
 
   server.setRequestHandler(ListResourcesRequestSchema, () => ({
@@ -49,15 +72,20 @@ export function createServer() {
   }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    if (request.params.uri !== SCHEMA_RESOURCE_URI) {
-      throw new McpError(ErrorCode.InvalidRequest, `Unknown resource: ${request.params.uri}`);
+    const { uri } = request.params;
+
+    if (uri !== SCHEMA_RESOURCE_URI) {
+      logger.warn('resource_not_found', { uri });
+      throw new McpError(ErrorCode.InvalidRequest, `Unknown resource: ${uri}`);
     }
+
     try {
       const text = await buildSchemaResource(executeQuery);
       return {
-        contents: [{ uri: SCHEMA_RESOURCE_URI, mimeType: 'application/json', text }],
+        contents: [{ uri, mimeType: 'application/json', text }],
       };
     } catch (err) {
+      logger.error('schema_resource_error', { error: err.message });
       throw new McpError(ErrorCode.InternalError, `Failed to build schema resource: ${err.message}`);
     }
   });

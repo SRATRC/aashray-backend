@@ -13,51 +13,58 @@
       }
     },
     "room_booking": {
-      "description": "Room reservation requests. One row per user stay. Supports waitlist and Utsav-linked bookings.",
+      "description": "Room reservation requests. One row per guest stay. bookingid is the PK.",
+      "statusFlow": "waiting → pending → pending checkin → checkedin → checkedout | cancelled | admin cancelled",
       "columns": {
+        "bookingid": "Primary key",
         "cardno": "FK → card_db.cardno",
         "roomno": "FK → roomdb.roomno — assigned room number",
         "checkin": "Stay start date (DATEONLY)",
         "checkout": "Stay end date (DATEONLY)",
-        "nights": "Number of nights (checkout - checkin)",
-        "room_type": "AC or NAC (non-AC)",
-        "booking_type": "regular or utsav"
+        "nights": "Number of nights",
+        "roomtype": "AC or NAC (non-AC)",
+        "status": "waiting | pending | pending checkin | checkedin | checkedout | cancelled | admin cancelled",
+        "gender": "Gender of the guest at time of booking"
       }
     },
     "food_db": {
-      "description": "Food booking records. One row per guest per date. Boolean flags for each meal.",
+      "description": "Food booking records. One row per guest per date. Boolean flags per meal — no status column, presence of row implies booking is active.",
       "columns": {
         "cardno": "FK → card_db.cardno",
         "date": "Date for which food is booked (DATEONLY)",
-        "breakfast": "true if breakfast booked",
-        "lunch": "true if lunch booked",
-        "dinner": "true if dinner booked",
-        "hb": "true if half-board booked",
-        "fb": "true if full-board booked",
-        "nb": "true if no-board (no meals)",
-        "high_tea": "true if high-tea booked"
+        "breakfast": "1 if breakfast booked",
+        "lunch": "1 if lunch booked",
+        "dinner": "1 if dinner booked",
+        "hightea": "1 if high-tea booked",
+        "spicy": "1 if spicy meal preference",
+        "breakfast_plate_issued": "1 if physical plate token issued for breakfast",
+        "lunch_plate_issued": "1 if physical plate token issued for lunch",
+        "dinner_plate_issued": "1 if physical plate token issued for dinner"
       }
     },
     "travel_db": {
       "description": "Travel arrangement bookings — pickup/dropoff to/from railway stations or airports.",
-      "statusFlow": "waiting → proceed for payment → confirmed | admin cancelled | cancelled | seats full cancel | wrong form cancel",
+      "statusFlow": "awaiting confirmation → proceed for payment → confirmed | cancelled | admin cancelled",
       "columns": {
         "cardno": "FK → card_db.cardno",
         "date": "Travel date (DATEONLY)",
         "type": "Regular or full",
         "pickup": "Pickup location / station name",
         "drop": "Drop location",
-        "luggage": "true if luggage assistance requested",
-        "adhoc": "true if ad-hoc (unplanned) travel",
-        "status": "Booking lifecycle: waiting, proceed for payment, confirmed, cancelled, admin cancelled, seats full cancel, wrong form cancel",
+        "luggage": "1 if luggage assistance requested",
+        "adhoc": "1 if ad-hoc (unplanned) travel",
+        "status": "awaiting confirmation | proceed for payment | confirmed | cancelled | admin cancelled",
         "comments": "Free-text travel notes"
       }
     },
     "shibir_booking_db": {
-      "description": "Adhyayan (spiritual education program / shibir) bookings. 'shibir' and 'adhyayan' are used interchangeably in the codebase.",
+      "description": "Adhyayan (spiritual education program / shibir) bookings. 'shibir' and 'adhyayan' are used interchangeably in the codebase. bookingid is the PK.",
+      "statusFlow": "waiting → pending → confirmed | cancelled | admin cancelled",
       "columns": {
+        "bookingid": "Primary key",
         "cardno": "FK → card_db.cardno",
-        "shibirCode": "FK → shibir_db.id — which adhyayan program"
+        "shibir_id": "FK → shibir_db.id — which adhyayan program",
+        "status": "waiting | pending | confirmed | cancelled | admin cancelled"
       }
     },
     "shibir_db": {
@@ -72,11 +79,18 @@
       }
     },
     "utsav_booking": {
-      "description": "Utsav (festival/special event) bookings. Guests book attendance at specific events and packages.",
+      "description": "Utsav (festival/special event) bookings. bookingid is the PK.",
+      "statusFlow": "waiting → pending → confirmed → checkedin | cancelled | admin cancelled | cash completed",
       "columns": {
+        "bookingid": "Primary key",
         "cardno": "FK → card_db.cardno",
-        "utsav_id": "FK → utsav_db.id — which utsav event",
-        "package_id": "FK → utsav_packages_db.id — selected package"
+        "utsavid": "FK → utsav_db.id — which utsav event",
+        "packageid": "FK → utsav_packages_db.id — selected package",
+        "arrival": "Expected arrival date/time",
+        "carno": "Vehicle number if arriving by car",
+        "volunteer": "1 if guest is volunteering at the event",
+        "roomno": "Room assigned during the utsav",
+        "status": "waiting | pending | confirmed | checkedin | cancelled | admin cancelled | cash completed"
       }
     },
     "utsav_db": {
@@ -97,27 +111,30 @@
       }
     },
     "flat_booking": {
-      "description": "Flat/apartment bookings for mumukshus who stay for extended periods.",
+      "description": "Flat/apartment bookings for mumukshus who stay for extended periods. bookingid is the PK.",
+      "statusFlow": "pending → pending checkin → checkedin → checkedout | cancelled | admin cancelled",
       "columns": {
+        "bookingid": "Primary key",
         "cardno": "FK → card_db.cardno",
-        "flatno": "FK → flatdb.flatno",
-        "roomno": "Room number within the flat",
-        "checkin": "Stay start date",
-        "checkout": "Stay end date",
-        "nights": "Duration in nights"
+        "flatno": "FK → flatdb.flatno — which flat",
+        "checkin": "Stay start date (DATEONLY)",
+        "checkout": "Stay end date (DATEONLY)",
+        "nights": "Duration in nights",
+        "status": "pending | pending checkin | checkedin | checkedout | cancelled | admin cancelled"
       }
     },
     "transactions": {
-      "description": "Payment records. One row per payment attempt. Links back to a booking via booking_ref + booking_type discriminator. Handles Razorpay, cash, UPI, and internal credit payments.",
+      "description": "Payment records. One row per payment attempt. Links back to a booking via bookingid + category discriminator. Handles Razorpay, cash, UPI, and internal credit payments.",
       "columns": {
         "cardno": "FK → card_db.cardno — payer",
-        "booking_type": "Discriminator: room | food | travel | adhyayan | utsav | flat — determines which *_booking table booking_ref points to",
-        "booking_ref": "FK into the table identified by booking_type (polymorphic)",
+        "bookingid": "FK into the booking table identified by category (polymorphic)",
+        "category": "Discriminator: room | food | travel | adhyayan | utsav | flat — determines which *_booking table bookingid points to",
         "amount": "Amount charged in INR",
-        "deduction": "Discount/credit deducted",
-        "payment_mode": "razorpay_callback | upi | cash",
-        "razorpay_order_id": "Razorpay order ID if payment_mode = razorpay_callback",
-        "status": "pending | completed | failed | authorized | captured | awaiting refund | cash pending | cash completed | credited"
+        "discount": "Discount/credit deducted from amount",
+        "upi_ref": "UPI reference number or Razorpay payment ID",
+        "razorpay_order_id": "Razorpay order ID for online payments",
+        "amt_type": "Sub-type of charge (e.g. late_checkout_room)",
+        "status": "pending | completed | cash pending | cash completed | cancelled | admin cancelled | credited | failed"
       }
     },
     "roomdb": {
@@ -306,7 +323,7 @@
     "utsav": "Festival or special event at the centre. Users book utsav attendance separately from regular room/food bookings.",
     "mumukshu": "A spiritual seeker — the primary guest category. Eligible for flat bookings and long-term stays.",
     "PR (permanent resident)": "card_db.type value for residents who live at the centre permanently",
-    "booking_ref polymorphic FK": "transactions.booking_ref points to the PK of the booking table identified by transactions.booking_type. E.g. booking_type='room' means booking_ref is a room_booking.id",
+    "polymorphic booking FK": "transactions.bookingid points to the bookingid PK of the booking table identified by transactions.category. E.g. category='room' means bookingid is a room_booking.bookingid. Same pattern: category='adhyayan' → shibir_booking_db.bookingid, 'utsav' → utsav_booking.bookingid, 'flat' → flat_booking.bookingid",
     "proceed for payment": "Intermediate booking status after waitlist approval but before payment is completed",
     "WL": "Waitlist abbreviation used in room booking comments"
   }

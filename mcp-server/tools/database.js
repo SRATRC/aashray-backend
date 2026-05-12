@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { DB } from '../config.js';
+import logger from '../logger.js';
 
 let pool = null;
 
@@ -159,7 +160,7 @@ const queryDb = {
         content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }],
       };
     } catch (err) {
-      process.stderr.write(`query_db error: ${err.message}\n`);
+      logger.error('query_db_error', { error: err.message, sql: sql.slice(0, 300) });
 
       let hint = '';
       // "Table 'db.foo' doesn't exist" → suggest similar table names
