@@ -20,7 +20,7 @@ function getPool() {
   return pool;
 }
 
-async function executeQuery(sql, params = []) {
+export async function executeQuery(sql, params = []) {
   const connection = await getPool().getConnection();
   try {
     const [rows] = await connection.execute({ sql, timeout: 5000 }, params);
@@ -33,7 +33,7 @@ async function executeQuery(sql, params = []) {
 const getSchema = {
   name: 'get_schema',
   description:
-    'Returns the full database schema: columns (with type, nullability, default, enum values), primary keys, and foreign key relationships. Use this once before writing queries — it gives you everything needed to write correct JOINs without extra round-trips.',
+    'Returns the live database schema with column types, nullability, defaults, enum values, primary keys, and FK relationships — also merged with business annotations (table purposes, column meanings, status flows). Prefer reading the schema://aashray MCP Resource at session start instead of calling this tool each time, as the resource avoids a round-trip. Use this tool when you need to refresh the schema mid-session or the resource is unavailable.',
   inputSchema: {
     type: 'object',
     properties: {},
