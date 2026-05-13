@@ -65,7 +65,7 @@ export function createServer() {
         uri: SCHEMA_RESOURCE_URI,
         name: 'Aashray Database Schema',
         description:
-          'Live database schema merged with business-level annotations. Includes table purposes, column descriptions, status enums, foreign key relationships, and a domain glossary. Read this once at session start — no need to call get_schema.',
+          'Live database schema merged with business-level annotations — table purposes, column descriptions, status enums, foreign key relationships, and a domain glossary. This MCP has read-only DB access; the schema reflects the live DB structure but cannot be modified through this server. Read this once at session start instead of calling get_schema.',
         mimeType: 'application/json',
       },
     ],
