@@ -125,15 +125,20 @@ const queryDb = {
     required: ['sql'],
   },
   handler: async ({ sql }) => {
-    const normalised = sql.trim().toUpperCase();
+    const trimmed = sql.trim().replace(/;+$/, '');
+    const normalised = trimmed.toUpperCase();
 
     try {
-      let safeSql = sql;
-      const isSelect = normalised.startsWith('SELECT') || normalised.startsWith('WITH');
-      if (isSelect && !/\bLIMIT\b/i.test(sql)) {
-        safeSql = `${sql}\nLIMIT 1000`;
+      let safeSql = trimmed;
+      const isSelect =
+        normalised.startsWith('SELECT') ||
+        normalised.startsWith('WITH') ||
+        normalised.startsWith('(');
+      const hasTopLevelLimit = /\bLIMIT\s+\d+(\s*,\s*\d+|\s+OFFSET\s+\d+)?\s*$/i.test(trimmed);
+      if (isSelect && !hasTopLevelLimit) {
+        safeSql = `${trimmed}\nLIMIT 1000`;
       }
-      safeSql = safeSql.replace(/\bLIMIT\s+(\d+)/i, (_, n) => `LIMIT ${Math.min(parseInt(n, 10), 1000)}`);
+      safeSql = safeSql.replace(/\bLIMIT\s+(\d+)/gi, (_, n) => `LIMIT ${Math.min(parseInt(n, 10), 1000)}`);
       const rows = await executeQuery(safeSql);
       return {
         content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }],
