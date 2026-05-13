@@ -52,7 +52,7 @@ function todayDate() {
 const getRecentLogs = {
   name: 'get_recent_logs',
   description:
-    "Returns the last N entries from today's application log. Optionally filter by log level.",
+    "Returns the last N entries from today's application log (default 50, max 500). Optionally filter by level. Read-only — cannot modify or clear logs. Log entries are JSON objects with fields: timestamp, level, message, correlationId, userId, and any request-scoped context added by the application. For historical dates or keyword search, use search_logs instead.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -115,7 +115,7 @@ const getRecentLogs = {
 const searchLogs = {
   name: 'search_logs',
   description:
-    "Searches a single day's application log for entries matching the given filters. All filters are ANDed together.",
+    "Searches a single day's application log for entries matching the given filters (all ANDed). Supports keyword substring match, level, userId, correlationId, and date (defaults to today). Read-only — cannot modify logs. Returns up to 500 matches; when more entries match, only the last N (most recent) are returned. For bulk tailing without filters, prefer get_recent_logs.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -204,7 +204,7 @@ const searchLogs = {
 const getErrorLogs = {
   name: 'get_error_logs',
   description:
-    'Returns the last N entries from the error log for a given date (defaults to today).',
+    'Returns the last N entries from the dedicated error log for a given date (defaults to today, max 200). Contains only error-level entries — use get_recent_logs or search_logs for other levels. Read-only — cannot modify or clear logs.',
   inputSchema: {
     type: 'object',
     properties: {

@@ -34,7 +34,7 @@ export async function executeQuery(sql, params = []) {
 const getSchema = {
   name: 'get_schema',
   description:
-    'Returns the live database schema with column types, nullability, defaults, enum values, primary keys, and FK relationships — also merged with business annotations (table purposes, column meanings, status flows). Prefer reading the schema://aashray MCP Resource at session start instead of calling this tool each time, as the resource avoids a round-trip. Use this tool when you need to refresh the schema mid-session or the resource is unavailable.',
+    'Returns the live database schema with column types, nullability, defaults, enum values, primary keys, and FK relationships — merged with business annotations (table purposes, column meanings, status flows). Read-only introspection via information_schema; cannot modify the schema. Prefer the schema://aashray MCP resource at session start to avoid a round-trip; use this tool only when you need a mid-session schema refresh.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -113,13 +113,13 @@ const getSchema = {
 const queryDb = {
   name: 'query_db',
   description:
-    'Executes a read-only SQL query against the database. Only SELECT, SHOW, DESCRIBE, and WITH (CTE) statements are permitted. Use get_schema first to understand the available tables. Returns the result rows as JSON.',
+    'Executes a SQL query against the Aashray database. The database user has SELECT-only privileges — the DB server will reject INSERT, UPDATE, DELETE, DROP, TRUNCATE, and any other write or DDL statements. SELECT and WITH (CTE) results are capped at 1000 rows; include your own LIMIT clause for smaller sets. SHOW and DESCRIBE are also supported. Read the schema://aashray resource at session start to discover table structure before querying.',
   inputSchema: {
     type: 'object',
     properties: {
       sql: {
         type: 'string',
-        description: 'The SQL query to execute. Must start with SELECT, SHOW, DESCRIBE, or WITH.',
+        description: 'The SQL query to execute.',
       },
     },
     required: ['sql'],
@@ -127,31 +127,10 @@ const queryDb = {
   handler: async ({ sql }) => {
     const normalised = sql.trim().toUpperCase();
 
-    if (normalised.includes(';')) {
-      return { content: [{ type: 'text', text: 'Multi-statement queries are not allowed.' }], isError: true };
-    }
-
-    const allowed =
-      normalised.startsWith('SELECT') ||
-      normalised.startsWith('SHOW') ||
-      normalised.startsWith('DESCRIBE') ||
-      normalised.startsWith('WITH');
-
-    if (!allowed) {
-      return {
-        isError: true,
-        content: [
-          {
-            type: 'text',
-            text: 'Only SELECT, SHOW, DESCRIBE, and WITH statements are permitted. The provided query was rejected without execution.',
-          },
-        ],
-      };
-    }
-
     try {
       let safeSql = sql;
-      if (normalised.startsWith('SELECT') && !/\bLIMIT\b/i.test(sql)) {
+      const isSelect = normalised.startsWith('SELECT') || normalised.startsWith('WITH');
+      if (isSelect && !/\bLIMIT\b/i.test(sql)) {
         safeSql = `${sql}\nLIMIT 1000`;
       }
       safeSql = safeSql.replace(/\bLIMIT\s+(\d+)/i, (_, n) => `LIMIT ${Math.min(parseInt(n, 10), 1000)}`);
@@ -202,7 +181,7 @@ const queryDb = {
 const getTableSample = {
   name: 'get_table_sample',
   description:
-    'Returns a sample of rows from the specified table. Useful for understanding the shape and content of data without writing a full query. Limit defaults to 10 and is capped at 50.',
+    'Returns a sample of rows from the specified table (default 10, max 50). Useful for understanding data shape and realistic values before writing a full query. Read-only — the DB user has SELECT-only privileges.',
   inputSchema: {
     type: 'object',
     properties: {
