@@ -36,6 +36,8 @@ import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js'
+import TravelBusGroup from './travelBusGroup.model.js';
+import TravelBusPassengers from './travelBusPassengers.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -341,7 +343,24 @@ CardDb.hasOne(PermanentWifiCodes, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+TravelBusGroup.hasMany(TravelBusPassengers, {
+  foreignKey: 'bus_group_id',
+  sourceKey: 'id',
+  as: 'passengers',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 
+TravelBusPassengers.belongsTo(TravelBusGroup, {
+  foreignKey: 'bus_group_id',
+  targetKey: 'id',
+  as: 'busGroup'
+});
+TravelBusPassengers.belongsTo(TravelBusGroup, {
+  foreignKey: 'bus_group_id',
+  targetKey: 'id',
+  as: 'TravelBusGroup',
+});
 // Utsav
 UtsavBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
@@ -562,5 +581,7 @@ export {
   Updates,
   AdhyayanFeedback,
   RazorpaySettlementRecon,
-  ShibirAttendanceDb
+  ShibirAttendanceDb,
+  TravelBusGroup,
+  TravelBusPassengers
 };
