@@ -657,7 +657,8 @@ export async function updateBooking(req, res) {
     pickup_point,
     drop_point,
     type,
-    date
+    date,
+    leaving_post_adhyayan
   } = req.body;
 
   req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date });
@@ -696,6 +697,9 @@ export async function updateBooking(req, res) {
   if (drop_point !== undefined) travelUpdate.drop_point = drop_point;
   if (type !== undefined) travelUpdate.type = type;
   if (date !== undefined) travelUpdate.date = date; // ✅ NEW
+  if (leaving_post_adhyayan !== undefined) {
+  travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
+}
 
   if (Object.keys(travelUpdate).length > 0) {
     const travelBooking = await TravelDb.findOne({
