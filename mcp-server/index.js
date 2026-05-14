@@ -5,14 +5,15 @@ import { PORT, BEARER_TOKEN, DB } from './config.js';
 import { bearerAuth } from './auth.js';
 import { closePool } from './tools/database.js';
 import { createServer, allTools } from './server.js';
+import logger from './logger.js';
 
 if (!BEARER_TOKEN) {
-  process.stderr.write('FATAL: MCP_BEARER_TOKEN env var is required\n');
+  logger.error('startup_failed', { reason: 'MCP_BEARER_TOKEN env var is required' });
   process.exit(1);
 }
 
 if (!DB.user || !DB.password) {
-  process.stderr.write('FATAL: MCP_DB_USER and MCP_DB_PASSWORD env vars are required\n');
+  logger.error('startup_failed', { reason: 'MCP_DB_USER and MCP_DB_PASSWORD env vars are required' });
   process.exit(1);
 }
 
@@ -28,6 +29,7 @@ app.post('/mcp', async (req, res) => {
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   } catch (err) {
+    logger.error('mcp_request_exception', { error: err.message, stack: err.stack });
     if (!res.headersSent) {
       res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
     }
@@ -41,20 +43,21 @@ app.get('/health', (_req, res) => {
 });
 
 process.on('unhandledRejection', (reason) => {
-  process.stderr.write(`Unhandled rejection: ${reason}\n`);
+  logger.error('unhandled_rejection', { reason: String(reason) });
   process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
-  process.stderr.write(`Uncaught exception: ${err.message}\n`);
+  logger.error('uncaught_exception', { error: err.message, stack: err.stack });
   process.exit(1);
 });
 
 const httpServer = app.listen(PORT, '0.0.0.0', () => {
-  process.stderr.write(`MCP server listening on port ${PORT}\n`);
+  logger.info('mcp_server_started', { port: PORT, tools: allTools.map(t => t.name) });
 });
 
 const shutdown = () => {
+  logger.info('mcp_server_shutdown');
   httpServer.close(async () => {
     await closePool();
     process.exit(0);

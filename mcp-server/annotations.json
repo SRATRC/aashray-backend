@@ -1,0 +1,330 @@
+{
+  "_readme": "Business-level annotations merged with live DB schema at runtime. Add/update entries here when meaning changes; structural schema (columns, types, FKs) is always fetched live from the DB.",
+  "tables": {
+    "card_db": {
+      "description": "Core user identity table. Every person who interacts with the centre has a card_db record. 'cardno' is the universal guest identifier used as FK in all booking tables.",
+      "columns": {
+        "cardno": "Universal User ID — use this in all joins with booking tables",
+        "issuedto": "Full name of the user",
+        "type": "User category: PR (permanent resident), MUMUKSHU (spiritual seeker), SEVA KUTIR, GUEST",
+        "gender": "M / F",
+        "mobno": "Primary mobile number",
+        "res_status": "Current on-premise status: onprem (currently staying) or offprem"
+      }
+    },
+    "room_booking": {
+      "description": "Room reservation requests. One row per guest stay. bookingid is the PK.",
+      "statusFlow": "waiting → pending → pending checkin → checkedin → checkedout | cancelled | admin cancelled",
+      "columns": {
+        "bookingid": "Primary key",
+        "cardno": "FK → card_db.cardno",
+        "roomno": "FK → roomdb.roomno — assigned room number",
+        "checkin": "Stay start date (DATEONLY)",
+        "checkout": "Stay end date (DATEONLY)",
+        "nights": "Number of nights",
+        "roomtype": "AC or NAC (non-AC)",
+        "status": "waiting | pending | pending checkin | checkedin | checkedout | cancelled | admin cancelled",
+        "gender": "Gender of the guest at time of booking"
+      }
+    },
+    "food_db": {
+      "description": "Food booking records. One row per guest per date. Boolean flags per meal — no status column, presence of row implies booking is active.",
+      "columns": {
+        "cardno": "FK → card_db.cardno",
+        "date": "Date for which food is booked (DATEONLY)",
+        "breakfast": "1 if breakfast booked",
+        "lunch": "1 if lunch booked",
+        "dinner": "1 if dinner booked",
+        "hightea": "1 if high-tea booked",
+        "spicy": "1 if spicy meal preference",
+        "breakfast_plate_issued": "1 if physical plate token issued for breakfast",
+        "lunch_plate_issued": "1 if physical plate token issued for lunch",
+        "dinner_plate_issued": "1 if physical plate token issued for dinner"
+      }
+    },
+    "travel_db": {
+      "description": "Travel arrangement bookings — pickup/dropoff to/from railway stations or airports.",
+      "statusFlow": "awaiting confirmation → proceed for payment → confirmed | cancelled | admin cancelled",
+      "columns": {
+        "cardno": "FK → card_db.cardno",
+        "date": "Travel date (DATEONLY)",
+        "type": "Regular or full",
+        "pickup": "Pickup location / station name",
+        "drop": "Drop location",
+        "luggage": "1 if luggage assistance requested",
+        "adhoc": "1 if ad-hoc (unplanned) travel",
+        "status": "awaiting confirmation | proceed for payment | confirmed | cancelled | admin cancelled",
+        "comments": "Free-text travel notes"
+      }
+    },
+    "shibir_booking_db": {
+      "description": "Adhyayan (spiritual education program / shibir) bookings. 'shibir' and 'adhyayan' are used interchangeably in the codebase. bookingid is the PK.",
+      "statusFlow": "waiting → pending → confirmed | cancelled | admin cancelled",
+      "columns": {
+        "bookingid": "Primary key",
+        "cardno": "FK → card_db.cardno",
+        "shibir_id": "FK → shibir_db.id — which adhyayan program",
+        "status": "waiting | pending | confirmed | cancelled | admin cancelled"
+      }
+    },
+    "shibir_db": {
+      "description": "Adhyayan/shibir program catalogue. One row per program offering.",
+      "columns": {
+        "name": "Program name",
+        "start_date": "Program start date",
+        "end_date": "Program end date",
+        "total_seats": "Maximum capacity",
+        "available_seats": "Remaining seats",
+        "status": "open | closed | cancelled"
+      }
+    },
+    "utsav_booking": {
+      "description": "Utsav (festival/special event) bookings. bookingid is the PK.",
+      "statusFlow": "waiting → pending → confirmed → checkedin | cancelled | admin cancelled | cash completed",
+      "columns": {
+        "bookingid": "Primary key",
+        "cardno": "FK → card_db.cardno",
+        "utsavid": "FK → utsav_db.id — which utsav event",
+        "packageid": "FK → utsav_packages_db.id — selected package",
+        "arrival": "Expected arrival date/time",
+        "carno": "Vehicle number if arriving by car",
+        "volunteer": "1 if guest is volunteering at the event",
+        "roomno": "Room assigned during the utsav",
+        "status": "waiting | pending | confirmed | checkedin | cancelled | admin cancelled | cash completed"
+      }
+    },
+    "utsav_db": {
+      "description": "Utsav (festival) event catalogue. Each row is one festival event.",
+      "columns": {
+        "name": "Event name",
+        "start_date": "Event start date",
+        "end_date": "Event end date",
+        "status": "open | closed"
+      }
+    },
+    "utsav_packages_db": {
+      "description": "Package options available within a specific utsav event.",
+      "columns": {
+        "utsav_id": "FK → utsav_db.id",
+        "name": "Package name",
+        "amount": "Package price in INR"
+      }
+    },
+    "flat_booking": {
+      "description": "Flat/apartment bookings for mumukshus who stay for extended periods. bookingid is the PK.",
+      "statusFlow": "pending → pending checkin → checkedin → checkedout | cancelled | admin cancelled",
+      "columns": {
+        "bookingid": "Primary key",
+        "cardno": "FK → card_db.cardno",
+        "flatno": "FK → flatdb.flatno — which flat",
+        "checkin": "Stay start date (DATEONLY)",
+        "checkout": "Stay end date (DATEONLY)",
+        "nights": "Duration in nights",
+        "status": "pending | pending checkin | checkedin | checkedout | cancelled | admin cancelled"
+      }
+    },
+    "transactions": {
+      "description": "Payment records. One row per payment attempt. Links back to a booking via bookingid + category discriminator. Handles Razorpay, cash, UPI, and internal credit payments.",
+      "columns": {
+        "cardno": "FK → card_db.cardno — payer",
+        "bookingid": "FK into the booking table identified by category (polymorphic)",
+        "category": "Discriminator: room | food | travel | adhyayan | utsav | flat — determines which *_booking table bookingid points to",
+        "amount": "Amount charged in INR",
+        "discount": "Discount/credit deducted from amount",
+        "upi_ref": "UPI reference number or Razorpay payment ID",
+        "razorpay_order_id": "Razorpay order ID for online payments",
+        "amt_type": "Sub-type of charge (e.g. late_checkout_room)",
+        "status": "pending | completed | cash pending | cash completed | cancelled | admin cancelled | credited | failed"
+      }
+    },
+    "roomdb": {
+      "description": "Physical room inventory. Each row is one bookable slot (bookno) within a room.",
+      "columns": {
+        "roomno": "Room number",
+        "bookno": "Slot number within the room (for multi-bed rooms)",
+        "type": "AC | NAC",
+        "status": "available | blocked | taken"
+      }
+    },
+    "flatdb": {
+      "description": "Physical flat inventory.",
+      "columns": {
+        "flatno": "Flat number",
+        "status": "available | blocked"
+      }
+    },
+    "guest_db": {
+      "description": "Guest relationship records — temporary visitors brought by a resident.",
+      "columns": {
+        "cardno": "FK → card_db.cardno — the resident who brought the guest",
+        "guest_name": "Guest full name",
+        "relation": "Relationship to the resident",
+        "status": "active | inactive"
+      }
+    },
+    "blockdates": {
+      "description": "Admin-managed date blocks that prevent bookings on specific dates or date ranges.",
+      "columns": {
+        "start_date": "Block start date",
+        "end_date": "Block end date",
+        "booking_type": "Which booking type is blocked: room | food | travel | all"
+      }
+    },
+    "admin_users": {
+      "description": "Admin portal user accounts.",
+      "columns": {
+        "username": "Admin login username",
+        "role": "Role determining admin permissions — see admin_roles table"
+      }
+    },
+    "admin_roles": {
+      "description": "Role definitions for admin portal access control.",
+      "columns": {
+        "role": "Role name: superAdmin | roomAdmin | cardAdmin | officeAdmin | adhyayanAdmin | utsavAdmin | etc.",
+        "permissions": "JSON array of allowed actions"
+      }
+    },
+    "support_tickets": {
+      "description": "Guest support/helpdesk tickets.",
+      "columns": {
+        "cardno": "FK → card_db.cardno — ticket submitter",
+        "subject": "Ticket subject",
+        "status": "open | in progress | closed"
+      }
+    },
+    "maintenance_db": {
+      "description": "Facility maintenance request records.",
+      "columns": {
+        "status": "open | in progress | closed"
+      }
+    },
+    "gate_record": {
+      "description": "Entry/exit gate log. Tracks when guests arrive at and depart from the centre.",
+      "columns": {
+        "cardno": "FK → card_db.cardno",
+        "checkin_time": "Timestamp of entry",
+        "checkout_time": "Timestamp of exit"
+      }
+    },
+    "bulk_food_booking": {
+      "description": "Admin-created bulk food bookings applied to groups of guests at once.",
+      "columns": {
+        "booking_type": "The food meal type this bulk booking covers"
+      }
+    },
+    "food_physical_plate": {
+      "description": "Physical plate tokens issued for food. Used for kitchen headcount.",
+      "columns": {
+        "date": "Date of the meal",
+        "meal_type": "breakfast | lunch | dinner"
+      }
+    },
+    "foodrate": {
+      "description": "Current food pricing per meal type.",
+      "columns": {
+        "meal_type": "breakfast | lunch | dinner | hb | fb",
+        "rate": "Price in INR"
+      }
+    },
+    "menu": {
+      "description": "Daily kitchen menu entries.",
+      "columns": {
+        "date": "Menu date",
+        "meal_type": "breakfast | lunch | dinner",
+        "items": "Comma-separated menu items"
+      }
+    },
+    "adhyayan_feedback": {
+      "description": "Post-adhyayan feedback submitted by participants.",
+      "columns": {
+        "cardno": "FK → card_db.cardno",
+        "shibir_id": "FK → shibir_db.id"
+      }
+    },
+    "shibir_attendance_db": {
+      "description": "Day-level attendance records for adhyayan programs.",
+      "columns": {
+        "cardno": "FK → card_db.cardno",
+        "shibir_id": "FK → shibir_db.id",
+        "date": "Attendance date",
+        "status": "present | absent"
+      }
+    },
+    "updates": {
+      "description": "App update / announcement records pushed to users.",
+      "columns": {
+        "version": "App version this update targets",
+        "message": "Update announcement text"
+      }
+    },
+    "razorpay_webhook": {
+      "description": "Raw Razorpay webhook event log. Used for debugging payment discrepancies.",
+      "columns": {
+        "event": "Razorpay event type (e.g. payment.captured)",
+        "payload": "Full JSON payload from Razorpay"
+      }
+    },
+    "razorpay_settlement": {
+      "description": "Razorpay settlement summary records for reconciliation.",
+      "columns": {
+        "settlement_id": "Razorpay settlement ID",
+        "amount": "Settled amount in paise"
+      }
+    },
+    "razorpay_settlement_recon": {
+      "description": "Line-item reconciliation entries within a Razorpay settlement.",
+      "columns": {
+        "settlement_id": "FK → razorpay_settlement.settlement_id",
+        "entity_id": "Razorpay entity (payment/refund) ID"
+      }
+    },
+    "wifi_pwd": {
+      "description": "Wi-Fi credentials issued to guests.",
+      "columns": {
+        "cardno": "FK → card_db.cardno",
+        "password": "Assigned Wi-Fi password",
+        "status": "active | inactive"
+      }
+    },
+    "permanent_wifi_codes": {
+      "description": "Permanent Wi-Fi codes for long-term residents.",
+      "columns": {
+        "code": "Wi-Fi code",
+        "cardno": "FK → card_db.cardno — assigned resident"
+      }
+    },
+    "guest_relationship": {
+      "description": "Defines allowed guest-resident relationship types.",
+      "columns": {
+        "relation": "Relationship label (e.g. spouse, parent, child)"
+      }
+    },
+    "centre_db": {
+      "description": "Centre configuration and metadata.",
+      "columns": {
+        "name": "Centre name",
+        "location": "Physical location"
+      }
+    },
+    "departments": {
+      "description": "Department / seva (service) area catalogue used for staff assignments.",
+      "columns": {
+        "name": "Department name"
+      }
+    },
+    "cities": { "description": "Reference list of cities for address fields." },
+    "states": { "description": "Reference list of Indian states." },
+    "countries": { "description": "Reference list of countries." },
+    "roles": { "description": "Guest role/category definitions." }
+  },
+  "glossary": {
+    "cardno": "Universal user identifier, it's the person's permanent ID",
+    "shibir / adhyayan": "Used interchangeably. Spiritual education programs held at the centre. Tables prefixed shibir_ correspond to adhyayan domain.",
+    "utsav": "Festival or special event at the centre. Users book utsav attendance separately from regular room/food bookings.",
+    "mumukshu": "A spiritual seeker — the primary guest category. Eligible for flat bookings and long-term stays.",
+    "PR (permanent resident)": "card_db.type value for residents who live at the centre permanently",
+    "polymorphic booking FK": "transactions.bookingid points to the bookingid PK of the booking table identified by transactions.category. E.g. category='room' means bookingid is a room_booking.bookingid. Same pattern: category='adhyayan' → shibir_booking_db.bookingid, 'utsav' → utsav_booking.bookingid, 'flat' → flat_booking.bookingid",
+    "proceed for payment": "Intermediate booking status after waitlist approval but before payment is completed",
+    "WL": "Waitlist abbreviation used in room booking comments"
+  }
+}

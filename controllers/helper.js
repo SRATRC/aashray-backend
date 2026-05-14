@@ -11,6 +11,7 @@ import {
   UtsavBooking,
   UtsavDb
 } from '../models/associations.js';
+import logger from '../config/logger.js';
 import {
   STATUS_CONFIRMED,
   TYPE_ROOM,
@@ -709,11 +710,7 @@ export async function createCardIds(count) {
 
       // If we're struggling to find unique random IDs, switch to sequential
       if (attempts >= MAX_ATTEMPTS && newIds.length < count) {
-        console.warn(
-          `Random generation inefficient, switching to sequential for remaining ${
-            count - newIds.length
-          } IDs`
-        );
+        logger.warn('create_card_ids_switching_to_sequential', { remaining: count - newIds.length });
 
         // Find the next available ID
         let currentId = MIN_ID;

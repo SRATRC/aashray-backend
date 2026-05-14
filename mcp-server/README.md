@@ -2,14 +2,10 @@
 
 A standalone HTTP server that implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), giving AI agents (Claude Code, Cursor, etc.) structured, read-only access to the application's logs and database.
 
-## What is MCP?
-
-MCP is a protocol that lets AI assistants call tools defined by your server — the same way a browser calls an API. When you or a teammate asks Claude "why did this booking fail?", Claude can call `get_error_logs` and `query_db` directly instead of you copy-pasting log snippets into the chat.
-
 ## How it fits into the stack
 
 ```
-Engineer's Claude Code
+  Claude Code
        │
        │  POST /mcp  (Bearer token)
        ▼
@@ -22,6 +18,147 @@ Cron Job                  (PM2 process: CronJob)
 ```
 
 The MCP server runs as a third PM2 process on the same Ubuntu server alongside the backend and cron job. It does not share code or process memory with the main app — it's a fully separate Node.js process.
+
+---
+
+## Connecting to the MCP server
+
+Get your `MCP_BEARER_TOKEN` from the team, then run the one-command installer:
+
+```bash
+# install for every AI agent detected on your machine
+curl -fsSL https://raw.githubusercontent.com/SRATRC/aashray-backend/main/mcp-server/install-mcp.sh \
+  | bash -s -- <MCP_BEARER_TOKEN>
+
+# or clone the repo and run directly
+./mcp-server/install-mcp.sh <MCP_BEARER_TOKEN>
+```
+
+The script auto-detects which agents are installed and patches only those.
+It is idempotent — safe to re-run after updates.
+
+---
+
+### Manual setup per agent
+
+If you prefer to configure an agent by hand, or the installer doesn't cover your setup:
+
+#### Claude Code
+
+```bash
+claude mcp add --transport http aashray https://your-server-domain.com/mcp \
+  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"
+```
+
+#### Claude Desktop
+
+Claude Desktop only supports stdio transport — use `mcp-remote` as a bridge.
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+or `~/.config/Claude/claude_desktop_config.json` (Linux):
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://your-server-domain.com/mcp",
+        "--header",
+        "Authorization: Bearer <MCP_BEARER_TOKEN>"
+      ]
+    }
+  }
+}
+```
+
+Requires Node.js. Restart Claude Desktop after saving.
+
+#### GitHub Copilot (VS Code ≥ 1.99)
+
+GitHub Copilot uses VS Code's native MCP support. Add to VS Code's global `settings.json`
+(`Cmd+Shift+P` → "Open User Settings (JSON)"):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "aashray": {
+        "type": "http",
+        "url": "https://your-server-domain.com/mcp",
+        "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+      }
+    }
+  },
+  "github.copilot.chat.mcp.enabled": true
+}
+```
+
+MCP tools appear in Copilot Chat under the `#` tools menu after reloading VS Code.
+
+#### Cursor
+
+Edit `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "url": "https://your-server-domain.com/mcp",
+      "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+    }
+  }
+}
+```
+
+#### Windsurf
+
+Edit `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "url": "https://your-server-domain.com/mcp",
+      "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+    }
+  }
+}
+```
+
+#### Gemini CLI
+
+Edit `~/.gemini/settings.json` (note: Gemini uses `httpUrl`, not `url`):
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "httpUrl": "https://your-server-domain.com/mcp",
+      "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+    }
+  }
+}
+```
+
+---
+
+## Pairing with Sentry MCP
+
+The MCP server is designed to work alongside the [Sentry MCP server](https://docs.sentry.io/product/sentry-mcp/) — not replace it. A typical debugging workflow:
+
+1. **Sentry MCP** → get the crash details, stack trace, and affected `userId` or request ID
+2. **`search_logs`** → pass the `correlationId` or `userId` from Sentry to get the full request lifecycle from our structured logs
+3. **`query_db`** → look up the booking, room, or user record involved to understand the data state at the time of the crash
+
+Add both via the Claude Code CLI:
+
+```bash
+claude mcp add --transport http aashray https://your-server-domain.com/mcp \
+  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"
+
+npx add-mcp https://mcp.sentry.dev/mcp
+```
 
 ---
 
@@ -96,210 +233,3 @@ mcp-server/
     ├── logs.js       Log reading tools. Streams files with readline + zlib. Cleans up file descriptors on error.
     └── database.js   Database tools. Lazy connection pool. All connections released in finally blocks.
 ```
-
----
-
-## Local development
-
-**1. Create `mcp-server/.env`** (already gitignored):
-
-```
-MCP_PORT=4000
-MCP_BEARER_TOKEN=local-dev-token
-
-LOG_DIR=../logs
-
-MCP_DB_HOST=localhost
-MCP_DB_PORT=3306
-MCP_DB_NAME=aashray
-MCP_DB_USER=root
-MCP_DB_PASSWORD=<your local root password>
-```
-
-`LOG_DIR=../logs` points to the `logs/` folder at the project root, which already has local log files from past dev sessions.
-
-**2. Start the server:**
-
-```bash
-cd mcp-server
-npm run dev
-# MCP server listening on port 4000
-```
-
-**3. Verify it's working:**
-
-```bash
-# Health check
-curl http://localhost:4000/health -H "Authorization: Bearer local-dev-token"
-# → {"status":"ok","tools":6}
-
-# Call a tool
-curl -X POST http://localhost:4000/mcp \
-  -H "Authorization: Bearer local-dev-token" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_recent_logs","arguments":{"n":5}}}'
-```
-
-**4. Connect Claude Code to localhost:**
-
-Add to `~/.mcp.json` (create if it doesn't exist):
-
-```json
-{
-  "mcpServers": {
-    "aashray-local": {
-      "type": "stdio",
-      "command": "node",
-      "args": [
-        "--env-file=/absolute/path/to/mcp-server/.env",
-        "/absolute/path/to/mcp-server/stdio.js"
-      ]
-    }
-  }
-}
-```
-
-Then add `"aashray-local"` to `enabledMcpjsonServers` in `~/.claude/settings.json`:
-
-```json
-{
-  "enabledMcpjsonServers": ["aashray-local"]
-}
-```
-
-Restart Claude Code. You can now ask it things like:
-- *"Show me the last 20 error logs"*
-- *"Search logs for correlationId abc123"*
-- *"What tables are in the database?"*
-- *"Show me the last 5 room bookings"*
-
----
-
-## First-time server setup
-
-These steps run once on the production server. They are not part of the CI/CD pipeline.
-
-**1. Create the read-only MySQL user:**
-
-```sql
-CREATE USER 'mcp_readonly'@'localhost' IDENTIFIED BY '<strong-password>';
-GRANT SELECT ON your_database_name.* TO 'mcp_readonly'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-**2. Generate a Bearer token:**
-
-```bash
-openssl rand -hex 32
-```
-
-**3. Add to `PROD_ENV_FILE` GitHub secret:**
-
-```
-MCP_PORT=4000
-MCP_BEARER_TOKEN=<token from step 2>
-MCP_DB_USER=mcp_readonly
-MCP_DB_PASSWORD=<password from step 1>
-```
-
-The `MCP_DB_HOST`, `MCP_DB_PORT`, and `MCP_DB_NAME` values will fall back to the main app's `DB_HOST`, `DB_PORT`, and `DB_NAME` automatically, so only add them if they differ.
-
-**4. (Recommended) Proxy through nginx with HTTPS:**
-
-Add to your nginx site config so the Bearer token is encrypted in transit:
-
-```nginx
-location /mcp {
-    proxy_pass         http://127.0.0.1:4000;
-    proxy_http_version 1.1;
-    proxy_set_header   Host $host;
-    proxy_set_header   X-Real-IP $remote_addr;
-    proxy_read_timeout 30s;
-}
-```
-
----
-
-## Connecting Claude Code (per engineer)
-
-Add to `~/.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "aashray": {
-      "type": "http",
-      "url": "https://your-server-domain.com/mcp",
-      "headers": {
-        "Authorization": "Bearer <MCP_BEARER_TOKEN>"
-      }
-    }
-  }
-}
-```
-
-Then add `"aashray"` to `enabledMcpjsonServers` in `~/.claude/settings.json`:
-
-```json
-{
-  "enabledMcpjsonServers": ["aashray"]
-}
-```
-
-Verify it's working:
-
-```bash
-curl -s https://your-server-domain.com/health \
-  -H "Authorization: Bearer <token>"
-# → {"status":"ok","tools":6}
-```
-
----
-
-## Pairing with Sentry MCP
-
-The MCP server is designed to work alongside the [Sentry MCP server](https://docs.sentry.io/product/sentry-mcp/) — not replace it. A typical debugging workflow:
-
-1. **Sentry MCP** → get the crash details, stack trace, and affected `userId` or request ID
-2. **`search_logs`** → pass the `correlationId` or `userId` from Sentry to get the full request lifecycle from our structured logs
-3. **`query_db`** → look up the booking, room, or user record involved to understand the data state at the time of the crash
-
-Add both to `~/.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "aashray": {
-      "type": "http",
-      "url": "https://your-server-domain.com/mcp",
-      "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
-    },
-    "sentry": {
-      "type": "http",
-      "url": "https://mcp.sentry.dev/mcp"
-    }
-  }
-}
-```
-
-Then add both to `enabledMcpjsonServers` in `~/.claude/settings.json`:
-
-```json
-{
-  "enabledMcpjsonServers": ["aashray", "sentry"]
-}
-```
-
----
-
-## Deployment
-
-The MCP server is deployed automatically on every push to `main` via the existing CI/CD pipeline. The workflow:
-
-1. Installs `mcp-server/` dependencies separately (`npm ci` inside `mcp-server/`)
-2. Sources `.env.prod` to make MCP env vars available to PM2
-3. Runs `pm2 reload MCPServer --update-env --env prod` (zero-downtime reload)
-4. Falls back to `pm2 start` on first deploy when the process doesn't exist yet
-5. Verifies the process with `pm2 show MCPServer`
-
-No manual intervention is needed after the first-time server setup above.
