@@ -17,8 +17,10 @@ import {
   getOtherBookingUser,
   notifyCardno
 } from '../../helpers/notification.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 
 export const FetchUpcoming = async (req, res) => {
+  req.log.info('fetch_upcoming_utsav_start');
   const today = moment().format('YYYY-MM-DD');
 
   const page = parseInt(req.query.page) || 1;
@@ -80,13 +82,16 @@ export const FetchUpcoming = async (req, res) => {
     }))
   };
 
+  req.log.info('fetch_upcoming_utsav_success', { count: utsavs.length });
   return res.status(200).send(formattedResponse);
 };
 
 export const ViewUtsavBookings = async (req, res) => {
+  attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  req.log.info('fetch_utsav_bookings_start', { cardno: req.user.cardno, page, pageSize });
 
   const utsavs = await database.query(
     `
@@ -131,11 +136,14 @@ export const ViewUtsavBookings = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_utsav_bookings_success', { cardno: req.user.cardno, count: utsavs.length });
   return res.status(200).send({ data: utsavs });
 };
 
 export const CancelUtsavBooking = async (req, res) => {
+  attachUserContext(req);
   const { bookingid } = req.body;
+  req.log.info('cancel_utsav_booking_start', { bookingid, cardno: req.user.cardno });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -153,18 +161,35 @@ export const CancelUtsavBooking = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('cancel_utsav_booking_not_found', { bookingid, cardno: req.user.cardno });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  req.log.info('cancel_utsav_booking_found', {
+    bookingid,
+    cardno: req.user.cardno,
+    utsavid: booking.utsavid,
+    packageid: booking.packageid,
+    currentStatus: booking.status
+  });
+
   await userCancelBooking(req.user, booking, t);
+  req.log.info('cancel_utsav_booking_cancelled', {
+    bookingid,
+    cardno: req.user.cardno,
+    previousStatus: booking.status,
+    newStatus: 'cancelled'
+  });
 
   const utsav = await UtsavDb.findOne({
     where: { id: booking.utsavid }
   });
   await cancelUtsavFoodBookings(booking,req.user.username,t);
   await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
-  
+  req.log.info('cancel_utsav_booking_seat_opened', { bookingid, utsavid: booking.utsavid });
+
   await t.commit();
+  req.log.info('cancel_utsav_booking_committed', { bookingid });
   
 
   if (booking.bookedBy) {
@@ -186,11 +211,13 @@ export const CancelUtsavBooking = async (req, res) => {
 
   await sendUtsavBookingUpdateEmail(booking, utsav);
 
+  req.log.info('cancel_utsav_booking_success', { bookingid, cardno: req.user.cardno });
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const FetchUtsavById = async (req, res) => {
   const { id } = req.params;
+  req.log.info('fetch_utsav_by_id_start', { utsavId: id });
   const today = moment().format('YYYY-MM-DD');
 
   const utsav = await database.query(
@@ -229,8 +256,10 @@ export const FetchUtsavById = async (req, res) => {
   );
 
   if (!utsav || utsav.length === 0) {
+    req.log.warn('fetch_utsav_by_id_not_found', { utsavId: id });
     throw new ApiError(404, 'Utsav not found');
   }
 
+  req.log.info('fetch_utsav_by_id_success', { utsavId: id });
   return res.status(200).send({ data: utsav[0] });
 };

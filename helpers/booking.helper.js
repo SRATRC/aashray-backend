@@ -126,7 +126,7 @@ export function getBookingTypeFromBooking(booking) {
   }
 
   if (!bookingType) {
-    throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${typeof booking}`);
+    throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${JSON.stringify(booking)}`);
   }
 
   return bookingType;

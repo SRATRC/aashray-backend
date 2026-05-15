@@ -257,7 +257,7 @@ const handleEarlyCheckout = async ({
     primary: {
       token: card.token,
       title: 'Raj Sharan early checkout',
-      body: 'We noticed you checked out early. Adjustment amount has been credited to payer’s account.'
+      body: "We noticed you checked out early. Adjustment amount has been credited to payer's account."
     },
     screen: '/bookings'
   });
@@ -266,6 +266,8 @@ const handleEarlyCheckout = async ({
 export const manualCheckin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
+
+  req.log.info('manual_checkin_start', { bookingid: req.params.bookingid });
 
   const today = moment().format('YYYY-MM-DD');
 
@@ -277,10 +279,12 @@ export const manualCheckin = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('manual_checkin_not_found', { bookingid: req.params.bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   if (booking.checkin > today) {
+    req.log.warn('manual_checkin_too_early', { bookingid: booking.bookingid, checkin: booking.checkin, today });
     throw new ApiError(
       404,
       `Cannot check-in until ${booking.checkin}. Please ask the guest to create ` +
@@ -297,6 +301,7 @@ export const manualCheckin = async (req, res) => {
     transaction &&
     [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
   ) {
+    req.log.warn('manual_checkin_payment_pending', { bookingid: booking.bookingid, transactionStatus: transaction.status });
     throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
@@ -309,6 +314,7 @@ export const manualCheckin = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('manual_checkin_success', { bookingid: booking.bookingid, cardno: booking.cardno });
   return res
     .status(200)
     .send({ message: 'Successfully checked in', data: booking });
@@ -318,6 +324,8 @@ export const manualCheckin = async (req, res) => {
 export const manualCheckout = async (req, res) => {
   const dbTransaction = await database.transaction();
   req.transaction = dbTransaction;
+
+  req.log.info('manual_checkout_start', { bookingid: req.params.bookingid });
 
   const booking = await RoomBooking.findOne({
     include: [
@@ -333,14 +341,9 @@ export const manualCheckout = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('manual_checkout_not_found', { bookingid: req.params.bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
-
-  logger.info(
-    `Successfully checked out for bookingid ${booking.bookingid} of user ${
-      booking.cardno
-    } on ${moment().format('DD-MM-YYYY')}, ${moment().format('HH:mm:ss')}`
-  );
 
   const transaction = await Transactions.findOne({
     where: { bookingid: booking.bookingid }
@@ -348,6 +351,8 @@ export const manualCheckout = async (req, res) => {
 
   const today = moment().format('YYYY-MM-DD');
   const checkoutTime = moment().format('HH:mm:ss');
+
+  req.log.info('manual_checkout_processing', { bookingid: booking.bookingid, cardno: booking.cardno, plannedCheckout: booking.checkout, today, checkoutTime });
 
   if (today === booking.checkout) {
     await handleSameDayCheckout({
@@ -381,12 +386,15 @@ export const manualCheckout = async (req, res) => {
   }
 
   await dbTransaction.commit();
+  req.log.info('manual_checkout_success', { bookingid: booking.bookingid, cardno: booking.cardno, today });
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
 export const cancelFlatBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
+
+  req.log.info('cancel_flat_booking_start', { bookingid: req.params.bookingid });
 
   const booking = await FlatBooking.findOne({
     include: [
@@ -409,6 +417,7 @@ export const cancelFlatBooking = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('cancel_flat_booking_not_found', { bookingid: req.params.bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
@@ -421,6 +430,7 @@ export const cancelFlatBooking = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('cancel_flat_booking_success', { bookingid: booking.bookingid, cardno: booking.cardno });
 
   sendDualUserNotifications({
     primary: {
@@ -453,6 +463,8 @@ export const flatCheckin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  req.log.info('flat_checkin_start', { bookingid: req.params.bookingid });
+
   const today = moment().format('YYYY-MM-DD');
 
   const booking = await FlatBooking.findOne({
@@ -463,10 +475,12 @@ export const flatCheckin = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('flat_checkin_not_found', { bookingid: req.params.bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   if (booking.checkin > today) {
+    req.log.warn('flat_checkin_too_early', { bookingid: booking.bookingid, checkin: booking.checkin, today });
     throw new ApiError(404, `Cannot check-in until ${booking.checkin}.`);
   }
 
@@ -479,6 +493,7 @@ export const flatCheckin = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('flat_checkin_success', { bookingid: booking.bookingid, cardno: booking.cardno });
   return res
     .status(200)
     .send({ message: 'Successfully checked in', data: booking });
@@ -488,6 +503,8 @@ export const flatCheckout = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  req.log.info('flat_checkout_start', { bookingid: req.params.bookingid });
+
   const booking = await FlatBooking.findOne({
     where: {
       bookingid: req.params.bookingid,
@@ -496,12 +513,14 @@ export const flatCheckout = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('flat_checkout_not_found', { bookingid: req.params.bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   const today = moment().format('YYYY-MM-DD');
 
   if (today > booking.checkout) {
+    req.log.warn('flat_checkout_overstay', { bookingid: booking.bookingid, plannedCheckout: booking.checkout, today });
     throw new ApiError(
       404,
       `Original check-out date was ${booking.checkout}. Please create ` +
@@ -522,12 +541,16 @@ export const flatCheckout = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('flat_checkout_success', { bookingid: booking.bookingid, cardno: booking.cardno, today });
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
 export const roomBooking = async (req, res) => {
   const { mobno, cardno, checkin_date, checkout_date, room_type, floor_pref } =
     req.body;
+
+  req.log.info('room_booking_start', { cardno, mobno, checkin_date, checkout_date, room_type });
+
   if (checkin_date > checkout_date) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
@@ -537,10 +560,12 @@ export const roomBooking = async (req, res) => {
     : await CardDb.findOne({ where: { cardno } });
 
   if (!card) {
+    req.log.warn('room_booking_card_not_found', { cardno, mobno });
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
   if (await checkRoomAlreadyBooked(checkin_date, checkout_date, card.cardno)) {
+    req.log.warn('room_booking_already_booked', { cardno: card.cardno, checkin_date, checkout_date });
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
@@ -594,10 +619,13 @@ export const roomBooking = async (req, res) => {
     },
     screen: '/bookings'
   });
+  req.log.info('room_booking_success', { cardno: card.cardno, checkin_date, checkout_date, bookingId: booking.bookingId });
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const flatBooking = async (req, res) => {
+  req.log.info('flat_booking_start', { mobno: req.params.mobno, checkin_date: req.body.checkin_date, checkout_date: req.body.checkout_date, flat_no: req.body.flat_no });
+
   if (req.body.checkin_date > req.body.checkout_date) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
@@ -619,6 +647,7 @@ export const flatBooking = async (req, res) => {
   });
 
   if (!card) {
+    req.log.warn('flat_booking_card_not_found', { mobno: req.params.mobno });
     throw new ApiError(404, ERR_CARD_NOT_FOUND);
   }
 
@@ -629,6 +658,7 @@ export const flatBooking = async (req, res) => {
       card.cardno
     )
   ) {
+    req.log.warn('flat_booking_already_booked', { cardno: card.cardno, checkin_date: req.body.checkin_date, checkout_date: req.body.checkout_date });
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
 
@@ -675,49 +705,62 @@ export const flatBooking = async (req, res) => {
     screen: '/bookings'
   });
 
+  req.log.info('flat_booking_success', { cardno: card.cardno, flat_no: req.body.flat_no, checkin: req.body.checkin_date, checkout: req.body.checkout_date, bookingId: booking.bookingId });
   return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
+  req.log.info('fetch_all_room_bookings_start');
+
   const bookings = await RoomBooking.findAll({
     order: [['checkin', 'ASC']]
   });
 
+  req.log.info('fetch_all_room_bookings_success', { count: bookings.length });
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
 export const fetchAllFlatBookings = async (req, res) => {
+  req.log.info('fetch_all_flat_bookings_start');
+
   const bookings = await FlatBooking.findAll({
     order: [['checkin', 'ASC']]
   });
 
+  req.log.info('fetch_all_flat_bookings_success', { count: bookings.length });
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
 export const fetchRoomBookingsByCard = async (req, res) => {
+  const cardno = req.params.cardno;
+  req.log.info('fetch_room_bookings_by_card_start', { cardno });
+
   const bookings = await RoomBooking.findAll({
-    where: {
-      cardno: req.params.cardno
-    },
+    where: { cardno },
     order: [['checkin', 'ASC']]
   });
 
+  req.log.info('fetch_room_bookings_by_card_success', { cardno, count: bookings.length });
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
 export const fetchFlatBookingsByCard = async (req, res) => {
+  const cardno = req.params.cardno;
+  req.log.info('fetch_flat_bookings_by_card_start', { cardno });
+
   const bookings = await FlatBooking.findAll({
-    where: {
-      cardno: req.params.cardno
-    },
+    where: { cardno },
     order: [['checkin', 'ASC']]
   });
 
+  req.log.info('fetch_flat_bookings_by_card_success', { cardno, count: bookings.length });
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
 export const updateRoomBooking = async (req, res) => {
   const { bookingid, roomno } = req.body;
+
+  req.log.info('update_room_booking_start', { bookingid, roomno });
 
   const booking = await RoomBooking.findOne({
     include: [
@@ -730,6 +773,7 @@ export const updateRoomBooking = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('update_room_booking_not_found', { bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
@@ -754,11 +798,14 @@ export const updateRoomBooking = async (req, res) => {
   });
 
   await t.commit();
+  req.log.info('update_room_booking_success', { bookingid, oldRoomno: booking.roomno, newRoomno: roomno });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateFlatBooking = async (req, res) => {
   const { bookingid, flatno, checkin_date, checkout_date, status } = req.body;
+
+  req.log.info('update_flat_booking_start', { bookingid, flatno, checkin_date, checkout_date, status });
 
   validateDate(checkin_date, checkout_date);
 
@@ -773,6 +820,7 @@ export const updateFlatBooking = async (req, res) => {
     where: { bookingid }
   });
   if (!booking) {
+    req.log.warn('update_flat_booking_not_found', { bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
@@ -794,10 +842,13 @@ export const updateFlatBooking = async (req, res) => {
     screen: '/bookings'
   });
 
+  req.log.info('update_flat_booking_success', { bookingid, flatno, status });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const roomList = async (req, res) => {
+  req.log.info('room_list_start');
+
   const result = await RoomDb.findAll({
     attributes: ['roomno', 'roomtype', 'gender', 'roomstatus'],
     where: {
@@ -807,31 +858,37 @@ export const roomList = async (req, res) => {
     }
   });
 
+  req.log.info('room_list_success', { count: result.length });
   return res.status(200).send({ message: 'Success', data: result });
 };
 
 export const flatList = async (req, res) => {
+  req.log.info('flat_list_start');
+
   const flats = await FlatDb.findAll({
     attributes: [[Sequelize.fn('DISTINCT', Sequelize.col('flatno')), 'flatno']]
   });
+
+  req.log.info('flat_list_success', { count: flats.length });
   return res.status(200).send({ message: 'Success', data: flats });
 };
 
 export const availableRooms = async (req, res) => {
   const bookingid = req.params.bookingid;
+  req.log.info('available_rooms_start', { bookingid });
 
   const booking = await RoomBooking.findOne({
     where: { bookingid }
   });
 
   if (!booking) {
+    req.log.warn('available_rooms_booking_not_found', { bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const today = moment().format('YYYY-MM-DD');
-
   const rooms = await findAllRoomsUnfiltered(booking.roomtype, booking.gender);
 
+  req.log.info('available_rooms_success', { bookingid, roomtype: booking.roomtype, count: rooms.length });
   return res
     .status(200)
     .send({ message: 'Fetched available rooms', data: rooms });
@@ -839,9 +896,11 @@ export const availableRooms = async (req, res) => {
 
 export const availableRoomsForDay = async (req, res) => {
   const { date, roomtype, gender } = req.query;
+  req.log.info('available_rooms_for_day_start', { date, roomtype, gender });
 
   const rooms = await findAllRoomsForDay(date, roomtype, gender);
 
+  req.log.info('available_rooms_for_day_success', { date, roomtype, count: rooms.length });
   return res.status(200).send({
     message: 'Fetched available rooms',
     data: rooms
@@ -851,6 +910,8 @@ export const availableRoomsForDay = async (req, res) => {
 export const blockRoom = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
+
+  req.log.info('block_room_start', { roomno: req.params.roomno });
 
   const rooms = await RoomDb.findAll({
     where: {
@@ -862,6 +923,7 @@ export const blockRoom = async (req, res) => {
   });
 
   if (rooms.length == 0) {
+    req.log.warn('block_room_not_found', { roomno: req.params.roomno });
     throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
@@ -876,12 +938,15 @@ export const blockRoom = async (req, res) => {
   }
 
   await t.commit();
+  req.log.info('block_room_success', { roomno: req.params.roomno, count: rooms.length });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const unblockRoom = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
+
+  req.log.info('unblock_room_start', { roomno: req.params.roomno });
 
   const rooms = await RoomDb.findAll({
     where: {
@@ -893,6 +958,7 @@ export const unblockRoom = async (req, res) => {
   });
 
   if (rooms.length == 0) {
+    req.log.warn('unblock_room_not_found', { roomno: req.params.roomno });
     throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
@@ -907,12 +973,15 @@ export const unblockRoom = async (req, res) => {
   }
 
   await t.commit();
+  req.log.info('unblock_room_success', { roomno: req.params.roomno, count: rooms.length });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateRoom = async (req, res) => {
   const { roomtype, gender } = req.body;
   const roomno = req.params.roomno;
+
+  req.log.info('update_room_start', { roomno, roomtype, gender });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -922,6 +991,7 @@ export const updateRoom = async (req, res) => {
   });
 
   if (!room) {
+    req.log.warn('update_room_not_found', { roomno });
     throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
@@ -935,10 +1005,13 @@ export const updateRoom = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('update_room_success', { roomno, roomtype, gender });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const rcBlockList = async (req, res) => {
+  req.log.info('rc_block_list_start');
+
   const today = moment().format('YYYY-MM-DD');
   const blocked = await BlockDates.findAll({
     attributes: ['id', 'checkin', 'checkout', 'comments', 'status'],
@@ -948,6 +1021,7 @@ export const rcBlockList = async (req, res) => {
     order: [['checkin', 'ASC']]
   });
 
+  req.log.info('rc_block_list_success', { count: blocked.length });
   return res
     .status(200)
     .send({ message: 'Fetched RC block list', data: blocked });
@@ -955,10 +1029,12 @@ export const rcBlockList = async (req, res) => {
 
 export const blockRC = async (req, res) => {
   const { checkin_date, checkout_date, comments } = req.body;
+  req.log.info('block_rc_start', { checkin_date, checkout_date, comments });
 
   const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
   if (blockedDates.length > 0) {
+    req.log.warn('block_rc_already_blocked', { checkin_date, checkout_date, conflictCount: blockedDates.length });
     throw new ApiError(
       400,
       'Already blocked on one or more of the given dates',
@@ -977,21 +1053,32 @@ export const blockRC = async (req, res) => {
     throw new ApiError(400, 'Error occured while blocking RC');
   }
 
+  req.log.info('block_rc_success', { checkin_date, checkout_date });
   return res.status(200).send({ message: 'Blocked RC successfully' });
 };
 
 export const unblockRC = async (req, res) => {
+  req.log.info('unblock_rc_start', { id: req.params.id });
+
   const blocked = await BlockDates.findByPk(req.params.id);
+
+  if (!blocked) {
+    req.log.warn('unblock_rc_not_found', { id: req.params.id });
+    throw new ApiError(404, 'Block record not found');
+  }
 
   await blocked.update({
     status: STATUS_INACTIVE,
     updatedBy: req.user.username
   });
 
+  req.log.info('unblock_rc_success', { id: req.params.id });
   return res.status(200).send({ message: 'Unblocked RC successfully' });
 };
 
 export const occupancyReport = async (req, res) => {
+  req.log.info('occupancy_report_start');
+
   const today = moment().startOf('day').toDate(); // today's 00:00
   const tomorrow = moment().add(1, 'day').startOf('day').toDate(); // tomorrow 00:00
 
@@ -1019,11 +1106,13 @@ export const occupancyReport = async (req, res) => {
     }
   });
 
+  req.log.info('occupancy_report_success', { count: result.length });
   return res.status(200).send({ message: 'Success', data: result });
 };
 
 export const ReservationReport = async (req, res) => {
   const { start_date, end_date, statuses } = req.query;
+  req.log.info('reservation_report_start', { start_date, end_date, statuses });
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
@@ -1036,6 +1125,7 @@ export const ReservationReport = async (req, res) => {
     statuses
   );
 
+  req.log.info('reservation_report_success', { start_date, end_date, count: reservations.length });
   return res
     .status(200)
     .send({ message: 'Fetched room reservation report', data: reservations });
@@ -1043,6 +1133,7 @@ export const ReservationReport = async (req, res) => {
 
 export const flatReservationReport = async (req, res) => {
   const { start_date, end_date, statuses } = req.query;
+  req.log.info('flat_reservation_report_start', { start_date, end_date, statuses });
 
   // Handle if `statuses` is not provided or is a single value
   const statusArray = Array.isArray(statuses)
@@ -1063,25 +1154,35 @@ export const flatReservationReport = async (req, res) => {
   }
 
   const bookings = await FlatBooking.findAll({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
-        required: true
-      }
-    ],
-    attributes: [
-      'bookingid',
-      'flatno',
-      'checkin',
-      'checkout',
-      'status',
-      'nights'
-    ],
-    where: whereClause,
-    order: [['checkin', 'ASC']]
-  });
+  include: [
+    {
+      model: CardDb,
+      attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+      required: true
+    },
+    {
+      model: Transactions,
+      as: 'transactions',
+      attributes: ['status', 'description'],
+      required: false,
+      separate: true,
+      limit: 1,
+      order: [['createdAt', 'DESC']]
+    }
+  ],
+  attributes: [
+    'bookingid',
+    'flatno',
+    'checkin',
+    'checkout',
+    'status',
+    'nights'
+  ],
+  where: whereClause,
+  order: [['checkin', 'ASC']]
+});
 
+  req.log.info('flat_reservation_report_success', { start_date, end_date, count: bookings.length });
   return res
     .status(200)
     .send({ message: 'Fetched flat reservation report', data: bookings });
@@ -1089,6 +1190,8 @@ export const flatReservationReport = async (req, res) => {
 
 export const dayWiseGuestCountReport = async (req, res) => {
   const { start_date, end_date } = req.query;
+  req.log.info('day_wise_guest_count_report_start', { start_date, end_date });
+
   const allDates = getDates(start_date, end_date);
 
   const data = [];
@@ -1136,6 +1239,7 @@ export const dayWiseGuestCountReport = async (req, res) => {
     });
   }
 
+  req.log.info('day_wise_guest_count_report_success', { start_date, end_date, dateCount: data.length });
   return res.status(200).send({ message: 'Fetched daywise report', data });
 };
 
@@ -1146,7 +1250,16 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'center', 'credits'],
         required: true
-      }
+      },
+        {
+          model: Transactions,
+          as: 'transactions',
+          attributes: ['status', 'description'],
+          required: false,
+          separate: true,
+          limit: 1,
+          order: [['createdAt', 'DESC']]
+        }
     ],
     attributes: [
       'bookingid',
@@ -1167,12 +1280,14 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
     },
     order: [['checkin', 'ASC']]
   });
-
+  console.log(JSON.stringify(data[0], null, 2));
   return data;
 }
 
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status, description } = req.body;
+
+  req.log.info('update_room_booking_status_start', { bookingid, status });
 
   const booking = await RoomBooking.findOne({
     include: [
@@ -1183,7 +1298,10 @@ export const updateBookingStatus = async (req, res) => {
     ],
     where: { bookingid }
   });
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    req.log.warn('update_room_booking_status_not_found', { bookingid });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
   const t = await database.transaction();
   req.transaction = t;
@@ -1192,10 +1310,12 @@ export const updateBookingStatus = async (req, res) => {
   let newStatus = originalStatus;
 
   if (!status || status === originalStatus) {
+    req.log.warn('update_room_booking_status_same_or_missing', { bookingid, status, originalStatus });
     throw new ApiError(400, 'Status is same as before or missing');
   }
 
   if (originalStatus === STATUS_ADMIN_CANCELLED) {
+    req.log.warn('update_room_booking_status_already_cancelled', { bookingid });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
@@ -1419,6 +1539,7 @@ export const updateBookingStatus = async (req, res) => {
   }
 
   await t.commit();
+  req.log.info('update_room_booking_status_transition', { bookingid, fromStatus: originalStatus, toStatus: newStatus });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -1464,6 +1585,7 @@ export async function findAllRoomsForDay(date, room_type, gender) {
 
 export const guestsByDateAndRoomtype = async (req, res) => {
   const { date, roomtype } = req.query;
+  req.log.info('guests_by_date_and_roomtype_start', { date, roomtype });
 
   const guests = await RoomBooking.findAll({
     where: {
@@ -1485,6 +1607,7 @@ export const guestsByDateAndRoomtype = async (req, res) => {
     order: [['roomno', 'ASC']]
   });
 
+  req.log.info('guests_by_date_and_roomtype_success', { date, roomtype, count: guests.length });
   return res
     .status(200)
     .send({ message: 'Fetched guests for the day', data: guests });
@@ -1513,6 +1636,8 @@ export async function findAllRoomsUnfiltered(room_type, gender) {
 export const updateFlatBookingStatus = async (req, res) => {
   const { bookingid, status, description } = req.body;
 
+  req.log.info('update_flat_booking_status_start', { bookingid, status });
+
   const booking = await FlatBooking.findOne({
     include: [
       {
@@ -1522,7 +1647,10 @@ export const updateFlatBookingStatus = async (req, res) => {
     ],
     where: { bookingid }
   });
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    req.log.warn('update_flat_booking_status_not_found', { bookingid });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
   const t = await database.transaction();
   req.transaction = t;
@@ -1531,10 +1659,12 @@ export const updateFlatBookingStatus = async (req, res) => {
   let newStatus = originalStatus;
 
   if (!status || status === originalStatus) {
+    req.log.warn('update_flat_booking_status_same_or_missing', { bookingid, status, originalStatus });
     throw new ApiError(400, 'Status is same as before or missing');
   }
 
   if (originalStatus === STATUS_ADMIN_CANCELLED) {
+    req.log.warn('update_flat_booking_status_already_cancelled', { bookingid });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
@@ -1757,12 +1887,14 @@ export const updateFlatBookingStatus = async (req, res) => {
   }
 
   await t.commit();
+  req.log.info('update_flat_booking_status_transition', { bookingid, fromStatus: originalStatus, toStatus: newStatus });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 
 export const fetchLateCheckoutFees = async (req, res) => {
   const { payment_type } = req.query;
+  req.log.info('fetch_late_checkout_fees_start', { payment_type });
 
   const statusMap = {
     payment_pending: ['cash pending'],
@@ -1773,6 +1905,7 @@ export const fetchLateCheckoutFees = async (req, res) => {
   const statuses = statusMap[payment_type];
 
   if (!statuses) {
+    req.log.warn('fetch_late_checkout_fees_invalid_payment_type', { payment_type });
     return res.status(400).json({
       success: false,
       message: `Invalid payment_type: ${payment_type}`
@@ -1876,6 +2009,7 @@ export const fetchLateCheckoutFees = async (req, res) => {
       };
     });
 
+    req.log.info('fetch_late_checkout_fees_success', { payment_type, count: data.length });
     res.json({
       success: true,
       data,
@@ -1885,7 +2019,7 @@ export const fetchLateCheckoutFees = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error fetching late checkout fees:', error);
+    req.log.error('fetch_late_checkout_fees_error', { payment_type, error: error.message });
     res.status(500).json({
       success: false,
       message: error.message
@@ -1896,26 +2030,26 @@ export const fetchLateCheckoutFees = async (req, res) => {
 
 export const revokeLateCheckoutFee = async (req, res) => {
   const { transactionId, status } = req.body;
+  req.log.info('revoke_late_checkout_fee_start', { transactionId, status });
 
   try {
-    console.log(`Updating transaction ${transactionId} to status: ${status}`);
-    
     const result = await Transactions.update(
       { status },
       { where: { id: transactionId } }
     );
 
     if (result[0] === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Transaction not found or already updated' 
+      req.log.warn('revoke_late_checkout_fee_not_found', { transactionId });
+      return res.status(404).json({
+        success: false,
+        message: 'Transaction not found or already updated'
       });
     }
 
-    console.log(`Successfully updated transaction ${transactionId}`);
+    req.log.info('revoke_late_checkout_fee_success', { transactionId, status });
     res.json({ success: true, message: 'Transaction updated successfully' });
   } catch (error) {
-    console.error('Error updating transaction:', error);
+    req.log.error('revoke_late_checkout_fee_error', { transactionId, error: error.message });
     res.status(500).json({ success: false, message: error.message });
   }
 };

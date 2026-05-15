@@ -1,4 +1,10 @@
-import { TravelDb, CardDb, Transactions } from '../../models/associations.js';
+import {
+  TravelDb,
+  CardDb,
+  Transactions,
+  TravelBusGroup,
+  TravelBusPassengers
+} from '../../models/associations.js';
 import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
@@ -20,7 +26,7 @@ import {
 import {
   adminCancelTransaction,
   createPendingTransaction,
-  cancelTransaction
+  cancelTransaction,
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
@@ -39,17 +45,8 @@ function getAdditionalConditions(
 ) {
   let additionalWhereClause = '';
 
-  console.log('🔍 getAdditionalConditions called with:', {
-    whereClauses,
-    pickupRC,
-    dropRC,
-    replacementMap
-  });
-
   if (Array.isArray(whereClauses) && whereClauses.length > 0) {
     additionalWhereClause += ` AND ${whereClauses.join(' AND ')}`;
-  } else if (whereClauses && !Array.isArray(whereClauses)) {
-    console.warn('⚠️ Warning: whereClauses is not an array:', whereClauses);
   }
 
   if (pickupRC === 'true') {
@@ -60,17 +57,14 @@ function getAdditionalConditions(
     additionalWhereClause += " AND t1.drop_point = 'RC'";
   }
 
-  console.log('✅ Final additionalWhereClause:', additionalWhereClause);
-
   return additionalWhereClause;
 }
 
 export const fetchSummary = async (req, res) => {
-  console.log('🚀 fetchSummary triggered');
-
   try {
     const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
       req.query;
+    req.log.info('travel_fetch_summary_start', { start_date, end_date, statuses, pickupRC, dropRC });
 
     const normalizedStatuses = Array.isArray(statuses)
       ? statuses
@@ -122,7 +116,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.pickup_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)', 'railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -131,7 +125,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.drop_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)','railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -158,7 +152,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.pickup_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)','railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -167,7 +161,7 @@ export const fetchSummary = async (req, res) => {
           WHEN LOWER(t1.drop_point) IN (
             'dadar', 'dadar (swami narayan temple)', 'dadar (swaminarayan temple)', 'amar mahal',
             'airoli', 'borivali', 'vile parle (sahara star)', 'airport terminal 1', 'airport terminal 2',
-            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)',
+            'railway station (bandra terminus)', 'railway station (kurla terminus)', 'railway station (ltt - kurla)','railway station (ltt - kurla terminus)',
             'railway station (csmt)', 'railway station (mumbai central)', 'mullund', 'mulund',
             'airport t1', 'airport t2', 'other', 'other (enter location in comments)',
             'railway station (ltt - kurla)', 'vile parle (sahara star hotel)', 'full car booking',
@@ -185,16 +179,15 @@ export const fetchSummary = async (req, res) => {
       ORDER BY destination, status
     `;
 
-    console.log('📥 Replacements:', replacements);
     const data = await database.query(sql, {
       replacements,
       type: Sequelize.QueryTypes.SELECT
     });
 
-    console.log('📊 fetchSummary data:', data);
+    req.log.info('travel_fetch_summary_success', { start_date, end_date, count: data.length });
     return res.status(200).send({ message: 'Fetched data', data });
   } catch (error) {
-    console.error('❌ fetchSummary error:', error);
+    req.log.error('travel_fetch_summary_error', { error: error.message });
     return res.status(500).send({
       statusCode: 500,
       message: error.message,
@@ -206,6 +199,7 @@ export const fetchSummary = async (req, res) => {
 export const fetchUpcomingBookings = async (req, res) => {
   const { start_date, end_date, statuses, pickupRC, dropRC, adminComments } =
     req.query;
+  req.log.info('travel_fetch_upcoming_bookings_start', { start_date, end_date, statuses, pickupRC, dropRC });
 
   const normalizedStatuses = statuses
     ? Array.isArray(statuses)
@@ -268,11 +262,13 @@ export const fetchUpcomingBookings = async (req, res) => {
     `SELECT t1.bookingid, t1.bookedBy, t1.date,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
-       t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
+       t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, tbp.bus_group_id, tbg.bus_name, tbg.timing AS bus_timing, tbg.coordinator_bookingid, tbp.bus_group_id,
        t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+     LEFT JOIN travel_bus_passengers tbp ON tbp.bookingid = t1.bookingid
+     LEFT JOIN travel_bus_group tbg ON tbg.id = tbp.bus_group_id
      WHERE t1.date >= :startDate AND t1.date <= :endDate
      ${additionalWhereClause}
      ORDER BY date ASC`,
@@ -282,11 +278,14 @@ export const fetchUpcomingBookings = async (req, res) => {
     }
   );
 
+  req.log.info('travel_fetch_upcoming_bookings_success', { start_date, end_date, count: data.length });
   return res.status(200).send({ message: 'Fetched data', data });
 };
 
 export const fetchBookingForDriver = async (req, res) => {
   try {
+    req.log.info('travel_fetch_booking_for_driver_start');
+
     // --- Get current IST time ---
     const now = new Date();
     const istNow = new Date(
@@ -310,7 +309,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.pickup_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'railway station (ltt - kurla terminus)', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
@@ -319,7 +318,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.drop_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'railway station (ltt - kurla terminus)', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
@@ -332,7 +331,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.pickup_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'railway station (ltt - kurla terminus)','Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
@@ -353,7 +352,7 @@ export const fetchBookingForDriver = async (req, res) => {
           WHEN t1.drop_point IN (
             'dadar', 'Dadar (Swami Narayan Temple)', 'Dadar (Swaminarayan Temple)', 'Amar Mahal', 'Airoli', 'Borivali',
             'Vile Parle (Sahara Star)', 'Airport Terminal 1', 'Airport Terminal 2', 'Railway Station (Bandra Terminus)',
-            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'Railway Station (CSMT)',
+            'Railway Station (Kurla Terminus)', 'Railway station (LTT - Kurla)', 'railway station (ltt - kurla terminus)', 'Railway Station (CSMT)',
             'Railway Station (Mumbai Central)', 'mullund', 'Mulund', 'AIRPORT T1', 'AIRPORT T2', 'OTHER',
             'RAILWAY STATION (LTT - KURLA)', 'VILE PARLE (SAHARA STAR HOTEL)', 'Full Car Booking',
             'Dadar (Pritam Hotel)', 'Railway station (Mumbai Central)', 'Other (enter location in comments)'
@@ -400,9 +399,10 @@ export const fetchBookingForDriver = async (req, res) => {
       }
     );
 
+    req.log.info('travel_fetch_booking_for_driver_success', { fetchDate, count: data.length });
     return res.status(200).send({ message: 'Fetched data', data });
   } catch (error) {
-    console.error('Error fetching data for driver:', error);
+    req.log.error('travel_fetch_booking_for_driver_error', { error: error.message });
     return res.status(500).send({ message: 'Something went wrong', error });
   }
 };
@@ -410,6 +410,8 @@ export const fetchBookingForDriver = async (req, res) => {
 export const updateBookingStatus = async (req, res) => {
   const { bookingid, status, adminComments,  description, charges, issueCredits } = req.body;
   let newBookingStatus = status;
+
+  req.log.info('travel_update_booking_status_start', { bookingid, status, adminComments, issueCredits });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -423,17 +425,22 @@ export const updateBookingStatus = async (req, res) => {
     ],
     where: {
       bookingid
-      // status: [STATUS_AWAITING_CONFIRMATION, STATUS_CONFIRMED, STATUS_PAYMENT_PENDING, STATUS_PROCEED_FOR_PAYMENT]
     }
   });
 
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    req.log.warn('travel_update_booking_status_not_found', { bookingid });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
-  if (status == booking.status)
-  throw new ApiError(400, 'Status is same as before');
+  if (status == booking.status) {
+    req.log.warn('travel_update_booking_status_same', { bookingid, status });
+    throw new ApiError(400, 'Status is same as before');
+  }
 
 if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
   if (!(booking.status === STATUS_CANCELLED && status === STATUS_ADMIN_CANCELLED)) {
+    req.log.warn('travel_update_booking_status_already_cancelled', { bookingid, currentStatus: booking.status });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 }
@@ -569,7 +576,8 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
   
 
   await t.commit();
- 
+  req.log.info('travel_update_booking_status_transition', { bookingid, fromStatus: booking.status, toStatus: newBookingStatus });
+
   sendMail({
     email: card.email,
     subject: 'Raj Pravas - Travel Booking Updated',
@@ -603,11 +611,14 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     },
     screen: '/bookings'
   });
+  req.log.info('travel_update_booking_status_success', { bookingid });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const updateTransactionStatus = async (req, res) => {
   const { cardno, bookingid, type } = req.body;
+
+  req.log.info('travel_update_transaction_status_start', { cardno, bookingid, type });
 
   const booking = await TravelDb.findOne({
     where: {
@@ -616,7 +627,10 @@ export const updateTransactionStatus = async (req, res) => {
     }
   });
 
-  if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!booking) {
+    req.log.warn('travel_update_transaction_status_booking_not_found', { bookingid });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
 
   const t = await database.transaction();
   req.transaction = t;
@@ -625,13 +639,17 @@ export const updateTransactionStatus = async (req, res) => {
     where: { cardno, bookingid, type }
   });
 
-  if (!transaction) throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
+  if (!transaction) {
+    req.log.warn('travel_update_transaction_status_transaction_not_found', { cardno, bookingid });
+    throw new ApiError(404, ERR_TRANSACTION_NOT_FOUND);
+  }
 
   await adminCancelTransaction(req.user, null, transaction, t);
 
   //TODO: send notification
 
   await t.commit();
+  req.log.info('travel_update_transaction_status_success', { cardno, bookingid, amount: transaction.amount });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -647,8 +665,13 @@ export async function updateBooking(req, res) {
     pickup_point,
     drop_point,
     type,
-    date
+    date,
+    leaving_post_adhyayan,
+    bus_group_id,
+    is_coordinator
   } = req.body;
+
+  req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date });
 
   if (!bookingid) {
     throw new ApiError(400, 'Booking ID is required');
@@ -676,7 +699,9 @@ export async function updateBooking(req, res) {
     );
 
     updatedFields.push('amount');
+
   }
+  
 
   /* 2️⃣ TRAVEL TABLE (pickup / drop / type) */
   const travelUpdate = {};
@@ -684,6 +709,12 @@ export async function updateBooking(req, res) {
   if (drop_point !== undefined) travelUpdate.drop_point = drop_point;
   if (type !== undefined) travelUpdate.type = type;
   if (date !== undefined) travelUpdate.date = date; // ✅ NEW
+  if (leaving_post_adhyayan !== undefined) {
+  travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
+}
+
+  let removedFromOldBus = false;
+  let matchingBus = null;
 
   if (Object.keys(travelUpdate).length > 0) {
     const travelBooking = await TravelDb.findOne({
@@ -695,19 +726,1095 @@ export async function updateBooking(req, res) {
       throw new ApiError(404, 'Travel booking not found');
     }
 
-    await travelBooking.update(travelUpdate, { transaction: t });
+    await travelBooking.update(
+      travelUpdate,
+      { transaction: t }
+    );
 
+    if (
+  pickup_point !== undefined ||
+  drop_point !== undefined ||
+  date !== undefined
+) {
+const updatedPickup =
+  pickup_point || travelBooking.pickup_point;
+
+const updatedDrop =
+  drop_point || travelBooking.drop_point;
+
+const updatedDate =
+  date || travelBooking.date;
+
+    // Remove invalid bus assignment if route/date changed
+
+    const busAssignment =
+      await TravelBusPassengers.findOne({
+        where: {
+          bookingid,
+        },
+        include: [
+          {
+            model: TravelBusGroup,
+            as: 'TravelBusGroup',
+          },
+        ],
+        transaction: t,
+      });
+
+    if (busAssignment) {
+
+      const bus = busAssignment.TravelBusGroup;
+
+      let isValidRoute = true;
+
+      // Date mismatch
+      if (bus.event_date !== updatedDate) {
+        isValidRoute = false;
+      }
+
+      // RC -> Mumbai
+      else if (
+        bus.pickup_point === 'Research Centre'
+      ) {
+
+        if (
+          updatedDrop !== bus.drop_point
+        ) {
+          isValidRoute = false;
+        }
+      }
+
+      // Mumbai -> RC
+      else if (
+        bus.drop_point === 'Research Centre'
+      ) {
+
+        if (
+          updatedPickup !== bus.pickup_point
+        ) {
+          isValidRoute = false;
+        }
+      }
+
+      if (!isValidRoute) {
+
+        removedFromOldBus = true;
+
+        // CHANGE BUS ASSIGNMENT ONLY IF BUS WAS CHANGED
+
+        if (
+          bus_group_id !== undefined
+        ) {
+
+          // REMOVE OLD ASSIGNMENT
+
+          await TravelBusPassengers.destroy({
+            where: {
+              bookingid,
+            },
+            transaction: t,
+          });
+
+          // CREATE NEW ASSIGNMENT
+
+          if (bus_group_id) {
+
+            // CHECK CAPACITY
+
+            const bus =
+              await TravelBusGroup.findByPk(
+                bus_group_id,
+                {
+                  include: [
+                    {
+                      model:
+                        TravelBusPassengers,
+                      as: 'passengers',
+                    },
+                  ],
+                  transaction: t,
+                }
+              );
+
+            if (!bus) {
+              throw new ApiError(
+                404,
+                'Bus not found'
+              );
+            }
+
+            const currentPassengers =
+              bus.passengers.length;
+
+            const capacity =
+              Number(bus.capacity);
+
+            if (
+              currentPassengers >=
+              capacity
+            ) {
+
+              await t.rollback();
+
+              return res.status(400).json({
+                capacityExceeded: true,
+                currentCapacity:
+                  capacity,
+
+                passengerCount:
+                  currentPassengers,
+
+                message:
+                  'Bus capacity exceeded',
+              });
+            }
+            
+            // CHECK CAPACITY
+
+            const selectedBus =
+              await TravelBusGroup.findByPk(
+                bus_group_id,
+                {
+                  include: [
+                    {
+                      model: TravelBusPassengers,
+                      as: 'passengers',
+                    },
+                  ],
+                  transaction: t,
+                }
+              );
+
+            if (!selectedBus) {
+              throw new ApiError(
+                404,
+                'Bus not found'
+              );
+            }
+
+            const selectedBusPassengerCount =
+              selectedBus.passengers.length;
+
+            const selectedBusCapacity =
+              Number(selectedBus.capacity);
+
+            // DON'T COUNT SAME BOOKING
+            const alreadyAssigned =
+              selectedBus.passengers.some(
+                p => p.bookingid === bookingid
+              );
+
+            const effectivePassengers =
+              alreadyAssigned
+                ? selectedBusPassengerCount
+                : selectedBusPassengerCount + 1;
+
+            if (
+              effectivePassengers >
+              selectedBusCapacity
+            ) {
+
+              await t.rollback();
+
+              return res.status(400).json({
+                capacityExceeded: true,
+                currentCapacity:
+                  selectedBusCapacity,
+
+                passengerCount:
+                  selectedBusPassengerCount,
+
+                message:
+                  'Bus capacity exceeded',
+              });
+            }
+
+            await TravelBusPassengers.create(
+              {
+                bus_group_id,
+                bookingid,
+              },
+              {
+                transaction: t,
+              }
+            );
+          }
+        }
+    }
+
+    // SET / REMOVE COORDINATOR
+
+        if (
+          bus_group_id &&
+          is_coordinator !== undefined
+        ) {
+
+          if (
+            is_coordinator === 'yes'
+          ) {
+
+            await TravelBusGroup.update(
+              {
+                coordinator_bookingid:
+                  bookingid,
+              },
+              {
+                where: {
+                  id: bus_group_id,
+                },
+
+                transaction: t,
+              }
+            );
+          }
+
+          else {
+
+            await TravelBusGroup.update(
+              {
+                coordinator_bookingid:
+                  null,
+              },
+              {
+                where: {
+                  id: bus_group_id,
+                  coordinator_bookingid:
+                    bookingid,
+                },
+
+                transaction: t,
+              }
+            );
+          }
+          updatedFields.push(
+            'bus_group_id'
+          );
+
+          updatedFields.push(
+            'is_coordinator'
+          );
+        }
+
+        // Check matching bus for new route
+    const matchingBusWhere = {
+      event_date: updatedDate,
+    };
+
+    // RC -> Mumbai
+    if (
+      updatedPickup === 'Research Centre'
+    ) {
+
+      matchingBusWhere.pickup_point =
+        'Research Centre';
+
+      matchingBusWhere.drop_point =
+        updatedDrop;
+    }
+
+    // Mumbai -> RC
+    else if (
+      updatedDrop === 'Research Centre'
+    ) {
+
+      matchingBusWhere.pickup_point =
+        updatedPickup;
+
+      matchingBusWhere.drop_point =
+        'Research Centre';
+    }
+
+    matchingBus =
+      await TravelBusGroup.findOne({
+        where: matchingBusWhere,
+        transaction: t,
+      });
+    }
     updatedFields.push(...Object.keys(travelUpdate));
+
   }
 
+      // MANUAL BUS CHANGE
+    // EVEN IF ROUTE FIELDS DID NOT CHANGE
+
+    if (
+      bus_group_id !== undefined
+    ) {
+
+      const existingAssignment =
+        await TravelBusPassengers.findOne({
+          where: {
+            bookingid,
+          },
+          transaction: t,
+        });
+
+      const alreadyAssignedToSameBus =
+        existingAssignment &&
+        existingAssignment.bus_group_id ==
+          bus_group_id;
+
+      if (!alreadyAssignedToSameBus) {
+
+        await TravelBusPassengers.destroy({
+          where: {
+            bookingid,
+          },
+          transaction: t,
+        });
+
+        if (bus_group_id) {
+
+          const selectedBus =
+            await TravelBusGroup.findByPk(
+              bus_group_id,
+              {
+                include: [
+                  {
+                    model:
+                      TravelBusPassengers,
+                    as: 'passengers',
+                  },
+                ],
+                transaction: t,
+              }
+            );
+
+          if (!selectedBus) {
+            throw new ApiError(
+              404,
+              'Bus not found'
+            );
+          }
+
+          const passengerCount =
+            selectedBus.passengers.length;
+
+          const capacity =
+            Number(selectedBus.capacity);
+
+          if (
+            passengerCount >= capacity
+          ) {
+
+            await t.rollback();
+
+            return res.status(400).json({
+              capacityExceeded: true,
+
+              currentCapacity:
+                capacity,
+
+              passengerCount,
+
+              message:
+                'Bus capacity exceeded',
+            });
+          }
+
+          await TravelBusPassengers.create(
+            {
+              bus_group_id,
+              bookingid,
+            },
+            {
+              transaction: t,
+            }
+          );
+        }
+
+        updatedFields.push(
+          'bus_group_id'
+        );
+      }
+
+      // COORDINATOR UPDATE
+
+      if (
+        is_coordinator !== undefined
+      ) {
+
+        if (
+          is_coordinator === 'yes'
+        ) {
+
+          await TravelBusGroup.update(
+            {
+              coordinator_bookingid:
+                bookingid,
+            },
+            {
+              where: {
+                id: bus_group_id,
+              },
+              transaction: t,
+            }
+          );
+        }
+
+        else {
+
+          await TravelBusGroup.update(
+            {
+              coordinator_bookingid:
+                null,
+            },
+            {
+              where: {
+                id: bus_group_id,
+                coordinator_bookingid:
+                  bookingid,
+              },
+              transaction: t,
+            }
+          );
+        }
+
+        updatedFields.push(
+          'is_coordinator'
+        );
+      }
+    }
+  }
   if (updatedFields.length === 0) {
     throw new ApiError(400, 'No fields provided to update');
   }
 
   await t.commit();
 
+  req.log.info('travel_update_booking_success', { bookingid, updatedFields });
   return res.json({
     message: 'Booking updated successfully',
     updatedFields,
+
+    removedFromOldBus,
+
+    matchingBusAvailable:
+      !!matchingBus,
+
+    matchingBus,
+  });
+}
+
+export async function createBusGroup(req, res) {
+  const t = await database.transaction();
+
+  try {
+    const {
+      event_date,
+      bus_name,
+      pickup_point,
+      drop_point,
+      timing,
+      capacity,
+      notes,
+      force_create
+    } = req.body;
+
+    if (!event_date || !bus_name) {
+      throw new ApiError(400, 'Event date and bus name are required');
+    }
+
+    const existingBus = await TravelBusGroup.findOne({
+      where: {
+        event_date,
+        bus_name,
+      },
+      transaction: t,
+    });
+
+    if (existingBus) {
+      throw new ApiError(
+        400,
+        'Bus already exists for this date'
+      );
+    }
+
+    const matchingBookings =
+      await TravelDb.findAll({
+        where: {
+          date: event_date,
+          status: 'confirmed',
+          pickup_point,
+          drop_point,
+        },
+
+        attributes: ['bookingid'],
+
+        transaction: t,
+      });
+
+    const matchedPassengerCount =
+      matchingBookings.length;
+
+    // Capacity validation
+    if (
+      Number(capacity) < matchedPassengerCount &&
+      !force_create
+    ) {
+
+      await t.rollback();
+
+      return res.status(200).json({
+        capacityExceeded: true,
+
+        matchedPassengers:
+          matchedPassengerCount,
+
+        currentCapacity:
+          Number(capacity),
+
+        suggestedCapacity:
+          matchedPassengerCount,
+      });
+    }
+
+    const busGroup = await TravelBusGroup.create(
+      {
+        event_date,
+        bus_name,
+        pickup_point,
+        drop_point,
+        timing,
+        capacity,
+        notes,
+        createdBy: req.user.username,
+      },
+      {
+        transaction: t,
+      }
+    );
+
+    // Auto assign matching passengers
+
+    const passengerMappings =
+      matchingBookings.map(item => ({
+        bus_group_id: busGroup.id,
+        bookingid: item.bookingid,
+      }));
+
+    if (passengerMappings.length > 0) {
+
+      await TravelBusPassengers.bulkCreate(
+        passengerMappings,
+        {
+          transaction: t,
+        }
+      );
+    }
+
+    await t.commit();
+
+   return res.status(201).json({
+    message: `Bus created successfully. ${passengerMappings.length} passengers auto assigned.`,
+    data: busGroup,
+  });
+  } catch (error) {
+    await t.rollback();
+
+    req.log.error('create_bus_group_error', {
+      error: error.message,
+    });
+
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Internal server error',
+    });
+  }
+}
+
+
+export async function assignPassengersToBus(req, res) {
+  const t = await database.transaction();
+
+  try {
+    const { bus_group_id, bookingids } = req.body;
+
+    if (!bus_group_id) {
+      throw new ApiError(400, 'Bus group ID is required');
+    }
+
+    if (!bookingids || !Array.isArray(bookingids) || bookingids.length === 0) {
+      throw new ApiError(400, 'Booking IDs are required');
+    }
+
+    // Validate bus exists
+    const busGroup = await TravelBusGroup.findByPk(bus_group_id, {
+      transaction: t,
+    });
+
+    if (!busGroup) {
+      throw new ApiError(404, 'Bus group not found');
+    }
+
+    // Prevent duplicate assignments
+    const existingAssignments = await TravelBusPassengers.findAll({
+      where: {
+        bookingid: bookingids,
+      },
+      transaction: t,
+    });
+
+    if (existingAssignments.length > 0) {
+      const alreadyAssigned = existingAssignments.map(
+        item => item.bookingid
+      );
+
+      throw new ApiError(
+        400,
+        `Some bookings are already assigned: ${alreadyAssigned.join(', ')}`
+      );
+    }
+
+    // Create mappings
+    const passengerMappings = bookingids.map(bookingid => ({
+      bus_group_id,
+      bookingid,
+    }));
+
+    await TravelBusPassengers.bulkCreate(passengerMappings, {
+      transaction: t,
+    });
+
+    await t.commit();
+
+    return res.status(201).json({
+      message: 'Passengers assigned successfully',
+    });
+  } catch (error) {
+    await t.rollback();
+
+    req.log.error('assign_passengers_error', {
+      error: error.message,
+    });
+
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Internal server error',
+    });
+  }
+}
+
+
+export async function fetchBusGroupDetails(req, res) {
+  try {
+    const { id } = req.params;
+
+    const busGroup = await TravelBusGroup.findOne({
+      where: { id },
+
+      include: [
+        {
+          model: TravelBusPassengers,
+          as: 'passengers',
+        },
+      ],
+    });
+
+    if (!busGroup) {
+      throw new ApiError(404, 'Bus group not found');
+    }
+
+    // Get booking IDs
+    const bookingids = busGroup.passengers.map(
+      item => item.bookingid
+    );
+
+    // Fetch passenger details
+    const passengers = await TravelDb.findAll({
+      where: {
+        bookingid: bookingids,
+      },
+
+      include: [
+        {
+          model: CardDb,
+          attributes: ['issuedto', 'mobno', 'cardno'],
+        },
+      ],
+    });
+
+    // Coordinator details
+    const coordinator = passengers.find(
+      p => p.bookingid === busGroup.coordinator_bookingid
+    );
+
+    return res.json({
+      bus: busGroup,
+      coordinator,
+      passengers,
+    });
+  } catch (error) {
+    req.log.error('fetch_bus_group_details_error', {
+      error: error.message,
+    });
+
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Internal server error',
+    });
+  }
+}
+
+export async function setBusCoordinator(req, res) {
+  const t = await database.transaction();
+
+  try {
+    const { bus_group_id, bookingid } = req.body;
+
+    if (!bus_group_id || !bookingid) {
+      throw new ApiError(
+        400,
+        'Bus group ID and booking ID are required'
+      );
+    }
+
+    // Validate bus exists
+    const busGroup = await TravelBusGroup.findByPk(
+      bus_group_id,
+      {
+        transaction: t,
+      }
+    );
+
+    if (!busGroup) {
+      throw new ApiError(404, 'Bus group not found');
+    }
+
+    // Validate passenger belongs to bus
+    const passengerExists =
+      await TravelBusPassengers.findOne({
+        where: {
+          bus_group_id,
+          bookingid,
+        },
+        transaction: t,
+      });
+
+    if (!passengerExists) {
+      throw new ApiError(
+        400,
+        'Passenger does not belong to this bus'
+      );
+    }
+
+    await busGroup.update(
+      {
+        coordinator_bookingid: bookingid,
+      },
+      {
+        transaction: t,
+      }
+    );
+
+    await t.commit();
+
+    return res.json({
+      message: 'Coordinator assigned successfully',
+    });
+  } catch (error) {
+    await t.rollback();
+
+    req.log.error('set_bus_coordinator_error', {
+      error: error.message,
+    });
+
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Internal server error',
+    });
+  }
+}
+
+export async function fetchAllBusGroups(req, res) {
+  try {
+
+    const busGroups =
+      await TravelBusGroup.findAll({
+
+        include: [
+          {
+            model: TravelBusPassengers,
+            as: 'passengers',
+          },
+        ],
+
+        order: [['event_date', 'DESC']],
+      });
+
+    return res.json({
+      data: busGroups,
+    });
+
+  } catch (error) {
+
+    req.log.error(
+      'fetch_all_bus_groups_error',
+      {
+        error: error.message,
+      }
+    );
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+      message:
+        error.message ||
+        'Internal server error',
+    });
+  }
+}
+
+export async function fetchAvailableTravelBookings(req, res) {
+  try {
+
+    const { event_date } = req.query;
+
+    if (!event_date) {
+      throw new ApiError(400, 'Event date is required');
+    }
+
+    // Already assigned booking IDs
+    const assignedPassengers =
+      await TravelBusPassengers.findAll({
+        attributes: ['bookingid'],
+      });
+
+    const assignedBookingIds =
+      assignedPassengers.map(item => item.bookingid);
+
+    // Fetch confirmed travel bookings
+    const busGroup = await TravelBusGroup.findByPk(
+      req.query.bus_group_id
+    );
+
+    if (!busGroup) {
+      throw new ApiError(404, 'Bus group not found');
+    }
+
+    const whereCondition = {
+      date: event_date,
+      status: 'confirmed',
+
+      bookingid: {
+        [Sequelize.Op.notIn]: assignedBookingIds,
+      },
+    };
+
+    // RC → Mumbai
+    if (
+      busGroup.pickup_point === 'Research Centre'
+    ) {
+      whereCondition.drop_point = {
+        [Sequelize.Op.ne]: 'Research Centre',
+      };
+    }
+
+    // Mumbai → RC
+    else if (
+      busGroup.drop_point === 'Research Centre'
+    ) {
+      whereCondition.pickup_point = {
+        [Sequelize.Op.ne]: 'Research Centre',
+      };
+    }
+
+    const bookings = await TravelDb.findAll({
+      where: whereCondition,
+
+      include: [
+        {
+          model: CardDb,
+          attributes: [
+            'issuedto',
+            'mobno',
+            'cardno',
+            'center',
+          ],
+        },
+      ],
+
+      order: [['pickup_point', 'ASC']],
+    });
+
+    return res.json({
+      data: bookings,
+    });
+
+  } catch (error) {
+
+    req.log.error(
+      'fetch_available_travel_bookings_error',
+      {
+        error: error.message,
+      }
+    );
+
+    return res
+      .status(error.statusCode || 500)
+      .json({
+        message:
+          error.message ||
+          'Internal server error',
+      });
+  }
+}
+
+
+export async function removePassengerFromBus(
+  req,
+  res
+) {
+
+  const t = await database.transaction();
+
+  try {
+
+    const { bookingid } = req.params;
+
+    const passenger =
+      await TravelBusPassengers.findOne({
+        where: {
+          bookingid,
+        },
+        transaction: t,
+      });
+
+    if (!passenger) {
+      throw new ApiError(
+        404,
+        'Passenger assignment not found'
+      );
+    }
+
+    const bus =
+      await TravelBusGroup.findByPk(
+        passenger.bus_group_id,
+        {
+          transaction: t,
+        }
+      );
+
+    await TravelBusPassengers.destroy({
+      where: {
+        bookingid,
+      },
+      transaction: t,
+    });
+
+    // Remove coordinator if same
+    if (
+      bus.coordinator_bookingid === bookingid
+    ) {
+
+      await bus.update(
+        {
+          coordinator_bookingid: null,
+        },
+        {
+          transaction: t,
+        }
+      );
+    }
+
+    await t.commit();
+
+    return res.json({
+      message:
+        'Passenger removed successfully',
+    });
+
+  } catch (error) {
+
+    await t.rollback();
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+      message: error.message,
+    });
+  }
+}
+
+export async function updateBusCapacity(
+  req,
+  res
+) {
+
+  try {
+
+    const {
+      bus_group_id,
+      capacity,
+    } = req.body;
+
+    const bus =
+      await TravelBusGroup.findByPk(
+        bus_group_id
+      );
+
+    if (!bus) {
+      throw new ApiError(
+        404,
+        'Bus group not found'
+      );
+    }
+
+    await bus.update({
+      capacity,
+    });
+
+    return res.json({
+      message:
+        'Bus capacity updated successfully',
+    });
+
+  } catch (error) {
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+      message: error.message,
+    });
+  }
+}
+
+
+export async function updateBusGroup(
+  req,
+  res
+) {
+
+  const {
+    bus_name,
+    pickup_point,
+    drop_point,
+    timing,
+    capacity,
+    notes
+  } = req.body;
+
+  const bus =
+    await TravelBusGroup.findByPk(
+      req.params.id
+    );
+
+  if (!bus) {
+    throw new ApiError(
+      404,
+      'Bus not found'
+    );
+  }
+
+  await bus.update({
+    bus_name,
+    pickup_point,
+    drop_point,
+    timing,
+    capacity,
+    notes,
+    updatedBy:
+      req.user.username,
+  });
+
+  return res.status(200).send({
+    message:
+      'Bus updated successfully',
   });
 }

@@ -17,6 +17,8 @@ import ApiError from '../../utils/ApiError.js';
 
 export const uploadWiFiCodes = async (req, res) => {
   try {
+    req.log.info('upload_wifi_codes_start');
+
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheet = XLSX.utils.sheet_to_json(
       workbook.Sheets[workbook.SheetNames[0]],
@@ -66,13 +68,14 @@ export const uploadWiFiCodes = async (req, res) => {
 
     await WifiDb.bulkCreate(uniqueRows);
 
+    req.log.info('upload_wifi_codes_success', { inserted: uniqueRows.length, duplicates: formattedRows.length - uniqueRows.length });
     res.status(200).json({
       message: `${uniqueRows.length} new record(s) inserted. ${
         formattedRows.length - uniqueRows.length
       } duplicate(s) ignored.`
     });
   } catch (err) {
-    console.error('Error processing Excel upload:', err);
+    req.log.error('upload_wifi_codes_error', { error: err.message });
     res.status(500).json({
       error: 'Failed to process and store Excel data: ' + err.message
     });
@@ -81,6 +84,7 @@ export const uploadWiFiCodes = async (req, res) => {
 
 export const wifiRecord = async (req, res) => {
   const { startDate, endDate, status, bookingType } = req.query;
+  req.log.info('wifi_record_start', { startDate, endDate, status, bookingType });
 
   let whereClause = 'WHERE 1 = 1';
   const replacements = {};
@@ -138,9 +142,10 @@ export const wifiRecord = async (req, res) => {
       replacements
     });
 
+    req.log.info('wifi_record_success', { count: result.length });
     res.status(200).json({ message: 'Success', data: result });
   } catch (err) {
-    console.error('Error fetching wifi records:', err);
+    req.log.error('wifi_record_error', { error: err.message });
     res.status(500).json({ error: 'Failed to fetch wifi records' });
   }
 };
@@ -150,6 +155,7 @@ import { Op } from 'sequelize';
 export const getPermanentCodeRequests = async (req, res) => {
   try {
     const { status, requestType } = req.query;
+    req.log.info('get_permanent_code_requests_start', { status, requestType });
 
     const whereClause = {};
 
@@ -177,6 +183,13 @@ export const getPermanentCodeRequests = async (req, res) => {
       whereClause.code = { [Op.not]: null };
     }
 
+    // 🔥 Decide order dynamically
+    let orderField = 'requested_at';
+
+    if (requestType === 'pending-reset') {
+      orderField = 'updatedAt';
+    }
+
     const rows = await PermanentWifiCodes.findAll({
       where: whereClause,
       include: [
@@ -185,9 +198,10 @@ export const getPermanentCodeRequests = async (req, res) => {
           attributes: ['cardno', 'issuedto', 'email', 'mobno', 'res_status']
         }
       ],
-      order: [['requested_at', 'DESC']]
+      order: [[orderField, 'DESC']]
     });
 
+    req.log.info('get_permanent_code_requests_success', { count: rows.length });
     res.status(200).json({
       message: 'Permanent WiFi code requests fetched successfully',
       data: {
@@ -195,8 +209,9 @@ export const getPermanentCodeRequests = async (req, res) => {
         total: rows.length
       }
     });
+
   } catch (error) {
-    console.error('Error fetching permanent WiFi code requests:', error);
+    req.log.error('get_permanent_code_requests_error', { error: error.message });
     res.status(500).json({
       message: error.message
     });
@@ -210,6 +225,7 @@ export const updatePermanentCodeRequest = async (req, res) => {
   try {
     const { requestId } = req.params;
     const { action, permanent_code, admin_comments, ssid, username } = req.body;
+    req.log.info('update_permanent_code_request_start', { requestId, action });
 
 if (
   !action ||
@@ -315,6 +331,7 @@ if (typeof username !== 'undefined') {
 
     await checkAlreadyrequested.reload();
 
+    req.log.info('update_permanent_code_request_success', { requestId, action });
     res.status(200).json({
       message: `Permanent WiFi code request ${action} successfully`,
       data: checkAlreadyrequested
@@ -323,10 +340,10 @@ if (typeof username !== 'undefined') {
     try {
       await t.rollback();
     } catch (rbErr) {
-      console.error('Rollback error:', rbErr);
+      req.log.error('update_permanent_code_request_rollback_error', { error: rbErr.message });
     }
 
-    console.error('Error updating permanent code request:', error);
+    req.log.error('update_permanent_code_request_error', { error: error.message });
 
     if (error instanceof ApiError) {
       return res
@@ -357,6 +374,7 @@ export const uploadPerWiFiCodes = async (req, res) => {
   const transaction = await PermanentWifiCodes.sequelize.transaction();
 
   try {
+    req.log.info('upload_per_wifi_codes_start');
     /* =====================================================
        1. READ EXCEL
        ===================================================== */
@@ -538,6 +556,11 @@ export const uploadPerWiFiCodes = async (req, res) => {
     /* =====================================================
        7. RESPONSE
        ===================================================== */
+    req.log.info('upload_per_wifi_codes_success', {
+      updatedCount: matched.length,
+      skippedInvalidRows: invalidRows.length,
+      skippedMismatched: mismatched.length
+    });
     res.json({
       success: true,
       updatedCount: matched.length,
@@ -551,7 +574,7 @@ export const uploadPerWiFiCodes = async (req, res) => {
 
   } catch (err) {
     await transaction.rollback();
-    console.error(err);
+    req.log.error('upload_per_wifi_codes_error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 };
@@ -572,6 +595,8 @@ export const addPermanentCodeManually = async (req, res) => {
       code
     } = req.body;
 
+    req.log.info('add_permanent_code_manually_start', { cardno, mobno, ssid, deviceType });
+
     if (!mobno || !cardno || !ssid || !code) {
       throw new ApiError(400, 'Required fields missing');
     }
@@ -583,6 +608,7 @@ export const addPermanentCodeManually = async (req, res) => {
     });
 
     if (!card) {
+      req.log.warn('add_permanent_code_manually_card_not_found', { cardno, mobno });
       throw new ApiError(404, 'Card not found');
     }
 
@@ -602,20 +628,21 @@ export const addPermanentCodeManually = async (req, res) => {
 
     await t.commit();
 
+    req.log.info('add_permanent_code_manually_success', { cardno, ssid });
     return res.status(201).json({
       message: 'Permanent WiFi code added successfully'
     });
 
   } catch (err) {
-    // ✅ IMPORTANT: rollback on ANY failure
+    // IMPORTANT: rollback on ANY failure
     if (t) await t.rollback();
+    req.log.error('add_permanent_code_manually_error', { error: err.message });
     throw err; // let global error handler respond
   }
 };
 
 export const insertPerWiFiCodesFromExcel = async (req, res) => {
-  // 🔐 ROLE CHECK
-  // 🔒 EXPLICIT CONFIRMATION REQUIRED
+  // ROLE CHECK / EXPLICIT CONFIRMATION REQUIRED
   if (req.query.allowInsert !== 'true') {
     return res.status(400).json({
       error: 'Insert not allowed. Confirm by sending allowInsert=true'
@@ -625,6 +652,7 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
   const transaction = await PermanentWifiCodes.sequelize.transaction();
 
   try {
+    req.log.info('insert_per_wifi_codes_from_excel_start');
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheet = XLSX.utils.sheet_to_json(
       workbook.Sheets[workbook.SheetNames[0]],
@@ -745,6 +773,11 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
     /* =====================================================
        5. RESPONSE
        ===================================================== */
+    req.log.info('insert_per_wifi_codes_from_excel_success', {
+      insertedCount: toInsert.length,
+      skippedExisting: skippedExisting.length,
+      invalidRows: invalidRows.length
+    });
     res.json({
       success: true,
       insertedCount: toInsert.length,
@@ -754,7 +787,101 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
 
   } catch (err) {
     await transaction.rollback();
-    console.error(err);
+    req.log.error('insert_per_wifi_codes_from_excel_error', { error: err.message });
     res.status(500).json({ error: err.message });
+  }
+};
+
+
+export const generateUsername = async (req, res) => {
+  try {
+    const { cardno, issuedto, deviceType } = req.query;
+
+    if (!cardno || !issuedto || !deviceType) {
+      return res.status(400).json({
+        message: 'cardno, issuedto and deviceType are required'
+      });
+    }
+
+    /* ================= USERNAME BASE ================= */
+
+    const DEVICE_SUFFIX_MAP = {
+      mobile: 'ph',
+      laptop: 'pc',
+      tablet: 'tb'
+    };
+
+    const deviceSuffix =
+      DEVICE_SUFFIX_MAP[deviceType.toLowerCase()] || 'ot';
+
+    const IGNORE_FIRST_NAMES = [
+      'rcof', 'rchk', 'cons', 'chak', 'divi', 'paon', 'guest'
+    ];
+
+    let nameParts = issuedto
+      .trim()
+      .toLowerCase()
+      .replace(/^guest-/, '')
+      .split(/\s+/);
+
+    while (
+      nameParts.length > 1 &&
+      IGNORE_FIRST_NAMES.includes(nameParts[0])
+    ) {
+      nameParts.shift();
+    }
+
+    const firstName = nameParts[0] || '';
+    const lastName =
+      nameParts.length > 1
+        ? nameParts[nameParts.length - 1]
+        : '';
+
+    const cardLast4 = cardno.slice(-4);
+
+    const baseUsername =
+      `${firstName}${lastName}${cardLast4}${deviceSuffix}`;
+
+    /* ================= INCREMENT LOGIC ================= */
+
+    const similarUsernames = await PermanentWifiCodes.findAll({
+      attributes: ['username'],
+      where: {
+        username: {
+          [Op.like]: `${baseUsername}%`
+        },
+        status: ['approved', 'reset', 'pending'] // ✅ YOUR RULE
+      }
+    });
+
+    let maxCounter = 0;
+
+    similarUsernames.forEach((user) => {
+      const currentUsername = user.username;
+      const suffix = currentUsername.substring(baseUsername.length);
+
+      if (suffix === '') {
+        maxCounter = Math.max(maxCounter, 1);
+      } else if (/^\d+$/.test(suffix)) {
+        maxCounter = Math.max(maxCounter, parseInt(suffix, 10));
+      }
+    });
+
+    const finalUsername =
+      maxCounter === 0
+        ? baseUsername
+        : `${baseUsername}${maxCounter + 1}`;
+
+    return res.status(200).json({
+      data: {
+        username: finalUsername.toLowerCase()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generating username:', error);
+    return res.status(500).json({
+      message: error.message
+    });
   }
 };

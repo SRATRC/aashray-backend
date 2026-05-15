@@ -1,8 +1,9 @@
 import { AdminRoles, AdminUsers } from '../models/associations.js';
 import { STATUS_ACTIVE, STATUS_INACTIVE } from '../config/constants.js';
-import jwt from 'jsonwebtoken';
+import { attachUserContext } from './Logger.js';
 import ApiError from '../utils/ApiError.js';
 import CatchAsync from '../utils/CatchAsync.js';
+import jwt from 'jsonwebtoken';
 
 export const auth = CatchAsync(async (req, res, next) => {
   const header = req.header('Authorization');
@@ -29,6 +30,7 @@ export const auth = CatchAsync(async (req, res, next) => {
 
   req.user = decoded.user;
   req.roles = admin_roles;
+  attachUserContext(req);
   next();
 });
 

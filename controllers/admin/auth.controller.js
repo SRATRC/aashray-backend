@@ -1,29 +1,36 @@
 import { AdminUsers, AdminRoles } from '../../models/associations.js';
 import { STATUS_ACTIVE, STATUS_INACTIVE } from '../../config/constants.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 
 export const login = async (req, res) => {
-  const { username, password } = req.body;
+  const { username } = req.body;
+  req.log.info('admin_login_start', { username });
+
   const admin = await AdminUsers.findOne({
     where: { username: username }
   });
-  if (admin.dataValues.status === STATUS_INACTIVE)
-    throw new ApiError(401, 'Account Deactivated');
 
   if (!admin) {
+    req.log.warn('admin_login_user_not_found', { username });
     throw new ApiError(404, 'Invalid Username');
   }
-  
+
+  if (admin.dataValues.status === STATUS_INACTIVE) {
+    req.log.warn('admin_login_account_deactivated', { username });
+    throw new ApiError(401, 'Account Deactivated');
+  }
+
   const roles = await AdminRoles.findAll({
     attributes: ['role_name'],
     where: { user_id: admin.dataValues.id, status: STATUS_ACTIVE }
   });
   const admin_roles = roles.map((role) => role.dataValues.role_name);
 
-  const result = await bcrypt.compare(password, admin.password);
+  const result = await bcrypt.compare(req.body.password, admin.password);
   if (result) {
     const token = jwt.sign(
       {
@@ -36,8 +43,10 @@ export const login = async (req, res) => {
       },
       process.env.SECRET
     );
+    req.log.info('admin_login_success', { username, roles: admin_roles });
     return res.status(200).send({ token: token, roles: admin_roles });
   } else {
+    req.log.warn('admin_login_incorrect_password', { username });
     throw new ApiError(401, 'Incorrect password');
   }
 };
@@ -46,9 +55,10 @@ export const createAdmin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { username, password, roles } = req.body;
+  const { username, roles } = req.body;
+  req.log.info('create_admin_start', { username, roles });
 
-  const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(req.body.password, 10);
   const admin = await AdminUsers.create(
     {
       username: username,
@@ -77,37 +87,43 @@ export const createAdmin = async (req, res) => {
     throw new ApiError(500, 'Unexpected error occured while creating admin');
 
   await t.commit();
+  req.log.info('create_admin_success', { username, adminId: admin.dataValues.id, roles });
   return res.status(201).send({ message: 'successfully created admin' });
 };
 
-
-
 export const resetPassword = async (req, res) => {
   const { username, newPassword } = req.body;
+  req.log.info('reset_password_start', { username });
 
-    if (!username || !newPassword) {
+  if (!username || !newPassword) {
+    req.log.warn('reset_password_missing_fields', { username });
     return res.status(400).json({ message: 'Username and new password are required' });
   }
 
   if (newPassword.length < 8) {
+    req.log.warn('reset_password_too_short', { username });
     return res.status(400).json({ message: 'Password must be at least 8 characters long' });
   }
 
   try {
-        const user = await AdminUsers.findOne({ where: { username } });
+    const user = await AdminUsers.findOne({ where: { username } });
     if (!user) {
+      req.log.warn('reset_password_user_not_found', { username });
       return res.status(404).json({ message: 'User not found' });
     }
 
     if (user.dataValues.status === STATUS_INACTIVE) {
+      req.log.warn('reset_password_account_deactivated', { username });
       return res.status(403).json({ message: 'Account is deactivated' });
     }
+
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await user.update({ password: hashedPassword });
 
+    req.log.info('reset_password_success', { username });
     res.status(200).json({ message: 'Password successfully reset' });
   } catch (err) {
-    console.error('Error resetting password:', err);
+    req.log.error('reset_password_error', { username, error: err.message });
     res.status(500).json({ message: 'Internal server error' });
   }
 };

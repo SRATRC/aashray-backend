@@ -56,13 +56,18 @@ export const createAdhyayan = async (req, res) => {
     comments
   } = req.body;
 
+  req.log.info('create_adhyayan_start', { name, speaker, start_date, end_date, total_seats, amount });
+
   const alreadyExists = await ShibirDb.findOne({
     where: {
       speaker: { [Sequelize.Op.like]: speaker },
       start_date: start_date
     }
   });
-  if (alreadyExists) throw new ApiError(400, 'Adhyayan Already Exists');
+  if (alreadyExists) {
+    req.log.warn('create_adhyayan_already_exists', { speaker, start_date });
+    throw new ApiError(400, 'Adhyayan Already Exists');
+  }
 
   const month = moment(start_date).format('MMMM');
 
@@ -81,10 +86,12 @@ export const createAdhyayan = async (req, res) => {
     updatedBy: req.user.username
   });
 
+  req.log.info('create_adhyayan_success', { adhyayanId: adhyayan_details.id, name, speaker });
   res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
 };
 
 export const fetchALLAdhyayan = async (req, res) => {
+  req.log.info('fetch_all_adhyayan_start');
   const shibirs = await database.query(
     `SELECT 
       shibir_db.id,
@@ -130,13 +137,16 @@ export const fetchALLAdhyayan = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_all_adhyayan_success', { count: shibirs.length });
   return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
 
 export const fetchAdhyayanByLocation = async (req, res) => {
   const { location } = req.query;
+  req.log.info('fetch_adhyayan_by_location_start', { location });
 
   if (!location) {
+    req.log.warn('fetch_adhyayan_by_location_missing_param');
     return res.status(400).send({ message: 'Location is required' });
   }
 
@@ -181,7 +191,7 @@ export const fetchAdhyayanByLocation = async (req, res) => {
       shibir_db.comments,
       shibir_db.status,
       shibir_db.updatedBy
-    ORDER BY 
+    ORDER BY
       shibir_db.start_date ASC;`,
     {
       type: QueryTypes.SELECT,
@@ -189,10 +199,12 @@ export const fetchAdhyayanByLocation = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_adhyayan_by_location_success', { location, count: shibirs.length });
   return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
 
 export const fetchPGS = async (req, res) => {
+  req.log.info('fetch_pgs_start');
   const shibirs = await database.query(
     `SELECT 
       shibir_db.id,
@@ -239,23 +251,27 @@ export const fetchPGS = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_pgs_success', { count: shibirs.length });
   return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
 
 export const fetchAdhyayan = async (req, res) => {
   const { id } = req.params;
+  req.log.info('fetch_adhyayan_start', { id });
   await validateAdhyayans(id);
 
   const adhyayan = await ShibirDb.findOne({
     where: { id: id }
   });
 
+  req.log.info('fetch_adhyayan_success', { id });
   return res.status(200).send({ message: 'Fetched Adhyayan', data: adhyayan });
 };
 
 export const fetchAdhyayanBookings = async (req, res) => {
   const shibir_id = req.query.shibir_id;
   let status = req.query.status;
+  req.log.info('fetch_adhyayan_bookings_start', { shibir_id, status });
   if (status != null || status != undefined) {
     status = status.replace(/^"|"$/g, '');
     status = status.trim();
@@ -283,6 +299,8 @@ if (status === 'waiting') {
       t1.shibir_id, 
       t1.bookedby, 
       t1.status, 
+      t1.createdAt,
+      t1.updatedAt,
       t2.cardno, 
       t2.issuedto, 
       t2.mobno, 
@@ -302,6 +320,7 @@ if (status === 'waiting') {
    WHERE 
       t1.shibir_id = :shibirId 
       AND t1.status IN (:status)
+      ORDER BY t1.createdAt ASC
    `,
   {
     replacements: {
@@ -316,6 +335,7 @@ if (status === 'waiting') {
 );
 
 
+  req.log.info('fetch_adhyayan_bookings_success', { shibir_id, status, count: adhyayanData.length });
   return res
     .status(200)
     .send({ message: 'Found Adhyayan Bookings', data: adhyayanData });
@@ -336,6 +356,7 @@ export const updateAdhyayan = async (req, res) => {
   } = req.body;
 
   const adhyayanId = req.params.id;
+  req.log.info('update_adhyayan_start', { adhyayanId, name, total_seats, amount });
   const adhyayan = (await validateAdhyayans(adhyayanId))[0];
 
   const month = moment(start_date).format('MMMM');
@@ -370,10 +391,12 @@ export const updateAdhyayan = async (req, res) => {
     updatedBy: req.user.username
   });
 
+  req.log.info('update_adhyayan_success', { adhyayanId, newAvailableSeats });
   res.status(200).send({ message: 'Updated Adhyayan' });
 };
 
 export const adhyayanWaitlist = async (req, res) => {
+  req.log.info('fetch_adhyayan_waitlist_start');
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -392,10 +415,12 @@ export const adhyayanWaitlist = async (req, res) => {
       type: QueryTypes.SELECT
     }
   );
+  req.log.info('fetch_adhyayan_waitlist_success', { count: data.length });
   res.status(200).send({ message: 'Fetched Adhyayan', data: data });
 };
 
 export const adhyayanPendinglist = async (req, res) => {
+  req.log.info('fetch_adhyayan_pendinglist_start');
   const today = moment().format('YYYY-MM-DD');
 
   const data = await database.query(
@@ -417,11 +442,13 @@ export const adhyayanPendinglist = async (req, res) => {
       type: QueryTypes.SELECT
     }
   );
+  req.log.info('fetch_adhyayan_pendinglist_success', { count: data.length });
   res.status(200).send({ message: 'Fetched Adhyayan', data: data });
 };
 
 export const adhyayanStatusUpdate = async (req, res) => {
   const { shibir_id, bookingid, status, description } = req.body;
+  req.log.info('adhyayan_status_update_start', { shibir_id, bookingid, newStatus: status });
 
   var newBookingStatus = status;
   let newBooking = null;
@@ -435,6 +462,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
   const booking = await validateAdhyayanBooking(bookingid, shibir_id);
 
   if (status == booking.status) {
+    req.log.warn('adhyayan_status_update_same_status', { bookingid, status });
     throw new ApiError(400, 'Status is same as before');
   }
 
@@ -442,8 +470,11 @@ export const adhyayanStatusUpdate = async (req, res) => {
     booking.status == STATUS_ADMIN_CANCELLED ||
     booking.status == STATUS_CANCELLED
   ) {
+    req.log.warn('adhyayan_status_update_already_cancelled', { bookingid, currentStatus: booking.status });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
+
+  req.log.info('adhyayan_status_update_transition', { bookingid, fromStatus: booking.status, toStatus: status });
 
   var transaction = await Transactions.findOne({
     where: { bookingid: bookingid }
@@ -577,31 +608,39 @@ export const adhyayanStatusUpdate = async (req, res) => {
     }
   } catch (error) {
     // Log error but don't fail the response since transaction is already committed
-    console.error('Error sending notifications/emails:', error);
+    req.log.error('adhyayan_status_update_notification_error', { bookingid, error: error.message });
   }
-  
+
+  req.log.info('adhyayan_status_update_success', { bookingid, shibir_id, finalStatus: newBookingStatus });
   return res.status(200).send({ message: 'Updated booking status' });
 };
 
 export const activateAdhyayan = async (req, res) => {
+  const { id, activate } = req.params;
+  req.log.info('activate_adhyayan_start', { adhyayanId: id, activateStatus: activate });
+
   const itemUpdated = await ShibirDb.update(
     {
-      status: req.params.activate,
+      status: activate,
       updatedBy: req.user.username
     },
     {
       where: {
-        id: req.params.id
+        id: id
       }
     }
   );
 
-  if (itemUpdated != 1)
+  if (itemUpdated != 1) {
+    req.log.error('activate_adhyayan_failed', { adhyayanId: id });
     throw new ApiError(500, 'Error occured while activating adhyayan');
+  }
+  req.log.info('activate_adhyayan_success', { adhyayanId: id, activateStatus: activate });
   res.status(200).send({ message: 'Adhyayan status updated' });
 };
 
 export const fetchAllAdhyayanList = async (req, res) => {
+  req.log.info('fetch_all_adhyayan_list_start');
   const adhyayans = await database.query(
     `SELECT id, name FROM shibir_db ORDER BY id ASC`,
     {
@@ -610,6 +649,7 @@ export const fetchAllAdhyayanList = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_all_adhyayan_list_success', { count: adhyayans.length });
   return res.status(200).json({
     message: 'Fetched adhyayan list',
     data: adhyayans
@@ -618,6 +658,7 @@ export const fetchAllAdhyayanList = async (req, res) => {
 
 export const softDeleteShibir = async (req, res) => {
   const { id } = req.params;
+  req.log.info('soft_delete_shibir_start', { shibirId: id });
 
   const updated = await ShibirDb.update(
     { status: 'deleted' },
@@ -625,6 +666,7 @@ export const softDeleteShibir = async (req, res) => {
   );
 
   if (updated[0] === 0) {
+    req.log.warn('soft_delete_shibir_not_found', { shibirId: id });
     return res.status(404).json({ message: 'Shibir not found' });
   }
 
@@ -661,9 +703,10 @@ export const softDeleteShibir = async (req, res) => {
       }
     }
   } catch (notifyErr) {
-    console.error('Bulk adhyayan cancel notification failed:', notifyErr);
+    req.log.error('soft_delete_shibir_notification_failed', { shibirId: id, error: notifyErr.message });
   }
 
+  req.log.info('soft_delete_shibir_success', { shibirId: id });
   res.status(200).json({ message: 'Shibir marked as deleted' });
 };
 
@@ -673,8 +716,10 @@ export const getAdhyayanFeedback = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 20;
   const offset = (page - 1) * pageSize;
+  req.log.info('get_adhyayan_feedback_start', { shibir_id, page, pageSize });
 
   if (!shibir_id) {
+    req.log.warn('get_adhyayan_feedback_missing_id');
     throw new ApiError(400, 'Adhyayan ID is required');
   }
 
@@ -715,6 +760,7 @@ export const getAdhyayanFeedback = async (req, res) => {
 
   const stats = await getFeedbackStats(parseInt(shibir_id));
 
+  req.log.info('get_adhyayan_feedback_success', { shibir_id, feedbackCount: feedback.length, totalCount });
   return res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
     data: {
@@ -736,17 +782,27 @@ export const markAdhyayanAttendance = async (req, res) => {
   try {
     const { shibir_id, session_no, cardno } = req.params;
     const sessionNo = Number(session_no);
+    req.log.info('mark_adhyayan_attendance_start', { shibir_id, session_no: sessionNo, cardno });
 
     if (!sessionNo || sessionNo < 1 || sessionNo > 9) {
+      req.log.warn('mark_adhyayan_attendance_invalid_session', { session_no });
       throw new ApiError(400, 'Invalid session number');
     }
 
     const attendance = await ShibirAttendanceDb.findOne({
       where: { shibir_id, cardno },
+      include: [
+        {
+          model: ShibirBookingDb,
+          required: true,
+          where: { status: 'confirmed' }
+        }
+      ],
       transaction: t
     });
 
     if (!attendance) {
+      req.log.warn('mark_adhyayan_attendance_record_not_found', { shibir_id, cardno });
       throw new ApiError(404, 'Attendance record not found');
     }
 
@@ -754,15 +810,21 @@ export const markAdhyayanAttendance = async (req, res) => {
     const attendanceField = `session_${sessionNo}_attendance`;
 
     if (!attendance[sessionField]) {
+      req.log.warn('mark_adhyayan_attendance_session_not_applicable', { shibir_id, cardno, sessionNo });
       throw new ApiError(400, `Session ${sessionNo} not applicable`);
     }
 
     if (attendance[attendanceField]) {
+      req.log.warn('mark_adhyayan_attendance_already_marked', { shibir_id, cardno, sessionNo });
       throw new ApiError(400, `Attendance already marked for session ${sessionNo}`);
     }
 
     const shibir = await ShibirDb.findByPk(shibir_id, { transaction: t });
-    const card = await CardDb.findOne({ where: { cardno }, transaction: t });
+
+    const card = await CardDb.findOne({
+      where: { cardno },
+      transaction: t
+    });
 
     await attendance.update(
       {
@@ -774,6 +836,7 @@ export const markAdhyayanAttendance = async (req, res) => {
 
     await t.commit();
 
+    req.log.info('mark_adhyayan_attendance_success', { shibir_id, cardno, sessionNo, participantName: card?.issuedto });
     return res.status(200).send({
       message: 'Attendance marked successfully',
       participantName: card?.issuedto || cardno,
@@ -782,7 +845,6 @@ export const markAdhyayanAttendance = async (req, res) => {
     });
 
   } catch (err) {
-    // ✅ rollback ONLY if transaction not finished
     if (t && !t.finished) {
       await t.rollback();
     }
@@ -792,11 +854,13 @@ export const markAdhyayanAttendance = async (req, res) => {
 
 export const fetchAdhyayanAttendanceReport = async (req, res) => {
   const { shibir_id } = req.params;
+  req.log.info('fetch_adhyayan_attendance_report_start', { shibir_id });
 
   const { Op } = Sequelize;
 
   const shibir = await ShibirDb.findByPk(shibir_id);
   if (!shibir) {
+    req.log.warn('fetch_adhyayan_attendance_report_not_found', { shibir_id });
     throw new ApiError(404, 'Adhyayan not found');
   }
 
@@ -841,9 +905,12 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
     return data;
   });
 
+  req.log.info('fetch_adhyayan_attendance_report_success', { shibir_id, rowCount: reportData.length });
   return res.status(200).send({
     shibirName: shibir.name,
     speaker: shibir.speaker,
+    startDate: shibir.start_date,
+    endDate: shibir.end_date,
     maxSessions: 9,
     data: reportData
   });
@@ -851,9 +918,11 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
 
 export async function fetchAdhyayanAttendanceSummary(req, res) {
   const { shibir_id } = req.params;
+  req.log.info('fetch_adhyayan_attendance_summary_start', { shibir_id });
 
   const shibir = await ShibirDb.findByPk(shibir_id);
   if (!shibir) {
+    req.log.warn('fetch_adhyayan_attendance_summary_not_found', { shibir_id });
     return res.status(404).json({ message: 'Shibir not found' });
   }
 
@@ -879,6 +948,7 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
     });
   }
 
+  req.log.info('fetch_adhyayan_attendance_summary_success', { shibir_id, totalRegistrants: attendanceRows.length });
   return res.status(200).json({
     data: {
       shibir_name: shibir.name,
@@ -889,6 +959,7 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
 
 export const createAdhyayanBookingByAdmin = async (req, res) => {
   const { shibir_ids, mumukshus } = req.body;
+  req.log.info('create_adhyayan_booking_by_admin_start', { shibir_ids, mumukshuCount: mumukshus?.length });
 
   // ✅ STRICT validation
   if (
@@ -897,6 +968,7 @@ export const createAdhyayanBookingByAdmin = async (req, res) => {
     !Array.isArray(mumukshus) ||
     mumukshus.length === 0
   ) {
+    req.log.warn('create_adhyayan_booking_by_admin_invalid_input', { shibir_ids, mumukshus });
     return res.status(400).send({
       message: 'Invalid input'
     });
@@ -915,6 +987,7 @@ export const createAdhyayanBookingByAdmin = async (req, res) => {
 
     await t.commit();
 
+    req.log.info('create_adhyayan_booking_by_admin_success', { shibir_ids, mumukshuCount: mumukshus.length, result });
     return res.status(200).send({
       message: 'Adhyayan bookings created by admin',
       data: result
@@ -940,8 +1013,10 @@ async function ensureAttendanceEntry(booking, user, t) {
 export const toggleAttendance = async (req, res) => {
   try {
     const { shibir_id, cardno, sessionNumber, value } = req.body;
+    req.log.info('toggle_attendance_start', { shibir_id, cardno, sessionNumber, value });
 
     if (!shibir_id || !cardno || !sessionNumber) {
+      req.log.warn('toggle_attendance_missing_params', { shibir_id, cardno, sessionNumber });
       return res.status(400).json({
         message: "shibir_id, cardno and sessionNumber required"
       });
@@ -949,6 +1024,7 @@ export const toggleAttendance = async (req, res) => {
 
     // Validate session number
     if (sessionNumber < 1 || sessionNumber > 9) {
+      req.log.warn('toggle_attendance_invalid_session', { sessionNumber });
       return res.status(400).json({
         message: "Invalid session number"
       });
@@ -964,6 +1040,7 @@ export const toggleAttendance = async (req, res) => {
     });
 
     if (!record) {
+      req.log.warn('toggle_attendance_record_not_found', { shibir_id, cardno });
       return res.status(404).json({
         message: "Attendance record not found"
       });
@@ -973,15 +1050,16 @@ export const toggleAttendance = async (req, res) => {
       [columnName]: value
     });
 
+    req.log.info('toggle_attendance_success', { shibir_id, cardno, sessionNumber, value });
     return res.json({
       message: "Attendance updated successfully"
     });
 
   } catch (error) {
-    console.error(error);
+    req.log.error('toggle_attendance_error', { error: error.message });
     return res.status(500).json({
       message: "Internal server error",
-      error: error.message  // Add this to see the actual SQL error
+      error: error.message
     });
   }
 };
@@ -989,6 +1067,7 @@ export const toggleAttendance = async (req, res) => {
 
 export const createAttendanceEntryManually = async (req, res) => {
   const { bookingid } = req.body;
+  req.log.info('create_attendance_entry_manually_start', { bookingid });
 
   const t = await database.transaction();
 
@@ -999,6 +1078,7 @@ export const createAttendanceEntryManually = async (req, res) => {
     });
 
     if (!booking) {
+      req.log.warn('create_attendance_entry_manually_booking_not_found', { bookingid });
       throw new ApiError(404, "Booking not found");
     }
 
@@ -1013,6 +1093,7 @@ export const createAttendanceEntryManually = async (req, res) => {
 
     if (existing) {
       await t.rollback();
+      req.log.warn('create_attendance_entry_manually_already_exists', { bookingid });
       return res.status(409).json({
         message: "Attendance record already exists"
       });
@@ -1026,6 +1107,7 @@ export const createAttendanceEntryManually = async (req, res) => {
 
     await t.commit();
 
+    req.log.info('create_attendance_entry_manually_success', { bookingid });
     return res.status(201).json({
       message: "Attendance record created"
     });
