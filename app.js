@@ -158,6 +158,25 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+app.get('/api', (_req, res) => {
+  res.status(200).send({ data: 'API is up and running... 🚀', status: 200 });
+});
+
+const videoMap = {
+  video1: 'https://youtu.be/p2kcV7VGdjk?list=PLvIMm5LLpatL2O0Qi8bESFmkQfkssTxKT',
+  video2: 'https://youtu.be/fJQzNL0jcIg?list=PLvIMm5LLpatL2O0Qi8bESFmkQfkssTxKT'
+};
+
+app.get('/v/:slug', (req, res) => {
+  const url = videoMap[req.params.slug];
+
+  if (!url) {
+    return res.status(404).send('Video not found');
+  }
+
+  res.redirect(url);
+});
+
 app.use('/api/v1/updates', updateRoutes);
 
 app.use('/api/v1/client', clientAuthRoutes);
