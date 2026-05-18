@@ -400,6 +400,15 @@ for (const item of busPassengers) {
 
 passengers.push({
 
+  passenger_id:
+    item.id,
+
+  boarded:
+    item.boarded,
+
+  boarded_at:
+    item.boarded_at,
+
   name:
     cardUser?.issuedto || '',
 
@@ -415,10 +424,12 @@ passengers.push({
   drop_point:
     booking.drop_point,
 
-  total_people:
-    booking.total_people,
-});
-  }
+    comments:
+  booking.comments || '',
+
+luggage:
+  booking.luggage || '',
+});  }
 }
 
 return res.status(200).json({
@@ -449,4 +460,51 @@ return res.status(200).json({
     bus.capacity -
     passengers.length,
 });
+}
+
+export async function
+updateBoardingStatus(
+  req,
+  res
+) {
+
+  const {
+    passenger_id,
+    boarded,
+  } = req.body;
+
+  const passenger =
+    await TravelBusPassengers.findOne({
+
+      where: {
+        id: passenger_id,
+      },
+    });
+
+  if (!passenger) {
+
+    throw new ApiError(
+      404,
+      'Passenger not found'
+    );
+  }
+
+  await passenger.update({
+
+    boarded,
+
+    boarded_at:
+      boarded
+        ? new Date()
+        : null,
+  });
+
+  return res.status(200).json({
+
+    message:
+      boarded
+        ? 'Passenger marked boarded'
+        : 'Passenger unboarded',
+    passenger,
+  });
 }

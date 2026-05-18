@@ -19,6 +19,15 @@ const TravelBusPassengers = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
+    boarded: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+
+    boarded_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: 'travel_bus_passengers',

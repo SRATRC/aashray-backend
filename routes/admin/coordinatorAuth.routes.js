@@ -10,6 +10,7 @@ import {
   sendOtp,
   verifyOtp,
   fetchCoordinatorDashboard,
+  updateBoardingStatus,
 } from '../../controllers/admin/coordinatorAuth.controller.js';
 
 router.post(
@@ -26,6 +27,13 @@ router.get(
   '/dashboard',
   CatchAsync(
     fetchCoordinatorDashboard
+  )
+);
+
+router.put(
+  '/boarding-status',
+  CatchAsync(
+    updateBoardingStatus
   )
 );
 
