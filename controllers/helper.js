@@ -34,6 +34,7 @@ import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
+import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   // const startDate = new Date(checkin_date);
@@ -440,7 +441,7 @@ export async function sendUnifiedEmail(
     const adhyanBookings = await ShibirBookingDb.findAll({
       include: includeOptions,
       where: {
-        bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
+        bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
       },
       order: [
         ['cardno', 'ASC'],
@@ -520,6 +521,7 @@ export async function sendUnifiedEmail(
         name: user ? user.issuedto : roomBooking.dataValues.CardDb.issuedto,
         status: roomBooking.status,
         bookingid: roomBooking.bookingid,
+        roomno: roomBooking.roomno,
         checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
         checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
       });
@@ -608,6 +610,10 @@ export async function sendUnifiedEmail(
       }
     });
   }
+
+    // ✅ Also send WhatsApp messages
+  await sendUnifiedWhatsApp(user, adhyanBookingDetails, travelBookingDetails, flatBookingDetails, utsavBookingDetails, roomBookingDetails);
+
 }
 
 export async function createGuestsHelper(cardno, guests, t) {

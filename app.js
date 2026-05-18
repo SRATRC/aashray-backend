@@ -1,4 +1,32 @@
 import './config/environment.js';
+
+// // -------------------------------------------------------------
+// // 🔍 ENABLE SEQUELIZE SQL TRACE (to locate broken queries)
+// // -------------------------------------------------------------
+// import Sequelize from "sequelize";
+// // import Sequelize from "sequelize";
+// const { Op } = Sequelize;
+
+// // Show stacktrace for each query
+// Sequelize.Model.$scopeStackTrace = true;
+
+// // Monkey-patch console.log to trace any SELECT queries
+// const originalLog = console.log;
+// console.log = (...args) => {
+//   if (typeof args[0] === "string" && args[0].includes("SELECT")) {
+//     console.trace("⚡ SQL SOURCE TRACE");
+//   }
+//   originalLog(...args);
+// };
+
+// // OPTIONAL: trace findAll calls
+// const originalFindAll = Sequelize.Model.findAll;
+// Sequelize.Model.findAll = function (...args) {
+//   console.trace("⚡ findAll called from:");
+//   return originalFindAll.apply(this, args);
+// };
+// // -------------------------------------------------------------
+
 import express, { urlencoded, json } from 'express';
 import { ErrorHandler } from './middleware/Error.js';
 import { httpLogger } from './middleware/Logger.js';
@@ -48,6 +76,7 @@ import {
 } from './routes/admin/utsavManagement.routes.js';
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
+import coordinatorAuthRoutes from './routes/admin/coordinatorAuth.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -188,6 +217,7 @@ app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
 app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 app.use('/api/v1/admin/wifi', wifiManagementRoutes);
+app.use('/api/v1/coordinator', coordinatorAuthRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
