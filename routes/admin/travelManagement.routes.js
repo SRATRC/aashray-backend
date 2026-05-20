@@ -17,7 +17,8 @@ import {
   updateBusCapacity,
   updateBusGroup,
   bulkAssignPassengersToBus,
-  previewBulkUpload
+  previewBulkUpload,
+  exportBusPassengers
 } from '../../controllers/admin/travelManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN, ROLE_DRI_TRAVEL_ADMIN } from '../../config/constants.js';
@@ -44,5 +45,6 @@ router.put('/bus-group/capacity', CatchAsync(updateBusCapacity));
 router.put('/bus-group/:id', CatchAsync(updateBusGroup));
 router.post('/bus-group/bulk-assign',bulkAssignPassengersToBus);
 router.post('/bus/preview-bulk-upload', previewBulkUpload);
+router.get('/bus-group/:id/export', CatchAsync(exportBusPassengers));
 
 export default router;

@@ -36,6 +36,7 @@ import database from '../../config/database.js';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
+import XLSX from 'xlsx';
 
 function getAdditionalConditions(
   whereClauses,
@@ -1937,30 +1938,30 @@ const validIds =
   validBookings.map(
     item => item.bookingid
   );
-    const passengerCount =
-      bus.passengers.length;
+const passengerCount =
+  bus.passengers.length;
 
-    const totalAfterInsert =
-      passengerCount +
-      validIds.length;
+const remainingSeats =
+  Number(bus.capacity) -
+  passengerCount;
 
-    if (
-      totalAfterInsert >
-      Number(bus.capacity)
-    ) {
+// TAKE ONLY FITTING PASSENGERS
 
-      throw new ApiError(
-        400,
-        `Capacity exceeded. Remaining seats: ${
-          Number(
-            bus.capacity
-          ) - passengerCount
-        }`
-      );
-    }
+const assignableIds =
+  validIds.slice(
+    0,
+    remainingSeats
+  );
 
-    const insertData =
-      validIds.map(
+// EXTRA PASSENGERS
+
+const skippedCapacityIds =
+  validIds.slice(
+    remainingSeats
+  );
+
+const insertData =
+  assignableIds.map(
         bookingid => ({
           bus_group_id,
           bookingid,
@@ -1997,11 +1998,13 @@ const validIds =
 
     await t.commit();
 
-    return res.json({
+   return res.json({
 
-      message:
+  message:
 `${insertData.length} passengers assigned successfully`,
-    });
+
+  skippedCapacityIds,
+});
 
   } catch (error) {
 
@@ -2419,9 +2422,38 @@ booking.pickup_point !==
       Number(bus.capacity) -
       passengerCount;
 
+      const assignableIds =
+  validBookingIds.slice(
+    0,
+    remainingSeats
+  );
+
+  
+const skippedCapacityIds =
+  validBookingIds.slice(
+    remainingSeats
+  );
+
+  rows.forEach(row => {
+
+  if (
+    skippedCapacityIds.includes(
+      row.bookingid
+    )
+  ) {
+
+    row.result =
+      'Capacity Full';
+  }
+});
+
+
     return res.json({
 
-      validBookingIds,
+      validBookingIds:
+  assignableIds,
+
+skippedCapacityIds,
 
       alreadyAssigned,
 
@@ -2442,6 +2474,167 @@ remainingSeats,
 
       rows,
     });
+
+  } catch (error) {
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+
+      message:
+        error.message,
+    });
+  }
+}
+
+export async function exportBusPassengers(
+  req,
+  res
+) {
+
+  try {
+
+    const busGroupId =
+      req.params.id;
+
+    const bus =
+      await TravelBusGroup.findByPk(
+        busGroupId
+      );
+
+    if (!bus) {
+
+      throw new ApiError(
+        404,
+        'Bus not found'
+      );
+    }
+
+    const assignments =
+      await TravelBusPassengers.findAll({
+
+        where: {
+          bus_group_id:
+            busGroupId,
+        },
+      });
+
+    const bookingIds =
+      assignments.map(
+        item =>
+          item.bookingid
+      );
+
+    const passengers =
+      await TravelDb.findAll({
+
+        where: {
+          bookingid:
+            bookingIds,
+        },
+
+        include: [
+          {
+            model: CardDb,
+            attributes: [
+              'issuedto',
+              'mobno',
+              'cardno',
+            ],
+          },
+        ],
+      });
+
+    const excelData =
+      passengers.map(
+        passenger => {
+
+          const assignment =
+            assignments.find(
+              item =>
+                item.bookingid ===
+                passenger.bookingid
+            );
+
+          return {
+
+            Name:
+              passenger.CardDb
+                ?.issuedto || '',
+
+            Mobile:
+              passenger.CardDb
+                ?.mobno || '',
+
+            'Card No':
+              passenger.CardDb
+                ?.cardno || '',
+
+            'Booking ID':
+              passenger.bookingid,
+
+            Pickup:
+              passenger.pickup_point,
+
+            Drop:
+              passenger.drop_point,
+
+            Status:
+              passenger.status,
+
+            Luggage:
+              passenger.luggage,
+
+            Comments:
+              passenger.comments,
+
+            Boarded:
+              assignment?.boarded
+                ? 'Yes'
+                : 'No',
+
+            Coordinator:
+              bus.coordinator_bookingid ===
+              passenger.bookingid
+                ? 'Yes'
+                : 'No',
+          };
+        }
+      );
+
+    const workbook =
+      XLSX.utils.book_new();
+
+    const worksheet =
+      XLSX.utils.json_to_sheet(
+        excelData
+      );
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      'Passengers'
+    );
+
+    const buffer =
+      XLSX.write(
+        workbook,
+        {
+          type: 'buffer',
+          bookType: 'xlsx',
+        }
+      );
+
+res.setHeader(
+  'Content-Disposition',
+  `attachment; filename=${bus.bus_name}_passengers.xlsx`
+);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+
+    return res.send(buffer);
 
   } catch (error) {
 
