@@ -314,7 +314,7 @@ fetchCoordinatorDashboard(
 
     // FETCH TRAVEL BOOKING
 
-let bus = null;
+const assignedBusData = [];
 
 const assignedBuses =
   await TravelBusGroup.findAll({
@@ -350,13 +350,13 @@ for (const item of assignedBuses) {
       user.cardno
   ) {
 
-    bus = item;
-
-    break;
-  }
+  assignedBusData.push(item);
+  } 
 }
 
-if (!bus) {
+if (
+  !assignedBusData.length
+) {
 
   throw new ApiError(
     404,
@@ -365,74 +365,96 @@ if (!bus) {
 }
   // FETCH PASSENGERS
 
-const busPassengers =
-  await TravelBusPassengers.findAll({
+const dashboardBuses = [];
 
-    where: {
-      bus_group_id:
-        bus.id,
-    },
-  });
+for (const bus of assignedBusData) {
 
-const passengers = [];
-
-for (const item of busPassengers) {
-
-  const booking =
-    await TravelDb.findOne({
+  const busPassengers =
+    await TravelBusPassengers.findAll({
 
       where: {
-        bookingid:
-          item.bookingid,
+        bus_group_id:
+          bus.id,
       },
     });
 
-  if (booking) {
+  const passengers = [];
 
-    const cardUser =
-  await CardDb.findOne({
+  for (const item of busPassengers) {
 
-    where: {
-      cardno:
-        booking.cardno,
+    const booking =
+      await TravelDb.findOne({
+
+        where: {
+          bookingid:
+            item.bookingid,
+        },
+      });
+
+    if (booking) {
+
+      const cardUser =
+        await CardDb.findOne({
+
+          where: {
+            cardno:
+              booking.cardno,
+          },
+        });
+
+      passengers.push({
+
+        passenger_id:
+          item.id,
+
+        boarded:
+          item.boarded,
+
+        boarded_at:
+          item.boarded_at,
+
+        name:
+          cardUser?.issuedto || '',
+
+        mobno:
+          cardUser?.mobno || '',
+
+        cardno:
+          booking.cardno,
+
+        pickup_point:
+          booking.pickup_point,
+
+        drop_point:
+          booking.drop_point,
+
+        comments:
+          booking.comments || '',
+
+        luggage:
+          booking.luggage || '',
+      });
+    }
+  }
+
+  dashboardBuses.push({
+
+    bus: {
+
+      ...bus.toJSON(),
+
+      remaining_seats:
+        bus.capacity -
+        passengers.length,
     },
+
+    passengers,
+
+    totalPassengers:
+      passengers.length,
   });
-
-passengers.push({
-
-  passenger_id:
-    item.id,
-
-  boarded:
-    item.boarded,
-
-  boarded_at:
-    item.boarded_at,
-
-  name:
-    cardUser?.issuedto || '',
-
-  mobno:
-    cardUser?.mobno || '',
-
-  cardno:
-    booking.cardno,
-
-  pickup_point:
-    booking.pickup_point,
-
-  drop_point:
-    booking.drop_point,
-
-    comments:
-  booking.comments || '',
-
-luggage:
-  booking.luggage || '',
-});  }
 }
-
-return res.status(200).json({
+  return res.status(200).json({
 
   coordinator: {
 
@@ -449,16 +471,8 @@ return res.status(200).json({
       user.center,
   },
 
-  bus,
-
-  passengers,
-
-  totalPassengers:
-    passengers.length,
-
-  remainingSeats:
-    bus.capacity -
-    passengers.length,
+  buses:
+    dashboardBuses,
 });
 }
 

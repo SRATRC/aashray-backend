@@ -15,7 +15,9 @@ import {
   fetchAvailableTravelBookings,
   removePassengerFromBus,
   updateBusCapacity,
-  updateBusGroup
+  updateBusGroup,
+  bulkAssignPassengersToBus,
+  previewBulkUpload
 } from '../../controllers/admin/travelManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN, ROLE_DRI_TRAVEL_ADMIN } from '../../config/constants.js';
@@ -40,4 +42,7 @@ router.get('/available-bookings', CatchAsync(fetchAvailableTravelBookings));
 router.delete('/bus-group/passenger/:bookingid', CatchAsync(removePassengerFromBus));
 router.put('/bus-group/capacity', CatchAsync(updateBusCapacity));
 router.put('/bus-group/:id', CatchAsync(updateBusGroup));
+router.post('/bus-group/bulk-assign',bulkAssignPassengersToBus);
+router.post('/bus/preview-bulk-upload', previewBulkUpload);
+
 export default router;
