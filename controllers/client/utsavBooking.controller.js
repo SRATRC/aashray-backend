@@ -8,7 +8,7 @@ import {
   UtsavPackagesDb
 } from '../../models/associations.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { openUtsavSeat, sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
+import { openUtsavSeat, sendUtsavBookingUpdateEmail, cancelUtsavFoodBookings } from '../../helpers/utsavBooking.helper.js';
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -184,6 +184,7 @@ export const CancelUtsavBooking = async (req, res) => {
   const utsav = await UtsavDb.findOne({
     where: { id: booking.utsavid }
   });
+  await cancelUtsavFoodBookings(booking,req.user.username,t);
   await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
   req.log.info('cancel_utsav_booking_seat_opened', { bookingid, utsavid: booking.utsavid });
 
