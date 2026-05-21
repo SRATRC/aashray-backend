@@ -1,5 +1,4 @@
 
-console.log('Coordinator auth routes loaded');
 import express from 'express';
 
 const router = express.Router();

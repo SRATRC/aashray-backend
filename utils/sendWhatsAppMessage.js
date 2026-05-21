@@ -1,6 +1,5 @@
 import axios from "axios";
-import dotenv from "dotenv";
-dotenv.config({ path: ".env.dev" });
+
 
 const API_URL = process.env.WHATSAPP_API_URL;
 const TOKEN = process.env.WHATSAPP_BEARER_TOKEN;

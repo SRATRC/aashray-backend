@@ -612,7 +612,7 @@ export async function sendUnifiedEmail(
   }
 
     // ✅ Also send WhatsApp messages
-  await sendUnifiedWhatsApp(user, adhyanBookingDetails, travelBookingDetails, flatBookingDetails, utsavBookingDetails, roomBookingDetails);
+  await sendUnifiedWhatsApp(cardno, adhyanBookingDetails, travelBookingDetails, flatBookingDetails, utsavBookingDetails, roomBookingDetails);
 
 }
 

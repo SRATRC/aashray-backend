@@ -29,6 +29,11 @@ const CoordinatorOtp = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },
+
+    attempts: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+    },
   },
 
   {

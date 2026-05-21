@@ -264,7 +264,7 @@ export const fetchUpcomingBookings = async (req, res) => {
     `SELECT t1.bookingid, t1.bookedBy, t1.date,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
-       t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, tbp.bus_group_id, tbg.bus_name, tbg.timing AS bus_timing, tbg.coordinator_bookingid, tbp.bus_group_id,
+       t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, tbp.bus_group_id, tbg.bus_name, tbg.timing AS bus_timing, tbg.coordinator_bookingid,
        t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
@@ -770,7 +770,14 @@ const updatedDate =
       let isValidRoute = true;
 
       // Date mismatch
-      if (bus.event_date !== updatedDate) {
+      if (
+  !moment(
+    bus.event_date
+  ).isSame(
+    updatedDate,
+    'day'
+  )
+) {
         isValidRoute = false;
       }
 
@@ -880,59 +887,6 @@ const updatedDate =
           );
         }
       }
-
-    // SET / REMOVE COORDINATOR
-
-        if (
-          bus_group_id &&
-          is_coordinator !== undefined
-        ) {
-
-          if (
-            is_coordinator === 'yes'
-          ) {
-
-            await TravelBusGroup.update(
-              {
-                coordinator_bookingid:
-                  bookingid,
-              },
-              {
-                where: {
-                  id: bus_group_id,
-                },
-
-                transaction: t,
-              }
-            );
-          }
-
-          else {
-
-            await TravelBusGroup.update(
-              {
-                coordinator_bookingid:
-                  null,
-              },
-              {
-                where: {
-                  id: bus_group_id,
-                  coordinator_bookingid:
-                    bookingid,
-                },
-
-                transaction: t,
-              }
-            );
-          }
-          updatedFields.push(
-            'bus_group_id'
-          );
-
-          updatedFields.push(
-            'is_coordinator'
-          );
-        }
 
         // Check matching bus for new route
     const matchingBusWhere = {
@@ -1601,13 +1555,45 @@ export async function fetchAvailableTravelBookings(req, res) {
     }
 
     // Already assigned booking IDs
-    const assignedPassengers =
-      await TravelBusPassengers.findAll({
-        attributes: ['bookingid'],
-      });
+   // FETCH BUS GROUPS FOR SAME EVENT DATE
 
-    const assignedBookingIds =
-      assignedPassengers.map(item => item.bookingid);
+const eventBusGroups =
+  await TravelBusGroup.findAll({
+
+    where: {
+      event_date,
+    },
+
+    attributes: ['id'],
+  });
+
+const busGroupIds =
+  eventBusGroups.map(
+    item => item.id
+  );
+
+// FETCH ONLY ASSIGNMENTS
+// FOR THIS EVENT DATE
+
+const assignedPassengers =
+  await TravelBusPassengers.findAll({
+
+    where: {
+
+      bus_group_id: {
+
+        [Sequelize.Op.in]:
+          busGroupIds,
+      },
+    },
+
+    attributes: ['bookingid'],
+  });
+
+const assignedBookingIds =
+  assignedPassengers.map(
+    item => item.bookingid
+  );
 
     // Fetch confirmed travel bookings
     const busGroup = await TravelBusGroup.findByPk(

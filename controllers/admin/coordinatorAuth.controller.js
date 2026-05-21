@@ -1,8 +1,3 @@
-import dotenv from 'dotenv';
-
-dotenv.config({
-  path: '.env.dev',
-});
 
 import jwt from 'jsonwebtoken';
 
@@ -20,6 +15,7 @@ import CardDb from '../../models/card.model.js';
 import { sendCoordinatorOtp } from '../../helpers/sendCoordinatorOtp.js';
 import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
+import crypto from 'crypto';
 
 export async function sendOtp(
   req,
@@ -89,28 +85,30 @@ const assignedBuses =
 let isCoordinator =
   false;
 
-for (const bus of assignedBuses) {
+const coordinatorBookingIds =
+  assignedBuses.map(
+    item =>
+      item.coordinator_bookingid
+  );
 
-  const travelBooking =
-    await TravelDb.findOne({
+const matchingBookings =
+  await TravelDb.findAll({
 
-      where: {
-        bookingid:
-          bus.coordinator_bookingid,
+    where: {
+
+      bookingid: {
+
+        [Sequelize.Op.in]:
+          coordinatorBookingIds,
       },
-    });
 
-  if (
-    travelBooking &&
-    travelBooking.cardno ===
-      coordinator.cardno
-  ) {
+      cardno:
+        coordinator.cardno,
+    },
+  });
 
-    isCoordinator = true;
-
-    break;
-  }
-}
+const isCoordinator =
+  matchingBookings.length > 0;
 
 if (!isCoordinator) {
 
@@ -120,12 +118,38 @@ if (!isCoordinator) {
   );
 }
 
+const recentOtpCount =
+  await CoordinatorOtp.count({
+
+    where: {
+
+      mobno,
+
+      createdAt: {
+
+        [Sequelize.Op.gte]:
+          new Date(
+            Date.now() -
+            10 * 60 * 1000
+          ),
+      },
+    },
+  });
+
+if (recentOtpCount >= 5) {
+
+  throw new ApiError(
+    429,
+    'Too many OTP requests. Try again later.'
+  );
+}
 // GENERATE OTP
 
   const otp =
-    Math.floor(
-      100000 + Math.random() * 900000
-    );
+  crypto.randomInt(
+    100000,
+    1000000
+  );
 
   // SAVE OTP
 
@@ -180,14 +204,58 @@ export async function verifyOtp(
       ],
     });
 
-  if (!record) {
+if (!record) {
 
-    throw new ApiError(
-      400,
-      'Invalid OTP'
+  const latestOtp =
+    await CoordinatorOtp.findOne({
+
+      where: {
+        mobno,
+        verified: false,
+      },
+
+      order: [
+        ['createdAt', 'DESC'],
+      ],
+    });
+
+  if (latestOtp) {
+
+    await latestOtp.increment(
+      'attempts'
     );
+
+    // BLOCK AFTER 5 ATTEMPTS
+
+    if (
+      latestOtp.attempts + 1 >= 5
+    ) {
+
+      await latestOtp.update({
+        verified: true,
+      });
+
+      throw new ApiError(
+        429,
+        'Too many invalid attempts. OTP blocked.'
+      );
+    }
   }
 
+  throw new ApiError(
+    400,
+    'Invalid OTP'
+  );
+}
+// CHECK MAX ATTEMPTS
+
+if (record.attempts >= 5) {
+
+  throw new ApiError(
+    429,
+    'Too many invalid attempts'
+  );
+}
   // CHECK EXPIRY
 
   if (
@@ -203,10 +271,10 @@ export async function verifyOtp(
 
   // MARK VERIFIED
 
-  await record.update({
-    verified: true,
-  });
-
+await record.update({
+  verified: true,
+  attempts: 0,
+});
   // FETCH USER
 
   const user =
@@ -223,7 +291,7 @@ export async function verifyOtp(
       mobno: user.mobno,
     },
 
-    process.env.JWT_SECRET,
+    process.env.SECRET,
 
     {
       expiresIn: '7d',
@@ -280,7 +348,7 @@ fetchCoordinatorDashboard(
 
     decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET
+      process.env.SECRET
     );
 
   } catch {
@@ -314,7 +382,7 @@ fetchCoordinatorDashboard(
 
     // FETCH TRAVEL BOOKING
 
-const assignedBusData = [];
+
 
 const assignedBuses =
   await TravelBusGroup.findAll({
@@ -333,27 +401,41 @@ const assignedBuses =
     },
   });
 
-for (const item of assignedBuses) {
+const coordinatorBookingIds =
+  assignedBuses.map(
+    item =>
+      item.coordinator_bookingid
+  );
 
-  const travelBooking =
-    await TravelDb.findOne({
+const matchingBookings =
+  await TravelDb.findAll({
 
-      where: {
-        bookingid:
-          item.coordinator_bookingid,
+    where: {
+
+      bookingid: {
+
+        [Sequelize.Op.in]:
+          coordinatorBookingIds,
       },
-    });
 
-  if (
-    travelBooking &&
-    travelBooking.cardno ===
-      user.cardno
-  ) {
+      cardno:
+        user.cardno,
+    },
+  });
 
-  assignedBusData.push(item);
-  } 
-}
+const matchingBookingIds =
+  matchingBookings.map(
+    item => item.bookingid
+  );
 
+const assignedBusData =
+  assignedBuses.filter(
+    item =>
+
+      matchingBookingIds.includes(
+        item.coordinator_bookingid
+      )
+  );
 if (
   !assignedBusData.length
 ) {
@@ -378,46 +460,65 @@ for (const bus of assignedBusData) {
       },
     });
 
-  const passengers = [];
+  const bookingIds =
+  busPassengers.map(
+    item => item.bookingid
+  );
 
-  for (const item of busPassengers) {
+const bookings =
+  await TravelDb.findAll({
 
-    const booking =
-      await TravelDb.findOne({
+    where: {
 
-        where: {
-          bookingid:
-            item.bookingid,
-        },
-      });
+      bookingid: {
 
-    if (booking) {
+        [Sequelize.Op.in]:
+          bookingIds,
+      },
+    },
 
-      const cardUser =
-        await CardDb.findOne({
+    include: [
+      {
+        model: CardDb,
 
-          where: {
-            cardno:
-              booking.cardno,
-          },
-        });
+        attributes: [
+          'issuedto',
+          'mobno',
+        ],
+      },
+    ],
+  });
 
-      passengers.push({
+const passengers =
+  bookings.map(
+    booking => {
+
+      const passengerData =
+        busPassengers.find(
+          item =>
+
+            item.bookingid ===
+            booking.bookingid
+        );
+
+      return {
 
         passenger_id:
-          item.id,
+          passengerData?.id,
 
         boarded:
-          item.boarded,
+          passengerData?.boarded,
 
         boarded_at:
-          item.boarded_at,
+          passengerData?.boarded_at,
 
         name:
-          cardUser?.issuedto || '',
+          booking.CardDb
+            ?.issuedto || '',
 
         mobno:
-          cardUser?.mobno || '',
+          booking.CardDb
+            ?.mobno || '',
 
         cardno:
           booking.cardno,
@@ -433,10 +534,9 @@ for (const bus of assignedBusData) {
 
         luggage:
           booking.luggage || '',
-      });
+      };
     }
-  }
-
+  );
   dashboardBuses.push({
 
     bus: {
