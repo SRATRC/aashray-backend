@@ -105,10 +105,10 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       );
       
       total_amount += package_info.amount;
-      await bookFoodForUtsav(package_info , utsav, mumukshu, t, user.cardno);
+      
       
     }
-
+    await bookFoodForUtsav(package_info , utsav, mumukshu, t, user.cardno);
     bookings.push(bookingid);
     userBookingIds[mumukshu.cardno] = bookings;
   }
