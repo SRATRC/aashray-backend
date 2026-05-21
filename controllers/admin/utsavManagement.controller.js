@@ -820,6 +820,8 @@ export const utsavStatusUpdate = async (req, res) => {
         await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
         await t.commit();
 
+        await sendUtsavBookingUpdateEmail(booking, utsav);
+
         return res.status(200).send({
           message:
             'Since package amount is 0, updating the status to confirmed.'
@@ -944,6 +946,9 @@ export const utsavStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
+
+  await sendUtsavBookingUpdateEmail(booking, utsav);
+
   req.log.info('utsav_status_update_transition', { bookingid, utsav_id, fromStatus: booking.status, toStatus: newBookingStatus });
   return res.status(200).send({ message: 'Updated booking status' });
 };
