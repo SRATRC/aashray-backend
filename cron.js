@@ -160,7 +160,7 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
           where: { id: booking.utsavid }
         });
         //Not automatically moving from waiting to payment pending for now
-        await cancelUtsavFoodBookings(utsav, booking.cardno, systemUser.username, t);
+        await cancelUtsavFoodBookings(booking, systemUser.username, t);
         await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
         
 

@@ -23,6 +23,7 @@ import {
   usableCredits
 } from './transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
+import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import {
@@ -121,13 +122,11 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
 }
 
 export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
-
+  
   if(utsav.location !== RESEARCH_CENTRE) 
     return;
 
-  const date1 = new Date(package_info.end_date).toDateString();
-  const date2 = new Date(utsav.end_date).toDateString();
-  const lastDayOnlyBreakfast = date1 == date2;
+  const lastDayOnlyBreakfast = moment(package_info.end_date).isSame(utsav.end_date, 'day');
 
   await bookFoodForAllMeals(
     package_info.start_date,
@@ -576,7 +575,9 @@ export async function findUtsavOnBoundaryDates(checkin, checkout) {
 export async function cancelUtsavFoodBookings(booking, updatedBy, t) {
  
   const utsavPackage = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
-  
-  await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
+
+  if (utsavPackage) {
+    await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
+  }
   
 }

@@ -570,30 +570,30 @@ export async function bookFoodForAllMeals(
     where: {
       cardno: cardno,
       date: allDates
-    }
+    },
+    transaction: t
   });
 
-  const bookingsToCreate = [],bookingsToUpdate = [];
+  const bookingsToCreate = [], bookingsToUpdate = [];
 
-  let dinner=1,lunch=1;
+  let dinner = 1, lunch = 1;
 
   const lastDay = allDates.at(-1);
-  
+
   for (const date of allDates) {
     const foodBooking = foodBookings.find((item) => item.date === date);
 
-    if( date == lastDay && lastDayOnlyBreakfast) {
+    if (date == lastDay && lastDayOnlyBreakfast) {
       lunch = 0;
       dinner = 0;
     }
 
-    
     if (foodBooking) {
       foodBooking.breakfast = 1;
       foodBooking.lunch = lunch;
       foodBooking.dinner = dinner;
       foodBooking.spicy = 1;
-      foodBooking.hightea = 1;
+      foodBooking.hightea = 'TEA';
       foodBooking.plateissued = 0;
       foodBooking.updatedBy = updatedBy;
       bookingsToUpdate.push(foodBooking);
@@ -612,41 +612,23 @@ export async function bookFoodForAllMeals(
       plateissued: 0,
       updatedBy: updatedBy
     });
-  }   
+  }
   if (bookingsToCreate.length > 0) {
     await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   }
   if (bookingsToUpdate.length > 0) {
-    await FoodDb.bulkUpdate(bookingsToUpdate, { transaction: t });
+    await Promise.all(bookingsToUpdate.map(booking => booking.save({ transaction: t })));
   }
 
 }
 
-export async function cancelAllMeals(start_date,
-  end_date,
-  cardno, updatedBy, t) {
+export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t) {
   const allDates = getDates(start_date, end_date);
-  const foodBookings = await FoodDb.findAll({
-    where: {
-      cardno: cardno,
-      date: allDates
-    }
-  });
-  
-  const updateFields = {
-    breakfast: 0,
-    lunch: 0,
-    dinner: 0,
-    updatedBy: updatedBy
-  };
 
-  for (const foodBooking of foodBookings) {
-    
-    await FoodDb.update(updateFields, {
-      where: { id: foodBooking.id },
-      transaction: t
-    });
-  }
+  await FoodDb.update(
+    { breakfast: 0, lunch: 0, dinner: 0, updatedBy: updatedBy },
+    { where: { cardno: cardno, date: allDates }, transaction: t }
+  );
 }
 
 
