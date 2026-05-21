@@ -3476,6 +3476,14 @@ const {
   assignments,
 } = req.body;
 
+const reassignmentMap = {};
+
+for (const assignment of assignments) {
+
+  reassignmentMap[
+    assignment['Booking Id']
+  ] = assignment['Bus Name'];
+}
 
 
     const previewBuses = [];
@@ -3509,23 +3517,35 @@ const {
           ),
 
         bookingids:
-          assignments
-            .filter(
-              assignment =>
+  Array.from(
 
-                assignment[
-                  'Bus Name'
-                ] ===
-                busRow[
-                  'Bus Name'
-                ]
-            )
-            .map(
-              assignment =>
-                assignment[
-                  'Booking Id'
-                ]
-            ),
+    new Set(
+
+      assignments
+
+        .filter(
+          assignment =>
+
+            assignment[
+              'Bus Name'
+            ] ===
+            busRow[
+              'Bus Name'
+            ]
+        )
+
+        .map(
+          assignment =>
+            assignment[
+              'Booking Id'
+            ]
+        )
+
+        .filter(Boolean)
+
+    )
+
+  ),
       };
 
       const duplicateStops =
@@ -3536,6 +3556,36 @@ const {
         stop
       ) !== index
   );
+
+  if (
+  item.stops.length < 2
+) {
+
+  item.routeError =
+    'Minimum 2 stops required';
+}
+
+if (
+
+  !item.stops.includes(
+    'Research Centre'
+  )
+) {
+
+  item.routeError =
+    'Research Centre missing in route';
+}
+
+if (
+
+  item.stops.some(
+    stop => !stop
+  )
+) {
+
+  item.routeError =
+    'Empty stop found';
+}
 
 if (
   duplicateStops.length
@@ -3652,49 +3702,143 @@ invalidPassengers.push({
                   continue;
         }
 
-        const existing =
-          await TravelBusPassengers.findOne({
+const existing =
+  await TravelBusPassengers.findOne({
 
-            where: {
-              bookingid,
-            },
-          });
+    where: {
+      bookingid,
+    },
 
-        if (existing) {
+    include: [
+      {
+        model: TravelBusGroup,
+        as: 'TravelBusGroup',
+      },
+    ],
+  });
+if (existing) {
 
-alreadyAssigned.push({
+  const existingBus =
+    existing.TravelBusGroup;
 
-  bookingid,
+  const sameBus =
 
-  name:
-    booking.CardDb
-      ?.issuedto || '',
+    existingBus?.bus_name ===
+    item.bus_name &&
 
-  pickup:
-    booking.pickup_point,
+    String(
+      existingBus?.event_date
+    ).split('T')[0] ===
 
-  drop:
-    booking.drop_point,
-});
+    String(
+      item.event_date
+    ).split('T')[0];
 
-          continue;
-        }
+  // SAME BUS
+  // SHOW ALREADY ASSIGNED
 
-     validPassengers.push({
+  const targetBusFromExcel =
+  reassignmentMap[
+    booking.bookingid
+  ];
 
-  bookingid,
+if (
+  sameBus &&
+  targetBusFromExcel ===
+    item.bus_name
+) {
 
-  name:
-    booking.CardDb
-      ?.issuedto || '',
+  alreadyAssigned.push({
 
-  pickup:
-    booking.pickup_point,
+    bookingid:
+      booking.bookingid,
 
-  drop:
-    booking.drop_point,
-});
-      }
+    name:
+      booking.CardDb
+        ?.issuedto || '',
+
+    pickup:
+      booking.pickup_point,
+
+    drop:
+      booking.drop_point,
+  });
+
+  continue;
+}
+
+  // DIFFERENT BUS
+  // REASSIGN ALLOWED
+
+  if (
+    req.body.update_existing
+  ) {
+
+    validPassengers.push({
+
+      bookingid:
+        booking.bookingid,
+
+      name:
+        booking.CardDb
+          ?.issuedto || '',
+
+      pickup:
+        booking.pickup_point,
+
+      drop:
+        booking.drop_point,
+    });
+
+    continue;
+  }
+
+  // DIFFERENT BUS
+  // BUT UPDATE NOT ALLOWED
+
+  alreadyAssigned.push({
+
+    bookingid:
+      booking.bookingid,
+
+    name:
+      booking.CardDb
+        ?.issuedto || '',
+
+    pickup:
+      booking.pickup_point,
+
+    drop:
+      booking.drop_point,
+  });
+
+  continue;
+}
+   if (
+  !validPassengers.some(
+    item =>
+
+      item.bookingid ===
+      booking.bookingid
+  )
+) {
+
+  validPassengers.push({
+
+    bookingid:
+      booking.bookingid,
+
+    name:
+      booking.CardDb
+        ?.issuedto || '',
+
+    pickup:
+      booking.pickup_point,
+
+    drop:
+      booking.drop_point,
+  });
+}   }
 
       const overflowPassengers =
         validPassengers.slice(
@@ -3753,8 +3897,10 @@ let skippedDuplicateBuses = 0;
 
   try {
 
-    const { buses } =
-      req.body;
+    const {
+  buses,
+  update_existing = false,
+} = req.body;
 
     for (const item of buses) {
 
@@ -3774,46 +3920,109 @@ let skippedDuplicateBuses = 0;
 
           transaction: t,
         });
-if (existingBus) {
+if (
+  existingBus &&
+  !update_existing
+) {
 
   skippedDuplicateBuses++;
 
   continue;
 }
 
-      // CREATE BUS
+ let bus = null;
 
-      const bus =
-        await TravelBusGroup.create({
+// UPDATE EXISTING BUS
 
-          event_date:
-            item.event_date,
+if (
+  existingBus &&
+  update_existing
+) {
 
-          bus_name:
-            item.bus_name,
+  bus = existingBus;
 
-          pickup_point:
-            item.stops[0],
+  await bus.update({
 
-          drop_point:
-            item.stops[
-              item.stops.length - 1
-            ],
+    pickup_point:
+      item.stops[0],
 
-          timing:
-            item.timing,
+    drop_point:
+      item.stops[
+        item.stops.length - 1
+      ],
 
-          capacity:
-            item.capacity,
+    timing:
+      item.timing,
 
-          createdBy:
-            req.user.username,
+    capacity:
+      item.capacity,
 
-        }, {
-          transaction: t,
-        });
-        createdBuses++;
+    updatedBy:
+      req.user.username,
 
+  }, {
+    transaction: t,
+  });
+
+  await TravelBusStops.destroy({
+
+    where: {
+      bus_group_id:
+        bus.id,
+    },
+
+    transaction: t,
+  });
+
+
+  await TravelBusGroup.update(
+  {
+    coordinator_bookingid:
+      null,
+  },
+  {
+    where: {
+      id: bus.id,
+    },
+    transaction: t,
+  }
+);
+} else {
+
+  // CREATE NEW BUS
+
+  bus =
+    await TravelBusGroup.create({
+
+      event_date:
+        item.event_date,
+
+      bus_name:
+        item.bus_name,
+
+      pickup_point:
+        item.stops[0],
+
+      drop_point:
+        item.stops[
+          item.stops.length - 1
+        ],
+
+      timing:
+        item.timing,
+
+      capacity:
+        item.capacity,
+
+      createdBy:
+        req.user.username,
+
+    }, {
+      transaction: t,
+    });
+
+  createdBuses++;
+}
       // CREATE STOPS
 
       await TravelBusStops.bulkCreate(
@@ -3844,9 +4053,114 @@ if (existingBus) {
           ?.length
       ) {
 
+        const uniquePassengers =
+  Array.from(
+
+    new Map(
+
+      item.validPassengers.map(
+        passenger => [
+
+          passenger.bookingid,
+
+          passenger,
+        ]
+      )
+
+    ).values()
+
+  );
+
+    const existingPassengerAssignments =
+  await TravelBusPassengers.findAll({
+
+    where: {
+
+      bookingid:
+        uniquePassengers.map(
+          item => item.bookingid
+        ),
+    },
+
+    transaction: t,
+  });
+
+const finalPassengers = [];
+
+for (const bookingid of item.bookingids) {
+
+  const existingAssignment =
+    existingPassengerAssignments.find(
+      item =>
+        item.bookingid === bookingid
+    );
+
+  // REASSIGNMENT CASE
+
+  if (
+    existingAssignment &&
+    update_existing
+  ) {
+
+    // REMOVE FROM OLD BUS
+
+    await TravelBusPassengers.destroy({
+      where: {
+        bookingid:
+          bookingid,
+      },
+      transaction: t,
+    });
+
+    finalPassengers.push({
+      bus_group_id:
+        bus.id,
+
+      bookingid:
+        bookingid,
+    });
+
+    continue;
+  }
+
+  // ALREADY ASSIGNED BUT NO UPDATE
+
+  if (
+    existingAssignment &&
+    !update_existing
+  ) {
+
+    skippedAssignedPassengers++;
+
+    continue;
+  }
+
+  // NORMAL NEW ASSIGNMENT
+
+  finalPassengers.push({
+    bus_group_id:
+      bus.id,
+
+    bookingid:
+      bookingid,
+  });
+}
+
+if (finalPassengers.length > 0) {
+
+  await TravelBusPassengers.bulkCreate(
+    finalPassengers,
+    {
+      transaction: t,
+    }
+  );
+
+  assignedPassengers +=
+    finalPassengers.length;
+}
 await TravelBusPassengers.bulkCreate(
 
-  item.validPassengers.map(
+  finalPassengers.map(
     passenger => ({
 
       bus_group_id:
@@ -3859,15 +4173,14 @@ await TravelBusPassengers.bulkCreate(
 
   {
     transaction: t,
+    ignoreDuplicates: true,
   }
 );
-        assignedPassengers +=
-
-  item.validPassengers.length;
+    
       }
-    }
 
-    await t.commit();
+
+}      await t.commit();
 
     return res.json({
 
@@ -3878,18 +4191,27 @@ await TravelBusPassengers.bulkCreate(
 `${assignedPassengers} passengers assigned, ` +
 
 `${skippedDuplicateBuses} duplicate buses skipped`,
-    });
-
-  } catch (error) {
+    });} catch (error) {
 
     await t.rollback();
 
-    return res.status(
-      error.statusCode || 500
-    ).json({
+   console.log(
+  'BULK CREATE ERROR:',
+  error
+);
 
-      message:
-        error.message,
-    });
+return res.status(
+  error.statusCode || 500
+).json({
+
+  message:
+    error.message,
+
+  errors:
+    error.errors || null,
+
+  stack:
+    error.stack || null,
+});
   }
 }
