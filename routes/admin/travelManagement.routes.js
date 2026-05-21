@@ -18,7 +18,10 @@ import {
   updateBusGroup,
   bulkAssignPassengersToBus,
   previewBulkUpload,
-  exportBusPassengers
+  exportBusPassengers,
+  deleteBusGroup,
+  previewCreateBusGroup,
+  previewUpdateBusGroup
 } from '../../controllers/admin/travelManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN, ROLE_DRI_TRAVEL_ADMIN } from '../../config/constants.js';
@@ -46,5 +49,8 @@ router.put('/bus-group/:id', CatchAsync(updateBusGroup));
 router.post('/bus-group/bulk-assign',bulkAssignPassengersToBus);
 router.post('/bus/preview-bulk-upload', previewBulkUpload);
 router.get('/bus-group/:id/export', CatchAsync(exportBusPassengers));
+router.delete('/bus-group/:id', CatchAsync(deleteBusGroup));
+router.post('/bus-group/preview-create', CatchAsync(previewCreateBusGroup));
+router.post('/bus-group/preview-update', CatchAsync(previewUpdateBusGroup));
 
 export default router;

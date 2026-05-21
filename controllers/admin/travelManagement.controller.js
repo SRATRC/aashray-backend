@@ -3,7 +3,8 @@ import {
   CardDb,
   Transactions,
   TravelBusGroup,
-  TravelBusPassengers
+  TravelBusPassengers,
+  TravelBusStops
 } from '../../models/associations.js';
 import {
   ERR_BOOKING_ALREADY_CANCELLED,
@@ -1138,19 +1139,30 @@ export async function createBusGroup(req, res) {
   const t = await database.transaction();
 
   try {
-    const {
-      event_date,
-      bus_name,
-      pickup_point,
-      drop_point,
-      timing,
-      capacity,
-      notes,
-      force_create
-    } = req.body;
+const {
+  event_date,
+  bus_name,
+  stops,
+  timing,
+  capacity,
+  notes,
+  force_create,
+  auto_assign = true
+} = req.body;
 
     if (!event_date || !bus_name) {
       throw new ApiError(400, 'Event date and bus name are required');
+    }
+
+    if (
+      !Array.isArray(stops) ||
+      stops.length < 2
+    ) {
+
+      throw new ApiError(
+        400,
+        'Minimum 2 stops required'
+      );
     }
 
     const existingBus = await TravelBusGroup.findOne({
@@ -1168,24 +1180,66 @@ export async function createBusGroup(req, res) {
       );
     }
 
-    const matchingBookings =
-      await TravelDb.findAll({
-        where: {
-          date: event_date,
-          status: {
-            [Sequelize.Op.in]: [
-              'confirmed',
-              'proceed for payment'
-            ]
-          },
-          pickup_point,
-          drop_point,
-        },
 
-        attributes: ['bookingid'],
+    const pickup_point =
+      stops[0];
 
-        transaction: t,
-      });
+    const drop_point =
+      stops[
+        stops.length - 1
+      ];
+
+const allBookings =
+  await TravelDb.findAll({
+
+    where: {
+
+      date: event_date,
+
+      status: {
+        [Sequelize.Op.in]: [
+          'confirmed',
+          'proceed for payment'
+        ]
+      },
+    },
+
+    attributes: [
+      'bookingid',
+      'pickup_point',
+      'drop_point',
+    ],
+
+    transaction: t,
+  });
+
+const stopNames =
+  stops;
+
+const matchingBookings =
+  allBookings.filter(
+    booking => {
+
+      const pickupIndex =
+        stopNames.indexOf(
+          booking.pickup_point
+        );
+
+      const dropIndex =
+        stopNames.indexOf(
+          booking.drop_point
+        );
+
+      return (
+
+        pickupIndex !== -1 &&
+
+        dropIndex !== -1 &&
+
+        pickupIndex < dropIndex
+      );
+    }
+  );
 
     const matchedPassengerCount =
       matchingBookings.length;
@@ -1212,6 +1266,7 @@ export async function createBusGroup(req, res) {
       });
     }
 
+
     const busGroup = await TravelBusGroup.create(
       {
         event_date,
@@ -1228,6 +1283,27 @@ export async function createBusGroup(req, res) {
       }
     );
 
+    await TravelBusStops.bulkCreate(
+
+      stops.map(
+        (stop, index) => ({
+
+          bus_group_id:
+            busGroup.id,
+
+          stop_name:
+            stop,
+
+          stop_order:
+            index + 1,
+        })
+      ),
+
+      {
+        transaction: t,
+      }
+    );
+
     // Auto assign matching passengers
 
     const passengerMappings =
@@ -1236,7 +1312,10 @@ export async function createBusGroup(req, res) {
         bookingid: item.bookingid,
       }));
 
-    if (passengerMappings.length > 0) {
+    if (
+  auto_assign &&
+  passengerMappings.length > 0
+) {
 
       await TravelBusPassengers.bulkCreate(
         passengerMappings,
@@ -1349,6 +1428,10 @@ export async function fetchBusGroupDetails(req, res) {
           model: TravelBusPassengers,
           as: 'passengers',
         },
+        {
+          model: TravelBusStops,
+          as: 'stops',
+        }
       ],
     });
 
@@ -1476,6 +1559,10 @@ export async function fetchAllBusGroups(req, res) {
             model: TravelBusPassengers,
             as: 'passengers',
           },
+          {
+            model: TravelBusStops,
+            as: 'stops',
+          }
         ],
 
         order: [['event_date', 'DESC']],
@@ -1729,19 +1816,28 @@ export async function updateBusGroup(
   res
 ) {
 
+  const t =
+    await database.transaction();
+
+  try {
+
   const {
     bus_name,
-    pickup_point,
-    drop_point,
+    stops,
     timing,
     capacity,
-    notes
+    notes,
+    auto_assign = false,
+    remove_invalid = false,
   } = req.body;
 
   const bus =
-    await TravelBusGroup.findByPk(
-      req.params.id
-    );
+  await TravelBusGroup.findByPk(
+    req.params.id,
+    {
+      transaction: t,
+    }
+  );
 
   if (!bus) {
     throw new ApiError(
@@ -1750,22 +1846,254 @@ export async function updateBusGroup(
     );
   }
 
-  await bus.update({
-    bus_name,
-    pickup_point,
-    drop_point,
-    timing,
-    capacity,
-    notes,
-    updatedBy:
-      req.user.username,
+  const pickup_point =
+    stops[0];
+
+  const drop_point =
+    stops[
+      stops.length - 1
+    ];
+
+await bus.update({
+
+  bus_name,
+
+  pickup_point,
+
+  drop_point,
+
+  timing,
+
+  capacity,
+
+  notes,
+
+  updatedBy:
+    req.user.username,
+
+}, {
+  transaction: t,
+});
+await TravelBusStops.destroy({
+
+  where: {
+    bus_group_id:
+      bus.id,
+  },
+
+  transaction: t,
+});
+
+await TravelBusStops.bulkCreate(
+
+  stops.map(
+    (stop, index) => ({
+
+      bus_group_id:
+        bus.id,
+
+      stop_name:
+        stop,
+
+      stop_order:
+        index + 1,
+    })
+  ),
+
+  {
+    transaction: t,
+  }
+);
+
+  // =====================================
+// ROUTE RECALCULATION
+// =====================================
+
+const allBookings =
+  await TravelDb.findAll({
+
+    where: {
+
+      date:
+        bus.event_date,
+
+      status: {
+        [Sequelize.Op.in]: [
+          'confirmed',
+          'proceed for payment',
+        ],
+      },
+    },
+
+    transaction: t,
   });
+
+const currentPassengers =
+  await TravelBusPassengers.findAll({
+
+    where: {
+      bus_group_id:
+        bus.id,
+    },
+
+    transaction: t,
+  });
+
+const currentPassengerIds =
+  currentPassengers.map(
+    item => item.bookingid
+  );
+
+const validBookingIds =
+  [];
+
+for (const booking of allBookings) {
+
+  const pickupIndex =
+    stops.indexOf(
+      booking.pickup_point
+    );
+
+  const dropIndex =
+    stops.indexOf(
+      booking.drop_point
+    );
+
+  const validRoute =
+
+    pickupIndex !== -1 &&
+
+    dropIndex !== -1 &&
+
+    pickupIndex < dropIndex;
+
+  if (validRoute) {
+
+    validBookingIds.push(
+      booking.bookingid
+    );
+  }
+}
+
+if (remove_invalid) {
+
+  const invalidAssignedIds =
+    currentPassengerIds.filter(
+      id =>
+        !validBookingIds.includes(
+          id
+        )
+    );
+
+  if (
+    invalidAssignedIds.length
+  ) {
+
+    await TravelBusPassengers.destroy({
+
+      where: {
+
+        bus_group_id:
+          bus.id,
+
+        bookingid:
+          invalidAssignedIds,
+      },
+
+      transaction: t,
+    });
+  }
+}
+if (auto_assign) {
+
+  const existingAssignments =
+    await TravelBusPassengers.findAll({
+
+      where: {
+        bookingid:
+          validBookingIds,
+      },
+
+      transaction: t,
+    });
+
+  const alreadyAssignedIds =
+    existingAssignments.map(
+      item => item.bookingid
+    );
+
+  const availableBookingIds =
+    validBookingIds.filter(
+      id =>
+        !alreadyAssignedIds.includes(
+          id
+        )
+    );
+
+  const latestPassengerCount =
+    await TravelBusPassengers.count({
+
+      where: {
+        bus_group_id:
+          bus.id,
+      },
+
+      transaction: t,
+    });
+
+  const remainingSeats =
+
+    Number(capacity) -
+
+    latestPassengerCount;
+
+  const assignableIds =
+    availableBookingIds.slice(
+      0,
+      remainingSeats
+    );
+
+  if (
+    assignableIds.length
+  ) {
+
+    await TravelBusPassengers.bulkCreate(
+
+      assignableIds.map(
+        bookingid => ({
+
+          bus_group_id:
+            bus.id,
+
+          bookingid,
+        })
+      ),
+
+      {
+        transaction: t,
+      }
+    );
+  }
+}
+await t.commit();
 
   return res.status(200).send({
     message:
       'Bus updated successfully',
+});
+
+} catch (error) {
+
+  await t.rollback();
+
+  return res.status(
+    error.statusCode || 500
+  ).json({
+
+    message:
+      error.message,
   });
-}
+}}
 
 export async function
 bulkAssignPassengersToBus(
@@ -1813,12 +2141,17 @@ bulkAssignPassengersToBus(
         bus_group_id,
         {
           include: [
-            {
-              model:
-                TravelBusPassengers,
-              as: 'passengers',
-            },
-          ],
+          {
+            model:
+              TravelBusPassengers,
+            as: 'passengers',
+          },
+          {
+            model:
+              TravelBusStops,
+            as: 'stops',
+          },
+        ],
           transaction: t,
         }
       );
@@ -1894,43 +2227,35 @@ bulkAssignPassengersToBus(
       return false;
     }
 
-    // RC -> Mumbai BUS
+ const stopNames =
+  bus.stops
+    .sort(
+      (a, b) =>
+        a.stop_order -
+        b.stop_order
+    )
+    .map(
+      stop => stop.stop_name
+    );
 
-    if (
-      bus.pickup_point ===
-      'Research Centre'
-    ) {
+const pickupIndex =
+  stopNames.indexOf(
+    booking.pickup_point
+  );
 
-      return (
-        booking.pickup_point ===
-          'Research Centre'
+const dropIndex =
+  stopNames.indexOf(
+    booking.drop_point
+  );
 
-        &&
+return (
 
-        booking.drop_point !==
-          'Research Centre'
-      );
-    }
+  pickupIndex !== -1 &&
 
-    // Mumbai -> RC BUS
+  dropIndex !== -1 &&
 
-    if (
-      bus.drop_point ===
-      'Research Centre'
-    ) {
-
-      return (
-        booking.drop_point ===
-          'Research Centre'
-
-        &&
-
-        booking.pickup_point !==
-          'Research Centre'
-      );
-    }
-
-    return false;
+  pickupIndex < dropIndex
+);
   }
 );
 
@@ -2043,10 +2368,19 @@ export async function previewBulkUpload(
       );
     }
 
-    const bus =
-      await TravelBusGroup.findByPk(
-        bus_group_id
-      );
+   const bus =
+    await TravelBusGroup.findByPk(
+      bus_group_id,
+      {
+        include: [
+          {
+            model:
+              TravelBusStops,
+            as: 'stops',
+          },
+        ],
+      }
+    );
 
     if (!bus) {
 
@@ -2285,46 +2619,34 @@ String(
         continue;
       }
 
-      let validRoute =
-        false;
+      const stopNames =
+  bus.stops
+    .sort(
+      (a, b) =>
+        a.stop_order -
+        b.stop_order
+    )
+    .map(
+      stop => stop.stop_name
+    );
 
-      // RC -> Mumbai
+const pickupIndex =
+  stopNames.indexOf(
+    booking.pickup_point
+  );
 
-      if (
-        bus.pickup_point ===
-        'Research Centre'
-      ) {
+const dropIndex =
+  stopNames.indexOf(
+    booking.drop_point
+  );
 
-        validRoute = (
+const validRoute =
 
-booking.pickup_point ===
-'Research Centre'
+  pickupIndex !== -1 &&
 
-&&
+  dropIndex !== -1 &&
 
-booking.drop_point !==
-'Research Centre'
-        );
-      }
-
-      // Mumbai -> RC
-
-      else if (
-        bus.drop_point ===
-        'Research Centre'
-      ) {
-
-        validRoute = (
-
-booking.drop_point ===
-'Research Centre'
-
-&&
-
-booking.pickup_point !==
-'Research Centre'
-        );
-      }
+  pickupIndex < dropIndex;
 
       if (!validRoute) {
 
@@ -2638,6 +2960,498 @@ res.setHeader(
 
   } catch (error) {
 
+    return res.status(
+      error.statusCode || 500
+    ).json({
+
+      message:
+        error.message,
+    });
+  }
+}
+
+export async function
+deleteBusGroup(
+  req,
+  res
+) {
+
+  const t =
+    await database.transaction();
+
+  try {
+
+    const busId =
+      req.params.id;
+
+    const bus =
+      await TravelBusGroup.findByPk(
+        busId,
+        {
+          transaction: t,
+        }
+      );
+
+    if (!bus) {
+
+      throw new ApiError(
+        404,
+        'Bus not found'
+      );
+    }
+
+    // DELETE PASSENGERS
+
+    await TravelBusPassengers.destroy({
+
+      where: {
+        bus_group_id:
+          busId,
+      },
+
+      transaction: t,
+    });
+
+    // DELETE STOPS
+
+    await TravelBusStops.destroy({
+
+      where: {
+        bus_group_id:
+          busId,
+      },
+
+      transaction: t,
+    });
+
+    // DELETE BUS
+
+    await bus.destroy({
+      transaction: t,
+    });
+
+    await t.commit();
+
+    return res.json({
+
+      message:
+        'Bus deleted successfully',
+    });
+
+  } catch (error) {
+
+    await t.rollback();
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+
+      message:
+        error.message,
+    });
+  }
+}
+
+
+export async function
+previewCreateBusGroup(
+  req,
+  res
+) {
+
+  try {
+
+    const {
+      event_date,
+      stops,
+      capacity,
+    } = req.body;
+
+    if (
+      !event_date
+    ) {
+
+      throw new ApiError(
+        400,
+        'Event date required'
+      );
+    }
+
+    if (
+      !Array.isArray(stops) ||
+      stops.length < 2
+    ) {
+
+      throw new ApiError(
+        400,
+        'Minimum 2 stops required'
+      );
+    }
+
+    const bookings =
+      await TravelDb.findAll({
+
+        where: {
+
+          date: event_date,
+
+          status: {
+            [Sequelize.Op.in]: [
+              'confirmed',
+              'proceed for payment',
+            ],
+          },
+        },
+
+        include: [
+          {
+            model: CardDb,
+            attributes: [
+              'issuedto',
+              'cardno',
+              'mobno',
+            ],
+          },
+        ],
+      });
+
+    const stopNames =
+      stops;
+
+    const rows = [];
+
+    const validBookingIds =
+      [];
+
+    for (const booking of bookings) {
+
+      const pickupIndex =
+        stopNames.indexOf(
+          booking.pickup_point
+        );
+
+      const dropIndex =
+        stopNames.indexOf(
+          booking.drop_point
+        );
+
+      const validRoute =
+
+        pickupIndex !== -1 &&
+
+        dropIndex !== -1 &&
+
+        pickupIndex < dropIndex;
+
+      if (!validRoute) {
+        continue;
+      }
+
+      const existingAssignment =
+        await TravelBusPassengers.findOne({
+
+          where: {
+            bookingid:
+              booking.bookingid,
+          },
+        });
+
+      if (
+        !existingAssignment
+      ) {
+
+        validBookingIds.push(
+          booking.bookingid
+        );
+      }
+
+      rows.push({
+
+        bookingid:
+          booking.bookingid,
+
+        name:
+          booking.CardDb
+            ?.issuedto || '',
+
+        cardno:
+          booking.CardDb
+            ?.cardno || '',
+
+        mobile:
+          booking.CardDb
+            ?.mobno || '',
+
+        pickup:
+          booking.pickup_point,
+
+        drop:
+          booking.drop_point,
+
+        status:
+          booking.status,
+
+        alreadyAssigned:
+          !!existingAssignment,
+      });
+    }
+
+    const remainingSeats =
+      Number(capacity);
+
+    const assignableIds =
+      validBookingIds.slice(
+        0,
+        remainingSeats
+      );
+
+    const skippedCapacityIds =
+      validBookingIds.slice(
+        remainingSeats
+      );
+
+    return res.json({
+
+      rows,
+
+      totalMatching:
+        rows.length,
+
+      assignableCount:
+        assignableIds.length,
+
+      skippedCapacityCount:
+        skippedCapacityIds.length,
+
+      validBookingIds,
+
+      assignableIds,
+
+      skippedCapacityIds,
+    });
+
+  } catch (error) {
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+
+      message:
+        error.message,
+    });
+  }
+}
+
+export async function previewUpdateBusGroup(
+  req,
+  res
+) {
+
+  const t =
+  await database.transaction();
+  try {
+
+    const {
+      bus_group_id,
+      stops,
+      capacity,
+    } = req.body;
+
+    const bus =
+      await TravelBusGroup.findByPk(
+        bus_group_id,
+        {
+          include: [
+            {
+              model:
+                TravelBusPassengers,
+              as: 'passengers',
+            },
+          ],
+        }
+      );
+
+    if (!bus) {
+
+      throw new ApiError(
+        404,
+        'Bus not found'
+      );
+    }
+
+    const bookings =
+      await TravelDb.findAll({
+
+        where: {
+
+          date:
+            bus.event_date,
+
+          status: {
+            [Sequelize.Op.in]: [
+              'confirmed',
+              'proceed for payment',
+            ],
+          },
+        },
+
+        include: [
+          {
+            model: CardDb,
+            attributes: [
+              'issuedto',
+              'cardno',
+              'mobno',
+            ],
+          },
+        ],
+      });
+
+    const currentAssignedIds =
+      bus.passengers.map(
+        item =>
+          item.bookingid
+      );
+
+    const newlyMatching =
+      [];
+
+    const noLongerMatching =
+      [];
+
+    const allAssignments =
+      await TravelBusPassengers.findAll({
+        transaction: t,
+      });
+
+    const assignedBookingIds =
+      allAssignments.map(
+        item => item.bookingid
+      );
+
+    for (const booking of bookings) {
+
+      const pickupIndex =
+        stops.indexOf(
+          booking.pickup_point
+        );
+
+      const dropIndex =
+        stops.indexOf(
+          booking.drop_point
+        );
+
+      const validRoute =
+
+        pickupIndex !== -1 &&
+
+        dropIndex !== -1 &&
+
+        pickupIndex <
+          dropIndex;
+
+      const isAssigned =
+        currentAssignedIds.includes(
+          booking.bookingid
+        );
+
+      // NEW MATCH
+
+if (
+  validRoute &&
+  !isAssigned
+) {
+
+  newlyMatching.push({
+
+    bookingid:
+      booking.bookingid,
+
+    name:
+      booking.CardDb
+        ?.issuedto || '',
+
+    cardno:
+      booking.CardDb
+        ?.cardno || '',
+
+    pickup:
+      booking.pickup_point,
+
+    drop:
+      booking.drop_point,
+
+    alreadyAssigned:
+      assignedBookingIds.includes(
+        booking.bookingid
+      ),
+  });
+}
+
+      // NO LONGER MATCHING
+
+      if (
+        !validRoute &&
+        isAssigned
+      ) {
+
+        noLongerMatching.push({
+
+          bookingid:
+            booking.bookingid,
+
+          name:
+            booking.CardDb
+              ?.issuedto || '',
+
+          cardno:
+            booking.CardDb
+              ?.cardno || '',
+
+          pickup:
+            booking.pickup_point,
+
+          drop:
+            booking.drop_point,
+        });
+      }
+    }
+
+    const remainingSeats =
+
+      Number(capacity) -
+
+      (
+        bus.passengers.length -
+
+        noLongerMatching.length
+      );
+
+    const assignable =
+      newlyMatching.slice(
+        0,
+        remainingSeats
+      );
+
+    const overflow =
+      newlyMatching.slice(
+        remainingSeats
+      );
+
+    await t.commit();
+    return res.json({
+
+      newlyMatching,
+
+      noLongerMatching,
+
+      assignable,
+
+      overflow,
+    });
+
+  } catch (error) {
+    await t.rollback();
     return res.status(
       error.statusCode || 500
     ).json({

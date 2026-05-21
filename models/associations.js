@@ -38,6 +38,7 @@ import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js'
 import TravelBusGroup from './travelBusGroup.model.js';
 import TravelBusPassengers from './travelBusPassengers.model.js';
+import TravelBusStops from './travelBusStops.model.js';
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -361,6 +362,22 @@ TravelBusPassengers.belongsTo(TravelBusGroup, {
   targetKey: 'id',
   as: 'TravelBusGroup',
 });
+
+TravelBusGroup.hasMany(
+  TravelBusStops,
+  {
+    foreignKey: 'bus_group_id',
+    as: 'stops',
+  }
+);
+
+TravelBusStops.belongsTo(
+  TravelBusGroup,
+  {
+    foreignKey: 'bus_group_id',
+  }
+);
+
 // Utsav
 UtsavBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
@@ -583,5 +600,6 @@ export {
   RazorpaySettlementRecon,
   ShibirAttendanceDb,
   TravelBusGroup,
-  TravelBusPassengers
+  TravelBusPassengers,
+  TravelBusStops
 };
