@@ -3461,3 +3461,435 @@ if (
     });
   }
 }
+
+
+export async function
+previewBulkMasterUpload(
+  req,
+  res
+) {
+
+  try {
+
+const {
+  buses,
+  assignments,
+} = req.body;
+
+
+
+    const previewBuses = [];
+
+    for (const busRow of buses) {
+
+      const item = {
+
+        bus_name:
+          busRow['Bus Name'],
+
+        event_date:
+          busRow['Event Date'],
+
+        timing:
+          busRow['Timing'],
+
+        capacity:
+          Number(
+            busRow['Capacity']
+          ),
+
+        stops:
+          String(
+            busRow['Stops']
+          )
+          .split('|')
+          .map(
+            item =>
+              item.trim()
+          ),
+
+        bookingids:
+          assignments
+            .filter(
+              assignment =>
+
+                assignment[
+                  'Bus Name'
+                ] ===
+                busRow[
+                  'Bus Name'
+                ]
+            )
+            .map(
+              assignment =>
+                assignment[
+                  'Booking Id'
+                ]
+            ),
+      };
+
+      const duplicateStops =
+  item.stops.filter(
+    (stop, index) =>
+
+      item.stops.indexOf(
+        stop
+      ) !== index
+  );
+
+if (
+  duplicateStops.length
+) {
+
+  item.routeError =
+    'Duplicate stops found';
+}
+
+      const existingBus =
+  await TravelBusGroup.findOne({
+
+    where: {
+
+      event_date:
+        item.event_date,
+
+      bus_name:
+        item.bus_name,
+    },
+  });
+
+item.duplicateBus =
+  !!existingBus;
+
+      const validPassengers =
+        [];
+
+const invalidPassengers =
+  [];
+
+      const alreadyAssigned =
+        [];
+
+      for (
+        const bookingid
+        of item.bookingids
+      ) {
+
+ const booking =
+  await TravelDb.findOne({
+
+    where: {
+      bookingid,
+    },
+
+    include: [
+      {
+        model: CardDb,
+        attributes: [
+          'issuedto',
+          'cardno',
+        ],
+      },
+    ],
+  });
+
+        if (!booking) {
+
+invalidPassengers.push({
+
+  bookingid,
+
+  reason:
+  'Booking not found',
+
+name: '',
+
+pickup: '',
+
+drop: '',
+});
+
+          continue;
+        }
+
+        const pickupIndex =
+          item.stops.indexOf(
+            booking.pickup_point
+          );
+
+        const dropIndex =
+          item.stops.indexOf(
+            booking.drop_point
+          );
+
+        const validRoute =
+
+          pickupIndex !== -1 &&
+
+          dropIndex !== -1 &&
+
+          pickupIndex < dropIndex;
+
+        if (!validRoute) {
+
+invalidPassengers.push({
+
+  bookingid,
+
+  name:
+    booking.CardDb
+      ?.issuedto || '',
+
+  pickup:
+    booking.pickup_point,
+
+  drop:
+    booking.drop_point,
+
+  reason:
+    'Route mismatch',
+});
+                  continue;
+        }
+
+        const existing =
+          await TravelBusPassengers.findOne({
+
+            where: {
+              bookingid,
+            },
+          });
+
+        if (existing) {
+
+alreadyAssigned.push({
+
+  bookingid,
+
+  name:
+    booking.CardDb
+      ?.issuedto || '',
+
+  pickup:
+    booking.pickup_point,
+
+  drop:
+    booking.drop_point,
+});
+
+          continue;
+        }
+
+     validPassengers.push({
+
+  bookingid,
+
+  name:
+    booking.CardDb
+      ?.issuedto || '',
+
+  pickup:
+    booking.pickup_point,
+
+  drop:
+    booking.drop_point,
+});
+      }
+
+      const overflowPassengers =
+        validPassengers.slice(
+          item.capacity
+        );
+
+      previewBuses.push({
+
+        ...item,
+
+        validPassengers:
+          validPassengers.slice(
+            0,
+            item.capacity
+          ),
+
+        overflowPassengers,
+
+        invalidPassengers,
+
+        alreadyAssigned,
+      });
+    }
+
+    return res.json({
+      buses:
+        previewBuses,
+    });
+    
+  } catch (error) {
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+
+      message:
+        error.message,
+    });
+  }
+}
+
+export async function
+createBulkMasterUpload(
+  req,
+  res
+) {
+
+  let createdBuses = 0;
+
+let assignedPassengers = 0;
+
+let skippedDuplicateBuses = 0;
+
+  const t =
+    await database.transaction();
+
+  try {
+
+    const { buses } =
+      req.body;
+
+    for (const item of buses) {
+
+      // DUPLICATE BUS CHECK
+
+      const existingBus =
+        await TravelBusGroup.findOne({
+
+          where: {
+
+            event_date:
+              item.event_date,
+
+            bus_name:
+              item.bus_name,
+          },
+
+          transaction: t,
+        });
+if (existingBus) {
+
+  skippedDuplicateBuses++;
+
+  continue;
+}
+
+      // CREATE BUS
+
+      const bus =
+        await TravelBusGroup.create({
+
+          event_date:
+            item.event_date,
+
+          bus_name:
+            item.bus_name,
+
+          pickup_point:
+            item.stops[0],
+
+          drop_point:
+            item.stops[
+              item.stops.length - 1
+            ],
+
+          timing:
+            item.timing,
+
+          capacity:
+            item.capacity,
+
+          createdBy:
+            req.user.username,
+
+        }, {
+          transaction: t,
+        });
+        createdBuses++;
+
+      // CREATE STOPS
+
+      await TravelBusStops.bulkCreate(
+
+        item.stops.map(
+          (stop, index) => ({
+
+            bus_group_id:
+              bus.id,
+
+            stop_name:
+              stop,
+
+            stop_order:
+              index + 1,
+          })
+        ),
+
+        {
+          transaction: t,
+        }
+      );
+
+      // CREATE PASSENGERS
+
+      if (
+        item.validPassengers
+          ?.length
+      ) {
+
+await TravelBusPassengers.bulkCreate(
+
+  item.validPassengers.map(
+    passenger => ({
+
+      bus_group_id:
+        bus.id,
+
+      bookingid:
+        passenger.bookingid,
+    })
+  ),
+
+  {
+    transaction: t,
+  }
+);
+        assignedPassengers +=
+
+  item.validPassengers.length;
+      }
+    }
+
+    await t.commit();
+
+    return res.json({
+
+      message:
+
+`${createdBuses} buses created, ` +
+
+`${assignedPassengers} passengers assigned, ` +
+
+`${skippedDuplicateBuses} duplicate buses skipped`,
+    });
+
+  } catch (error) {
+
+    await t.rollback();
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+
+      message:
+        error.message,
+    });
+  }
+}
