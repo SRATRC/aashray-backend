@@ -113,21 +113,35 @@ export const FetchBookedShibir = async (req, res) => {
   );
 
   const currentDate = new Date();
-  shibirs.forEach((shibir) => {
-    const startDate = new Date(shibir.start_date);
-    const feedbackStartDate = new Date(startDate);
-    feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
+  const updatedShibirs = await Promise.all(
+    shibirs.map(async (shibir) => {
+      const startDate = new Date(shibir.start_date);
+      const feedbackStartDate = new Date(startDate);
+      feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
 
-    const feedbackEndDate = new Date(shibir.end_date);
-    feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
+      const feedbackEndDate = new Date(shibir.end_date);
+      feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
 
-    shibir.showFeedback =
-      currentDate >= feedbackStartDate &&
-      currentDate <= feedbackEndDate &&
-      shibir.status === STATUS_CONFIRMED;
-  });
+      const existingFeedback = await AdhyayanFeedback.findOne({
+        where: {
+          shibir_id: shibir.shibir_id,
+          cardno: req.user.cardno
+        }
+      });
 
-  return res.status(200).send({ data: shibirs });
+      return {
+        ...shibir,
+        hasSubmittedFeedback: !!existingFeedback,
+        showFeedback:
+          !existingFeedback &&
+          currentDate >= feedbackStartDate &&
+          currentDate <= feedbackEndDate &&
+          shibir.status === STATUS_CONFIRMED
+      };
+    })
+  );
+
+  return res.status(200).send({ data: updatedShibirs });
 };
 
 export const CancelShibir = async (req, res) => {
