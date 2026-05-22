@@ -37,6 +37,8 @@ import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
+import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
+
 
 // CardDb
 CardDb.hasMany(GateRecord, {
@@ -399,6 +401,44 @@ UtsavPackagesDb.hasMany(UtsavBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+UtsavDb.hasMany(UtsavFeedback, {
+  foreignKey: 'utsav_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+UtsavFeedback.belongsTo(UtsavDb, {
+  foreignKey: 'utsav_id',
+  targetKey: 'id'
+});
+
+CardDb.hasMany(UtsavFeedback, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+UtsavFeedback.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+
+UtsavFeedback.hasMany(UtsavFeedbackAnswer, {
+  foreignKey: 'feedback_id',
+  sourceKey: 'id',
+  as: 'answers',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+UtsavFeedbackAnswer.belongsTo(UtsavFeedback, {
+  foreignKey: 'feedback_id',
+  targetKey: 'id',
+  as: 'feedback'
+});
+
 
 // Admin Roles
 AdminUsers.hasMany(AdminRoles, {
@@ -554,5 +594,6 @@ export {
   AdhyayanFeedback,
   RazorpaySettlementRecon,
   ShibirAttendanceDb,
-  UtsavFeedback
+  UtsavFeedback,
+  UtsavFeedbackAnswer
 };
