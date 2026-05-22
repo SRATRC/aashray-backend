@@ -152,7 +152,7 @@ export const ERR_FEEDBACK_ALREADY_SUBMITTED =
 export const ERR_FEEDBACK_NOT_ALLOWED =
   'You are not eligible to submit feedback for this adhyayan';
 export const ERR_ADHYAYAN_NOT_COMPLETED =
-  'c';
+  'Cannot submit feedback for ongoing or future adhyayan';
 
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
