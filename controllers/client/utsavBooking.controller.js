@@ -91,57 +91,6 @@ export const FetchUpcoming = async (req, res) => {
   return res.status(200).send(formattedResponse);
 };
 
-// export const ViewUtsavBookings = async (req, res) => {
-//   const page = parseInt(req.query.page) || 1;
-//   const pageSize = parseInt(req.query.page_size) || 10;
-//   const offset = (page - 1) * pageSize;
-
-//   const utsavs = await database.query(
-//     `
-//     SELECT t1.bookingid,
-//        t1.utsavid,
-//        t2.name AS utsav_name,
-//        t2.start_date AS utsav_start_date,
-//        t2.end_date AS utsav_end_date,
-//        t2.month,
-//        t2.location AS utsav_location,
-//        t1.packageid,
-//        t3.name AS package_name,
-//        t3.start_date AS package_start,
-//        t3.end_date AS package_end,
-//        t1.volunteer,
-//        t1.cardno,
-//        t1.bookedBy,
-//        t1.roomno as stay,
-//        t5.issuedto AS user_name,
-//        t1.status,
-//        t4.status AS transaction_status,
-//        t4.amount,
-//        t2.createdAt AS created_at
-//     FROM utsav_booking t1
-//     LEFT JOIN utsav_db t2 ON t1.utsavid = t2.id
-//     LEFT JOIN utsav_packages_db t3 ON t3.id = t1.packageid
-//     LEFT JOIN card_db t5 ON t5.cardno = t1.cardno
-//     LEFT JOIN transactions t4 ON t4.bookingid = t1.bookingid
-//     WHERE t1.cardno = :cardno OR t1.bookedBy = :cardno
-//     ORDER BY created_at DESC
-//     LIMIT :limit
-//     OFFSET :offset;
-//   `,
-//     {
-//       replacements: {
-//         cardno: req.user.cardno,
-//         limit: pageSize,
-//         offset: offset
-//       },
-//       type: database.QueryTypes.SELECT,
-//       raw: true
-//     }
-//   );
-
-//   return res.status(200).send({ data: utsavs });
-// };
-
 export const ViewUtsavBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
@@ -194,26 +143,40 @@ export const ViewUtsavBookings = async (req, res) => {
 
   const now = moment().tz('Asia/Kolkata');
 
-  utsavs.forEach((utsav) => {
-    const feedbackStartDate = moment(utsav.utsav_start_date)
-      .tz('Asia/Kolkata')
-      .hour(FEEDBACK_ELIGIBILITY_HOUR)
-      .minute(0)
-      .second(0);
+  const updatedUtsavs = await Promise.all(
+    utsavs.map(async (utsav) => {
+      const feedbackStartDate = moment(utsav.utsav_start_date)
+        .tz('Asia/Kolkata')
+        .hour(FEEDBACK_ELIGIBILITY_HOUR)
+        .minute(0)
+        .second(0);
 
-    const daysSinceStart = now.diff(feedbackStartDate, 'days');
+      const daysSinceStart = now.diff(feedbackStartDate, 'days');
 
-    const normalizedStatus = (utsav.status || '').toLowerCase();
+      const normalizedStatus = (utsav.status || '').toLowerCase();
 
-    utsav.showFeedback =
-      !now.isBefore(feedbackStartDate) && // after start time
-      daysSinceStart <= 8 &&              // SAME window as validator
-      ['confirmed', 'checkedin'].includes(normalizedStatus);
-  });
-  console.log('DEBUG SHOW FEEDBACK:', utsavs[0]);
+      const existingFeedback = await UtsavFeedback.findOne({
+        where: {
+          utsav_id: utsav.utsavid,
+          cardno: req.user.cardno
+        }
+      });
 
-  return res.status(200).send({ data: utsavs });
+      return {
+        ...utsav,
 
+        hasSubmittedFeedback: !!existingFeedback,
+
+        showFeedback:
+          !existingFeedback &&
+          !now.isBefore(feedbackStartDate) &&
+          daysSinceStart <= 8 &&
+          ['confirmed', 'checkedin'].includes(normalizedStatus)
+      };
+    })
+  );
+
+  return res.status(200).send({ data: updatedUtsavs });
 };
 
 export const CancelUtsavBooking = async (req, res) => {
