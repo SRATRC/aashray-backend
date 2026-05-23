@@ -121,6 +121,32 @@ export async function cancelTransaction(
     card = await validateCard(transaction.cardno);
   }
 
+  // Remove from bus assignment if assigned
+  const busAssignment = await TravelBusPassengers.findOne({
+    where: { bookingid },
+    transaction: t
+  });
+
+  if (busAssignment) {
+    // Check if the user was the coordinator for this bus and clear it
+    await TravelBusGroup.update(
+      { coordinator_bookingid: null },
+      {
+        where: { id: busAssignment.bus_group_id, coordinator_bookingid: bookingid },
+        transaction: t
+      }
+    );
+
+    // Delete the passenger assignment
+    await TravelBusPassengers.destroy({
+      where: { bookingid },
+      transaction: t
+    });
+
+    req.log.info('cancel_travel_removed_from_bus', { bookingid, busGroupId: busAssignment.bus_group_id });
+  }
+
+
   if (
     !admin &&
     [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction))
@@ -136,7 +162,7 @@ export async function cancelTransaction(
   const totalAmount = transaction.amount + transaction.discount;
   const credits =
     transaction.status == STATUS_PAYMENT_COMPLETED ||
-    transaction.status == STATUS_CASH_COMPLETED
+      transaction.status == STATUS_CASH_COMPLETED
       ? totalAmount
       : transaction.discount;
 

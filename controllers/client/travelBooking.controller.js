@@ -1,4 +1,4 @@
-import { TravelDb } from '../../models/associations.js';
+import { TravelDb, TravelBusPassengers, TravelBusGroup } from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
@@ -146,14 +146,12 @@ export const CancelTravel = async (req, res) => {
       const title = 'Raj Pravas Booking Cancelled';
       const body =
         req.user.cardno === booking.cardno
-          ? `Travel on ${moment(booking.date).format('Do MMM, YYYY')} for ${
-              req.user.issuedto
-            } has been cancelled.`
+          ? `Travel on ${moment(booking.date).format('Do MMM, YYYY')} for ${req.user.issuedto
+          } has been cancelled.`
           : `Your travel on ${moment(booking.date).format(
-              'Do MMM, YYYY'
-            )} from ${booking.pickup_point} to ${
-              booking.drop_point
-            } has been cancelled.`;
+            'Do MMM, YYYY'
+          )} from ${booking.pickup_point} to ${booking.drop_point
+          } has been cancelled.`;
       notifyCardno(other, {
         title,
         body,

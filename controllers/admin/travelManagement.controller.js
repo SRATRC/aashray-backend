@@ -570,8 +570,82 @@ export const updateBookingStatus = async (req, res) => {
     STATUS_CANCELLED
   ];
 
-  if (cancelledStatuses.includes(newBookingStatus)) {
-    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking, t);
+  if (
+    cancelledStatuses.includes(
+      newBookingStatus
+    )
+  ) {
+
+    bookingWhichCameOutOfWaiting =
+      await updateWaitingTravelBooking(
+        booking,
+        t
+      );
+
+    const bookingid =
+      booking.bookingid;
+
+    // REMOVE FROM BUS ASSIGNMENT
+
+    const busAssignment =
+      await TravelBusPassengers.findOne({
+
+        where: {
+          bookingid,
+        },
+
+        transaction: t,
+      });
+
+    if (busAssignment) {
+
+      // REMOVE COORDINATOR
+
+      await TravelBusGroup.update(
+
+        {
+          coordinator_bookingid:
+            null,
+        },
+
+        {
+
+          where: {
+
+            id:
+              busAssignment.bus_group_id,
+
+            coordinator_bookingid:
+              bookingid,
+          },
+
+          transaction: t,
+        }
+      );
+
+      // REMOVE PASSENGER
+
+      await TravelBusPassengers.destroy({
+
+        where: {
+          bookingid,
+        },
+
+        transaction: t,
+      });
+
+      req.log.info(
+
+        'travel_admin_cancel_removed_from_bus',
+
+        {
+          bookingid,
+
+          busGroupId:
+            busAssignment.bus_group_id,
+        }
+      );
+    }
   }
 
   const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
