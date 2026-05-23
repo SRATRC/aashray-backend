@@ -1326,3 +1326,128 @@ export const issuePlate = async (req, res) => {
   await t.commit();
   return res.status(200).send({ message, issuedto });
 };
+
+export const fetchUtsavFeedbacks = async (req, res) => {
+  const {
+    utsav_id,
+    search = ''
+  } = req.query;
+
+  let whereClause = '';
+  const replacements = {};
+
+  if (utsav_id) {
+    whereClause += ' AND uf.utsav_id = :utsav_id ';
+    replacements.utsav_id = utsav_id;
+  }
+
+  if (search) {
+    whereClause += `
+      AND (
+        c.cardno LIKE :search
+        OR c.issuedto LIKE :search
+      )
+    `;
+
+    replacements.search = `%${search}%`;
+  }
+
+  const feedbacks = await database.query(
+    `
+    SELECT
+      uf.id,
+      uf.cardno,
+      c.issuedto,
+      c.mobno,
+      c.gender,
+      c.center,
+      c.res_status,
+      uf.utsav_id,
+      u.name AS utsav_name,
+      uf.createdAt
+    FROM utsav_feedback uf
+    LEFT JOIN card_db c
+      ON c.cardno = uf.cardno
+    LEFT JOIN utsav_db u
+      ON u.id = uf.utsav_id
+    WHERE 1=1
+    ${whereClause}
+    ORDER BY uf.createdAt DESC
+    `,
+    {
+      replacements,
+      type: database.QueryTypes.SELECT
+    }
+  );
+
+  const feedbackIds = feedbacks.map((f) => f.id);
+
+  let answers = [];
+
+  if (feedbackIds.length > 0) {
+    answers = await database.query(
+      `
+      SELECT
+        feedback_id,
+        question_id,
+        question_text,
+        question_type,
+        answer
+      FROM utsav_feedback_answers
+      WHERE feedback_id IN (:feedbackIds)
+      ORDER BY id ASC
+      `,
+      {
+        replacements: {
+          feedbackIds
+        },
+        type: database.QueryTypes.SELECT
+      }
+    );
+  }
+
+  const groupedAnswers = {};
+
+  answers.forEach((answer) => {
+    if (!groupedAnswers[answer.feedback_id]) {
+      groupedAnswers[answer.feedback_id] = [];
+    }
+
+    groupedAnswers[answer.feedback_id].push(answer);
+  });
+
+  const finalData = feedbacks.map((feedback) => {
+
+    const answersObj = {};
+
+    (groupedAnswers[feedback.id] || []).forEach((a) => {
+      answersObj[a.question_id] = a.answer;
+    });
+
+    return {
+      ...feedback,
+
+      food_rating:
+        answersObj.food_rating || '-',
+
+      stay_rating:
+        answersObj.stay_rating || '-',
+
+      overall_rating:
+        answersObj.overall_rating || '-',
+
+      loved_most:
+        answersObj.loved_most || '-',
+
+      improvement_suggestions:
+        answersObj.improvement_suggestions || '-',
+
+      answers:
+        groupedAnswers[feedback.id] || []
+    };
+
+  });
+  return res.status(200).send({
+    data: finalData
+  });
+};
