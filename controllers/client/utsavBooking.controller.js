@@ -329,108 +329,147 @@ const ALLOWED_UTSAV_FEEDBACK_QUESTIONS = [
 ];
 
 export const submitUtsavFeedback = async (req, res) => {
-  const { utsav_id, answers } = req.body;
 
-  if (!utsav_id) {
-    throw new ApiError(400, 'utsav_id is required');
-  }
+  const transaction = await database.transaction();
 
-  if (!Array.isArray(answers) || answers.length === 0) {
-    throw new ApiError(400, 'answers array is required');
-  }
+  try {
 
-  await validateFeedbackEligibility(req.user.cardno, utsav_id);
+    const { utsav_id, answers } = req.body;
 
-  const allowedQuestionMap = new Map(
-    ALLOWED_UTSAV_FEEDBACK_QUESTIONS.map((q) => [q.id, q.type])
-  );
-
-  const submittedQuestionIds = [];
-
-  // Validate all answers
-  for (const answerObj of answers) {
-    const {
-      question_id,
-      question_text,
-      question_type,
-      answer
-    } = answerObj;
-
-    submittedQuestionIds.push(question_id);
-
-    if (
-      !question_id ||
-      !question_text ||
-      !question_type ||
-      answer === undefined ||
-      answer === null ||
-      answer === ''
-    ) {
-      throw new ApiError(400, 'All feedback fields are required');
+    if (!utsav_id) {
+      throw new ApiError(400, 'utsav_id is required');
     }
 
-    const expectedType = allowedQuestionMap.get(question_id);
-
-    if (!expectedType) {
-      throw new ApiError(
-        400,
-        `Invalid question_id: ${question_id}`
-      );
+    if (!Array.isArray(answers) || answers.length === 0) {
+      throw new ApiError(400, 'answers array is required');
     }
 
-    if (expectedType !== question_type) {
-      throw new ApiError(
-        400,
-        `Invalid question_type for ${question_id}`
-      );
-    }
+    await validateFeedbackEligibility(
+      req.user.cardno,
+      utsav_id
+    );
 
-    // Rating validation
-    if (question_type === 'rating') {
-      const rating = Number(answer);
+    const allowedQuestionMap = new Map(
+      ALLOWED_UTSAV_FEEDBACK_QUESTIONS.map(
+        (q) => [q.id, q.type]
+      )
+    );
+
+    const submittedQuestionIds = [];
+
+    // Validate all answers
+    for (const answerObj of answers) {
+
+      const {
+        question_id,
+        question_text,
+        question_type,
+        answer
+      } = answerObj;
+
+      submittedQuestionIds.push(question_id);
 
       if (
-        Number.isNaN(rating) ||
-        rating < 1 ||
-        rating > 5
+        !question_id ||
+        !question_text ||
+        !question_type ||
+        answer === undefined ||
+        answer === null ||
+        answer === ''
       ) {
         throw new ApiError(
           400,
-          `${question_id} must be between 1 and 5`
+          'All feedback fields are required'
         );
       }
+
+      const expectedType =
+        allowedQuestionMap.get(question_id);
+
+      if (!expectedType) {
+        throw new ApiError(
+          400,
+          `Invalid question_id: ${question_id}`
+        );
+      }
+
+      if (expectedType !== question_type) {
+        throw new ApiError(
+          400,
+          `Invalid question_type for ${question_id}`
+        );
+      }
+
+      // Rating validation
+      if (question_type === 'rating') {
+
+        const rating = Number(answer);
+
+        if (
+          Number.isNaN(rating) ||
+          rating < 1 ||
+          rating > 5
+        ) {
+          throw new ApiError(
+            400,
+            `${question_id} must be between 1 and 5`
+          );
+        }
+
+      }
+
     }
+
+    // Ensure all required questions are submitted
+    for (const question of ALLOWED_UTSAV_FEEDBACK_QUESTIONS) {
+
+      if (!submittedQuestionIds.includes(question.id)) {
+
+        throw new ApiError(
+          400,
+          `${question.id} is required`
+        );
+
+      }
+
+    }
+
+    // Create main feedback row
+    const feedback = await UtsavFeedback.create(
+      {
+        cardno: req.user.cardno,
+        utsav_id
+      },
+      { transaction }
+    );
+
+    // Create answers
+    const feedbackAnswers = answers.map((item) => ({
+      feedback_id: feedback.id,
+      question_id: item.question_id,
+      question_text: item.question_text,
+      question_type: item.question_type,
+      answer: item.answer
+    }));
+
+    await UtsavFeedbackAnswer.bulkCreate(
+      feedbackAnswers,
+      { transaction }
+    );
+
+    await transaction.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Utsav feedback submitted successfully'
+    });
+
+  } catch (error) {
+
+    await transaction.rollback();
+
+    throw error;
+
   }
 
-  // Ensure all required questions are submitted
-  for (const question of ALLOWED_UTSAV_FEEDBACK_QUESTIONS) {
-    if (!submittedQuestionIds.includes(question.id)) {
-      throw new ApiError(
-        400,
-        `${question.id} is required`
-      );
-    }
-  }
-
-  // Create main feedback row
-  const feedback = await UtsavFeedback.create({
-    cardno: req.user.cardno,
-    utsav_id
-  });
-
-  // Create answers
-  const feedbackAnswers = answers.map((item) => ({
-    feedback_id: feedback.id,
-    question_id: item.question_id,
-    question_text: item.question_text,
-    question_type: item.question_type,
-    answer: item.answer
-  }));
-
-  await UtsavFeedbackAnswer.bulkCreate(feedbackAnswers);
-
-  return res.status(201).json({
-    success: true,
-    message: 'Utsav feedback submitted successfully'
-  });
 };
