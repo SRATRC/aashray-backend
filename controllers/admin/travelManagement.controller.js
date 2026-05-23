@@ -71,14 +71,14 @@ export const fetchSummary = async (req, res) => {
     const normalizedStatuses = Array.isArray(statuses)
       ? statuses
       : statuses
-      ? [statuses]
-      : [];
+        ? [statuses]
+        : [];
 
     const adminCommentFilters = Array.isArray(adminComments)
       ? adminComments
       : adminComments
-      ? [adminComments]
-      : [];
+        ? [adminComments]
+        : [];
 
     const replacements = {
       startDate: start_date,
@@ -264,7 +264,16 @@ export const fetchUpcomingBookings = async (req, res) => {
     `SELECT t1.bookingid, t1.bookedBy, t1.date,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
-       t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center, tbp.bus_group_id, tbg.bus_name, tbg.timing AS bus_timing, tbg.coordinator_bookingid,
+       t1.comments, t1.admin_comments, t1.status, t3.issuedto,
+t3.mobno,
+t3.center,
+
+tbp.bus_group_id,
+
+tbg.bus_name,
+tbg.capacity AS bus_capacity,
+tbg.timing AS bus_timing,
+tbg.coordinator_bookingid,
        t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
@@ -410,7 +419,7 @@ export const fetchBookingForDriver = async (req, res) => {
 };
 
 export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments,  description, charges, issueCredits } = req.body;
+  const { bookingid, status, adminComments, description, charges, issueCredits } = req.body;
   let newBookingStatus = status;
 
   req.log.info('travel_update_booking_status_start', { bookingid, status, adminComments, issueCredits });
@@ -440,12 +449,12 @@ export const updateBookingStatus = async (req, res) => {
     throw new ApiError(400, 'Status is same as before');
   }
 
-if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
-  if (!(booking.status === STATUS_CANCELLED && status === STATUS_ADMIN_CANCELLED)) {
-    req.log.warn('travel_update_booking_status_already_cancelled', { bookingid, currentStatus: booking.status });
-    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
+    if (!(booking.status === STATUS_CANCELLED && status === STATUS_ADMIN_CANCELLED)) {
+      req.log.warn('travel_update_booking_status_already_cancelled', { bookingid, currentStatus: booking.status });
+      throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+    }
   }
-}
 
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
@@ -472,33 +481,33 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
       }
       break;
 
-  case STATUS_ADMIN_CANCELLED:
-  if (transaction) {
+    case STATUS_ADMIN_CANCELLED:
+      if (transaction) {
 
-    if (issueCredits === 'yes') {
-      // Always cancel + issue credits
-      await cancelTransaction(req.user, bookedByCard, transaction, t, true);
+        if (issueCredits === 'yes') {
+          // Always cancel + issue credits
+          await cancelTransaction(req.user, bookedByCard, transaction, t, true);
+          break;
+        }
+
+        // issueCredits = "no"
+        // ---- IMPORTANT FIX ----
+        // If transaction is already completed, DO NOT update it.
+        if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+          // leave transaction untouched
+          break;
+        }
+
+        // If transaction is pending or cash pending → mark admin cancelled
+        await transaction.update(
+          {
+            status: STATUS_ADMIN_CANCELLED,
+            updatedBy: req.user.username,
+          },
+          { transaction: t }
+        );
+      }
       break;
-    }
-
-    // issueCredits = "no"
-    // ---- IMPORTANT FIX ----
-    // If transaction is already completed, DO NOT update it.
-    if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-      // leave transaction untouched
-      break;
-    }
-
-    // If transaction is pending or cash pending → mark admin cancelled
-    await transaction.update(
-      {
-        status: STATUS_ADMIN_CANCELLED,
-        updatedBy: req.user.username,
-      },
-      { transaction: t }
-    );
-  }
-  break;
 
     case STATUS_SEATSFULL_CANCELLED:
       if (transaction) {
@@ -560,7 +569,7 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     STATUS_WRONGFORM_CANCELLED,
     STATUS_CANCELLED
   ];
-  
+
   if (cancelledStatuses.includes(newBookingStatus)) {
     bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking, t);
   }
@@ -575,7 +584,7 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
       newBookingStatus = 'Cancelled by admin';
     }
   }
-  
+
 
   await t.commit();
   req.log.info('travel_update_booking_status_transition', { bookingid, fromStatus: booking.status, toStatus: newBookingStatus });
@@ -607,9 +616,8 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     bookedBy: booking.bookedBy && {
       cardno: booking.bookedBy,
       title: 'Raj Pravas Booking Cancelled',
-      body: `Travel booking for ${
-        booking.CardDb.issuedto.split(' ')[0]
-      } has been updated to "${newBookingStatus}"`
+      body: `Travel booking for ${booking.CardDb.issuedto.split(' ')[0]
+        } has been updated to "${newBookingStatus}"`
     },
     screen: '/bookings'
   });
@@ -703,7 +711,7 @@ export async function updateBooking(req, res) {
     updatedFields.push('amount');
 
   }
-  
+
 
   /* 2️⃣ TRAVEL TABLE (pickup / drop / type) */
   const travelUpdate = {};
@@ -712,8 +720,8 @@ export async function updateBooking(req, res) {
   if (type !== undefined) travelUpdate.type = type;
   if (date !== undefined) travelUpdate.date = date; // ✅ NEW
   if (leaving_post_adhyayan !== undefined) {
-  travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
-}
+    travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
+  }
 
   let removedFromOldBus = false;
   let matchingBus = null;
@@ -734,200 +742,200 @@ export async function updateBooking(req, res) {
     );
 
     if (
-  pickup_point !== undefined ||
-  drop_point !== undefined ||
-  date !== undefined
-) {
-const updatedPickup =
-  pickup_point || travelBooking.pickup_point;
+      pickup_point !== undefined ||
+      drop_point !== undefined ||
+      date !== undefined
+    ) {
+      const updatedPickup =
+        pickup_point || travelBooking.pickup_point;
 
-const updatedDrop =
-  drop_point || travelBooking.drop_point;
+      const updatedDrop =
+        drop_point || travelBooking.drop_point;
 
-const updatedDate =
-  date || travelBooking.date;
+      const updatedDate =
+        date || travelBooking.date;
 
-    // Remove invalid bus assignment if route/date changed
+      // Remove invalid bus assignment if route/date changed
 
-    const busAssignment =
-      await TravelBusPassengers.findOne({
-        where: {
-          bookingid,
-        },
-        include: [
-          {
-            model: TravelBusGroup,
-            as: 'TravelBusGroup',
-          },
-        ],
-        transaction: t,
-      });
-
-    if (busAssignment) {
-
-      const bus = busAssignment.TravelBusGroup;
-
-      let isValidRoute = true;
-
-      // Date mismatch
-      if (
-  !moment(
-    bus.event_date
-  ).isSame(
-    updatedDate,
-    'day'
-  )
-) {
-        isValidRoute = false;
-      }
-
-      // RC -> Mumbai
-      else if (
-        bus.pickup_point === 'Research Centre'
-      ) {
-
-        if (
-          updatedDrop !== bus.drop_point
-        ) {
-          isValidRoute = false;
-        }
-      }
-
-      // Mumbai -> RC
-      else if (
-        bus.drop_point === 'Research Centre'
-      ) {
-
-        if (
-          updatedPickup !== bus.pickup_point
-        ) {
-          isValidRoute = false;
-        }
-      }
-
-      if (!isValidRoute) {
-
-        removedFromOldBus = true;
-
-        // ALWAYS REMOVE INVALID ASSIGNMENT
-
-        await TravelBusPassengers.destroy({
+      const busAssignment =
+        await TravelBusPassengers.findOne({
           where: {
             bookingid,
           },
+          include: [
+            {
+              model: TravelBusGroup,
+              as: 'TravelBusGroup',
+            },
+          ],
           transaction: t,
         });
 
-        // OPTIONAL NEW ASSIGNMENT
+      if (busAssignment) {
 
+        const bus = busAssignment.TravelBusGroup;
+
+        let isValidRoute = true;
+
+        // Date mismatch
         if (
-          bus_group_id !== undefined &&
-          bus_group_id
+          !moment(
+            bus.event_date
+          ).isSame(
+            updatedDate,
+            'day'
+          )
+        ) {
+          isValidRoute = false;
+        }
+
+        // RC -> Mumbai
+        else if (
+          bus.pickup_point === 'Research Centre'
         ) {
 
-          // CHECK CAPACITY
+          if (
+            updatedDrop !== bus.drop_point
+          ) {
+            isValidRoute = false;
+          }
+        }
 
-          const selectedBus =
-            await TravelBusGroup.findByPk(
-              bus_group_id,
+        // Mumbai -> RC
+        else if (
+          bus.drop_point === 'Research Centre'
+        ) {
+
+          if (
+            updatedPickup !== bus.pickup_point
+          ) {
+            isValidRoute = false;
+          }
+        }
+
+        if (!isValidRoute) {
+
+          removedFromOldBus = true;
+
+          // ALWAYS REMOVE INVALID ASSIGNMENT
+
+          await TravelBusPassengers.destroy({
+            where: {
+              bookingid,
+            },
+            transaction: t,
+          });
+
+          // OPTIONAL NEW ASSIGNMENT
+
+          if (
+            bus_group_id !== undefined &&
+            bus_group_id
+          ) {
+
+            // CHECK CAPACITY
+
+            const selectedBus =
+              await TravelBusGroup.findByPk(
+                bus_group_id,
+                {
+                  include: [
+                    {
+                      model:
+                        TravelBusPassengers,
+                      as: 'passengers',
+                    },
+                  ],
+                  transaction: t,
+                }
+              );
+
+            if (!selectedBus) {
+
+              throw new ApiError(
+                404,
+                'Bus not found'
+              );
+            }
+
+            const passengerCount =
+              selectedBus.passengers.length;
+
+            const capacity =
+              Number(selectedBus.capacity);
+
+            if (
+              passengerCount >= capacity
+            ) {
+
+              await t.rollback();
+
+              return res.status(400).json({
+
+                capacityExceeded: true,
+
+                currentCapacity:
+                  capacity,
+
+                passengerCount,
+
+                message:
+                  'Bus capacity exceeded',
+              });
+            }
+
+            await TravelBusPassengers.create(
               {
-                include: [
-                  {
-                    model:
-                      TravelBusPassengers,
-                    as: 'passengers',
-                  },
-                ],
+                bus_group_id,
+                bookingid,
+              },
+              {
                 transaction: t,
               }
             );
-
-          if (!selectedBus) {
-
-            throw new ApiError(
-              404,
-              'Bus not found'
-            );
           }
-
-          const passengerCount =
-            selectedBus.passengers.length;
-
-          const capacity =
-            Number(selectedBus.capacity);
-
-          if (
-            passengerCount >= capacity
-          ) {
-
-            await t.rollback();
-
-            return res.status(400).json({
-
-              capacityExceeded: true,
-
-              currentCapacity:
-                capacity,
-
-              passengerCount,
-
-              message:
-                'Bus capacity exceeded',
-            });
-          }
-
-          await TravelBusPassengers.create(
-            {
-              bus_group_id,
-              bookingid,
-            },
-            {
-              transaction: t,
-            }
-          );
         }
-      }
 
         // Check matching bus for new route
-    const matchingBusWhere = {
-      event_date: updatedDate,
-    };
+        const matchingBusWhere = {
+          event_date: updatedDate,
+        };
 
-    // RC -> Mumbai
-    if (
-      updatedPickup === 'Research Centre'
-    ) {
+        // RC -> Mumbai
+        if (
+          updatedPickup === 'Research Centre'
+        ) {
 
-      matchingBusWhere.pickup_point =
-        'Research Centre';
+          matchingBusWhere.pickup_point =
+            'Research Centre';
 
-      matchingBusWhere.drop_point =
-        updatedDrop;
+          matchingBusWhere.drop_point =
+            updatedDrop;
+        }
+
+        // Mumbai -> RC
+        else if (
+          updatedDrop === 'Research Centre'
+        ) {
+
+          matchingBusWhere.pickup_point =
+            updatedPickup;
+
+          matchingBusWhere.drop_point =
+            'Research Centre';
+        }
+
+        matchingBus =
+          await TravelBusGroup.findOne({
+            where: matchingBusWhere,
+            transaction: t,
+          });
+      }
+      updatedFields.push(...Object.keys(travelUpdate));
+
     }
 
-    // Mumbai -> RC
-    else if (
-      updatedDrop === 'Research Centre'
-    ) {
-
-      matchingBusWhere.pickup_point =
-        updatedPickup;
-
-      matchingBusWhere.drop_point =
-        'Research Centre';
-    }
-
-    matchingBus =
-      await TravelBusGroup.findOne({
-        where: matchingBusWhere,
-        transaction: t,
-      });
-    }
-    updatedFields.push(...Object.keys(travelUpdate));
-
-  }
-
-      // MANUAL BUS CHANGE
+    // MANUAL BUS CHANGE
     // EVEN IF ROUTE FIELDS DID NOT CHANGE
 
     if (
@@ -945,7 +953,7 @@ const updatedDate =
       const alreadyAssignedToSameBus =
         existingAssignment &&
         existingAssignment.bus_group_id ==
-          bus_group_id;
+        bus_group_id;
 
       if (!alreadyAssignedToSameBus) {
 
@@ -1093,16 +1101,18 @@ export async function createBusGroup(req, res) {
   const t = await database.transaction();
 
   try {
-const {
-  event_date,
-  bus_name,
-  stops,
-  timing,
-  capacity,
-  notes,
-  force_create,
-  auto_assign = true
-} = req.body;
+    const {
+      event_date,
+      bus_name,
+      stops,
+      timing,
+      capacity,
+      notes,
+      force_create,
+      auto_assign = true,
+      selected_bookingids = [],
+
+    } = req.body;
 
     if (!event_date || !bus_name) {
       throw new ApiError(400, 'Event date and bus name are required');
@@ -1140,60 +1150,60 @@ const {
 
     const drop_point =
       stops[
-        stops.length - 1
+      stops.length - 1
       ];
 
-const allBookings =
-  await TravelDb.findAll({
+    const allBookings =
+      await TravelDb.findAll({
 
-    where: {
+        where: {
 
-      date: event_date,
+          date: event_date,
 
-      status: {
-        [Sequelize.Op.in]: [
-          'confirmed',
-          'proceed for payment'
-        ]
-      },
-    },
+          status: {
+            [Sequelize.Op.in]: [
+              'confirmed',
+              'proceed for payment'
+            ]
+          },
+        },
 
-    attributes: [
-      'bookingid',
-      'pickup_point',
-      'drop_point',
-    ],
+        attributes: [
+          'bookingid',
+          'pickup_point',
+          'drop_point',
+        ],
 
-    transaction: t,
-  });
+        transaction: t,
+      });
 
-const stopNames =
-  stops;
+    const stopNames =
+      stops;
 
-const matchingBookings =
-  allBookings.filter(
-    booking => {
+    const matchingBookings =
+      allBookings.filter(
+        booking => {
 
-      const pickupIndex =
-        stopNames.indexOf(
-          booking.pickup_point
-        );
+          const pickupIndex =
+            stopNames.indexOf(
+              booking.pickup_point
+            );
 
-      const dropIndex =
-        stopNames.indexOf(
-          booking.drop_point
-        );
+          const dropIndex =
+            stopNames.indexOf(
+              booking.drop_point
+            );
 
-      return (
+          return (
 
-        pickupIndex !== -1 &&
+            pickupIndex !== -1 &&
 
-        dropIndex !== -1 &&
+            dropIndex !== -1 &&
 
-        pickupIndex < dropIndex
+            pickupIndex < dropIndex
+          );
+        }
       );
-    }
-  );
 
     const matchedPassengerCount =
       matchingBookings.length;
@@ -1260,19 +1270,117 @@ const matchingBookings =
 
     // Auto assign matching passengers
 
-    const passengerMappings =
-      matchingBookings.map(item => ({
-        bus_group_id: busGroup.id,
-        bookingid: item.bookingid,
-      }));
+    const filteredBookings =
+      matchingBookings.filter(
+        item =>
+
+          selected_bookingids.length === 0 ||
+
+          selected_bookingids.includes(
+            item.bookingid
+          )
+      );
+
+    const existingAssignments =
+      await TravelBusPassengers.findAll({
+
+        where: {
+
+          bookingid:
+            filteredBookings.map(
+              item => item.bookingid
+            ),
+        },
+
+        attributes: [
+          'bookingid',
+        ],
+
+        transaction: t,
+      });
+
+    const alreadyAssignedIds =
+      existingAssignments.map(
+        item => item.bookingid
+      );
+
+    const selectedBookingIds =
+      req.body.selected_bookingids || [];
+
+    const passengerMappings = [];
+
+    for (const booking of matchingBookings) {
+
+      // skip if unchecked in preview
+
+      if (
+        auto_assign &&
+        selectedBookingIds.length &&
+        !selectedBookingIds.includes(
+          booking.bookingid
+        )
+      ) {
+        continue;
+      }
+
+      const existingAssignment =
+        await TravelBusPassengers.findOne({
+
+          where: {
+            bookingid:
+              booking.bookingid,
+          },
+
+          transaction: t,
+        });
+
+      // if already assigned and NOT selected
+      // then ignore
+
+      if (
+        existingAssignment &&
+        !selectedBookingIds.includes(
+          booking.bookingid
+        )
+      ) {
+        continue;
+      }
+
+      // if already assigned AND selected
+      // remove old assignment first
+
+      if (existingAssignment) {
+
+        await TravelBusPassengers.destroy({
+
+          where: {
+            bookingid:
+              booking.bookingid,
+          },
+
+          transaction: t,
+        });
+      }
+
+      passengerMappings.push({
+
+        bus_group_id:
+          busGroup.id,
+
+        bookingid:
+          booking.bookingid,
+      });
+    }
 
     if (
-  auto_assign &&
-  passengerMappings.length > 0
-) {
+      auto_assign &&
+      passengerMappings.length > 0
+    ) {
 
       await TravelBusPassengers.bulkCreate(
+
         passengerMappings,
+
         {
           transaction: t,
         }
@@ -1281,10 +1389,10 @@ const matchingBookings =
 
     await t.commit();
 
-   return res.status(201).json({
-    message: `Bus created successfully. ${passengerMappings.length} passengers auto assigned.`,
-    data: busGroup,
-  });
+    return res.status(201).json({
+      message: `Bus created successfully. ${passengerMappings.length} passengers auto assigned.`,
+      data: busGroup,
+    });
   } catch (error) {
     await t.rollback();
 
@@ -1555,45 +1663,45 @@ export async function fetchAvailableTravelBookings(req, res) {
     }
 
     // Already assigned booking IDs
-   // FETCH BUS GROUPS FOR SAME EVENT DATE
+    // FETCH BUS GROUPS FOR SAME EVENT DATE
 
-const eventBusGroups =
-  await TravelBusGroup.findAll({
+    const eventBusGroups =
+      await TravelBusGroup.findAll({
 
-    where: {
-      event_date,
-    },
+        where: {
+          event_date,
+        },
 
-    attributes: ['id'],
-  });
+        attributes: ['id'],
+      });
 
-const busGroupIds =
-  eventBusGroups.map(
-    item => item.id
-  );
+    const busGroupIds =
+      eventBusGroups.map(
+        item => item.id
+      );
 
-// FETCH ONLY ASSIGNMENTS
-// FOR THIS EVENT DATE
+    // FETCH ONLY ASSIGNMENTS
+    // FOR THIS EVENT DATE
 
-const assignedPassengers =
-  await TravelBusPassengers.findAll({
+    const assignedPassengers =
+      await TravelBusPassengers.findAll({
 
-    where: {
+        where: {
 
-      bus_group_id: {
+          bus_group_id: {
 
-        [Sequelize.Op.in]:
-          busGroupIds,
-      },
-    },
+            [Sequelize.Op.in]:
+              busGroupIds,
+          },
+        },
 
-    attributes: ['bookingid'],
-  });
+        attributes: ['bookingid'],
+      });
 
-const assignedBookingIds =
-  assignedPassengers.map(
-    item => item.bookingid
-  );
+    const assignedBookingIds =
+      assignedPassengers.map(
+        item => item.bookingid
+      );
 
     // Fetch confirmed travel bookings
     const busGroup = await TravelBusGroup.findByPk(
@@ -1807,217 +1915,60 @@ export async function updateBusGroup(
 
   try {
 
-  const {
-    bus_name,
-    stops,
-    timing,
-    capacity,
-    notes,
-    auto_assign = false,
-    remove_invalid = false,
-  } = req.body;
+    const {
+      bus_name,
+      stops,
+      timing,
+      capacity,
+      notes,
+      auto_assign = false,
+      remove_invalid = false,
+    } = req.body;
 
-  const bus =
-  await TravelBusGroup.findByPk(
-    req.params.id,
-    {
-      transaction: t,
+    const bus =
+      await TravelBusGroup.findByPk(
+        req.params.id,
+        {
+          transaction: t,
+        }
+      );
+
+    if (!bus) {
+      throw new ApiError(
+        404,
+        'Bus not found'
+      );
     }
-  );
 
-  if (!bus) {
-    throw new ApiError(
-      404,
-      'Bus not found'
-    );
-  }
+    const pickup_point =
+      stops[0];
 
-  const pickup_point =
-    stops[0];
-
-  const drop_point =
-    stops[
+    const drop_point =
+      stops[
       stops.length - 1
-    ];
+      ];
 
-await bus.update({
+    await bus.update({
 
-  bus_name,
+      bus_name,
 
-  pickup_point,
+      pickup_point,
 
-  drop_point,
+      drop_point,
 
-  timing,
+      timing,
 
-  capacity,
+      capacity,
 
-  notes,
+      notes,
 
-  updatedBy:
-    req.user.username,
+      updatedBy:
+        req.user.username,
 
-}, {
-  transaction: t,
-});
-await TravelBusStops.destroy({
-
-  where: {
-    bus_group_id:
-      bus.id,
-  },
-
-  transaction: t,
-});
-
-await TravelBusStops.bulkCreate(
-
-  stops.map(
-    (stop, index) => ({
-
-      bus_group_id:
-        bus.id,
-
-      stop_name:
-        stop,
-
-      stop_order:
-        index + 1,
-    })
-  ),
-
-  {
-    transaction: t,
-  }
-);
-
-  // =====================================
-// ROUTE RECALCULATION
-// =====================================
-
-const allBookings =
-  await TravelDb.findAll({
-
-    where: {
-
-      date:
-        bus.event_date,
-
-      status: {
-        [Sequelize.Op.in]: [
-          'confirmed',
-          'proceed for payment',
-        ],
-      },
-    },
-
-    transaction: t,
-  });
-
-const currentPassengers =
-  await TravelBusPassengers.findAll({
-
-    where: {
-      bus_group_id:
-        bus.id,
-    },
-
-    transaction: t,
-  });
-
-const currentPassengerIds =
-  currentPassengers.map(
-    item => item.bookingid
-  );
-
-const validBookingIds =
-  [];
-
-for (const booking of allBookings) {
-
-  const pickupIndex =
-    stops.indexOf(
-      booking.pickup_point
-    );
-
-  const dropIndex =
-    stops.indexOf(
-      booking.drop_point
-    );
-
-  const validRoute =
-
-    pickupIndex !== -1 &&
-
-    dropIndex !== -1 &&
-
-    pickupIndex < dropIndex;
-
-  if (validRoute) {
-
-    validBookingIds.push(
-      booking.bookingid
-    );
-  }
-}
-
-if (remove_invalid) {
-
-  const invalidAssignedIds =
-    currentPassengerIds.filter(
-      id =>
-        !validBookingIds.includes(
-          id
-        )
-    );
-
-  if (
-    invalidAssignedIds.length
-  ) {
-
-    await TravelBusPassengers.destroy({
-
-      where: {
-
-        bus_group_id:
-          bus.id,
-
-        bookingid:
-          invalidAssignedIds,
-      },
-
+    }, {
       transaction: t,
     });
-  }
-}
-if (auto_assign) {
-
-  const existingAssignments =
-    await TravelBusPassengers.findAll({
-
-      where: {
-        bookingid:
-          validBookingIds,
-      },
-
-      transaction: t,
-    });
-
-  const alreadyAssignedIds =
-    existingAssignments.map(
-      item => item.bookingid
-    );
-
-  const availableBookingIds =
-    validBookingIds.filter(
-      id =>
-        !alreadyAssignedIds.includes(
-          id
-        )
-    );
-
-  const latestPassengerCount =
-    await TravelBusPassengers.count({
+    await TravelBusStops.destroy({
 
       where: {
         bus_group_id:
@@ -2027,31 +1978,19 @@ if (auto_assign) {
       transaction: t,
     });
 
-  const remainingSeats =
+    await TravelBusStops.bulkCreate(
 
-    Number(capacity) -
-
-    latestPassengerCount;
-
-  const assignableIds =
-    availableBookingIds.slice(
-      0,
-      remainingSeats
-    );
-
-  if (
-    assignableIds.length
-  ) {
-
-    await TravelBusPassengers.bulkCreate(
-
-      assignableIds.map(
-        bookingid => ({
+      stops.map(
+        (stop, index) => ({
 
           bus_group_id:
             bus.id,
 
-          bookingid,
+          stop_name:
+            stop,
+
+          stop_order:
+            index + 1,
         })
       ),
 
@@ -2059,33 +1998,203 @@ if (auto_assign) {
         transaction: t,
       }
     );
+
+    // =====================================
+    // ROUTE RECALCULATION
+    // =====================================
+
+    const allBookings =
+      await TravelDb.findAll({
+
+        where: {
+
+          date:
+            bus.event_date,
+
+          status: {
+            [Sequelize.Op.in]: [
+              'confirmed',
+              'proceed for payment',
+            ],
+          },
+        },
+
+        transaction: t,
+      });
+
+    const currentPassengers =
+      await TravelBusPassengers.findAll({
+
+        where: {
+          bus_group_id:
+            bus.id,
+        },
+
+        transaction: t,
+      });
+
+    const currentPassengerIds =
+      currentPassengers.map(
+        item => item.bookingid
+      );
+
+    const validBookingIds =
+      [];
+
+    for (const booking of allBookings) {
+
+      const pickupIndex =
+        stops.indexOf(
+          booking.pickup_point
+        );
+
+      const dropIndex =
+        stops.indexOf(
+          booking.drop_point
+        );
+
+      const validRoute =
+
+        pickupIndex !== -1 &&
+
+        dropIndex !== -1 &&
+
+        pickupIndex < dropIndex;
+
+      if (validRoute) {
+
+        validBookingIds.push(
+          booking.bookingid
+        );
+      }
+    }
+
+    if (remove_invalid) {
+
+      const invalidAssignedIds =
+        currentPassengerIds.filter(
+          id =>
+            !validBookingIds.includes(
+              id
+            )
+        );
+
+      if (
+        invalidAssignedIds.length
+      ) {
+
+        await TravelBusPassengers.destroy({
+
+          where: {
+
+            bus_group_id:
+              bus.id,
+
+            bookingid:
+              invalidAssignedIds,
+          },
+
+          transaction: t,
+        });
+      }
+    }
+    if (auto_assign) {
+
+      const existingAssignments =
+        await TravelBusPassengers.findAll({
+
+          where: {
+            bookingid:
+              validBookingIds,
+          },
+
+          transaction: t,
+        });
+
+      const alreadyAssignedIds =
+        existingAssignments.map(
+          item => item.bookingid
+        );
+
+      const availableBookingIds =
+        validBookingIds.filter(
+          id =>
+            !alreadyAssignedIds.includes(
+              id
+            )
+        );
+
+      const latestPassengerCount =
+        await TravelBusPassengers.count({
+
+          where: {
+            bus_group_id:
+              bus.id,
+          },
+
+          transaction: t,
+        });
+
+      const remainingSeats =
+
+        Number(capacity) -
+
+        latestPassengerCount;
+
+      const assignableIds =
+        availableBookingIds.slice(
+          0,
+          remainingSeats
+        );
+
+      if (
+        assignableIds.length
+      ) {
+
+        await TravelBusPassengers.bulkCreate(
+
+          assignableIds.map(
+            bookingid => ({
+
+              bus_group_id:
+                bus.id,
+
+              bookingid,
+            })
+          ),
+
+          {
+            transaction: t,
+          }
+        );
+      }
+    }
+    await t.commit();
+
+    return res.status(200).send({
+      message:
+        'Bus updated successfully',
+    });
+
+  } catch (error) {
+
+    await t.rollback();
+
+    return res.status(
+      error.statusCode || 500
+    ).json({
+
+      message:
+        error.message,
+    });
   }
 }
-await t.commit();
-
-  return res.status(200).send({
-    message:
-      'Bus updated successfully',
-});
-
-} catch (error) {
-
-  await t.rollback();
-
-  return res.status(
-    error.statusCode || 500
-  ).json({
-
-    message:
-      error.message,
-  });
-}}
 
 export async function
-bulkAssignPassengersToBus(
-  req,
-  res
-) {
+  bulkAssignPassengersToBus(
+    req,
+    res
+  ) {
 
   const t =
     await database.transaction();
@@ -2127,17 +2236,17 @@ bulkAssignPassengersToBus(
         bus_group_id,
         {
           include: [
-          {
-            model:
-              TravelBusPassengers,
-            as: 'passengers',
-          },
-          {
-            model:
-              TravelBusStops,
-            as: 'stops',
-          },
-        ],
+            {
+              model:
+                TravelBusPassengers,
+              as: 'passengers',
+            },
+            {
+              model:
+                TravelBusStops,
+              as: 'stops',
+            },
+          ],
           transaction: t,
         }
       );
@@ -2198,81 +2307,81 @@ bulkAssignPassengersToBus(
         transaction: t,
       });
 
- const validBookings = bookings.filter(
-  booking => {
+    const validBookings = bookings.filter(
+      booking => {
 
-    // DATE CHECK
+        // DATE CHECK
 
-    if (
-      String(booking.date)
-        .split('T')[0] !==
-      String(bus.event_date)
-        .split('T')[0]
-    ) {
+        if (
+          String(booking.date)
+            .split('T')[0] !==
+          String(bus.event_date)
+            .split('T')[0]
+        ) {
 
-      return false;
-    }
+          return false;
+        }
 
- const stopNames =
-  bus.stops
-    .sort(
-      (a, b) =>
-        a.stop_order -
-        b.stop_order
-    )
-    .map(
-      stop => stop.stop_name
+        const stopNames =
+          bus.stops
+            .sort(
+              (a, b) =>
+                a.stop_order -
+                b.stop_order
+            )
+            .map(
+              stop => stop.stop_name
+            );
+
+        const pickupIndex =
+          stopNames.indexOf(
+            booking.pickup_point
+          );
+
+        const dropIndex =
+          stopNames.indexOf(
+            booking.drop_point
+          );
+
+        return (
+
+          pickupIndex !== -1 &&
+
+          dropIndex !== -1 &&
+
+          pickupIndex < dropIndex
+        );
+      }
     );
 
-const pickupIndex =
-  stopNames.indexOf(
-    booking.pickup_point
-  );
+    const validIds =
+      validBookings.map(
+        item => item.bookingid
+      );
+    const passengerCount =
+      bus.passengers.length;
 
-const dropIndex =
-  stopNames.indexOf(
-    booking.drop_point
-  );
+    const remainingSeats =
+      Number(bus.capacity) -
+      passengerCount;
 
-return (
+    // TAKE ONLY FITTING PASSENGERS
 
-  pickupIndex !== -1 &&
+    const assignableIds =
+      validIds.slice(
+        0,
+        remainingSeats
+      );
 
-  dropIndex !== -1 &&
+    // EXTRA PASSENGERS
 
-  pickupIndex < dropIndex
-);
-  }
-);
+    const skippedCapacityIds =
+      validIds.slice(
+        remainingSeats
+      );
 
-const validIds =
-  validBookings.map(
-    item => item.bookingid
-  );
-const passengerCount =
-  bus.passengers.length;
-
-const remainingSeats =
-  Number(bus.capacity) -
-  passengerCount;
-
-// TAKE ONLY FITTING PASSENGERS
-
-const assignableIds =
-  validIds.slice(
-    0,
-    remainingSeats
-  );
-
-// EXTRA PASSENGERS
-
-const skippedCapacityIds =
-  validIds.slice(
-    remainingSeats
-  );
-
-const insertData =
-  assignableIds.map(
+    const insertData =
+      assignableIds.map(
         bookingid => ({
           bus_group_id,
           bookingid,
@@ -2309,13 +2418,13 @@ const insertData =
 
     await t.commit();
 
-   return res.json({
+    return res.json({
 
-  message:
-`${insertData.length} passengers assigned successfully`,
+      message:
+        `${insertData.length} passengers assigned successfully`,
 
-  skippedCapacityIds,
-});
+      skippedCapacityIds,
+    });
 
   } catch (error) {
 
@@ -2354,19 +2463,19 @@ export async function previewBulkUpload(
       );
     }
 
-   const bus =
-    await TravelBusGroup.findByPk(
-      bus_group_id,
-      {
-        include: [
-          {
-            model:
-              TravelBusStops,
-            as: 'stops',
-          },
-        ],
-      }
-    );
+    const bus =
+      await TravelBusGroup.findByPk(
+        bus_group_id,
+        {
+          include: [
+            {
+              model:
+                TravelBusStops,
+              as: 'stops',
+            },
+          ],
+        }
+      );
 
     if (!bus) {
 
@@ -2399,13 +2508,13 @@ export async function previewBulkUpload(
       await TravelDb.findAll({
 
         include: [
-      {
-        model: CardDb,
-        attributes: [
-          'issuedto',
+          {
+            model: CardDb,
+            attributes: [
+              'issuedto',
+            ],
+          },
         ],
-      },
-    ],
 
         where: {
 
@@ -2440,15 +2549,15 @@ export async function previewBulkUpload(
 
     for (const id of bookingids) {
       const excelRow =
-  req.body.rows?.find(
-    row => row.bookingid === id
-  ) || {};
+        req.body.rows?.find(
+          row => row.bookingid === id
+        ) || {};
 
-  const booking =
-  bookings.find(
-    item =>
-      item.bookingid === id
-  );
+      const booking =
+        bookings.find(
+          item =>
+            item.bookingid === id
+        );
 
       // ALREADY ASSIGNED
 
@@ -2462,47 +2571,47 @@ export async function previewBulkUpload(
           id
         );
 
-   rows.push({
+        rows.push({
 
-  bookingid: id,
+          bookingid: id,
 
-  name:
-    excelRow.name ||
+          name:
+            excelRow.name ||
 
-    booking?.CardDb?.issuedto ||
+            booking?.CardDb?.issuedto ||
 
-    '',
+            '',
 
-  pickup_point:
-    excelRow.pickup_point ||
+          pickup_point:
+            excelRow.pickup_point ||
 
-    booking.pickup_point ||
+            booking.pickup_point ||
 
-    '',
+            '',
 
-  drop_point:
-    excelRow.drop_point ||
+          drop_point:
+            excelRow.drop_point ||
 
-    booking.drop_point ||
+            booking.drop_point ||
 
-    '',
+            '',
 
-  status:
-    booking.status,
+          status:
+            booking.status,
 
-  result:
-    'Already Assigned',
+          result:
+            'Already Assigned',
 
-  isCoordinator:
-    coordinator_bookingid ===
-    id,
-});
+          isCoordinator:
+            coordinator_bookingid ===
+            id,
+        });
         continue;
       }
-      
-      
-        
-      
+
+
+
+
 
       // INVALID
 
@@ -2514,39 +2623,39 @@ export async function previewBulkUpload(
 
         rows.push({
 
-  bookingid: id,
+          bookingid: id,
 
-  name:
-    excelRow.name ||
+          name:
+            excelRow.name ||
 
-    booking?.CardDb?.issuedto ||
+            booking?.CardDb?.issuedto ||
 
-    '',
+            '',
 
-  pickup_point:
-    excelRow.pickup_point ||
+          pickup_point:
+            excelRow.pickup_point ||
 
-    booking.pickup_point ||
+            booking.pickup_point ||
 
-    '',
+            '',
 
-  drop_point:
-    excelRow.drop_point ||
+          drop_point:
+            excelRow.drop_point ||
 
-    booking.drop_point ||
+            booking.drop_point ||
 
-    '',
+            '',
 
-  status:
-    booking.status,
+          status:
+            booking.status,
 
-  result:
-    'Invalid',
+          result:
+            'Invalid',
 
-  isCoordinator:
-    coordinator_bookingid ===
-    id,
-});
+          isCoordinator:
+            coordinator_bookingid ===
+            id,
+        });
         continue;
       }
 
@@ -2554,125 +2663,125 @@ export async function previewBulkUpload(
 
       if (
 
-String(
-  booking.date
-).split('T')[0]
+        String(
+          booking.date
+        ).split('T')[0]
 
-!==
+        !==
 
-String(
-  bus.event_date
-).split('T')[0]
+        String(
+          bus.event_date
+        ).split('T')[0]
       ) {
 
         wrongDate.push(id);
 
         rows.push({
 
-  bookingid: id,
+          bookingid: id,
 
-  name:
-    excelRow.name ||
+          name:
+            excelRow.name ||
 
-    booking?.CardDb?.issuedto ||
+            booking?.CardDb?.issuedto ||
 
-    '',
+            '',
 
-  pickup_point:
-    excelRow.pickup_point ||
+          pickup_point:
+            excelRow.pickup_point ||
 
-    booking.pickup_point ||
+            booking.pickup_point ||
 
-    '',
+            '',
 
-  drop_point:
-    excelRow.drop_point ||
+          drop_point:
+            excelRow.drop_point ||
 
-    booking.drop_point ||
+            booking.drop_point ||
 
-    '',
+            '',
 
-  status:
-    booking.status,
+          status:
+            booking.status,
 
-  result:
-    'Wrong Date',
+          result:
+            'Wrong Date',
 
-  isCoordinator:
-    coordinator_bookingid ===
-    id,
-});
+          isCoordinator:
+            coordinator_bookingid ===
+            id,
+        });
         continue;
       }
 
       const stopNames =
-  bus.stops
-    .sort(
-      (a, b) =>
-        a.stop_order -
-        b.stop_order
-    )
-    .map(
-      stop => stop.stop_name
-    );
+        bus.stops
+          .sort(
+            (a, b) =>
+              a.stop_order -
+              b.stop_order
+          )
+          .map(
+            stop => stop.stop_name
+          );
 
-const pickupIndex =
-  stopNames.indexOf(
-    booking.pickup_point
-  );
+      const pickupIndex =
+        stopNames.indexOf(
+          booking.pickup_point
+        );
 
-const dropIndex =
-  stopNames.indexOf(
-    booking.drop_point
-  );
+      const dropIndex =
+        stopNames.indexOf(
+          booking.drop_point
+        );
 
-const validRoute =
+      const validRoute =
 
-  pickupIndex !== -1 &&
+        pickupIndex !== -1 &&
 
-  dropIndex !== -1 &&
+        dropIndex !== -1 &&
 
-  pickupIndex < dropIndex;
+        pickupIndex < dropIndex;
 
       if (!validRoute) {
 
         wrongRoute.push(id);
 
-       rows.push({
+        rows.push({
 
-  bookingid: id,
+          bookingid: id,
 
-  name:
-    excelRow.name ||
+          name:
+            excelRow.name ||
 
-    booking?.CardDb?.issuedto ||
+            booking?.CardDb?.issuedto ||
 
-    '',
+            '',
 
-  pickup_point:
-    excelRow.pickup_point ||
+          pickup_point:
+            excelRow.pickup_point ||
 
-    booking.pickup_point ||
+            booking.pickup_point ||
 
-    '',
+            '',
 
-  drop_point:
-    excelRow.drop_point ||
+          drop_point:
+            excelRow.drop_point ||
 
-    booking.drop_point ||
+            booking.drop_point ||
 
-    '',
+            '',
 
-  status:
-    booking.status,
+          status:
+            booking.status,
 
-  result:
-    'Wrong Route',
+          result:
+            'Wrong Route',
 
-  isCoordinator:
-    coordinator_bookingid ===
-    id,
-});
+          isCoordinator:
+            coordinator_bookingid ===
+            id,
+        });
 
         continue;
       }
@@ -2681,41 +2790,41 @@ const validRoute =
         id
       );
 
-     rows.push({
+      rows.push({
 
-  bookingid: id,
+        bookingid: id,
 
-  name:
-    excelRow.name ||
+        name:
+          excelRow.name ||
 
-    booking?.CardDb?.issuedto ||
+          booking?.CardDb?.issuedto ||
 
-    '',
+          '',
 
-  pickup_point:
-    excelRow.pickup_point ||
+        pickup_point:
+          excelRow.pickup_point ||
 
-    booking.pickup_point ||
+          booking.pickup_point ||
 
-    '',
+          '',
 
-  drop_point:
-    excelRow.drop_point ||
+        drop_point:
+          excelRow.drop_point ||
 
-    booking.drop_point ||
+          booking.drop_point ||
 
-    '',
+          '',
 
-  status:
-    booking.status,
+        status:
+          booking.status,
 
-  result:
-    'Valid',
+        result:
+          'Valid',
 
-  isCoordinator:
-    coordinator_bookingid ===
-    id,
-});
+        isCoordinator:
+          coordinator_bookingid ===
+          id,
+      });
     }
 
     const passengerCount =
@@ -2730,38 +2839,38 @@ const validRoute =
       Number(bus.capacity) -
       passengerCount;
 
-      const assignableIds =
-  validBookingIds.slice(
-    0,
-    remainingSeats
-  );
+    const assignableIds =
+      validBookingIds.slice(
+        0,
+        remainingSeats
+      );
 
-  
-const skippedCapacityIds =
-  validBookingIds.slice(
-    remainingSeats
-  );
 
-  rows.forEach(row => {
+    const skippedCapacityIds =
+      validBookingIds.slice(
+        remainingSeats
+      );
 
-  if (
-    skippedCapacityIds.includes(
-      row.bookingid
-    )
-  ) {
+    rows.forEach(row => {
 
-    row.result =
-      'Capacity Full';
-  }
-});
+      if (
+        skippedCapacityIds.includes(
+          row.bookingid
+        )
+      ) {
+
+        row.result =
+          'Capacity Full';
+      }
+    });
 
 
     return res.json({
 
       validBookingIds:
-  assignableIds,
+        assignableIds,
 
-skippedCapacityIds,
+      skippedCapacityIds,
 
       alreadyAssigned,
 
@@ -2777,8 +2886,8 @@ skippedCapacityIds,
 
       capacityExceeded:
 
-validBookingIds.length >
-remainingSeats,
+        validBookingIds.length >
+        remainingSeats,
 
       rows,
     });
@@ -2874,13 +2983,6 @@ export async function exportBusPassengers(
               passenger.CardDb
                 ?.mobno || '',
 
-            'Card No':
-              passenger.CardDb
-                ?.cardno || '',
-
-            'Booking ID':
-              passenger.bookingid,
-
             Pickup:
               passenger.pickup_point,
 
@@ -2903,7 +3005,7 @@ export async function exportBusPassengers(
 
             Coordinator:
               bus.coordinator_bookingid ===
-              passenger.bookingid
+                passenger.bookingid
                 ? 'Yes'
                 : 'No',
           };
@@ -2933,10 +3035,10 @@ export async function exportBusPassengers(
         }
       );
 
-res.setHeader(
-  'Content-Disposition',
-  `attachment; filename=${bus.bus_name}_passengers.xlsx`
-);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=${bus.bus_name}_passengers.xlsx`
+    );
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -2957,10 +3059,10 @@ res.setHeader(
 }
 
 export async function
-deleteBusGroup(
-  req,
-  res
-) {
+  deleteBusGroup(
+    req,
+    res
+  ) {
 
   const t =
     await database.transaction();
@@ -3040,10 +3142,10 @@ deleteBusGroup(
 
 
 export async function
-previewCreateBusGroup(
-  req,
-  res
-) {
+  previewCreateBusGroup(
+    req,
+    res
+  ) {
 
   try {
 
@@ -3234,7 +3336,7 @@ export async function previewUpdateBusGroup(
 ) {
 
   const t =
-  await database.transaction();
+    await database.transaction();
   try {
 
     const {
@@ -3334,7 +3436,7 @@ export async function previewUpdateBusGroup(
         dropIndex !== -1 &&
 
         pickupIndex <
-          dropIndex;
+        dropIndex;
 
       const isAssigned =
         currentAssignedIds.includes(
@@ -3343,36 +3445,36 @@ export async function previewUpdateBusGroup(
 
       // NEW MATCH
 
-if (
-  validRoute &&
-  !isAssigned
-) {
+      if (
+        validRoute &&
+        !isAssigned
+      ) {
 
-  newlyMatching.push({
+        newlyMatching.push({
 
-    bookingid:
-      booking.bookingid,
+          bookingid:
+            booking.bookingid,
 
-    name:
-      booking.CardDb
-        ?.issuedto || '',
+          name:
+            booking.CardDb
+              ?.issuedto || '',
 
-    cardno:
-      booking.CardDb
-        ?.cardno || '',
+          cardno:
+            booking.CardDb
+              ?.cardno || '',
 
-    pickup:
-      booking.pickup_point,
+          pickup:
+            booking.pickup_point,
 
-    drop:
-      booking.drop_point,
+          drop:
+            booking.drop_point,
 
-    alreadyAssigned:
-      assignedBookingIds.includes(
-        booking.bookingid
-      ),
-  });
-}
+          alreadyAssigned:
+            assignedBookingIds.includes(
+              booking.bookingid
+            ),
+        });
+      }
 
       // NO LONGER MATCHING
 
@@ -3450,31 +3552,84 @@ if (
 
 
 export async function
-previewBulkMasterUpload(
-  req,
-  res
-) {
+  previewBulkMasterUpload(
+    req,
+    res
+  ) {
 
   try {
 
-const {
-  buses,
-  assignments,
-} = req.body;
+    const {
+      buses,
+      assignments,
+    } = req.body;
 
-const reassignmentMap = {};
+    const reassignmentMap = {};
 
-for (const assignment of assignments) {
+    for (const assignment of assignments) {
 
-  reassignmentMap[
-    assignment['Booking Id']
-  ] = assignment['Bus Name'];
-}
+      reassignmentMap[
+        assignment['Booking Id']
+      ] = assignment['Bus Name'];
+    }
 
 
     const previewBuses = [];
 
     for (const busRow of buses) {
+
+      const stops =
+        String(
+          busRow['Stops']
+        )
+          .split('|')
+          .map(
+            item =>
+              item.trim()
+          );
+
+      const VALID_STOPS = [
+
+        'Research Centre',
+
+        'Dadar (Swaminarayan Temple)',
+
+        'Amar Mahal',
+
+        'Airoli',
+
+        'Vile Parle (Sahara Star)',
+
+        'Airport Terminal 1',
+
+        'Airport Terminal 2',
+
+        'Railway Station (Bandra Terminus)',
+
+        'Railway Station (LTT - Kurla Terminus)',
+
+        'Railway Station (CSMT)',
+
+        'Railway Station (Mumbai Central)',
+
+        'Other (enter location in comments)',
+
+        'Dadar (Pritam Da Dhaba)',
+
+        'Borivali (Indraprasth Shopping Centre)',
+
+        'Mulund (Sarvoday Nagar)',
+
+        'Railway Station (Kurla Terminus)',
+      ];
+
+      const invalidStops =
+        stops.filter(
+          stop =>
+            !VALID_STOPS.includes(
+              stop
+            )
+        );
 
       const item = {
 
@@ -3492,116 +3647,114 @@ for (const assignment of assignments) {
             busRow['Capacity']
           ),
 
-        stops:
-          String(
-            busRow['Stops']
-          )
-          .split('|')
-          .map(
-            item =>
-              item.trim()
-          ),
+        stops,
 
         bookingids:
-  Array.from(
+          Array.from(
+            new Set(
 
-    new Set(
+              assignments
 
-      assignments
+                .filter(
+                  assignment =>
 
-        .filter(
-          assignment =>
+                    assignment[
+                    'Bus Name'
+                    ] ===
+                    busRow[
+                    'Bus Name'
+                    ]
+                )
 
-            assignment[
-              'Bus Name'
-            ] ===
-            busRow[
-              'Bus Name'
-            ]
-        )
+                .map(
+                  assignment =>
+                    assignment[
+                    'Booking Id'
+                    ]
+                )
 
-        .map(
-          assignment =>
-            assignment[
-              'Booking Id'
-            ]
-        )
+                .filter(Boolean)
 
-        .filter(Boolean)
+            )
 
-    )
-
-  ),
+          ),
       };
 
       const duplicateStops =
-  item.stops.filter(
-    (stop, index) =>
+        item.stops.filter(
+          (stop, index) =>
 
-      item.stops.indexOf(
-        stop
-      ) !== index
-  );
+            item.stops.indexOf(
+              stop
+            ) !== index
+        );
 
-  if (
-  item.stops.length < 2
-) {
+      if (
+        item.stops.length < 2
+      ) {
 
-  item.routeError =
-    'Minimum 2 stops required';
-}
+        item.routeError =
+          'Minimum 2 stops required';
+      }
 
-if (
+      if (
 
-  !item.stops.includes(
-    'Research Centre'
-  )
-) {
+        !item.stops.includes(
+          'Research Centre'
+        )
+      ) {
 
-  item.routeError =
-    'Research Centre missing in route';
-}
+        item.routeError =
+          'Research Centre missing in route';
+      }
 
-if (
+      if (
 
-  item.stops.some(
-    stop => !stop
-  )
-) {
+        item.stops.some(
+          stop => !stop
+        )
+      ) {
 
-  item.routeError =
-    'Empty stop found';
-}
+        item.routeError =
+          'Empty stop found';
+      }
 
-if (
-  duplicateStops.length
-) {
+      if (
+        duplicateStops.length
+      ) {
 
-  item.routeError =
-    'Duplicate stops found';
-}
+        item.routeError =
+          'Duplicate stops found';
+      }
+      if (
+        invalidStops.length
+      ) {
+
+        item.routeError =
+          `Invalid stop(s): ${invalidStops.join(', ')}`;
+      }
 
       const existingBus =
-  await TravelBusGroup.findOne({
+        await TravelBusGroup.findOne({
 
-    where: {
+          where: {
 
-      event_date:
-        item.event_date,
+            event_date:
+              item.event_date,
 
-      bus_name:
-        item.bus_name,
-    },
-  });
+            bus_name:
+              item.bus_name,
+          },
+        });
 
-item.duplicateBus =
-  !!existingBus;
+      item.duplicateBus =
+        !!existingBus;
 
       const validPassengers =
         [];
 
-const invalidPassengers =
-  [];
+      const invalidPassengers =
+        [];
 
       const alreadyAssigned =
         [];
@@ -3611,39 +3764,39 @@ const invalidPassengers =
         of item.bookingids
       ) {
 
- const booking =
-  await TravelDb.findOne({
+        const booking =
+          await TravelDb.findOne({
 
-    where: {
-      bookingid,
-    },
+            where: {
+              bookingid,
+            },
 
-    include: [
-      {
-        model: CardDb,
-        attributes: [
-          'issuedto',
-          'cardno',
-        ],
-      },
-    ],
-  });
+            include: [
+              {
+                model: CardDb,
+                attributes: [
+                  'issuedto',
+                  'cardno',
+                ],
+              },
+            ],
+          });
 
         if (!booking) {
 
-invalidPassengers.push({
+          invalidPassengers.push({
 
-  bookingid,
+            bookingid,
 
-  reason:
-  'Booking not found',
+            reason:
+              'Booking not found',
 
-name: '',
+            name: '',
 
-pickup: '',
+            pickup: '',
 
-drop: '',
-});
+            drop: '',
+          });
 
           continue;
         }
@@ -3668,163 +3821,164 @@ drop: '',
 
         if (!validRoute) {
 
-invalidPassengers.push({
+          invalidPassengers.push({
 
-  bookingid,
+            bookingid,
 
-  name:
-    booking.CardDb
-      ?.issuedto || '',
+            name:
+              booking.CardDb
+                ?.issuedto || '',
 
-  pickup:
-    booking.pickup_point,
+            pickup:
+              booking.pickup_point,
 
-  drop:
-    booking.drop_point,
+            drop:
+              booking.drop_point,
 
-  reason:
-    'Route mismatch',
-});
-                  continue;
+            reason:
+              'Route mismatch',
+          });
+          continue;
         }
 
-const existing =
-  await TravelBusPassengers.findOne({
+        const existing =
+          await TravelBusPassengers.findOne({
 
-    where: {
-      bookingid,
-    },
+            where: {
+              bookingid,
+            },
 
-    include: [
-      {
-        model: TravelBusGroup,
-        as: 'TravelBusGroup',
-      },
-    ],
-  });
-if (existing) {
+            include: [
+              {
+                model: TravelBusGroup,
+                as: 'TravelBusGroup',
+              },
+            ],
+          });
+        if (existing) {
 
-  const existingBus =
-    existing.TravelBusGroup;
+          const existingBus =
+            existing.TravelBusGroup;
 
-  const sameBus =
+          const sameBus =
 
-    existingBus?.bus_name ===
-    item.bus_name &&
+            existingBus?.bus_name ===
+            item.bus_name &&
 
-    String(
-      existingBus?.event_date
-    ).split('T')[0] ===
+            String(
+              existingBus?.event_date
+            ).split('T')[0] ===
 
-    String(
-      item.event_date
-    ).split('T')[0];
+            String(
+              item.event_date
+            ).split('T')[0];
 
-  // SAME BUS
-  // SHOW ALREADY ASSIGNED
+          // SAME BUS
+          // SHOW ALREADY ASSIGNED
 
-  const targetBusFromExcel =
-  reassignmentMap[
-    booking.bookingid
-  ];
+          const targetBusFromExcel =
+            reassignmentMap[
+            booking.bookingid
+            ];
 
-if (
-  sameBus &&
-  targetBusFromExcel ===
-    item.bus_name
-) {
+          if (
+            sameBus &&
+            targetBusFromExcel ===
+            item.bus_name
+          ) {
 
-  alreadyAssigned.push({
+            alreadyAssigned.push({
 
-    bookingid:
-      booking.bookingid,
+              bookingid:
+                booking.bookingid,
 
-    name:
-      booking.CardDb
-        ?.issuedto || '',
+              name:
+                booking.CardDb
+                  ?.issuedto || '',
 
-    pickup:
-      booking.pickup_point,
+              pickup:
+                booking.pickup_point,
 
-    drop:
-      booking.drop_point,
-  });
+              drop:
+                booking.drop_point,
+            });
 
-  continue;
-}
+            continue;
+          }
 
-  // DIFFERENT BUS
-  // REASSIGN ALLOWED
+          // DIFFERENT BUS
+          // REASSIGN ALLOWED
 
-  if (
-    req.body.update_existing
-  ) {
+          if (
+            req.body.update_existing
+          ) {
 
-    validPassengers.push({
+            validPassengers.push({
 
-      bookingid:
-        booking.bookingid,
+              bookingid:
+                booking.bookingid,
 
-      name:
-        booking.CardDb
-          ?.issuedto || '',
+              name:
+                booking.CardDb
+                  ?.issuedto || '',
 
-      pickup:
-        booking.pickup_point,
+              pickup:
+                booking.pickup_point,
 
-      drop:
-        booking.drop_point,
-    });
+              drop:
+                booking.drop_point,
+            });
 
-    continue;
-  }
+            continue;
+          }
 
-  // DIFFERENT BUS
-  // BUT UPDATE NOT ALLOWED
+          // DIFFERENT BUS
+          // BUT UPDATE NOT ALLOWED
 
-  alreadyAssigned.push({
+          alreadyAssigned.push({
 
-    bookingid:
-      booking.bookingid,
+            bookingid:
+              booking.bookingid,
 
-    name:
-      booking.CardDb
-        ?.issuedto || '',
+            name:
+              booking.CardDb
+                ?.issuedto || '',
 
-    pickup:
-      booking.pickup_point,
+            pickup:
+              booking.pickup_point,
 
-    drop:
-      booking.drop_point,
-  });
+            drop:
+              booking.drop_point,
+          });
 
-  continue;
-}
-   if (
-  !validPassengers.some(
-    item =>
+          continue;
+        }
+        if (
+          !validPassengers.some(
+            item =>
 
-      item.bookingid ===
-      booking.bookingid
-  )
-) {
+              item.bookingid ===
+              booking.bookingid
+          )
+        ) {
 
-  validPassengers.push({
+          validPassengers.push({
 
-    bookingid:
-      booking.bookingid,
+            bookingid:
+              booking.bookingid,
 
-    name:
-      booking.CardDb
-        ?.issuedto || '',
+            name:
+              booking.CardDb
+                ?.issuedto || '',
 
-    pickup:
-      booking.pickup_point,
+            pickup:
+              booking.pickup_point,
 
-    drop:
-      booking.drop_point,
-  });
-}   }
+            drop:
+              booking.drop_point,
+          });
+        }
+      }
 
       const overflowPassengers =
         validPassengers.slice(
@@ -3853,7 +4007,7 @@ if (
       buses:
         previewBuses,
     });
-    
+
   } catch (error) {
 
     return res.status(
@@ -3867,16 +4021,16 @@ if (
 }
 
 export async function
-createBulkMasterUpload(
-  req,
-  res
-) {
+  createBulkMasterUpload(
+    req,
+    res
+  ) {
 
   let createdBuses = 0;
 
-let assignedPassengers = 0;
+  let assignedPassengers = 0;
 
-let skippedDuplicateBuses = 0;
+  let skippedDuplicateBuses = 0;
 
   const t =
     await database.transaction();
@@ -3884,13 +4038,64 @@ let skippedDuplicateBuses = 0;
   try {
 
     const {
-  buses,
-  update_existing = false,
-} = req.body;
+      buses,
+      update_existing = false,
+    } = req.body;
 
     for (const item of buses) {
 
-      // DUPLICATE BUS CHECK
+      const VALID_STOPS = [
+
+        'Research Centre',
+
+        'Dadar (Swaminarayan Temple)',
+
+        'Amar Mahal',
+
+        'Airoli',
+
+        'Vile Parle (Sahara Star)',
+
+        'Airport Terminal 1',
+
+        'Airport Terminal 2',
+
+        'Railway Station (Bandra Terminus)',
+
+        'Railway Station (LTT - Kurla Terminus)',
+
+        'Railway Station (CSMT)',
+
+        'Railway Station (Mumbai Central)',
+
+        'Other (enter location in comments)',
+
+        'Dadar (Pritam Da Dhaba)',
+
+        'Borivali (Indraprasth Shopping Centre)',
+
+        'Mulund (Sarvoday Nagar)',
+
+        'Railway Station (Kurla Terminus)',
+      ];
+
+      const invalidStops =
+        item.stops.filter(
+          stop =>
+            !VALID_STOPS.includes(
+              stop
+            )
+        );
+
+      if (invalidStops.length) {
+
+        throw new ApiError(
+
+          400,
+
+          `Invalid stop(s): ${invalidStops.join(', ')}`
+        );
+      }// DUPLICATE BUS CHECK
 
       const existingBus =
         await TravelBusGroup.findOne({
@@ -3906,109 +4111,109 @@ let skippedDuplicateBuses = 0;
 
           transaction: t,
         });
-if (
-  existingBus &&
-  !update_existing
-) {
+      if (
+        existingBus &&
+        !update_existing
+      ) {
 
-  skippedDuplicateBuses++;
+        skippedDuplicateBuses++;
 
-  continue;
-}
+        continue;
+      }
 
- let bus = null;
+      let bus = null;
 
-// UPDATE EXISTING BUS
+      // UPDATE EXISTING BUS
 
-if (
-  existingBus &&
-  update_existing
-) {
+      if (
+        existingBus &&
+        update_existing
+      ) {
 
-  bus = existingBus;
+        bus = existingBus;
 
-  await bus.update({
+        await bus.update({
 
-    pickup_point:
-      item.stops[0],
+          pickup_point:
+            item.stops[0],
 
-    drop_point:
-      item.stops[
-        item.stops.length - 1
-      ],
+          drop_point:
+            item.stops[
+            item.stops.length - 1
+            ],
 
-    timing:
-      item.timing,
+          timing:
+            item.timing,
 
-    capacity:
-      item.capacity,
+          capacity:
+            item.capacity,
 
-    updatedBy:
-      req.user.username,
+          updatedBy:
+            req.user.username,
 
-  }, {
-    transaction: t,
-  });
+        }, {
+          transaction: t,
+        });
 
-  await TravelBusStops.destroy({
+        await TravelBusStops.destroy({
 
-    where: {
-      bus_group_id:
-        bus.id,
-    },
+          where: {
+            bus_group_id:
+              bus.id,
+          },
 
-    transaction: t,
-  });
+          transaction: t,
+        });
 
 
-  await TravelBusGroup.update(
-  {
-    coordinator_bookingid:
-      null,
-  },
-  {
-    where: {
-      id: bus.id,
-    },
-    transaction: t,
-  }
-);
-} else {
+        await TravelBusGroup.update(
+          {
+            coordinator_bookingid:
+              null,
+          },
+          {
+            where: {
+              id: bus.id,
+            },
+            transaction: t,
+          }
+        );
+      } else {
 
-  // CREATE NEW BUS
+        // CREATE NEW BUS
 
-  bus =
-    await TravelBusGroup.create({
+        bus =
+          await TravelBusGroup.create({
 
-      event_date:
-        item.event_date,
+            event_date:
+              item.event_date,
 
-      bus_name:
-        item.bus_name,
+            bus_name:
+              item.bus_name,
 
-      pickup_point:
-        item.stops[0],
+            pickup_point:
+              item.stops[0],
 
-      drop_point:
-        item.stops[
-          item.stops.length - 1
-        ],
+            drop_point:
+              item.stops[
+              item.stops.length - 1
+              ],
 
-      timing:
-        item.timing,
+            timing:
+              item.timing,
 
-      capacity:
-        item.capacity,
+            capacity:
+              item.capacity,
 
-      createdBy:
-        req.user.username,
+            createdBy:
+              req.user.username,
 
-    }, {
-      transaction: t,
-    });
+          }, {
+            transaction: t,
+          });
 
-  createdBuses++;
-}
+        createdBuses++;
+      }
       // CREATE STOPS
 
       await TravelBusStops.bulkCreate(
@@ -4040,164 +4245,147 @@ if (
       ) {
 
         const uniquePassengers =
-  Array.from(
+          Array.from(
 
-    new Map(
+            new Map(
 
-      item.validPassengers.map(
-        passenger => [
+              item.validPassengers.map(
+                passenger => [
 
-          passenger.bookingid,
+                  passenger.bookingid,
 
-          passenger,
-        ]
-      )
+                  passenger,
+                ]
+              )
 
-    ).values()
+            ).values()
 
-  );
+          );
 
-    const existingPassengerAssignments =
-  await TravelBusPassengers.findAll({
+        const existingPassengerAssignments =
+          await TravelBusPassengers.findAll({
 
-    where: {
+            where: {
 
-      bookingid:
-        uniquePassengers.map(
-          item => item.bookingid
-        ),
-    },
+              bookingid:
+                uniquePassengers.map(
+                  item => item.bookingid
+                ),
+            },
 
-    transaction: t,
-  });
+            transaction: t,
+          });
 
-const finalPassengers = [];
+        const finalPassengers = [];
 
-for (const bookingid of item.bookingids) {
+        for (const passenger of uniquePassengers) {
 
-  const existingAssignment =
-    existingPassengerAssignments.find(
-      item =>
-        item.bookingid === bookingid
-    );
+          const existingAssignment =
+            existingPassengerAssignments.find(
+              item =>
+                item.bookingid === passenger.bookingid
+            );
 
-  // REASSIGNMENT CASE
+          // REASSIGNMENT CASE
 
-  if (
-    existingAssignment &&
-    update_existing
-  ) {
+          if (
+            existingAssignment &&
+            update_existing
+          ) {
 
-    // REMOVE FROM OLD BUS
+            // REMOVE FROM OLD BUS
 
-    await TravelBusPassengers.destroy({
-      where: {
-        bookingid:
-          bookingid,
-      },
-      transaction: t,
-    });
+            await TravelBusPassengers.destroy({
+              where: {
+                bookingid:
+                  passenger.bookingid,
+              },
+              transaction: t,
+            });
 
-    finalPassengers.push({
-      bus_group_id:
-        bus.id,
+            finalPassengers.push({
+              bus_group_id:
+                bus.id,
 
-      bookingid:
-        bookingid,
-    });
+              bookingid:
+                passenger.bookingid,
+            });
 
-    continue;
-  }
+            continue;
+          }
 
-  // ALREADY ASSIGNED BUT NO UPDATE
+          // ALREADY ASSIGNED BUT NO UPDATE
 
-  if (
-    existingAssignment &&
-    !update_existing
-  ) {
+          if (
+            existingAssignment &&
+            !update_existing
+          ) {
 
-    skippedAssignedPassengers++;
+            skippedAssignedPassengers++;
 
-    continue;
-  }
+            continue;
+          }
 
-  // NORMAL NEW ASSIGNMENT
+          // NORMAL NEW ASSIGNMENT
 
-  finalPassengers.push({
-    bus_group_id:
-      bus.id,
+          finalPassengers.push({
+            bus_group_id:
+              bus.id,
 
-    bookingid:
-      bookingid,
-  });
-}
+            bookingid:
+              passenger.bookingid,
+          });
+        }
 
-if (finalPassengers.length > 0) {
+        if (finalPassengers.length > 0) {
 
-  await TravelBusPassengers.bulkCreate(
-    finalPassengers,
-    {
-      transaction: t,
-    }
-  );
+          await TravelBusPassengers.bulkCreate(
+            finalPassengers,
+            {
+              transaction: t,
+            }
+          );
 
-  assignedPassengers +=
-    finalPassengers.length;
-}
-await TravelBusPassengers.bulkCreate(
+          assignedPassengers +=
+            finalPassengers.length;
+        }
 
-  finalPassengers.map(
-    passenger => ({
-
-      bus_group_id:
-        bus.id,
-
-      bookingid:
-        passenger.bookingid,
-    })
-  ),
-
-  {
-    transaction: t,
-    ignoreDuplicates: true,
-  }
-);
-    
       }
 
 
-}      await t.commit();
+    } await t.commit();
 
     return res.json({
 
       message:
 
-`${createdBuses} buses created, ` +
+        `${createdBuses} buses created, ` +
 
-`${assignedPassengers} passengers assigned, ` +
+        `${assignedPassengers} passengers assigned, ` +
 
-`${skippedDuplicateBuses} duplicate buses skipped`,
-    });} catch (error) {
+        `${skippedDuplicateBuses} duplicate buses skipped`,
+    });
+  } catch (error) {
 
     await t.rollback();
 
-   console.log(
-  'BULK CREATE ERROR:',
-  error
-);
+    console.log(
+      'BULK CREATE ERROR:',
+      error
+    );
 
-return res.status(
-  error.statusCode || 500
-).json({
+    return res.status(
+      error.statusCode || 500
+    ).json({
 
-  message:
-    error.message,
+      message:
+        error.message,
 
-  errors:
-    error.errors || null,
+      errors:
+        error.errors || null,
 
-  stack:
-    error.stack || null,
-});
+      stack:
+        error.stack || null,
+    });
   }
 }
