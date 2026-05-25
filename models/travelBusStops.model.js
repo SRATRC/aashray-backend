@@ -24,6 +24,11 @@ const TravelBusStops = database.define(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+
+    timing: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: 'travel_bus_stops',

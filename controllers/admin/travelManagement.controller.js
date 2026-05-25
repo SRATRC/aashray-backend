@@ -39,6 +39,44 @@ import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
 import XLSX from 'xlsx';
 
+function normalizeExcelTime(value) {
+
+  // Excel numeric time
+  if (
+    typeof value === 'number'
+  ) {
+
+    const totalMinutes =
+      Math.round(
+        value * 24 * 60
+      );
+
+    const hours =
+      String(
+        Math.floor(
+          totalMinutes / 60
+        )
+      ).padStart(2, '0');
+
+    const minutes =
+      String(
+        totalMinutes % 60
+      ).padStart(2, '0');
+
+    return `${hours}:${minutes}`;
+  }
+
+  // Already string
+  if (
+    typeof value === 'string'
+  ) {
+
+    return value.trim();
+  }
+
+  return '';
+}
+
 function getAdditionalConditions(
   whereClauses,
   pickupRC,
@@ -1168,7 +1206,6 @@ export async function createBusGroup(req, res) {
       event_date,
       bus_name,
       stops,
-      timing,
       capacity,
       notes,
       force_create,
@@ -1207,14 +1244,13 @@ export async function createBusGroup(req, res) {
       );
     }
 
-
     const pickup_point =
-      stops[0];
+      stops[0]?.stop_name;
 
     const drop_point =
       stops[
-      stops.length - 1
-      ];
+        stops.length - 1
+      ]?.stop_name;
 
     const allBookings =
       await TravelDb.findAll({
@@ -1241,20 +1277,92 @@ export async function createBusGroup(req, res) {
       });
 
     const stopNames =
-      stops;
+      stops.map(
+        item => item.stop_name
+      );
+
+    for (
+      let i = 1;
+      i < stops.length;
+      i++
+    ) {
+
+      const previousStop =
+        stops[i - 1];
+
+      const currentStop =
+        stops[i];
+
+      const previousTime =
+        normalizeExcelTime(
+          previousStop.timing
+        );
+
+      const currentTime =
+        normalizeExcelTime(
+          currentStop.timing
+        );
+
+      if (
+        previousTime &&
+        currentTime
+      ) {
+
+        const previousMinutes =
+
+          Number(
+            previousTime.split(':')[0]
+          ) * 60 +
+
+          Number(
+            previousTime.split(':')[1]
+          );
+
+        const currentMinutes =
+
+          Number(
+            currentTime.split(':')[0]
+          ) * 60 +
+
+          Number(
+            currentTime.split(':')[1]
+          );
+
+        if (
+          currentMinutes <=
+          previousMinutes
+        ) {
+
+          throw new ApiError(
+            400,
+
+            `Timing for stop ${currentStop.stop_name} must be after ${previousStop.stop_name}`
+          );
+        }
+      }
+    }
 
     const matchingBookings =
       allBookings.filter(
         booking => {
+          const normalizedStops =
+            stopNames.map(
+              stop =>
+                stop?.trim()?.toLowerCase()
+            );
 
           const pickupIndex =
-            stopNames.indexOf(
+            normalizedStops.indexOf(
               booking.pickup_point
+                ?.trim()
+                ?.toLowerCase()
             );
 
           const dropIndex =
-            stopNames.indexOf(
+            normalizedStops.indexOf(
               booking.drop_point
+                ?.trim()
+                ?.toLowerCase()
             );
 
           return (
@@ -1300,7 +1408,6 @@ export async function createBusGroup(req, res) {
         bus_name,
         pickup_point,
         drop_point,
-        timing,
         capacity,
         notes,
         createdBy: req.user.username,
@@ -1319,7 +1426,12 @@ export async function createBusGroup(req, res) {
             busGroup.id,
 
           stop_name:
-            stop,
+            stop.stop_name,
+
+          timing:
+            normalizeExcelTime(
+              stop.timing
+            ),
 
           stop_order:
             index + 1,
@@ -1350,22 +1462,15 @@ export async function createBusGroup(req, res) {
         where: {
 
           bookingid:
-            filteredBookings.map(
+            matchingBookings.map(
               item => item.bookingid
             ),
         },
 
-        attributes: [
-          'bookingid',
-        ],
-
         transaction: t,
       });
 
-    const alreadyAssignedIds =
-      existingAssignments.map(
-        item => item.bookingid
-      );
+
 
     const selectedBookingIds =
       req.body.selected_bookingids || [];
@@ -1385,17 +1490,12 @@ export async function createBusGroup(req, res) {
       ) {
         continue;
       }
-
       const existingAssignment =
-        await TravelBusPassengers.findOne({
-
-          where: {
-            bookingid:
-              booking.bookingid,
-          },
-
-          transaction: t,
-        });
+        existingAssignments.find(
+          item =>
+            item.bookingid ===
+            booking.bookingid
+        );
 
       // if already assigned and NOT selected
       // then ignore
@@ -1687,6 +1787,10 @@ export async function fetchAllBusGroups(req, res) {
           {
             model: TravelBusStops,
             as: 'stops',
+            separate: true,
+            order: [
+              ['stop_order', 'ASC']
+            ],
           }
         ],
 
@@ -2004,12 +2108,12 @@ export async function updateBusGroup(
     }
 
     const pickup_point =
-      stops[0];
+      stops[0]?.stop_name;
 
     const drop_point =
       stops[
-      stops.length - 1
-      ];
+        stops.length - 1
+      ]?.stop_name;
 
     await bus.update({
 
@@ -2050,7 +2154,12 @@ export async function updateBusGroup(
             bus.id,
 
           stop_name:
-            stop,
+            stop.stop_name,
+
+          timing:
+            normalizeExcelTime(
+              stop.timing
+            ),
 
           stop_order:
             index + 1,
@@ -2104,16 +2213,92 @@ export async function updateBusGroup(
     const validBookingIds =
       [];
 
+    const stopNames =
+      stops.map(
+        item => item.stop_name
+      );
+
+    for (
+      let i = 1;
+      i < stops.length;
+      i++
+    ) {
+
+      const previousStop =
+        stops[i - 1];
+
+      const currentStop =
+        stops[i];
+
+      const previousTime =
+        normalizeExcelTime(
+          previousStop.timing
+        );
+
+      const currentTime =
+        normalizeExcelTime(
+          currentStop.timing
+        );
+
+      if (
+        previousTime &&
+        currentTime
+      ) {
+
+        const previousMinutes =
+
+          Number(
+            previousTime.split(':')[0]
+          ) * 60 +
+
+          Number(
+            previousTime.split(':')[1]
+          );
+
+        const currentMinutes =
+
+          Number(
+            currentTime.split(':')[0]
+          ) * 60 +
+
+          Number(
+            currentTime.split(':')[1]
+          );
+
+        if (
+          currentMinutes <=
+          previousMinutes
+        ) {
+
+          throw new ApiError(
+            400,
+
+            `Timing for stop ${currentStop.stop_name} must be after ${previousStop.stop_name}`
+          );
+        }
+      }
+    }
+
+    const normalizedStops =
+      stopNames.map(
+        stop =>
+          stop?.trim()?.toLowerCase()
+      );
+
     for (const booking of allBookings) {
 
       const pickupIndex =
-        stops.indexOf(
+        normalizedStops.indexOf(
           booking.pickup_point
+            ?.trim()
+            ?.toLowerCase()
         );
 
       const dropIndex =
-        stops.indexOf(
+        normalizedStops.indexOf(
           booking.drop_point
+            ?.trim()
+            ?.toLowerCase()
         );
 
       const validRoute =
@@ -3266,24 +3451,53 @@ export async function
         ],
       });
 
+
     const stopNames =
-      stops;
+      stops.map(
+        item => item.stop_name
+      );
+
+    const existingAssignments =
+      await TravelBusPassengers.findAll({
+
+        where: {
+
+          bookingid:
+            bookings.map(
+              item => item.bookingid
+            ),
+        },
+
+        attributes: [
+          'bookingid',
+        ],
+      });
 
     const rows = [];
 
-    const validBookingIds =
-      [];
+    const validBookingIds = [];
+
 
     for (const booking of bookings) {
 
+      const normalizedStops =
+        stopNames.map(
+          stop =>
+            stop?.trim()?.toLowerCase()
+        );
+
       const pickupIndex =
-        stopNames.indexOf(
+        normalizedStops.indexOf(
           booking.pickup_point
+            ?.trim()
+            ?.toLowerCase()
         );
 
       const dropIndex =
-        stopNames.indexOf(
+        normalizedStops.indexOf(
           booking.drop_point
+            ?.trim()
+            ?.toLowerCase()
         );
 
       const validRoute =
@@ -3299,13 +3513,11 @@ export async function
       }
 
       const existingAssignment =
-        await TravelBusPassengers.findOne({
-
-          where: {
-            bookingid:
-              booking.bookingid,
-          },
-        });
+        existingAssignments.find(
+          item =>
+            item.bookingid ===
+            booking.bookingid
+        );
 
       if (
         !existingAssignment
@@ -3458,6 +3670,11 @@ export async function previewUpdateBusGroup(
         ],
       });
 
+    const stopNames =
+      stops.map(
+        item => item.stop_name
+      );
+
     const currentAssignedIds =
       bus.passengers.map(
         item =>
@@ -3482,16 +3699,25 @@ export async function previewUpdateBusGroup(
 
     for (const booking of bookings) {
 
+      const normalizedStops =
+        stopNames.map(
+          stop =>
+            stop?.trim()?.toLowerCase()
+        );
+
       const pickupIndex =
-        stops.indexOf(
+        normalizedStops.indexOf(
           booking.pickup_point
+            ?.trim()
+            ?.toLowerCase()
         );
 
       const dropIndex =
-        stops.indexOf(
+        normalizedStops.indexOf(
           booking.drop_point
+            ?.trim()
+            ?.toLowerCase()
         );
-
       const validRoute =
 
         pickupIndex !== -1 &&
@@ -3628,6 +3854,52 @@ export async function
     } = req.body;
 
     const reassignmentMap = {};
+    const groupedBuses = {};
+
+
+    for (const row of buses) {
+      console.log(
+        'ROW:',
+        row
+      );
+
+      const key =
+        `${row['Bus Name']}__${row['Event Date']}`;
+
+      if (!groupedBuses[key]) {
+
+        groupedBuses[key] = {
+
+          bus_name:
+            row['Bus Name'],
+
+          event_date:
+            row['Event Date'],
+
+          capacity:
+            Number(row['Capacity']),
+
+          stops: [],
+        };
+      }
+
+      groupedBuses[key].stops.push({
+
+        stop_order:
+          Number(row['Stop Order']),
+
+        stop_name:
+          row['Stop Name'],
+
+        timing:
+          normalizeExcelTime(
+            row['Timing']
+          ),
+      });
+    }
+
+    const parsedBuses =
+      Object.values(groupedBuses);
 
     for (const assignment of assignments) {
 
@@ -3639,17 +3911,44 @@ export async function
 
     const previewBuses = [];
 
-    for (const busRow of buses) {
+    for (const item of parsedBuses) {
 
-      const stops =
-        String(
-          busRow['Stops']
-        )
-          .split('|')
-          .map(
-            item =>
-              item.trim()
-          );
+      item.stops.sort(
+        (a, b) =>
+          a.stop_order - b.stop_order
+      );
+
+      const stopNames =
+        item.stops.map(
+          stop => stop.stop_name
+        );
+
+      item.bookingids =
+        Array.from(
+          new Set(
+
+            assignments
+
+              .filter(
+                assignment =>
+
+                  assignment[
+                  'Bus Name'
+                  ] ===
+                  item.bus_name
+              )
+
+              .map(
+                assignment =>
+                  assignment[
+                  'Booking Id'
+                  ]
+              )
+
+              .filter(Boolean)
+
+          )
+        );
 
       const VALID_STOPS = [
 
@@ -3687,70 +3986,58 @@ export async function
       ];
 
       const invalidStops =
-        stops.filter(
+        stopNames.filter(
           stop =>
             !VALID_STOPS.includes(
               stop
             )
         );
 
-      const item = {
+      const missingTiming =
+        item.stops.some(
+          stop => !stop.timing
+        );
 
-        bus_name:
-          busRow['Bus Name'],
+      if (missingTiming) {
 
-        event_date:
-          busRow['Event Date'],
-
-        timing:
-          busRow['Timing'],
-
-        capacity:
-          Number(
-            busRow['Capacity']
-          ),
-
-        stops,
-
-        bookingids:
-          Array.from(
-            new Set(
-
-              assignments
-
-                .filter(
-                  assignment =>
-
-                    assignment[
-                    'Bus Name'
-                    ] ===
-                    busRow[
-                    'Bus Name'
-                    ]
-                )
-
-                .map(
-                  assignment =>
-                    assignment[
-                    'Booking Id'
-                    ]
-                )
-
-                .filter(Boolean)
-
-            )
-
-          ),
-      };
+        item.routeError =
+          'Missing timing';
+      }
 
       const duplicateStops =
-        item.stops.filter(
+        stopNames.filter(
           (stop, index) =>
 
-            item.stops.indexOf(
+            stopNames.indexOf(
               stop
             ) !== index
         );
+
+      for (
+        let i = 1;
+        i < item.stops.length;
+        i++
+      ) {
+
+        const previousStop =
+          item.stops[i - 1];
+
+        const currentStop =
+          item.stops[i];
+
+        const previousTime =
+          normalizeExcelTime(
+            previousStop.timing
+          );
+
+        const currentTime =
+          normalizeExcelTime(
+            currentStop.timing
+          );
+
+        currentTime <= previousTime
+
+      }
 
       if (
         item.stops.length < 2
@@ -3762,7 +4049,7 @@ export async function
 
       if (
 
-        !item.stops.includes(
+        !stopNames.includes(
           'Research Centre'
         )
       ) {
@@ -3774,7 +4061,7 @@ export async function
       if (
 
         item.stops.some(
-          stop => !stop
+          stop => !stop.stop_name
         )
       ) {
 
@@ -3865,12 +4152,12 @@ export async function
         }
 
         const pickupIndex =
-          item.stops.indexOf(
+          stopNames.indexOf(
             booking.pickup_point
           );
 
         const dropIndex =
-          item.stops.indexOf(
+          stopNames.indexOf(
             booking.drop_point
           );
 
@@ -4095,6 +4382,7 @@ export async function
 
   let skippedDuplicateBuses = 0;
 
+  let skippedAssignedPassengers = 0;
   const t =
     await database.transaction();
 
@@ -4105,7 +4393,62 @@ export async function
       update_existing = false,
     } = req.body;
 
-    for (const item of buses) {
+    const parsedBuses = buses;
+
+    for (const item of parsedBuses) {
+
+
+      console.log(
+        'CREATING BUS:',
+        item.bus_name
+      );
+
+
+
+      const stopNames =
+        item.stops.map(
+          stop => stop.stop_name
+        );
+
+
+      for (
+        let i = 1;
+        i < item.stops.length;
+        i++
+      ) {
+
+        const previousStop =
+          item.stops[i - 1];
+
+        const currentStop =
+          item.stops[i];
+
+        const previousTime =
+          previousStop.timing;
+
+        const currentTime =
+          currentStop.timing;
+
+        if (
+          previousTime &&
+          currentTime &&
+          currentTime <= previousTime
+        ) {
+
+          throw new ApiError(
+            400,
+
+            `Timing sequence invalid in ${item.bus_name}. ` +
+
+            `${currentStop.stop_name} (${currentTime}) ` +
+
+            `must be after ` +
+
+            `${previousStop.stop_name} (${previousTime})`
+          );
+        }
+      }
+
 
       const VALID_STOPS = [
 
@@ -4143,12 +4486,31 @@ export async function
       ];
 
       const invalidStops =
-        item.stops.filter(
+        stopNames.filter(
           stop =>
             !VALID_STOPS.includes(
               stop
             )
         );
+
+      const missingTiming =
+        item.stops.some(
+          stop =>
+
+            stop.timing === undefined ||
+
+            stop.timing === null ||
+
+            stop.timing === ''
+        );
+
+      if (missingTiming) {
+
+        throw new ApiError(
+          400,
+          `Missing timing in ${item.bus_name}`
+        );
+      }
 
       if (invalidStops.length) {
 
@@ -4198,15 +4560,12 @@ export async function
         await bus.update({
 
           pickup_point:
-            item.stops[0],
+            item.stops[0].stop_name,
 
           drop_point:
             item.stops[
-            item.stops.length - 1
-            ],
-
-          timing:
-            item.timing,
+              item.stops.length - 1
+            ].stop_name,
 
           capacity:
             item.capacity,
@@ -4255,15 +4614,12 @@ export async function
               item.bus_name,
 
             pickup_point:
-              item.stops[0],
+              item.stops[0].stop_name,
 
             drop_point:
               item.stops[
-              item.stops.length - 1
-              ],
-
-            timing:
-              item.timing,
+                item.stops.length - 1
+              ].stop_name,
 
             capacity:
               item.capacity,
@@ -4280,7 +4636,6 @@ export async function
       // CREATE STOPS
 
       await TravelBusStops.bulkCreate(
-
         item.stops.map(
           (stop, index) => ({
 
@@ -4288,7 +4643,12 @@ export async function
               bus.id,
 
             stop_name:
-              stop,
+              stop.stop_name,
+
+            timing:
+              normalizeExcelTime(
+                stop.timing
+              ),
 
             stop_order:
               index + 1,
@@ -4303,26 +4663,23 @@ export async function
       // CREATE PASSENGERS
 
       if (
-        item.validPassengers
-          ?.length
+        item.bookingids?.length
       ) {
 
         const uniquePassengers =
           Array.from(
+            new Set(
 
-            new Map(
-
-              item.validPassengers.map(
-                passenger => [
-
-                  passenger.bookingid,
-
-                  passenger,
-                ]
-              )
-
-            ).values()
-
+              (item.validPassengers || [])
+                .map(
+                  passenger =>
+                    passenger.bookingid
+                )
+            )
+          ).map(
+            bookingid => ({
+              bookingid
+            })
           );
 
         const existingPassengerAssignments =

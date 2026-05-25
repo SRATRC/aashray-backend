@@ -10,6 +10,9 @@ import TravelBusPassengers
 import TravelDb
   from '../../models/travel_db.model.js';
 
+import TravelBusStops
+  from '../../models/travelBusStops.model.js'
+
 import CoordinatorOtp from '../../models/coordinatorOtp.model.js';
 import CardDb from '../../models/card.model.js';
 import { sendCoordinatorOtp } from '../../helpers/sendCoordinatorOtp.js';
@@ -449,6 +452,20 @@ export async function
 
   for (const bus of assignedBusData) {
 
+
+    const busStops =
+      await TravelBusStops.findAll({
+
+        where: {
+          bus_group_id:
+            bus.id,
+        },
+
+        order: [
+          ['stop_order', 'ASC']
+        ],
+      });
+
     const busPassengers =
       await TravelBusPassengers.findAll({
 
@@ -499,6 +516,14 @@ export async function
                 booking.bookingid
             );
 
+          const pickupStop =
+            busStops.find(
+              stop =>
+
+                stop.stop_name ===
+                booking.pickup_point
+            );
+
           return {
 
             passenger_id:
@@ -524,6 +549,9 @@ export async function
             pickup_point:
               booking.pickup_point,
 
+            pickup_timing:
+              pickupStop?.timing || '',
+
             drop_point:
               booking.drop_point,
 
@@ -540,6 +568,9 @@ export async function
       bus: {
 
         ...bus.toJSON(),
+
+        stops:
+          busStops,
 
         remaining_seats:
           bus.capacity -

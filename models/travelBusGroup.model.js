@@ -30,11 +30,6 @@ const TravelBusGroup = sequelize.define(
       allowNull: true,
     },
 
-    timing: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-
     coordinator_bookingid: {
       type: DataTypes.STRING,
       allowNull: true,
