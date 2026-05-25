@@ -149,7 +149,7 @@ export const ERR_FEEDBACK_NOT_ALLOWED =
   'You are not eligible to submit feedback for this adhyayan';
 export const ERR_ADHYAYAN_NOT_COMPLETED =
   'Cannot submit feedback for ongoing or future adhyayan';
-
+export const ERR_UTSAV_NO_SEATS_AVAILABLE = 'No seats available for this utsav';
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';

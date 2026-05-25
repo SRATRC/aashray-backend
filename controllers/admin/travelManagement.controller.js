@@ -27,7 +27,7 @@ import {
 import {
   adminCancelTransaction,
   createPendingTransaction,
-  cancelTransaction,
+  cancelTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
@@ -278,8 +278,6 @@ tbg.coordinator_bookingid,
       FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
-     LEFT JOIN travel_bus_passengers tbp ON tbp.bookingid = t1.bookingid
-     LEFT JOIN travel_bus_group tbg ON tbg.id = tbp.bus_group_id
      WHERE t1.date >= :startDate AND t1.date <= :endDate
      ${additionalWhereClause}
      ORDER BY date ASC`,
@@ -750,9 +748,7 @@ export async function updateBooking(req, res) {
     drop_point,
     type,
     date,
-    leaving_post_adhyayan,
-    bus_group_id,
-    is_coordinator
+    leaving_post_adhyayan
   } = req.body;
 
   req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date });
@@ -783,7 +779,6 @@ export async function updateBooking(req, res) {
     );
 
     updatedFields.push('amount');
-
   }
 
 
@@ -797,9 +792,6 @@ export async function updateBooking(req, res) {
     travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
   }
 
-  let removedFromOldBus = false;
-  let matchingBus = null;
-
   if (Object.keys(travelUpdate).length > 0) {
     const travelBooking = await TravelDb.findOne({
       where: { bookingid },
@@ -810,10 +802,7 @@ export async function updateBooking(req, res) {
       throw new ApiError(404, 'Travel booking not found');
     }
 
-    await travelBooking.update(
-      travelUpdate,
-      { transaction: t }
-    );
+    await travelBooking.update(travelUpdate, { transaction: t });
 
     if (
       pickup_point !== undefined ||

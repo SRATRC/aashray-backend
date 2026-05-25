@@ -12,6 +12,8 @@ import {
   openUtsavSeat,
   validateUtsavPackage,
   bookUtsavForMumukshus,
+  cancelUtsavFoodBookings,
+  bookFoodForUtsav,
   bookUtsavForMumukshusAdmin
 } from '../../helpers/utsavBooking.helper.js';
 import { sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
@@ -21,6 +23,7 @@ import {
   createPendingTransaction,
   cancelTransaction
 } from '../../helpers/transactions.helper.js';
+
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -77,7 +80,6 @@ export const createUtsavBookingByAdmin = async (req, res) => {
       t,
       req.user
     );
-
     await t.commit();
 
     // send emails outside transaction
@@ -759,6 +761,8 @@ export const utsavStatusUpdate = async (req, res) => {
           t,
           true
         );
+        let utsav_packages_db = await UtsavPackagesDb.findOne({ where: { id: booking.packageid, utsavid: utsav.id } });
+        await bookFoodForUtsav(utsav_packages_db, utsav, card, t, req.user.username);
       } else {
         if (transaction.status === STATUS_CANCELLED) {
           await transaction.update(
@@ -813,8 +817,10 @@ export const utsavStatusUpdate = async (req, res) => {
           },
           { transaction: t }
         );
-
+        await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
         await t.commit();
+
+        await sendUtsavBookingUpdateEmail(booking, utsav);
 
         return res.status(200).send({
           message:
@@ -850,7 +856,7 @@ export const utsavStatusUpdate = async (req, res) => {
           },
           transaction: t
         });
-
+        await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
         transaction = existingTransaction;
       }
 
@@ -871,7 +877,7 @@ export const utsavStatusUpdate = async (req, res) => {
           'Admin Cancelled can only be set from waiting, payment pending, confirmed or cancelled'
         );
       }
-
+      await cancelUtsavFoodBookings(booking,req.user.username,t);
       // 🪑 Free seat if applicable
       if (
         booking.status === STATUS_CONFIRMED ||
@@ -940,6 +946,9 @@ export const utsavStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
+
+  await sendUtsavBookingUpdateEmail(booking, utsav);
+
   req.log.info('utsav_status_update_transition', { bookingid, utsav_id, fromStatus: booking.status, toStatus: newBookingStatus });
   return res.status(200).send({ message: 'Updated booking status' });
 };

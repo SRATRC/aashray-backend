@@ -457,6 +457,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
   await cancelTransactions(user, transactions, t, admin);
 }
 
+
 async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   start_date,
   end_date,
@@ -553,6 +554,84 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
 }
+
+export async function bookFoodForAllMeals( 
+  start_date,
+  end_date,
+  lastDayOnlyBreakfast = false,
+  cardno,
+  t,
+  updatedBy
+) {
+
+  const allDates = getDates(start_date, end_date);
+
+  const foodBookings = await FoodDb.findAll({
+    where: {
+      cardno: cardno,
+      date: allDates
+    },
+    transaction: t
+  });
+
+  const bookingsToCreate = [], bookingsToUpdate = [];
+
+  let dinner = 1, lunch = 1;
+
+  const lastDay = allDates.at(-1);
+
+  for (const date of allDates) {
+    const foodBooking = foodBookings.find((item) => item.date === date);
+
+    if (date == lastDay && lastDayOnlyBreakfast) {
+      lunch = 0;
+      dinner = 0;
+    }
+
+    if (foodBooking) {
+      foodBooking.breakfast = 1;
+      foodBooking.lunch = lunch;
+      foodBooking.dinner = dinner;
+      foodBooking.spicy = 1;
+      foodBooking.hightea = 'TEA';
+      foodBooking.plateissued = 0;
+      foodBooking.updatedBy = updatedBy;
+      bookingsToUpdate.push(foodBooking);
+
+      continue;
+    }
+    bookingsToCreate.push({
+      id: uuidv4(),
+      cardno: cardno,
+      date: date,
+      breakfast: 1,
+      lunch: lunch,
+      dinner: dinner,
+      spicy: 1,
+      hightea: 1,
+      plateissued: 0,
+      updatedBy: updatedBy
+    });
+  }
+  if (bookingsToCreate.length > 0) {
+    await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  }
+  if (bookingsToUpdate.length > 0) {
+    await Promise.all(bookingsToUpdate.map(booking => booking.save({ transaction: t })));
+  }
+
+}
+
+export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t) {
+  const allDates = getDates(start_date, end_date);
+
+  await FoodDb.update(
+    { breakfast: 0, lunch: 0, dinner: 0, updatedBy: updatedBy },
+    { where: { cardno: cardno, date: allDates }, transaction: t }
+  );
+}
+
+
 
 export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
   // ✅ Use provided date or fallback to current date
