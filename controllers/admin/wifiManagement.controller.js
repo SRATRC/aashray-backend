@@ -14,6 +14,7 @@ import {
   STATUS_RESET
 } from '../../config/constants.js';
 import ApiError from '../../utils/ApiError.js';
+import { sendWifiRequestWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const uploadWiFiCodes = async (req, res) => {
   try {
@@ -70,9 +71,8 @@ export const uploadWiFiCodes = async (req, res) => {
 
     req.log.info('upload_wifi_codes_success', { inserted: uniqueRows.length, duplicates: formattedRows.length - uniqueRows.length });
     res.status(200).json({
-      message: `${uniqueRows.length} new record(s) inserted. ${
-        formattedRows.length - uniqueRows.length
-      } duplicate(s) ignored.`
+      message: `${uniqueRows.length} new record(s) inserted. ${formattedRows.length - uniqueRows.length
+        } duplicate(s) ignored.`
     });
   } catch (err) {
     req.log.error('upload_wifi_codes_error', { error: err.message });
@@ -227,21 +227,21 @@ export const updatePermanentCodeRequest = async (req, res) => {
     const { action, permanent_code, admin_comments, ssid, username } = req.body;
     req.log.info('update_permanent_code_request_start', { requestId, action });
 
-if (
-  !action ||
-  ![
-    STATUS_APPROVED,
-    STATUS_REJECTED,
-    STATUS_DELETED,
-    STATUS_RESET,
-    STATUS_PENDING
-  ].includes(action)
-) {
-  throw new ApiError(
-    400,
-    'Invalid action. Must be approved, rejected, deleted, reset or pending'
-  );
-}
+    if (
+      !action ||
+      ![
+        STATUS_APPROVED,
+        STATUS_REJECTED,
+        STATUS_DELETED,
+        STATUS_RESET,
+        STATUS_PENDING
+      ].includes(action)
+    ) {
+      throw new ApiError(
+        400,
+        'Invalid action. Must be approved, rejected, deleted, reset or pending'
+      );
+    }
     // 🔹 FIRST: fetch record
     const checkAlreadyrequested = await PermanentWifiCodes.findByPk(requestId, {
       transaction: t,
@@ -252,25 +252,25 @@ if (
       throw new ApiError(404, 'Permanent code request not found');
     }
     if (
-  checkAlreadyrequested.status === STATUS_DELETED &&
-  action === STATUS_DELETED
-) {
-  throw new ApiError(400, 'Request is already deleted');
-}
-if (
-  action === STATUS_RESET &&
-  checkAlreadyrequested.status !== STATUS_APPROVED
-) {
-  throw new ApiError(
-    400,
-    'Only approved requests can be moved to reset'
-  );
-}
+      checkAlreadyrequested.status === STATUS_DELETED &&
+      action === STATUS_DELETED
+    ) {
+      throw new ApiError(400, 'Request is already deleted');
+    }
+    if (
+      action === STATUS_RESET &&
+      checkAlreadyrequested.status !== STATUS_APPROVED
+    ) {
+      throw new ApiError(
+        400,
+        'Only approved requests can be moved to reset'
+      );
+    }
 
 
     // Prevent re-approving or re-rejecting an already approved request
-// Allow admin to change status freely
-// Backend remains authoritative for validations
+    // Allow admin to change status freely
+    // Backend remains authoritative for validations
 
     // 🔹 SECOND: validation based on existing DB state
     if (
@@ -301,35 +301,42 @@ if (
 
     // 🔹 FOURTH: prepare update payload
     const updateData = {
-  status: action,
-  reviewed_at: new Date(),
-  reviewed_by: req.user?.username,
-  admin_comments
-};
+      status: action,
+      reviewed_at: new Date(),
+      reviewed_by: req.user?.username,
+      admin_comments
+    };
 
-// Assign code only when approving a record without one
-if (action === STATUS_APPROVED && checkAlreadyrequested.code == null) {
-  updateData.code = permanent_code;
-}
+    // Assign code only when approving a record without one
+    if (action === STATUS_APPROVED && checkAlreadyrequested.code == null) {
+      updateData.code = permanent_code;
+    }
 
-// Optional: clear code when going to reset
-if (action === STATUS_RESET) {
-  updateData.code = null;
-}
+    // Optional: clear code when going to reset
+    if (action === STATUS_RESET) {
+      updateData.code = null;
+    }
 
-if (typeof ssid !== 'undefined') {
-  updateData.ssid = ssid === null ? null : ssid;
-}
+    if (typeof ssid !== 'undefined') {
+      updateData.ssid = ssid === null ? null : ssid;
+    }
 
-if (typeof username !== 'undefined') {
-  updateData.username = username === null ? null : username;
-}
+    if (typeof username !== 'undefined') {
+      updateData.username = username === null ? null : username;
+    }
 
     await checkAlreadyrequested.update(updateData, { transaction: t });
 
     await t.commit();
 
     await checkAlreadyrequested.reload();
+
+    // Send WhatsApp message asynchronously
+    sendWifiRequestWhatsApp(
+      checkAlreadyrequested.cardno,
+      checkAlreadyrequested.username,
+      action,
+    );
 
     req.log.info('update_permanent_code_request_success', { requestId, action });
     res.status(200).json({
@@ -628,6 +635,14 @@ export const addPermanentCodeManually = async (req, res) => {
 
     await t.commit();
 
+    // Send WhatsApp message asynchronously
+    sendWifiRequestWhatsApp(
+      cardno,
+      username,
+      STATUS_APPROVED,
+      null,
+      deviceType
+    );
     req.log.info('add_permanent_code_manually_success', { cardno, ssid });
     return res.status(201).json({
       message: 'Permanent WiFi code added successfully'
