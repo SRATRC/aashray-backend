@@ -123,29 +123,42 @@ export async function cancelTransaction(
 
   // Remove from bus assignment if assigned
   const busAssignment = await TravelBusPassengers.findOne({
-    where: { bookingid },
+    where: {
+      bookingid: transaction.bookingid
+    },
     transaction: t
   });
 
   if (busAssignment) {
-    // Check if the user was the coordinator for this bus and clear it
+
     await TravelBusGroup.update(
-      { coordinator_bookingid: null },
       {
-        where: { id: busAssignment.bus_group_id, coordinator_bookingid: bookingid },
+        coordinator_bookingid: null
+      },
+      {
+        where: {
+          id: busAssignment.bus_group_id,
+          coordinator_bookingid: transaction.bookingid
+        },
         transaction: t
       }
     );
 
-    // Delete the passenger assignment
     await TravelBusPassengers.destroy({
-      where: { bookingid },
+      where: {
+        bookingid: transaction.bookingid
+      },
       transaction: t
     });
 
-    req.log.info('cancel_travel_removed_from_bus', { bookingid, busGroupId: busAssignment.bus_group_id });
+    logger.info(
+      'cancel_travel_removed_from_bus',
+      {
+        bookingid: transaction.bookingid,
+        busGroupId: busAssignment.bus_group_id
+      }
+    );
   }
-
 
   if (
     !admin &&

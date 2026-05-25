@@ -21,7 +21,7 @@ import {
   TYPE_FLAT,
   TYPE_UTSAV,
   STATUS_GUEST,
-  STATUS_ACTIVE, 
+  STATUS_ACTIVE,
   RAJ_PRAVAS_EMAIL,
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
@@ -35,6 +35,7 @@ import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
+import { sendUnifiedWhatsApp } from '../helpers/whatsapp.helper.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   // const startDate = new Date(checkin_date);
@@ -334,9 +335,9 @@ export function getWelcomeMessage(bookingStatus, country) {
     const bookingCreate = 'Your bookings were created.';
     return country && country != 'India'
       ? bookingCreate +
-          ' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
+      ' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
       : bookingCreate +
-          ' Payment is due within 24 hours to confirm any bookings in pending status.';
+      ' Payment is due within 24 hours to confirm any bookings in pending status.';
   }
 
   if (bookingStatus == STATUS_CANCELLED) {
@@ -572,7 +573,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject:getSubject(bookingStatus),
+      subject: getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
@@ -599,7 +600,7 @@ export async function sendUnifiedEmail(
   ) {
     sendMail({
       email: RAJ_PRAVAS_EMAIL,
-      subject: getSubject(bookingStatus) +" "+ name,
+      subject: getSubject(bookingStatus) + " " + name,
       template: template,
       context: {
         showTravelDetail: wasRajprvasBooked,
@@ -611,7 +612,7 @@ export async function sendUnifiedEmail(
     });
   }
 
-    // ✅ Also send WhatsApp messages
+  // ✅ Also send WhatsApp messages
   await sendUnifiedWhatsApp(cardno, adhyanBookingDetails, travelBookingDetails, flatBookingDetails, utsavBookingDetails, roomBookingDetails);
 
 }
@@ -758,7 +759,7 @@ export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllow
   return !noOverlap;
 }
 
-export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {  
+export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {
   return isDateRangeOverlapping(
     blockedDate.checkin,
     blockedDate.checkout,

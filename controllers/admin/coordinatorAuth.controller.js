@@ -80,7 +80,7 @@ export async function sendOtp(
 
         event_date: {
           [Sequelize.Op.gte]:
-            new Date(),
+            new Date(new Date().setHours(0, 0, 0, 0)),
         },
       },
     });
@@ -283,6 +283,13 @@ export async function verifyOtp(
       where: { mobno },
     });
 
+  if (!user) {
+    throw new ApiError(
+      404,
+      'Coordinator card not found'
+    );
+  }
+
   // GENERATE JWT
 
   const token = jwt.sign(
@@ -397,7 +404,7 @@ export async function
 
         event_date: {
           [Sequelize.Op.gte]:
-            new Date(),
+            new Date(new Date().setHours(0, 0, 0, 0)),
         },
       },
     });

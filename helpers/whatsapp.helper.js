@@ -3,7 +3,7 @@ import Sequelize from "sequelize";
 import { Op } from 'sequelize';
 import { CardDb, Transactions, UtsavDb, UtsavPackagesDb } from "../models/associations.js";
 import moment from "moment";
-// import { TYPE_ADHYAYAN } from "../config/constants.js";
+import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 
 function sanitizeParamText(s) {
@@ -439,8 +439,7 @@ async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser
         b.date || ""
       ];
 
-      const components = [{ type: "body", parameters: params.filter(p => p !== null && p !== undefined && p !== "").map(p => ({ type: "text", text: String(p) })) }];
-
+      const components = buildBodyComponents(params);
       const result = await sendWithTemplateFallback(phone, template, components);
       if (!result.ok) console.error("Travel WA failed for booking", b, result.error);
       else console.log("📩 Travel WhatsApp sent:", { toCard: user.cardno, bookedFor: bookedForName, booking: b.id || b.bookingid || b, template: result.usedTemplate });
@@ -619,7 +618,7 @@ async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = n
         b.end_date ? moment(b.end_date).format("DD MMM YYYY") : ""
       ];
 
-      const components = [{ type: "body", parameters: params.filter(p => p !== null && p !== undefined && p !== "").map(p => ({ type: "text", text: String(p) })) }];
+      const components = buildBodyComponents(params);
 
       const result = await sendWithTemplateFallback(phone, template, components);
       if (!result.ok) console.error("Flat WA failed for booking", b, result.error);

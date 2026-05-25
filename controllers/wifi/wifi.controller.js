@@ -256,7 +256,7 @@ export const requestPermanentCode = async (req, res) => {
   await t.commit();
 
   // Send WhatsApp message asynchronously
-  sendWifiRequestWhatsApp(req.user.cardno, uniqueUsername.toLowerCase(), STATUS_PENDING, deviceType);
+  sendWifiRequestWhatsApp(req.user.cardno, uniqueUsername.toLowerCase(), STATUS_PENDING, null, deviceType);
 
   return res.status(201).send({
     message:

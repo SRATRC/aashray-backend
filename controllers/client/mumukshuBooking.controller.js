@@ -56,7 +56,7 @@ import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
-import { 
+import {
   ShibirBookingDb,
   TravelDb,
   RoomBooking,
@@ -77,9 +77,9 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const typeMap = userBookingIdMap[cardno] || {};
   const adhyanIds = Array.isArray(typeMap[TYPE_ADHYAYAN]) ? typeMap[TYPE_ADHYAYAN].map(String).filter(Boolean) : [];
   const travelIds = Array.isArray(typeMap[TYPE_TRAVEL]) ? typeMap[TYPE_TRAVEL].map(String).filter(Boolean) : [];
-  const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
-  const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
-  const flatIds   = Array.isArray(typeMap['FLAT']) ? typeMap['FLAT'].map(String).filter(Boolean) : [];
+  const roomIds = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
+  const utsavIds = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
+  const flatIds = Array.isArray(typeMap['FLAT']) ? typeMap['FLAT'].map(String).filter(Boolean) : [];
 
   console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)}`);
 
@@ -93,29 +93,29 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
     ] = await Promise.all([
       adhyanIds.length
         ? ShibirBookingDb.findAll({
-            where: { bookingid: { [Op.in]: adhyanIds } },
-            include: [{ model: ShibirDb, as: 'ShibirDb' }],
-            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
-          })
+          where: { bookingid: { [Op.in]: adhyanIds } },
+          include: [{ model: ShibirDb, as: 'ShibirDb' }],
+          order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+        })
         : [],
       travelIds.length
         ? TravelDb.findAll({ where: { id: { [Op.in]: travelIds } } })
         : [],
       roomIds.length
         ? RoomBooking.findAll({
-            where: { bookingid: { [Op.in]: roomIds } },
-            order: [['cardno', 'ASC'], ['checkin', 'ASC']]
-          })
+          where: { bookingid: { [Op.in]: roomIds } },
+          order: [['cardno', 'ASC'], ['checkin', 'ASC']]
+        })
         : [],
       utsavIds.length
         ? UtsavBooking.findAll({
-            where: { bookingid: { [Op.in]: utsavIds } },
-            include: [
-              { model: UtsavDb, as: 'UtsavDb' },
-              { model: UtsavPackagesDb, as: 'UtsavPackagesDb' }
-            ],
-            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
-          })
+          where: { bookingid: { [Op.in]: utsavIds } },
+          include: [
+            { model: UtsavDb, as: 'UtsavDb' },
+            { model: UtsavPackagesDb, as: 'UtsavPackagesDb' }
+          ],
+          order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+        })
         : [],
       flatIds.length
         ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
@@ -132,7 +132,7 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
     const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
     const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
 
-    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails||[]).length} utsavCount=${(utsavBookingDetails||[]).length}`);
+    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails || []).length} utsavCount=${(utsavBookingDetails || []).length}`);
 
     return {
       adhyanBookingDetails,
@@ -210,6 +210,7 @@ export const mumukshuBooking = async (req, res, next) => {
       primary_booking,
       t,
       req.user,
+      null,
       userBookingIdMap,
       waitingBookingCountMap
     );
@@ -221,6 +222,7 @@ export const mumukshuBooking = async (req, res, next) => {
           addon,
           t,
           req.user,
+          null,
           userBookingIdMap,
           waitingBookingCountMap
         );
@@ -679,10 +681,10 @@ async function getBookingDetailsForCard(cardno, userBookingIdMap) {
 
   const adhyanIds = typeMap[TYPE_ADHYAYAN] || [];
   const travelIds = typeMap[TYPE_TRAVEL] || [];
-  const roomIds   = typeMap[TYPE_ROOM] || [];
-  const utsavIds  = typeMap[TYPE_UTSAV] || [];
-  const flatIds   = typeMap["FLAT"] || []; // if used later
-  
+  const roomIds = typeMap[TYPE_ROOM] || [];
+  const utsavIds = typeMap[TYPE_UTSAV] || [];
+  const flatIds = typeMap["FLAT"] || []; // if used later
+
 
   const [
     adhyanBookingDetails,
@@ -693,9 +695,9 @@ async function getBookingDetailsForCard(cardno, userBookingIdMap) {
   ] = await Promise.all([
     adhyanIds.length
       ? ShibirBookingDb.findAll({
-          where: { bookingid: { [Op.in]: adhyanIds } },
-          include: [{ model: ShibirDb, as: "ShibirDb" }]
-        })
+        where: { bookingid: { [Op.in]: adhyanIds } },
+        include: [{ model: ShibirDb, as: "ShibirDb" }]
+      })
       : [],
     travelIds.length
       ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })

@@ -636,8 +636,13 @@ export const addPermanentCodeManually = async (req, res) => {
     await t.commit();
 
     // Send WhatsApp message asynchronously
-    sendWifiRequestWhatsApp(cardno, username, STATUS_APPROVED, deviceType);
-
+    sendWifiRequestWhatsApp(
+      cardno,
+      username,
+      STATUS_APPROVED,
+      null,
+      deviceType
+    );
     req.log.info('add_permanent_code_manually_success', { cardno, ssid });
     return res.status(201).json({
       message: 'Permanent WiFi code added successfully'
