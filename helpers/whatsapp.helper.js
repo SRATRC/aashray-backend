@@ -347,31 +347,31 @@ async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = n
       // build params (only include non-empty values to avoid template param mismatch)
 
       const rawParams = [
-  user.issuedto || "",
-  bookedForName,
-  bookingId,
-  rawStatus || "",
-  b.roomtype || "",
-  b.roomno || "",
-  b.checkin ? moment(b.checkin).format("Do MMMM, YYYY") : "",
-  b.checkout ? moment(b.checkout).format("Do MMMM, YYYY") : "",
-  tx.amount != null ? String(tx.amount) : "",
-  tx.discount != null ? String(tx.discount) : "",
-//   tx.razorpay_order_id || ""
-];
+        user.issuedto || "",
+        bookedForName,
+        bookingId,
+        rawStatus || "",
+        b.roomtype || "",
+        b.roomno || "",
+        b.checkin ? moment(b.checkin).format("Do MMMM, YYYY") : "",
+        b.checkout ? moment(b.checkout).format("Do MMMM, YYYY") : "",
+        tx.amount != null ? String(tx.amount) : "",
+        tx.discount != null ? String(tx.discount) : "",
+        //   tx.razorpay_order_id || ""
+      ];
 
-const sanitized = rawParams.map(sanitizeParamText);
-const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
-const components = buildBodyComponents(sanitized, expectedCount);
+      const sanitized = rawParams.map(sanitizeParamText);
+      const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
+      const components = buildBodyComponents(sanitized, expectedCount);
 
-// // add button param, sanitized:
-// if ((template === "booking_sharan_self_pending_for" || template === "booking_sharan_self_pending_for") && bookingId) {
-//   components.push({
-//   type: "button",
-//   sub_type: "url",
-//   index: 0
-// });
-// }
+      // // add button param, sanitized:
+      // if ((template === "booking_sharan_self_pending_for" || template === "booking_sharan_self_pending_for") && bookingId) {
+      //   components.push({
+      //   type: "button",
+      //   sub_type: "url",
+      //   index: 0
+      // });
+      // }
 
       // send with fallback wrapper if you have it, otherwise sendWhatsAppMessage(phone, template, components)
       const result = await sendWithTemplateFallback ? await sendWithTemplateFallback(phone, template, components) : await sendWhatsAppMessage(phone, template, components);
@@ -543,18 +543,18 @@ async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser =
       ];
 
       const sanitized = rawParams.map(sanitizeParamText);
-const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
-const components = buildBodyComponents(sanitized, expectedCount);
+      const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
+      const components = buildBodyComponents(sanitized, expectedCount);
 
-// add button param, sanitized:
-// if ((template === "booking_utsav_self_confirmed_for" || template === "booking_utsav_self_confirmed_for") && bookingId) {
-//   components.push({
-//     type: "button",
-//     sub_type: "url",
-//     index: 0,
-//     // parameters: [{ type: "text", text: sanitizeParamText(bookingId) }]
-//   });
-// }
+      // add button param, sanitized:
+      // if ((template === "booking_utsav_self_confirmed_for" || template === "booking_utsav_self_confirmed_for") && bookingId) {
+      //   components.push({
+      //     type: "button",
+      //     sub_type: "url",
+      //     index: 0,
+      //     // parameters: [{ type: "text", text: sanitizeParamText(bookingId) }]
+      //   });
+      // }
       const result = await (sendWithTemplateFallback ? sendWithTemplateFallback(phone, template, components) : sendWhatsAppMessage(phone, template, components));
 
       if (!result || !result.ok) {
@@ -658,4 +658,85 @@ function buildBodyComponents(paramsArray = [], expectedCount = null) {
 
   const bodyParameters = normalized.map(p => ({ type: "text", text: p }));
   return [{ type: "body", parameters: bodyParameters }];
+}
+
+function deduceDeviceType(username, deviceType = null) {
+  if (deviceType) {
+    const dt = String(deviceType).toLowerCase().trim();
+    if (dt === 'mobile' || dt === 'ph') return 'Mobile';
+    if (dt === 'laptop' || dt === 'pc') return 'Laptop';
+    if (dt === 'tablet' || dt === 'tb') return 'Tablet';
+    if (dt === 'other' || dt === 'ot') return 'Other';
+    return deviceType.charAt(0).toUpperCase() + deviceType.slice(1);
+  }
+
+  if (!username) return 'Other';
+  const cleanUsername = String(username).toLowerCase().replace(/\d+$/, '');
+  if (cleanUsername.endsWith('ph')) return 'Mobile';
+  if (cleanUsername.endsWith('pc')) return 'Laptop';
+  if (cleanUsername.endsWith('tb')) return 'Tablet';
+  return 'Other';
+}
+
+export async function sendWifiRequestWhatsApp(cardno, username, status, code = null, explicitDeviceType = null) {
+  try {
+    if (!cardno) {
+      console.warn("sendWifiRequestWhatsApp called without cardno");
+      return;
+    }
+
+    const user = await CardDb.findOne({ where: { cardno } });
+    if (!user) {
+      console.warn(`No Card record found for cardno=${cardno}; skipping Wifi request WhatsApp.`);
+      return;
+    }
+
+    const phone = user.mobno ? String(user.mobno) : null;
+    if (!phone) {
+      console.warn(`⚠️ No WhatsApp number found for ${user.issuedto} (cardno=${cardno}); skipping Wifi request WhatsApp.`);
+      return;
+    }
+
+    const deviceType = deduceDeviceType(username, explicitDeviceType);
+
+    const templateMap = {
+      deleted: 'per_wf_code_req_del',
+      rejected: 'per_wf_code_req_rej',
+      reset: 'per_wf_code_req_res',
+      pending: 'per_wf_code_req_pend',
+      approved: 'per_wf_code_req_cnf_ad_m'
+    };
+
+    const templateName = templateMap[status];
+    if (!templateName) {
+      console.warn(`No WhatsApp template mapped for status='${status}'; skipping.`);
+      return;
+    }
+
+    const components = [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: sanitizeParamText(user.issuedto) },
+          { type: "text", text: sanitizeParamText(deviceType) }
+        ]
+      }
+    ];
+
+
+
+    const sendResult = await sendWhatsAppMessage(phone, templateName, components);
+    if (!sendResult.ok) {
+      console.error(`Wifi request WA failed for template ${templateName}`, sendResult.error);
+    } else {
+      console.log(`📩 Wifi request WhatsApp sent:`, {
+        toCard: cardno,
+        username,
+        status,
+        template: templateName
+      });
+    }
+  } catch (err) {
+    console.error("Error sending Wifi request WhatsApp:", err && (err.stack || err.message || err));
+  }
 }
