@@ -310,12 +310,13 @@ tbp.bus_group_id,
 
 tbg.bus_name,
 tbg.capacity AS bus_capacity,
-tbg.timing AS bus_timing,
 tbg.coordinator_bookingid,
        t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+     LEFT JOIN travel_bus_passengers tbp ON tbp.bookingid = t1.bookingid
+     LEFT JOIN travel_bus_group tbg ON tbg.id = tbp.bus_group_id
      WHERE t1.date >= :startDate AND t1.date <= :endDate
      ${additionalWhereClause}
      ORDER BY date ASC`,
@@ -325,6 +326,45 @@ tbg.coordinator_bookingid,
     }
   );
 
+  const busGroupIds =
+
+    [...new Set(
+
+      data
+        .filter(
+          item =>
+            item.bus_group_id
+        )
+        .map(
+          item =>
+            item.bus_group_id
+        )
+    )];
+
+  const busStops =
+    await TravelBusStops.findAll({
+
+      where: {
+
+        bus_group_id:
+          busGroupIds,
+      },
+
+      order: [
+        ['stop_order', 'ASC']
+      ],
+    });
+
+  for (const item of data) {
+
+    item.stops =
+      busStops.filter(
+        stop =>
+
+          stop.bus_group_id ===
+          item.bus_group_id
+      );
+  }
   req.log.info('travel_fetch_upcoming_bookings_success', { start_date, end_date, count: data.length });
   return res.status(200).send({ message: 'Fetched data', data });
 };
@@ -786,8 +826,14 @@ export async function updateBooking(req, res) {
     drop_point,
     type,
     date,
-    leaving_post_adhyayan
+    leaving_post_adhyayan,
+    bus_group_id,
+    is_coordinator
   } = req.body;
+
+  let removedFromOldBus = false;
+
+  let matchingBus = null;
 
   req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date });
 
