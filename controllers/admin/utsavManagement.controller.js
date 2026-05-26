@@ -117,7 +117,9 @@ export const createUtsav = async (req, res) => {
     end_date,
     total_seats,
     location,
-    registration_deadline
+    registration_deadline,
+    starting_meal,
+    ending_meal
   } = req.body;
 
   req.log.info('create_utsav_start', { name, start_date, end_date, total_seats, location });
@@ -162,6 +164,8 @@ export const createUtsav = async (req, res) => {
       available_seats: total_seats,
       status: STATUS_OPEN,
       registration_deadline,
+      starting_meal,
+      ending_meal,
       updatedBy: req.user.username
     },
     { transaction: t }
@@ -394,7 +398,9 @@ export const updateUtsav = async (req, res) => {
     available_seats, // optional manual override
     comments,
     location,
-    registration_deadline
+    registration_deadline,
+    starting_meal,
+    ending_meal
   } = req.body;
 
   const utsavId = req.params.id;
@@ -431,6 +437,8 @@ export const updateUtsav = async (req, res) => {
     comments,
     location,
     registration_deadline,
+    starting_meal,
+    ending_meal,
     updatedBy: req.user.username
   });
 

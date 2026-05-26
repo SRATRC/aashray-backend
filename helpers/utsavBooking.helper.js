@@ -126,12 +126,19 @@ export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, update
   if(utsav.location !== RESEARCH_CENTRE) 
     return;
 
-  const lastDayOnlyBreakfast = moment(package_info.end_date).isSame(utsav.end_date, 'day');
+  const effectiveStartingMeal = moment(package_info.start_date).isSame(utsav.start_date, 'day')
+    ? utsav.starting_meal
+    : null;
+
+  const effectiveEndingMeal = moment(package_info.end_date).isSame(utsav.end_date, 'day')
+    ? utsav.ending_meal
+    : null;
 
   await bookFoodForAllMeals(
     package_info.start_date,
     package_info.end_date,
-    lastDayOnlyBreakfast,
+    effectiveStartingMeal,
+    effectiveEndingMeal,
     mumukshu.cardno,
     t,
     updatedBy
