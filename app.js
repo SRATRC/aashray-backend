@@ -42,6 +42,8 @@ import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 import accountsManagementRoutes from './routes/admin/accountsManagement.routes.js';
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagement.routes.js';
 import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
+import shortLinkRoutes from './routes/admin/shortLink.routes.js';
+import redirectRoutes from './routes/admin/redirect.routes.js';
 // import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
 import {
   utsavPublicRouter,
@@ -162,21 +164,6 @@ app.get('/api', (_req, res) => {
   res.status(200).send({ data: 'API is up and running... 🚀', status: 200 });
 });
 
-const videoMap = {
-  video1: 'https://youtu.be/p2kcV7VGdjk?list=PLvIMm5LLpatL2O0Qi8bESFmkQfkssTxKT',
-  video2: 'https://youtu.be/fJQzNL0jcIg?list=PLvIMm5LLpatL2O0Qi8bESFmkQfkssTxKT'
-};
-
-app.get('/v/:slug', (req, res) => {
-  const url = videoMap[req.params.slug];
-
-  if (!url) {
-    return res.status(404).send('Video not found');
-  }
-
-  res.redirect(url);
-});
-
 app.use('/api/v1/updates', updateRoutes);
 
 app.use('/api/v1/client', clientAuthRoutes);
@@ -210,6 +197,8 @@ app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 app.use('/api/v1/admin/wifi', wifiManagementRoutes);
 app.use('/api/v1/coordinator', coordinatorAuthRoutes);
+app.use('/api/v1/short-links', shortLinkRoutes);
+app.use('/', redirectRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);
