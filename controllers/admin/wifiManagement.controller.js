@@ -382,29 +382,49 @@ export const uploadPerWiFiCodes = async (req, res) => {
 
   try {
     req.log.info('upload_per_wifi_codes_start');
-    /* =====================================================
-       1. READ EXCEL
-       ===================================================== */
+
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheet = XLSX.utils.sheet_to_json(
       workbook.Sheets[workbook.SheetNames[0]],
       { defval: '' }
     );
 
+    if (sheet.length > 0) {
+      console.log('DEBUG PARSED EXCEL ROW KEYS:', Object.keys(sheet[0]));
+      console.log('DEBUG PARSED EXCEL ROW CONTENT:', sheet[0]);
+    }
+
     if (!sheet.length) {
+      await transaction.rollback();
       return res.status(400).json({ error: 'Excel file is empty' });
     }
 
-    /* =====================================================
-       2. NORMALIZE & VALIDATE EXCEL ROWS
-       ===================================================== */
-    const allowedStatuses = new Set(['approved', 'deleted', 'rejected', 'reset']);
+    const allowedStatuses = new Set(['approved', 'deleted', 'rejected', 'reset', 'pending']);
+    const errors = [];
+
+    // 1. Parsing & Basic Validation
+    const getExcelRowValue = (row, possibleKeys) => {
+      const foundKey = Object.keys(row).find(k =>
+        possibleKeys.includes(k.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
+      );
+      return foundKey ? row[foundKey] : undefined;
+    };
 
     const parsed = sheet.map((row, index) => {
-      const rawId = row.id?.toString().trim();
-      const cardno = row.cardno?.toString().trim();
-      const code = row.code?.toString().trim();
-      const excelStatus = row.status?.toString().trim().toLowerCase();
+      const rawId = getExcelRowValue(row, ['id', 'sr'])?.toString().trim();
+      const cardno = getExcelRowValue(row, ['cardno', 'cardnumber', 'card'])?.toString().trim();
+      const code = getExcelRowValue(row, ['code', 'wificode', 'permanentcode'])?.toString().trim() || null;
+      const rawStatus = getExcelRowValue(row, ['status'])?.toString().trim();
+      const ssid = getExcelRowValue(row, ['ssid'])?.toString().trim() || null;
+      const username = getExcelRowValue(row, ['username'])?.toString().trim() || null;
+      const deviceType = getExcelRowValue(row, ['devicetype', 'device'])?.toString().trim() || 'other';
+
+      // Skip completely empty rows
+      if (!rawId && !cardno && !code && !rawStatus && !ssid && !username) {
+        return null;
+      }
+
+      const status = rawStatus ? rawStatus.toLowerCase() : 'approved';
 
       return {
         rowNumber: index + 2,
@@ -412,177 +432,247 @@ export const uploadPerWiFiCodes = async (req, res) => {
         id: /^\d+$/.test(rawId) ? parseInt(rawId, 10) : null,
         cardno,
         code,
-        ssid: row.ssid?.toString().trim() || null,
-        username: row.username?.toString().trim() || null,
-        status: allowedStatuses.has(excelStatus) ? excelStatus : null
+        ssid,
+        username,
+        status,
+        deviceType
       };
+    }).filter(Boolean);
+
+    // Validate structure
+    parsed.forEach(r => {
+      if (!r.rawId || r.id === null) {
+        errors.push({ row: r.rowNumber, error: `Invalid or missing ID: '${r.rawId || ''}'` });
+      }
+      if (!r.cardno) {
+        errors.push({ row: r.rowNumber, error: 'Missing Card Number.' });
+      }
+      if (r.status && !allowedStatuses.has(r.status)) {
+        errors.push({ row: r.rowNumber, error: `Invalid status: '${r.status}'. Must be one of approved, deleted, rejected, reset, pending.` });
+      }
     });
 
-    const invalidRows = parsed.filter(
-      r => !r.id || !r.cardno || !r.code
-    );
+    const validRows = parsed.filter(r => r.id !== null && r.cardno);
 
-    const validRows = parsed.filter(
-      r => r.id && r.cardno && r.code
-    );
-
-    if (!validRows.length) {
+    if (validRows.length === 0) {
+      await transaction.rollback();
       return res.status(400).json({
-        error: 'No valid rows found',
-        invalidRows
+        error: 'No valid rows found to process.',
+        errors
       });
     }
 
-    /* =====================================================
-       3. VERIFY id + cardno EXISTS IN DB
-       ===================================================== */
+    // 2. Fetch CardDb records in batch to verify card existence
+    const cardnos = [...new Set(validRows.map(r => r.cardno))];
+    const dbCards = await CardDb.findAll({
+      where: { cardno: cardnos },
+      attributes: ['cardno', 'issuedto'],
+      transaction
+    });
+    const existingCards = new Set(dbCards.map(c => c.cardno));
+    const cardNamesMap = new Map(dbCards.map(c => [c.cardno, c.issuedto]));
+
+    // 3. Fetch current database records for the requested IDs
     const dbRows = await PermanentWifiCodes.findAll({
+      where: { id: validRows.map(r => r.id) },
+      transaction
+    });
+    const dbMap = new Map(dbRows.map(r => [r.id, r]));
+
+    // 4. Fetch all approved codes to check database uniqueness
+    const codesToCheck = [...new Set(validRows.map(r => r.code).filter(Boolean))];
+    const approvedCodesInDb = await PermanentWifiCodes.findAll({
       where: {
-        id: validRows.map(r => r.id)
+        code: codesToCheck,
+        status: 'approved'
       },
-      attributes: ['id', 'cardno', 'status'],
+      attributes: ['id', 'cardno', 'code'],
       transaction
     });
 
-    const dbMap = new Map(
-      dbRows.map(r => [`${r.id}|${r.cardno}`, r.status])
-    );
+    // Check duplicate codes in Excel
+    const excelCodesSeen = new Set();
+    const excelCodeDuplicates = new Set();
+    validRows.forEach(r => {
+      if (r.code) {
+        if (excelCodesSeen.has(r.code)) {
+          excelCodeDuplicates.add(r.code);
+        }
+        excelCodesSeen.add(r.code);
+      }
+    });
 
+    // 5. Run row-by-row validation
     const matched = [];
     const mismatched = [];
 
     for (const r of validRows) {
-      if (dbMap.has(`${r.id}|${r.cardno}`)) {
-        matched.push(r);
-      } else {
+      let hasRowError = false;
+
+      // Card existence
+      if (!existingCards.has(r.cardno)) {
+        errors.push({ row: r.rowNumber, error: `Card number '${r.cardno}' does not exist.` });
+        hasRowError = true;
+      }
+
+      // Check ID + Cardno exists
+      const dbRow = dbMap.get(r.id);
+      if (!dbRow || dbRow.cardno !== r.cardno) {
         mismatched.push(r);
+        errors.push({ row: r.rowNumber, error: `No record found matching ID '${r.id}' and Card Number '${r.cardno}'.` });
+        hasRowError = true;
+        continue;
+      }
+
+      // If status is approved, code is required
+      if (r.status === 'approved' && !r.code) {
+        errors.push({ row: r.rowNumber, error: `WiFi code is required for 'approved' status.` });
+        hasRowError = true;
+      }
+
+      // Check code uniqueness in Excel
+      if (r.code && excelCodeDuplicates.has(r.code)) {
+        errors.push({ row: r.rowNumber, error: `Duplicate code '${r.code}' found multiple times in the Excel sheet.` });
+        hasRowError = true;
+      }
+
+      // Check code uniqueness in Database (only if status is approved)
+      if (r.status === 'approved' && r.code) {
+        const conflictingDbCode = approvedCodesInDb.find(dbC => dbC.code === r.code && dbC.id !== r.id);
+        if (conflictingDbCode) {
+          errors.push({ row: r.rowNumber, error: `Code '${r.code}' is already assigned to another approved request (Card: ${conflictingDbCode.cardno}).` });
+          hasRowError = true;
+        }
+      }
+
+      if (!hasRowError) {
+        matched.push({
+          excelRow: r,
+          dbRow
+        });
       }
     }
 
-    /* =====================================================
-       4. DRY RUN MODE
-       ===================================================== */
+    if (errors.length > 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: 'Validation failed',
+        errors,
+        mismatched
+      });
+    }
+
+    // 6. Handle Dry Run Mode
     if (req.query.dryRun === 'true') {
       await transaction.rollback();
+
+      const dryRunDiff = [];
+      for (const m of matched) {
+        const { excelRow, dbRow } = m;
+        const changes = {};
+
+        let newUsername = excelRow.username;
+        if (!newUsername && !dbRow.username) {
+          const issuedto = cardNamesMap.get(excelRow.cardno) || 'user';
+          newUsername = await internalGenerateUsername({
+            cardno: excelRow.cardno,
+            issuedto,
+            deviceType: excelRow.deviceType
+          });
+        }
+
+        if (excelRow.code !== dbRow.code) changes.code = { old: dbRow.code, new: excelRow.code };
+        if (excelRow.ssid !== dbRow.ssid) changes.ssid = { old: dbRow.ssid, new: excelRow.ssid };
+        if (newUsername && newUsername !== dbRow.username) changes.username = { old: dbRow.username, new: newUsername };
+        if (excelRow.status !== dbRow.status) changes.status = { old: dbRow.status, new: excelRow.status };
+
+        if (Object.keys(changes).length > 0) {
+          dryRunDiff.push({
+            rowNumber: excelRow.rowNumber,
+            id: excelRow.id,
+            cardno: excelRow.cardno,
+            changes
+          });
+        }
+      }
+
       return res.json({
         dryRun: true,
         summary: {
           totalRows: sheet.length,
           validRows: validRows.length,
           matched: matched.length,
-          mismatched: mismatched.length,
-          invalidRows: invalidRows.length
+          invalidRows: parsed.length - validRows.length,
+          changesCount: dryRunDiff.length
         },
-        matched,
-        mismatched,
-        invalidRows
+        changes: dryRunDiff
       });
     }
 
-    if (!matched.length) {
-      await transaction.rollback();
-      return res.status(400).json({
-        error: 'No matching id + cardno pairs found in DB',
-        mismatched
-      });
+    // 7. Process updates and queue notifications
+    const now = new Date();
+    const reviewer = req.user?.username || 'admin';
+    const notifList = [];
+
+    for (const m of matched) {
+      const { excelRow, dbRow } = m;
+
+      const finalDeviceType = (excelRow.deviceType && excelRow.deviceType !== 'other') ? excelRow.deviceType : dbRow.deviceType;
+
+      // Auto-generate username if blank (both Excel and DB username are empty)
+      let finalUsername = excelRow.username || dbRow.username;
+      if (!finalUsername) {
+        const issuedto = cardNamesMap.get(excelRow.cardno) || 'user';
+        finalUsername = await internalGenerateUsername({
+          cardno: excelRow.cardno,
+          issuedto,
+          deviceType: finalDeviceType
+        });
+      }
+
+      const oldStatus = dbRow.status;
+      const oldCode = dbRow.code;
+
+      await dbRow.update({
+        code: excelRow.code,
+        ssid: excelRow.ssid,
+        username: finalUsername,
+        deviceType: finalDeviceType,
+        status: excelRow.status,
+        reviewed_by: reviewer,
+        reviewed_at: now
+      }, { transaction });
+
+      // Track if status changed or code was assigned to notify user
+      if (excelRow.status !== oldStatus || excelRow.code !== oldCode) {
+        notifList.push({
+          cardno: excelRow.cardno,
+          username: finalUsername,
+          status: excelRow.status,
+          code: excelRow.code,
+          deviceType: finalDeviceType
+        });
+      }
     }
 
-    /* =====================================================
-       5. BUILD SAFE CASE STATEMENTS
-       ===================================================== */
-    const esc = v => v.replace(/'/g, "\\'");
-    const now = formatDateForMySQL(new Date());
-    const reviewer = esc(req.user?.username || 'admin');
-
-    const codeCases = matched
-      .map(r =>
-        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.code)}'`
-      )
-      .join(' ');
-
-    const ssidCases = matched
-      .filter(r => r.ssid)
-      .map(r =>
-        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.ssid)}'`
-      )
-      .join(' ');
-
-    const usernameCases = matched
-      .filter(r => r.username)
-      .map(r =>
-        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.username)}'`
-      )
-      .join(' ');
-
-    const statusCases = matched
-      .filter(r => r.status)
-      .map(r =>
-        `WHEN id = ${r.id} AND cardno = '${esc(r.cardno)}' THEN '${esc(r.status)}'`
-      )
-      .join(' ');
-
-    const whereClause = matched
-      .map(r => `(id = ${r.id} AND cardno = '${esc(r.cardno)}')`)
-      .join(' OR ');
-
-    const query = `
-      UPDATE permanent_wifi_codes
-      SET
-        code = CASE
-          ${codeCases}
-          ELSE code
-        END,
-
-        ssid = CASE
-          ${ssidCases || 'WHEN 1=0 THEN ssid'}
-          ELSE ssid
-        END,
-
-        username = CASE
-          ${usernameCases || 'WHEN 1=0 THEN username'}
-          ELSE username
-        END,
-
-        status = CASE
-          ${statusCases || 'WHEN 1=0 THEN status'}
-          ELSE status
-        END,
-
-        reviewed_by = '${reviewer}',
-        reviewed_at = '${now}',
-        updatedAt = '${now}'
-      WHERE ${whereClause};
-    `;
-
-    /* =====================================================
-       6. EXECUTE UPDATE
-       ===================================================== */
-    await PermanentWifiCodes.sequelize.query(query, { transaction });
     await transaction.commit();
 
-    /* =====================================================
-       7. RESPONSE
-       ===================================================== */
-    req.log.info('upload_per_wifi_codes_success', {
-      updatedCount: matched.length,
-      skippedInvalidRows: invalidRows.length,
-      skippedMismatched: mismatched.length
-    });
-    res.json({
+    // Trigger asynchronous background WhatsApp sends
+    if (notifList.length > 0) {
+      sendBulkWifiNotifications(notifList);
+    }
+
+    req.log.info('upload_per_wifi_codes_success', { updatedCount: matched.length });
+    return res.json({
       success: true,
       updatedCount: matched.length,
-      skipped: {
-        invalidRows: invalidRows.length,
-        mismatched: mismatched.length
-      },
-      mismatched,
-      invalidRows
+      notificationsQueued: notifList.length
     });
 
   } catch (err) {
     await transaction.rollback();
     req.log.error('upload_per_wifi_codes_error', { error: err.message });
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
 
@@ -674,73 +764,208 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
       { defval: '' }
     );
 
+    if (sheet.length > 0) {
+      console.log('DEBUG PARSED EXCEL ROW KEYS (INSERT):', Object.keys(sheet[0]));
+      console.log('DEBUG PARSED EXCEL ROW CONTENT (INSERT):', sheet[0]);
+    }
+
     if (!sheet.length) {
+      await transaction.rollback();
       return res.status(400).json({ error: 'Excel file is empty' });
     }
 
-    /* =====================================================
-       1. PARSE & VALIDATE
-       ===================================================== */
     const allowedStatuses = new Set(['approved', 'pending']);
+    const errors = [];
+
+    /* =====================================================
+       1. PARSE & BASIC VALIDATION
+       ===================================================== */
+    const getExcelRowValue = (row, possibleKeys) => {
+      const foundKey = Object.keys(row).find(k =>
+        possibleKeys.includes(k.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
+      );
+      return foundKey ? row[foundKey] : undefined;
+    };
 
     const parsed = sheet.map((row, index) => {
-      const rawId = row.id?.toString().trim();
-      const cardno = row.cardno?.toString().trim();
+      const rawId = getExcelRowValue(row, ['id', 'sr'])?.toString().trim();
+      const cardno = getExcelRowValue(row, ['cardno', 'cardnumber', 'card'])?.toString().trim();
+      const code = getExcelRowValue(row, ['code', 'wificode', 'permanentcode'])?.toString().trim() || null;
+      const rawStatus = getExcelRowValue(row, ['status'])?.toString().trim();
+      const ssid = getExcelRowValue(row, ['ssid'])?.toString().trim() || null;
+      const username = getExcelRowValue(row, ['username'])?.toString().trim() || null;
+      const deviceType = getExcelRowValue(row, ['devicetype', 'device'])?.toString().trim() || 'other';
+
+      // Skip completely empty rows
+      if (!rawId && !cardno && !code && !rawStatus && !ssid && !username) {
+        return null;
+      }
+
+      const status = rawStatus ? rawStatus.toLowerCase() : 'approved';
 
       return {
         rowNumber: index + 2,
+        rawId,
         id: /^\d+$/.test(rawId) ? parseInt(rawId, 10) : null,
         cardno,
-        code: row.code?.toString().trim() || null,
-        ssid: row.ssid?.toString().trim() || null,
-        username: row.username?.toString().trim() || null,
-        status: allowedStatuses.has(
-          row.status?.toString().trim().toLowerCase()
-        )
-          ? row.status.toLowerCase()
-          : 'approved'
+        code,
+        ssid,
+        username,
+        status,
+        deviceType
       };
+    }).filter(Boolean);
+
+    parsed.forEach(r => {
+      if (!r.rawId || r.id === null) {
+        errors.push({ row: r.rowNumber, error: `Invalid or missing ID: '${r.rawId || ''}'` });
+      }
+      if (!r.cardno) {
+        errors.push({ row: r.rowNumber, error: 'Missing Card Number.' });
+      }
+      if (r.status && !allowedStatuses.has(r.status)) {
+        errors.push({ row: r.rowNumber, error: `Invalid status: '${r.status}'. Must be either approved or pending.` });
+      }
     });
 
-    const invalidRows = parsed.filter(r => !r.id || !r.cardno);
+    const validRows = parsed.filter(r => r.id !== null && r.cardno);
 
-    const validRows = parsed.filter(r => r.id && r.cardno);
-
-    if (!validRows.length) {
+    if (validRows.length === 0) {
+      await transaction.rollback();
       return res.status(400).json({
         error: 'No valid rows to insert',
-        invalidRows
+        errors
       });
     }
 
     /* =====================================================
-       2. CHECK EXISTING DB ROWS
+       2. BATCH FETCH DB RECORDS FOR CARD EXISTENCE & DUPLICATES
        ===================================================== */
-    const existing = await PermanentWifiCodes.findAll({
-      where: {
-        id: validRows.map(r => r.id)
-      },
+    const cardnos = [...new Set(validRows.map(r => r.cardno))];
+    const dbCards = await CardDb.findAll({
+      where: { cardno: cardnos },
+      attributes: ['cardno', 'issuedto'],
+      transaction
+    });
+    const existingCards = new Set(dbCards.map(c => c.cardno));
+    const cardNamesMap = new Map(dbCards.map(c => [c.cardno, c.issuedto]));
+
+    // Check if ID + cardno combination already exists in DB
+    const existingPermanentCodes = await PermanentWifiCodes.findAll({
+      where: { id: validRows.map(r => r.id) },
       attributes: ['id', 'cardno'],
       transaction
     });
+    const existingSet = new Set(existingPermanentCodes.map(r => `${r.id}|${r.cardno}`));
 
-    const existingSet = new Set(
-      existing.map(r => `${r.id}|${r.cardno}`)
-    );
+    // Fetch approved codes to check database uniqueness
+    const codesToCheck = [...new Set(validRows.map(r => r.code).filter(Boolean))];
+    const approvedCodesInDb = await PermanentWifiCodes.findAll({
+      where: {
+        code: codesToCheck,
+        status: 'approved'
+      },
+      attributes: ['id', 'cardno', 'code'],
+      transaction
+    });
 
-    const toInsert = validRows.filter(
-      r => !existingSet.has(`${r.id}|${r.cardno}`)
-    );
-
-    const skippedExisting = validRows.filter(
-      r => existingSet.has(`${r.id}|${r.cardno}`)
-    );
+    // Check duplicate codes in Excel
+    const excelCodesSeen = new Set();
+    const excelCodeDuplicates = new Set();
+    validRows.forEach(r => {
+      if (r.code) {
+        if (excelCodesSeen.has(r.code)) {
+          excelCodeDuplicates.add(r.code);
+        }
+        excelCodesSeen.add(r.code);
+      }
+    });
 
     /* =====================================================
-       3. DRY RUN PREVIEW
+       3. DETAILED VALIDATIONS
+       ==================================================== */
+    const toInsert = [];
+    const skippedExisting = [];
+
+    for (const r of validRows) {
+      let hasRowError = false;
+
+      // Card check
+      if (!existingCards.has(r.cardno)) {
+        errors.push({ row: r.rowNumber, error: `Card number '${r.cardno}' does not exist.` });
+        hasRowError = true;
+      }
+
+      // Check if already exists (ID check)
+      if (existingSet.has(`${r.id}|${r.cardno}`)) {
+        skippedExisting.push(r);
+        continue;
+      }
+
+      // Approved status constraints
+      if (r.status === 'approved' && !r.code) {
+        errors.push({ row: r.rowNumber, error: `WiFi code is required for 'approved' status.` });
+        hasRowError = true;
+      }
+
+      // Check Excel duplicate code
+      if (r.code && excelCodeDuplicates.has(r.code)) {
+        errors.push({ row: r.rowNumber, error: `Duplicate code '${r.code}' found multiple times in the Excel sheet.` });
+        hasRowError = true;
+      }
+
+      // Check DB duplicate code
+      if (r.status === 'approved' && r.code) {
+        const conflictingDbCode = approvedCodesInDb.find(dbC => dbC.code === r.code);
+        if (conflictingDbCode) {
+          errors.push({ row: r.rowNumber, error: `Code '${r.code}' is already assigned to another approved request (Card: ${conflictingDbCode.cardno}).` });
+          hasRowError = true;
+        }
+      }
+
+      if (!hasRowError) {
+        toInsert.push(r);
+      }
+    }
+
+    if (errors.length > 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: 'Validation failed',
+        errors,
+        skippedExisting
+      });
+    }
+
+    /* =====================================================
+       4. DRY RUN PREVIEW
        ===================================================== */
     if (req.query.dryRun === 'true') {
       await transaction.rollback();
+
+      const previewRows = [];
+      for (const r of toInsert) {
+        let genUsername = r.username;
+        if (!genUsername) {
+          const issuedto = cardNamesMap.get(r.cardno) || 'user';
+          genUsername = await internalGenerateUsername({
+            cardno: r.cardno,
+            issuedto,
+            deviceType: r.deviceType
+          });
+        }
+        previewRows.push({
+          rowNumber: r.rowNumber,
+          id: r.id,
+          cardno: r.cardno,
+          username: genUsername,
+          code: r.code,
+          ssid: r.ssid,
+          status: r.status,
+          deviceType: r.deviceType
+        });
+      }
+
       return res.json({
         dryRun: true,
         summary: {
@@ -748,11 +973,11 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
           validRows: validRows.length,
           toInsert: toInsert.length,
           skippedExisting: skippedExisting.length,
-          invalidRows: invalidRows.length
+          invalidRows: parsed.length - validRows.length
         },
-        toInsert,
+        toInsert: previewRows,
         skippedExisting,
-        invalidRows
+        invalidRows: parsed.filter(r => !r.rawId || r.id === null || !r.cardno)
       });
     }
 
@@ -765,48 +990,71 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
     }
 
     /* =====================================================
-       4. INSERT
+       5. INSERT
        ===================================================== */
-    const now = formatDateForMySQL(new Date());
+    const now = new Date();
+    const reviewer = req.user?.username || 'admin';
+    const bulkInsertRows = [];
+    const notifList = [];
 
-    await PermanentWifiCodes.bulkCreate(
-      toInsert.map(r => ({
+    for (const r of toInsert) {
+      let finalUsername = r.username;
+      if (!finalUsername) {
+        const issuedto = cardNamesMap.get(r.cardno) || 'user';
+        finalUsername = await internalGenerateUsername({
+          cardno: r.cardno,
+          issuedto,
+          deviceType: r.deviceType
+        });
+      }
+
+      bulkInsertRows.push({
         id: r.id,
         cardno: r.cardno,
         code: r.code,
         ssid: r.ssid,
-        username: r.username,
+        username: finalUsername,
         status: r.status,
-        reviewed_by: req.user.username,
-        reviewed_at: now
-      })),
-      { transaction }
-    );
+        reviewed_by: reviewer,
+        reviewed_at: now,
+        requested_at: now
+      });
 
+      notifList.push({
+        cardno: r.cardno,
+        username: finalUsername,
+        status: r.status,
+        code: r.code,
+        deviceType: r.deviceType
+      });
+    }
+
+    await PermanentWifiCodes.bulkCreate(bulkInsertRows, { transaction });
     await transaction.commit();
 
-    /* =====================================================
-       5. RESPONSE
-       ===================================================== */
+    // Trigger WhatsApp notifications in background
+    if (notifList.length > 0) {
+      sendBulkWifiNotifications(notifList);
+    }
+
     req.log.info('insert_per_wifi_codes_from_excel_success', {
       insertedCount: toInsert.length,
-      skippedExisting: skippedExisting.length,
-      invalidRows: invalidRows.length
+      skippedExisting: skippedExisting.length
     });
-    res.json({
+
+    return res.json({
       success: true,
       insertedCount: toInsert.length,
       skippedExisting: skippedExisting.length,
-      invalidRows: invalidRows.length
+      notificationsQueued: notifList.length
     });
 
   } catch (err) {
     await transaction.rollback();
     req.log.error('insert_per_wifi_codes_from_excel_error', { error: err.message });
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
-
 
 export const generateUsername = async (req, res) => {
   try {
@@ -818,78 +1066,11 @@ export const generateUsername = async (req, res) => {
       });
     }
 
-    /* ================= USERNAME BASE ================= */
-
-    const DEVICE_SUFFIX_MAP = {
-      mobile: 'ph',
-      laptop: 'pc',
-      tablet: 'tb'
-    };
-
-    const deviceSuffix =
-      DEVICE_SUFFIX_MAP[deviceType.toLowerCase()] || 'ot';
-
-    const IGNORE_FIRST_NAMES = [
-      'rcof', 'rchk', 'cons', 'chak', 'divi', 'paon', 'guest'
-    ];
-
-    let nameParts = issuedto
-      .trim()
-      .toLowerCase()
-      .replace(/^guest-/, '')
-      .split(/\s+/);
-
-    while (
-      nameParts.length > 1 &&
-      IGNORE_FIRST_NAMES.includes(nameParts[0])
-    ) {
-      nameParts.shift();
-    }
-
-    const firstName = nameParts[0] || '';
-    const lastName =
-      nameParts.length > 1
-        ? nameParts[nameParts.length - 1]
-        : '';
-
-    const cardLast4 = cardno.slice(-4);
-
-    const baseUsername =
-      `${firstName}${lastName}${cardLast4}${deviceSuffix}`;
-
-    /* ================= INCREMENT LOGIC ================= */
-
-    const similarUsernames = await PermanentWifiCodes.findAll({
-      attributes: ['username'],
-      where: {
-        username: {
-          [Op.like]: `${baseUsername}%`
-        },
-        status: ['approved', 'reset', 'pending'] // ✅ YOUR RULE
-      }
-    });
-
-    let maxCounter = 0;
-
-    similarUsernames.forEach((user) => {
-      const currentUsername = user.username;
-      const suffix = currentUsername.substring(baseUsername.length);
-
-      if (suffix === '') {
-        maxCounter = Math.max(maxCounter, 1);
-      } else if (/^\d+$/.test(suffix)) {
-        maxCounter = Math.max(maxCounter, parseInt(suffix, 10));
-      }
-    });
-
-    const finalUsername =
-      maxCounter === 0
-        ? baseUsername
-        : `${baseUsername}${maxCounter + 1}`;
+    const username = await internalGenerateUsername({ cardno, issuedto, deviceType });
 
     return res.status(200).json({
       data: {
-        username: finalUsername.toLowerCase()
+        username
       }
     });
 
@@ -898,5 +1079,241 @@ export const generateUsername = async (req, res) => {
     return res.status(500).json({
       message: error.message
     });
+  }
+};
+
+/* =====================================================
+   HELPER & TEMPLATE FUNCTIONS
+   ===================================================== */
+
+export const internalGenerateUsername = async ({ cardno, issuedto, deviceType = 'other' }) => {
+  const DEVICE_SUFFIX_MAP = {
+    mobile: 'ph',
+    laptop: 'pc',
+    tablet: 'tb',
+    other: 'ot'
+  };
+
+  const deviceSuffix =
+    DEVICE_SUFFIX_MAP[deviceType.toLowerCase()] || 'ot';
+
+  const IGNORE_FIRST_NAMES = [
+    'rcof', 'rchk', 'cons', 'chak', 'divi', 'paon', 'guest'
+  ];
+
+  let nameParts = issuedto
+    .trim()
+    .toLowerCase()
+    .replace(/^guest-/, '')
+    .split(/\s+/);
+
+  while (
+    nameParts.length > 1 &&
+    IGNORE_FIRST_NAMES.includes(nameParts[0])
+  ) {
+    nameParts.shift();
+  }
+
+  const firstName = nameParts[0] || '';
+  const lastName =
+    nameParts.length > 1
+      ? nameParts[nameParts.length - 1]
+      : '';
+
+  const cardLast4 = cardno.slice(-4);
+
+  const baseUsername =
+    `${firstName}${lastName}${cardLast4}${deviceSuffix}`.toLowerCase();
+
+  const similarUsernames = await PermanentWifiCodes.findAll({
+    attributes: ['username'],
+    where: {
+      username: {
+        [Op.like]: `${baseUsername}%`
+      },
+      status: ['approved', 'reset', 'pending']
+    }
+  });
+
+  let maxCounter = 0;
+
+  similarUsernames.forEach((user) => {
+    const currentUsername = user.username;
+    const suffix = currentUsername.substring(baseUsername.length);
+
+    if (suffix === '') {
+      maxCounter = Math.max(maxCounter, 1);
+    } else if (/^\d+$/.test(suffix)) {
+      maxCounter = Math.max(maxCounter, parseInt(suffix, 10));
+    }
+  });
+
+  const finalUsername =
+    maxCounter === 0
+      ? baseUsername
+      : `${baseUsername}${maxCounter + 1}`;
+
+  return finalUsername.toLowerCase();
+};
+
+const sendBulkWifiNotifications = (notifications) => {
+  setTimeout(async () => {
+    for (const notif of notifications) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 200)); // Throttling delay
+        await sendWifiRequestWhatsApp(
+          notif.cardno,
+          notif.username,
+          notif.status,
+          notif.code,
+          notif.deviceType
+        );
+      } catch (err) {
+        console.error('Error sending background bulk WiFi WhatsApp notification:', err.message);
+      }
+    }
+  }, 0);
+};
+
+
+export const exportPortalWifiCodes = async (req, res) => {
+  try {
+    req.log.info('export_portal_wifi_codes_start');
+
+    const whereClause = { status: 'approved' };
+    const { startDate, endDate, hours } = req.query;
+
+    if (hours) {
+      const cutoff = new Date(Date.now() - parseFloat(hours) * 60 * 60 * 1000);
+      whereClause.reviewed_at = { [Op.gte]: cutoff };
+    } else if (startDate && endDate) {
+      whereClause.reviewed_at = {
+        [Op.between]: [
+          new Date(startDate + 'T00:00:00.000Z'),
+          new Date(endDate + 'T23:59:59.999Z')
+        ]
+      };
+    }
+
+    // 1. Fetch approved permanent wifi codes matching filter including CardDb associations
+    const approvedCodes = await PermanentWifiCodes.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: CardDb,
+          attributes: ['issuedto', 'res_status', 'email']
+        }
+      ]
+    });
+
+    const wb = XLSX.utils.book_new();
+
+    // 2. Helper functions for derivation
+    const deriveFirstName = (username, issuedto) => {
+      if (!username) return '';
+
+      // Clean username: remove ending digits and device suffix (e.g. 4768ph)
+      let nameStr = username.replace(/[0-9]+[a-z]{2}$/i, '').trim().toLowerCase();
+      if (nameStr === username.toLowerCase()) {
+        nameStr = username.replace(/[0-9]+/g, '').slice(0, -2).toLowerCase();
+      }
+
+      // If we have card holder name, use it to accurately split the lowercase username string
+      if (issuedto) {
+        const IGNORE_FIRST_NAMES = [
+          'rcof', 'rchk', 'cons', 'chak', 'divi', 'paon', 'guest'
+        ];
+
+        let nameParts = issuedto
+          .trim()
+          .toLowerCase()
+          .replace(/^guest-/, '')
+          .split(/\s+/);
+
+        while (
+          nameParts.length > 1 &&
+          IGNORE_FIRST_NAMES.includes(nameParts[0])
+        ) {
+          nameParts.shift();
+        }
+
+        const firstName = nameParts[0] || '';
+        if (firstName && nameStr.startsWith(firstName)) {
+          const rest = nameStr.substring(firstName.length);
+          const capFirst = firstName.charAt(0).toUpperCase() + firstName.slice(1);
+          const capRest = rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : '';
+          return capRest ? `${capFirst}_${capRest}` : capFirst;
+        }
+      }
+
+      // Fallback: capitalize whole cleaned name prefix
+      return nameStr.charAt(0).toUpperCase() + nameStr.slice(1);
+    };
+
+    const deriveLastName = (username) => {
+      if (!username) return 'Other';
+      const suffix = username.slice(-2).toLowerCase();
+      switch (suffix) {
+        case 'ph': return 'Phone';
+        case 'h2': return 'Phone2';
+        case 'h3': return 'Phone3';
+        case 'tb': return 'Tablet';
+        case 'b2': return 'Tablet2';
+        case 'b3': return 'Tablet3';
+        case 'pc': return 'Laptop';
+        case 'c2': return 'Laptop2';
+        case 'c3': return 'Laptop3';
+        default: return 'Other';
+      }
+    };
+
+    const getGroupFromResStatus = (resStatus) => {
+      if (!resStatus) return 'NonPRpermanentCode';
+      const status = resStatus.toUpperCase().trim();
+      if (status === 'PR') return 'Residents';
+      if (status === 'SEVA KUTIR') return '1Yr1DeviceUnlimitedData';
+      if (status === 'MUMUKSHU' || status === 'GUEST') return 'NonPRpermanentCode';
+      return 'NonPRpermanentCode';
+    };
+
+    // 3. Format row data and compute values statically (no formulas)
+    const rowsData = approvedCodes.map((r) => {
+      const username = r.username || '';
+      const firstName = deriveFirstName(username, r.CardDb?.issuedto);
+      const lastName = deriveLastName(username);
+      const alias = `${firstName}_${lastName}`;
+
+      return {
+        Account: username,
+        Password: r.code || '',
+        First_name: firstName,
+        Last_name: lastName,
+        Alias: alias,
+        User_group: getGroupFromResStatus(r.CardDb?.res_status),
+        Email: r.CardDb?.email || ''
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rowsData);
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Portal Wifi Accounts');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=wifi_portal_accounts.xlsx'
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+
+    req.log.info('export_portal_wifi_codes_success', { count: approvedCodes.length });
+    return res.send(buffer);
+
+  } catch (err) {
+    req.log.error('export_portal_wifi_codes_error', { error: err.message });
+    return res.status(500).json({ error: 'Failed to export portal WiFi codes: ' + err.message });
   }
 };
