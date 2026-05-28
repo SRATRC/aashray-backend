@@ -739,3 +739,33 @@ export async function sendWifiRequestWhatsApp(cardno, username, status, code = n
     console.error("Error sending Wifi request WhatsApp:", err && (err.stack || err.message || err));
   }
 }
+
+export async function sendWifiLowAlertWhatsApp(activeCount) {
+  try {
+    const phone = "919819988657";
+    const templateName = "temp_wifi_code_alert";
+
+    const components = [
+      {
+        type: "body",
+        parameters: [
+          { type: "text", text: String(activeCount) }
+        ]
+      }
+    ];
+
+    const sendResult = await sendWhatsAppMessage(phone, templateName, components);
+    if (!sendResult.ok) {
+      console.error(`Wifi low alert WA failed for template ${templateName}`, sendResult.error);
+    } else {
+      console.log(`📩 Wifi low alert WhatsApp sent to admin:`, {
+        phone,
+        activeCount,
+        template: templateName
+      });
+    }
+  } catch (err) {
+    console.error("Error sending Wifi low alert WhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
