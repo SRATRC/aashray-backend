@@ -305,12 +305,6 @@ export const fetchUpcomingBookings = async (req, res) => {
        t1.comments, t1.admin_comments, t1.status, t3.issuedto,
 t3.mobno,
 t3.center,
-
-tbp.bus_group_id,
-
-tbg.bus_name,
-tbg.capacity AS bus_capacity,
-tbg.coordinator_bookingid,
        t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
        t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
