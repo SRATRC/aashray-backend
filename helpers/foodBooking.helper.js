@@ -555,10 +555,11 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   return t;
 }
 
-export async function bookFoodForAllMeals( 
+export async function bookFoodForAllMeals(
   start_date,
   end_date,
-  lastDayOnlyBreakfast = false,
+  starting_meal,
+  ending_meal,
   cardno,
   t,
   updatedBy
@@ -576,20 +577,28 @@ export async function bookFoodForAllMeals(
 
   const bookingsToCreate = [], bookingsToUpdate = [];
 
-  let dinner = 1, lunch = 1;
-
+  const firstDay = allDates[0];
   const lastDay = allDates.at(-1);
 
   for (const date of allDates) {
     const foodBooking = foodBookings.find((item) => item.date === date);
 
-    if (date == lastDay && lastDayOnlyBreakfast) {
-      lunch = 0;
-      dinner = 0;
+    let breakfast = 1, lunch = 1, dinner = 1;
+
+    if (date === firstDay && starting_meal?.length) {
+      breakfast = starting_meal.includes('breakfast') ? 1 : 0;
+      lunch     = starting_meal.includes('lunch')     ? 1 : 0;
+      dinner    = starting_meal.includes('dinner')    ? 1 : 0;
+    }
+
+    if (date === lastDay && ending_meal?.length) {
+      breakfast = ending_meal.includes('breakfast') ? 1 : 0;
+      lunch     = ending_meal.includes('lunch')     ? 1 : 0;
+      dinner    = ending_meal.includes('dinner')    ? 1 : 0;
     }
 
     if (foodBooking) {
-      foodBooking.breakfast = 1;
+      foodBooking.breakfast = breakfast;
       foodBooking.lunch = lunch;
       foodBooking.dinner = dinner;
       foodBooking.spicy = 1;
@@ -604,9 +613,9 @@ export async function bookFoodForAllMeals(
       id: uuidv4(),
       cardno: cardno,
       date: date,
-      breakfast: 1,
-      lunch: lunch,
-      dinner: dinner,
+      breakfast,
+      lunch,
+      dinner,
       spicy: 1,
       hightea: 1,
       plateissued: 0,

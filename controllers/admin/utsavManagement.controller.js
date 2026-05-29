@@ -110,6 +110,21 @@ export const createUtsavBookingByAdmin = async (req, res) => {
   }
 };
 
+const VALID_MEALS = ['breakfast', 'lunch', 'dinner'];
+
+function validateMealField(value, fieldName) {
+  if (value === null || value === undefined) return;
+  if (!Array.isArray(value))
+    throw new ApiError(400, `${fieldName} must be an array`);
+  if (value.length === 0)
+    throw new ApiError(400, `${fieldName} cannot be an empty array`);
+  const invalid = value.filter(m => !VALID_MEALS.includes(m));
+  if (invalid.length)
+    throw new ApiError(400, `${fieldName} contains invalid values: ${invalid.join(', ')}. Allowed: breakfast, lunch, dinner`);
+  if (new Set(value).size !== value.length)
+    throw new ApiError(400, `${fieldName} contains duplicate values`);
+}
+
 export const createUtsav = async (req, res) => {
   const {
     name,
@@ -117,8 +132,13 @@ export const createUtsav = async (req, res) => {
     end_date,
     total_seats,
     location,
-    registration_deadline
+    registration_deadline,
+    starting_meal,
+    ending_meal
   } = req.body;
+
+  validateMealField(starting_meal, 'starting_meal');
+  validateMealField(ending_meal, 'ending_meal');
 
   req.log.info('create_utsav_start', { name, start_date, end_date, total_seats, location });
 
@@ -162,6 +182,8 @@ export const createUtsav = async (req, res) => {
       available_seats: total_seats,
       status: STATUS_OPEN,
       registration_deadline,
+      starting_meal,
+      ending_meal,
       updatedBy: req.user.username
     },
     { transaction: t }
@@ -394,8 +416,13 @@ export const updateUtsav = async (req, res) => {
     available_seats, // optional manual override
     comments,
     location,
-    registration_deadline
+    registration_deadline,
+    starting_meal,
+    ending_meal
   } = req.body;
+
+  validateMealField(starting_meal, 'starting_meal');
+  validateMealField(ending_meal, 'ending_meal');
 
   const utsavId = req.params.id;
   req.log.info('update_utsav_start', { utsavId, name, start_date, end_date, status, total_seats });
@@ -431,6 +458,8 @@ export const updateUtsav = async (req, res) => {
     comments,
     location,
     registration_deadline,
+    starting_meal,
+    ending_meal,
     updatedBy: req.user.username
   });
 
