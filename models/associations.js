@@ -344,6 +344,7 @@ CardDb.hasOne(PermanentWifiCodes, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+
 TravelBusGroup.hasMany(TravelBusPassengers, {
   foreignKey: 'bus_group_id',
   sourceKey: 'id',
@@ -357,6 +358,7 @@ TravelBusPassengers.belongsTo(TravelBusGroup, {
   targetKey: 'id',
   as: 'busGroup'
 });
+
 TravelBusPassengers.belongsTo(TravelBusGroup, {
   foreignKey: 'bus_group_id',
   targetKey: 'id',
