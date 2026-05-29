@@ -302,14 +302,21 @@ export const fetchUpcomingBookings = async (req, res) => {
     `SELECT t1.bookingid, t1.bookedBy, t1.date,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
-       t1.comments, t1.admin_comments, t1.status, t3.issuedto,
 t3.mobno,
 t3.center,
+tbp.bus_group_id,
+tbg.bus_name,
+tbg.capacity AS bus_capacity,
+tbg.coordinator_bookingid,
        t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
        t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
      LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+      LEFT JOIN travel_bus_passengers tbp
+    ON t1.bookingid = tbp.bookingid
+LEFT JOIN travel_bus_group tbg
+    ON tbp.bus_group_id = tbg.id
      WHERE t1.date >= :startDate AND t1.date <= :endDate
      ${additionalWhereClause}
      ORDER BY date ASC`,
@@ -1214,27 +1221,26 @@ export async function updateBooking(req, res) {
       }
     }
   }
-  updatedFields.push(...Object.keys(travelUpdate));
-}
 
-if (updatedFields.length === 0) {
-  throw new ApiError(400, 'No fields provided to update');
-}
 
-await t.commit();
+  if (updatedFields.length === 0) {
+    throw new ApiError(400, 'No fields provided to update');
+  }
 
-req.log.info('travel_update_booking_success', { bookingid, updatedFields });
-return res.json({
-  message: 'Booking updated successfully',
-  updatedFields,
+  await t.commit();
 
-  removedFromOldBus,
+  req.log.info('travel_update_booking_success', { bookingid, updatedFields });
+  return res.json({
+    message: 'Booking updated successfully',
+    updatedFields,
 
-  matchingBusAvailable:
-    !!matchingBus,
+    removedFromOldBus,
 
-  matchingBus,
-});
+    matchingBusAvailable:
+      !!matchingBus,
+
+    matchingBus,
+  });
 }
 
 export async function createBusGroup(req, res) {
