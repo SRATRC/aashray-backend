@@ -31,6 +31,7 @@ import ApiError from '../utils/ApiError.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import { sendDualUserNotifications } from './notification.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp } from './whatsapp.helper.js';
 
 export async function bookAdhyayanForMumukshus(shibir_ids, mumukshus, t, user) {
   await validateCards(mumukshus);
@@ -225,8 +226,8 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
       updatedBy,
       t
     );
- return booking;
- } else {
+    return booking;
+  } else {
     await adhyayan.update(
       {
         available_seats: adhyayan.dataValues.available_seats + 1
@@ -238,12 +239,12 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t) {
   }
 }
 
-export async function sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, isfromAdmin) {
+export async function sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, isfromAdmin, previousStatus) {
   // Build card numbers array efficiently and fetch all cards in single query
   const cardNumbers = [newBooking.cardno, newBooking.bookedBy].filter(Boolean);
   const cards = await CardDb.findAll({ where: { cardno: cardNumbers } });
 
-  if(!adhyayan){
+  if (!adhyayan) {
     adhyayan = await ShibirDb.findOne({ where: { id: newBooking.shibir_id } });
   }
 
@@ -255,17 +256,17 @@ export async function sendAdhyayanBookingUpdateNotification(newBooking, adhyayan
   // Early return if no card
   if (!card) return;
   let adminBody = '';
-  if(isfromAdmin){
-  adminBody = ' by an Admin';
+  if (isfromAdmin) {
+    adminBody = ' by an Admin';
   }
   let adhyanName = adhyayan.name;
   // Status message mapping
   const statusMessages = {
-    [STATUS_PAYMENT_PENDING]: 'has been pending '+adminBody+' and you are requested to make payment within 24 hours to secure your spot.',
-    [STATUS_CONFIRMED]: 'has been confirmed '+adminBody+' for '+adhyanName+'.',
-    [STATUS_WAITING]: "has been placed on the waiting list for "+adhyanName+" and will be notified if a spot becomes available."+adminBody+'.',
-    [STATUS_CANCELLED]: 'has been cancelled for '+adhyanName+'.',
-    [STATUS_ADMIN_CANCELLED]: 'has been cancelled by an Admin for '+adhyanName+'.',
+    [STATUS_PAYMENT_PENDING]: 'has been pending ' + adminBody + ' and you are requested to make payment within 24 hours to secure your spot.',
+    [STATUS_CONFIRMED]: 'has been confirmed ' + adminBody + ' for ' + adhyanName + '.',
+    [STATUS_WAITING]: "has been placed on the waiting list for " + adhyanName + " and will be notified if a spot becomes available." + adminBody + '.',
+    [STATUS_CANCELLED]: 'has been cancelled for ' + adhyanName + '.',
+    [STATUS_ADMIN_CANCELLED]: 'has been cancelled by an Admin for ' + adhyanName + '.',
   };
 
   const messageBody = statusMessages[newBooking.status] || 'has been updated.';
@@ -303,6 +304,9 @@ export async function sendAdhyayanBookingUpdateNotification(newBooking, adhyayan
       }
     });
   }
+
+  // Send WhatsApp messages for status transitions
+  await sendAdhyayanStatusChangeWhatsApp(newBooking, adhyayan, previousStatus);
 }
 
 export async function checkAdhyayanAvailabilityForMumukshus(

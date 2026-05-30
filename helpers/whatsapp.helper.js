@@ -1,9 +1,9 @@
 import Sequelize from "sequelize";
 // at top of both files (whatsapp.helper and mumukshuBooking.controller)
 import { Op } from 'sequelize';
-import { CardDb, Transactions, UtsavDb, UtsavPackagesDb } from "../models/associations.js";
+import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb } from "../models/associations.js";
 import moment from "moment";
-import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV } from "../config/constants.js";
+import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 
 function sanitizeParamText(s) {
@@ -23,52 +23,80 @@ const TEMPLATE_PARAM_COUNTS = {
  * retries with a fallback template (usually a 'confirmed' variant). Non-fatal.
  */
 async function sendWithTemplateFallback(phone, template, components) {
-  try {
-    const result = await sendWhatsAppMessage(phone, template, components);
-    return { ok: true, usedTemplate: template, responseData: result.responseData };
-  } catch (err) {
-    const status = err?.response?.status || err?.whatsappContext?.status;
-    const details = err?.response?.data || err?.whatsappContext?.responseData;
+  const trySend = async (tpl, comps, lang = null) => {
+    try {
+      const result = await sendWhatsAppMessage(phone, tpl, comps, lang);
+      return { ok: true, usedTemplate: tpl, responseData: result.responseData };
+    } catch (err) {
+      const status = err?.response?.status || err?.whatsappContext?.status;
+      const details = err?.response?.data || err?.whatsappContext?.responseData;
+      const errorMsg = String(
+        details?.error?.message ||
+        details?.error?.error_data?.details ||
+        err?.message ||
+        ""
+      ).toLowerCase();
+      const isTemplateMissing =
+        status === 404 &&
+        (errorMsg.includes("does not exist") || errorMsg.includes("template name"));
+      return { ok: false, error: err, isTemplateMissing };
+    }
+  };
 
-    const isTemplateMissing =
-      status === 404 &&
-      details &&
-      details.error &&
-      String(details.error.details || "").toLowerCase().includes("does not exist");
+  // 1. Try original template with default lang (en_US)
+  let attempt = await trySend(template, components);
+  if (attempt.ok) return attempt;
 
-    console.warn(`WA SEND FAILED for ${phone} template=${template}:`, err.message || err);
+  // 2. If template missing and default isn't "en", retry original with "en"
+  const defaultLang = process.env.WHATSAPP_DEFAULT_LANG || "en_US";
+  if (attempt.isTemplateMissing && defaultLang !== "en") {
+    console.log(`WA SEND: template '${template}' missing in ${defaultLang}, retrying with 'en'`);
+    attempt = await trySend(template, components, "en");
+    if (attempt.ok) return attempt;
+  }
 
-    if (isTemplateMissing) {
-      let fallbackTemplate = template;
+  // 3. If still missing, try fallback template
+  if (attempt.isTemplateMissing) {
+    let fallbackTemplate = template;
+    let fallbackComponents = components;
+
+    if (template.startsWith("bn_adh_gu_b_")) {
+      fallbackTemplate = "bn_adh_gu_b_cf";
+    } else if (template.startsWith("bn_adh_gu_f_")) {
+      fallbackTemplate = "bn_adh_gu_f_cf";
+      // bn_adh_gu_f_cf expects only 2 body parameters: [attendeeName, shibirName]
+      fallbackComponents = JSON.parse(JSON.stringify(components));
+      const bodyComp = fallbackComponents.find(c => c.type === "body");
+      if (bodyComp && bodyComp.parameters && bodyComp.parameters.length > 2) {
+        bodyComp.parameters = bodyComp.parameters.slice(0, 2);
+      }
+    } else if (template.startsWith("bn_adh_s_b_")) {
+      fallbackTemplate = "bn_adh_s_b_cnf";
+    } else {
       fallbackTemplate = fallbackTemplate.replace(
         /_pending_for|_pending|_waiting_for|_waiting/gi,
         "_confirmed"
       );
-
       if (fallbackTemplate === template) {
         fallbackTemplate = "booking_adhyayan_self_confirmed";
       }
-
-      try {
-        console.log(`WA SEND: retrying with fallback template '${fallbackTemplate}' for phone ${phone}`);
-        const retryResult = await sendWhatsAppMessage(phone, fallbackTemplate, components);
-        return {
-          ok: true,
-          usedTemplate: fallbackTemplate,
-          fallback: true,
-          responseData: retryResult.responseData,
-        };
-      } catch (innerErr) {
-        console.error(
-          `WA fallback also failed for ${phone} template=${fallbackTemplate}:`,
-          innerErr.message || innerErr
-        );
-        return { ok: false, error: innerErr };
-      }
     }
 
-    return { ok: false, error: err };
+    console.log(`WA SEND: retrying with fallback template '${fallbackTemplate}'`);
+    // Try fallback with default lang
+    attempt = await trySend(fallbackTemplate, fallbackComponents);
+    if (attempt.ok) return { ...attempt, fallback: true };
+
+    // Try fallback with "en"
+    if (attempt.isTemplateMissing && defaultLang !== "en") {
+      console.log(`WA SEND: fallback template '${fallbackTemplate}' missing in ${defaultLang}, retrying with 'en'`);
+      attempt = await trySend(fallbackTemplate, fallbackComponents, "en");
+      if (attempt.ok) return { ...attempt, fallback: true };
+    }
   }
+
+  // Return the last failure
+  return { ok: false, error: attempt.error };
 }
 
 // Exported main function
@@ -154,10 +182,29 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
     return;
   }
 
-  // Cache for bookedFor cardno -> issuedto (minimize DB hits)
+  // Cache for card name lookups (minimize DB hits)
+  const cardCache = new Map();
+  if (user && user.cardno) cardCache.set(String(user.cardno), user.issuedto || "");
+  if (bookedForUser && bookedForUser.cardno) cardCache.set(String(bookedForUser.cardno), bookedForUser.issuedto || "");
+
   const bookedForCache = new Map();
   if (bookedForUser && bookedForUser.cardno) {
     bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
+  }
+
+  async function getCardName(cardno) {
+    if (!cardno) return "";
+    const cno = String(cardno);
+    if (cardCache.has(cno)) return cardCache.get(cno);
+    try {
+      const card = await CardDb.findOne({ where: { cardno: cno } });
+      const name = card && card.issuedto ? card.issuedto : "";
+      cardCache.set(cno, name);
+      return name;
+    } catch (err) {
+      console.warn(`Failed to lookup card name for cardno=${cno}:`, err.message || err);
+      return "";
+    }
   }
 
   // defensive: ensure we always have an array
@@ -174,76 +221,151 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
       const bookingStatus = rawStatus.trim().toLowerCase(); // now always a lowercased string
 
-      // tolerant template selection
-      let template = "booking_adhyayan_self_confirmed";
-      if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
-        template = "booking_adhyayan_self_waiting_for";
-      } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
-        template = "booking_adhyayan_self_pending_for";
-      } else {
-        template = "booking_adhyayan_self_confirmed";
-      }
-
       const shibir = b.ShibirDb || {};
       const bookingId = b.bookingid || b.bookingId || (b.id ? String(b.id) : "");
 
-      // Determine booked-for name priority:
-      // 1) If booking object annotated with __bookedForCardno -> lookup that cardno (cached)
-      // 2) Else if bookedForUser provided -> use that
-      // 3) Else fallback to recipient (user.issuedto)
-      let bookedForName = user.issuedto || "";
+      const isResearchCentre = shibir && shibir.location === RESEARCH_CENTRE;
 
-      if (b.__bookedForCardno) {
-        const bfCardno = String(b.__bookedForCardno);
-        if (bookedForCache.has(bfCardno)) {
-          bookedForName = bookedForCache.get(bfCardno) || bookedForName;
+      let template = "booking_adhyayan_self_confirmed";
+      let components = [];
+
+      if (isResearchCentre) {
+        const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
+        const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
+
+        let bodyParams = [];
+        let headerParam = "";
+
+        if (isGuestBy) {
+          const attendeeName = bookedForUser.issuedto || "";
+          const bookerName = user.issuedto || "";
+          headerParam = attendeeName;
+
+          if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+            template = "bn_adh_gu_b_wg";
+            bodyParams = [bookerName, shibir.name || "", "waiting"];
+          } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
+            template = "bn_adh_gu_b_ppg";
+            bodyParams = [bookerName, shibir.name || "", "payment pending"];
+          } else {
+            template = "bn_adh_gu_b_cf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: bookingId }
+            }).catch(() => null);
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            bodyParams = [bookerName, shibir.name || "", paymentId];
+          }
+        } else if (isGuestFor) {
+          const bookerName = await getCardName(b.bookedBy);
+          const attendeeName = user.issuedto || "";
+          headerParam = bookerName;
+
+          if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+            template = "bn_adh_gu_f_wg";
+            bodyParams = [attendeeName, shibir.name || "", "waiting"];
+          } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
+            template = "bn_adh_gu_f_ppg";
+            bodyParams = [attendeeName, shibir.name || "", "payment pending"];
+          } else {
+            template = "bn_adh_gu_f_cf";
+            bodyParams = [attendeeName, shibir.name || ""];
+          }
         } else {
-          try {
-            const bf = await CardDb.findOne({ where: { cardno: bfCardno } });
-            const bfName = bf && bf.issuedto ? bf.issuedto : "";
-            bookedForCache.set(bfCardno, bfName);
-            if (bfName) bookedForName = bfName;
-          } catch (innerErr) {
-            if (bookedForUser && bookedForUser.issuedto) {
-              bookedForName = bookedForUser.issuedto;
-            }
-            console.warn(`Failed to lookup bookedFor card ${bfCardno}:`, innerErr && (innerErr.message || innerErr));
+          if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+            template = "bn_adh_s_b_w";
+            bodyParams = [user.issuedto || "", shibir.name || "", "waiting"];
+          } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
+            template = "bn_adh_s_b_ppg";
+            bodyParams = [user.issuedto || "", shibir.name || "", "payment pending"];
+          } else {
+            template = "bn_adh_s_b_cnf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: bookingId }
+            }).catch(() => null);
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            bodyParams = [user.issuedto || "", shibir.name || "", paymentId];
           }
         }
-      } else if (bookedForUser && bookedForUser.issuedto) {
-        bookedForName = bookedForUser.issuedto;
+
+        const bodyComp = buildBodyComponents(bodyParams)[0];
+        if (headerParam) {
+          const sanitizedHeader = sanitizeParamText(headerParam);
+          const headerParameters = [{ type: "text", text: sanitizedHeader === "" ? " " : sanitizedHeader }];
+          components = [
+            { type: "header", parameters: headerParameters },
+            bodyComp
+          ];
+        } else {
+          components = [bodyComp];
+        }
+      } else {
+        // tolerant template selection for non-Research Centre
+        if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+          template = "booking_adhyayan_self_waiting_for";
+        } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
+          template = "booking_adhyayan_self_pending_for";
+        } else {
+          template = "booking_adhyayan_self_confirmed";
+        }
+
+        // Determine booked-for name priority:
+        // 1) If booking object annotated with __bookedForCardno -> lookup that cardno (cached)
+        // 2) Else if bookedForUser provided -> use that
+        // 3) Else fallback to recipient (user.issuedto)
+        let bookedForName = user.issuedto || "";
+
+        if (b.__bookedForCardno) {
+          const bfCardno = String(b.__bookedForCardno);
+          if (bookedForCache.has(bfCardno)) {
+            bookedForName = bookedForCache.get(bfCardno) || bookedForName;
+          } else {
+            try {
+              const bf = await CardDb.findOne({ where: { cardno: bfCardno } });
+              const bfName = bf && bf.issuedto ? bf.issuedto : "";
+              bookedForCache.set(bfCardno, bfName);
+              if (bfName) bookedForName = bfName;
+            } catch (innerErr) {
+              if (bookedForUser && bookedForUser.issuedto) {
+                bookedForName = bookedForUser.issuedto;
+              }
+              console.warn(`Failed to lookup bookedFor card ${bfCardno}:`, innerErr && (innerErr.message || innerErr));
+            }
+          }
+        } else if (bookedForUser && bookedForUser.issuedto) {
+          bookedForName = bookedForUser.issuedto;
+        }
+
+        const params = [
+          user.issuedto || "",   // recipient name (who gets the message)
+          bookedForName,         // booked-for name
+          bookingId,
+          rawStatus || "",       // original (or defaulted) status string
+          shibir.name || "",
+          shibir.venue || "Research Centre",
+          shibir.speaker || "",
+          shibir.start_date ? moment(shibir.start_date).format("DD MMM YYYY") : "",
+          shibir.end_date ? moment(shibir.end_date).format("DD MMM YYYY") : ""
+        ];
+
+        const bodyParameters = params
+          .filter((p) => p !== null && p !== undefined && p !== "")
+          .map((p) => ({ type: "text", text: String(p) }));
+
+        components = [{ type: "body", parameters: bodyParameters }];
+
+        // Button only for waiting/pending templates
+        if ((template === "booking_adhyayan_self_waiting_for" || template === "booking_adhyayan_self_pending_for") && shibir.id) {
+          components.push({
+            type: "button",
+            sub_type: "url",
+            index: 0,
+            parameters: [{ type: "text", text: String(shibir.id) }]
+          });
+        }
       }
 
       // Debug log so we can verify behavior
-      console.log(`WA ADHYAYAN: to=${user.cardno} phone=${phone} bookingId=${bookingId} rawStatus='${String(b.status)}' normalized='${bookingStatus}' -> template='${template}' bookedFor='${bookedForName}' shibirExists=${!!shibir && !!shibir.name}`);
-
-      const params = [
-        user.issuedto || "",   // recipient name (who gets the message)
-        bookedForName,         // booked-for name
-        bookingId,
-        rawStatus || "",       // original (or defaulted) status string
-        shibir.name || "",
-        shibir.venue || "Research Centre",
-        shibir.speaker || "",
-        shibir.start_date ? moment(shibir.start_date).format("DD MMM YYYY") : "",
-        shibir.end_date ? moment(shibir.end_date).format("DD MMM YYYY") : ""
-      ];
-
-      const bodyParameters = params
-        .filter((p) => p !== null && p !== undefined && p !== "")
-        .map((p) => ({ type: "text", text: String(p) }));
-
-      const components = [{ type: "body", parameters: bodyParameters }];
-
-      // Button only for waiting/pending templates
-      if ((template === "booking_adhyayan_self_waiting_for" || template === "booking_adhyayan_self_pending_for") && shibir.id) {
-        components.push({
-          type: "button",
-          sub_type: "url",
-          index: 0,
-          parameters: [{ type: "text", text: String(shibir.id) }]
-        });
-      }
+      console.log(`WA ADHYAYAN: to=${user.cardno} phone=${phone} bookingId=${bookingId} rawStatus='${String(b.status)}' normalized='${bookingStatus}' -> template='${template}' shibirExists=${!!shibir && !!shibir.name}`);
 
       // send with fallback handling
       const sendResult = await sendWithTemplateFallback(phone, template, components);
@@ -252,7 +374,6 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
       } else {
         console.log("📩 Adhyayan WhatsApp sent:", {
           toCard: user.cardno,
-          bookedFor: bookedForName,
           bookingid: bookingId,
           status: bookingStatus,
           template: sendResult.usedTemplate,
@@ -768,4 +889,215 @@ export async function sendWifiLowAlertWhatsApp(activeCount) {
     console.error("Error sending Wifi low alert WhatsApp:", err && (err.stack || err.message || err));
   }
 }
+
+export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previousStatus) {
+  try {
+    if (!booking) return;
+
+    const rawStatus = (booking.status === undefined || booking.status === null || String(booking.status).trim() === "") ? "pending" : String(booking.status);
+    const newStatus = rawStatus.trim().toLowerCase();
+    const prevStatusNormalized = previousStatus ? String(previousStatus).trim().toLowerCase() : "";
+    const updatedBy = booking.updatedBy ? String(booking.updatedBy).trim().toLowerCase() : "";
+
+    // Load adhyayan if not provided
+    if (!adhyayan) {
+      adhyayan = await ShibirDb.findOne({ where: { id: booking.shibir_id } });
+    }
+
+    // This adhyayan templates are only for adhyayans happening in Research Centre
+    if (adhyayan && adhyayan.location === RESEARCH_CENTRE) {
+      const shibirName = adhyayan.name || "";
+
+      const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
+      const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+      const attendeeName = attendeeCard?.issuedto || "";
+
+      const hasBooker = booking.bookedBy && booking.bookedBy !== booking.cardno;
+      let bookerCard = null;
+      let bookerPhone = null;
+      let bookerName = "";
+      if (hasBooker) {
+        bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
+        bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+        bookerName = bookerCard?.issuedto || "";
+      }
+
+      // Helper to check if a status matches "pending" variations
+      const isPendingStatus = (status) => ["pending", "payment pending", "cash pending"].includes(status);
+
+      // Helper to check if a status matches "confirmed" variations
+      const isConfirmedStatus = (status) => ["confirmed", "completed", "cash completed"].includes(status);
+
+      // --- 1. DISPATCH ATTENDEE NOTIFICATION ---
+      if (attendeePhone) {
+        let templateName = null;
+        let parameters = [];
+
+        // --- TRANSITION LOGIC FOR ATTENDEE (SELF) ---
+        if (prevStatusNormalized === "waiting") {
+          if (newStatus === "cancelled") {
+            templateName = "bk_adh_s_b_w2cn";
+            parameters = [attendeeName, shibirName, "cancelled"];
+          } else if (newStatus === "admin cancelled") {
+            templateName = "bk_adh_s_b_w2acn";
+            parameters = [attendeeName, shibirName, "admin cancelled"];
+          } else if (isPendingStatus(newStatus)) {
+            templateName = "bk_adh_s_b_w2ppg";
+            parameters = [attendeeName, shibirName, "payment pending"];
+          } else if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_s_b_wtg2conf";
+            parameters = [attendeeName, shibirName];
+          }
+        } else if (isPendingStatus(prevStatusNormalized)) {
+          if (newStatus === "cancelled") {
+            templateName = "bk_adh_s_b_ppg2cn";
+            parameters = [attendeeName, shibirName, "cancelled"];
+          } else if (newStatus === "admin cancelled") {
+            if (updatedBy === "admin") {
+              templateName = "bk_adh_s_b_ppg2acn_c";
+            } else {
+              templateName = "bk_adh_s_b_ppg2acn_a";
+            }
+            parameters = [attendeeName, shibirName, "admin cancelled"];
+          } else if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_s_b_ppg2cnf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: booking.bookingid }
+            });
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            parameters = [attendeeName, shibirName, paymentId];
+          }
+        } else if (isConfirmedStatus(prevStatusNormalized)) {
+          if (newStatus === "cancelled") {
+            templateName = "bk_adh_s_b_cf2cn";
+            parameters = [attendeeName, shibirName, "cancelled"];
+          } else if (newStatus === "admin cancelled") {
+            templateName = "bk_adh_s_b_cf2acn";
+            parameters = [attendeeName, shibirName, "admin cancelled"];
+          }
+        } else if (prevStatusNormalized === "cancelled") {
+          if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_s_b_canc2conf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: booking.bookingid }
+            });
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            parameters = [attendeeName, shibirName, paymentId];
+          }
+        } else if (prevStatusNormalized === "admin cancelled") {
+          if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_s_b_adcanc2conf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: booking.bookingid }
+            });
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            parameters = [attendeeName, shibirName, paymentId];
+          }
+        }
+
+        if (templateName) {
+          const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+          const components = buildBodyComponents(sanitizedParams);
+          console.log(`WA SENDING ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee cardno=${booking.cardno})`);
+          const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
+          if (!result || !result.ok) {
+            console.error(`Error sending WhatsApp notification to attendee for template ${templateName}`, result?.error);
+          } else {
+            console.log(`📩 WhatsApp attendee notification sent successfully: template=${templateName} to ${attendeePhone}`);
+          }
+        } else {
+          console.log(`WA SKIP ATTENDEE: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}' (updatedBy=${updatedBy})`);
+        }
+      }
+
+      // --- 2. DISPATCH BOOKER NOTIFICATION ---
+      if (hasBooker && bookerPhone) {
+        let templateName = null;
+        let parameters = [];
+
+        // --- TRANSITION LOGIC FOR BOOKER (GUEST) ---
+        if (prevStatusNormalized === "waiting") {
+          if (newStatus === "cancelled") {
+            templateName = "bk_adh_gu_b_wg2cn";
+            parameters = [bookerName, shibirName, "cancelled", attendeeName];
+          } else if (newStatus === "admin cancelled") {
+            templateName = "bk_adh_gu_b_wg2acn";
+            parameters = [bookerName, shibirName, "admin cancelled", attendeeName];
+          } else if (isPendingStatus(newStatus)) {
+            templateName = "bk_adh_gu_b_wg2ppg";
+            parameters = [bookerName, shibirName, "payment pending", attendeeName];
+          } else if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_gu_b_wtg2conf";
+            parameters = [bookerName, shibirName, "confirmed", attendeeName];
+          }
+        } else if (isPendingStatus(prevStatusNormalized)) {
+          if (newStatus === "cancelled") {
+            templateName = "bk_adh_gu_b_ppg2cn";
+            parameters = [bookerName, shibirName, "cancelled", attendeeName];
+          } else if (newStatus === "admin cancelled") {
+            if (updatedBy === "admin") {
+              templateName = "bk_adh_gu_b_ppg2acn_c";
+            } else {
+              templateName = "bk_adh_gu_b_ppg2acn_a";
+            }
+            parameters = [bookerName, shibirName, "admin cancelled", attendeeName];
+          } else if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_gu_b_ppg2cf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: booking.bookingid }
+            });
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            parameters = [bookerName, shibirName, paymentId, attendeeName];
+          }
+        } else if (isConfirmedStatus(prevStatusNormalized)) {
+          if (newStatus === "cancelled") {
+            templateName = "bk_adh_gu_b_cnfm2canc";
+            parameters = [bookerName, shibirName, "cancelled", attendeeName];
+          } else if (newStatus === "admin cancelled") {
+            templateName = "bk_adh_gu_b_cf2acn";
+            parameters = [bookerName, shibirName, "admin cancelled", attendeeName];
+          }
+        } else if (prevStatusNormalized === "cancelled") {
+          if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_gu_b_canc2conf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: booking.bookingid }
+            });
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            parameters = [bookerName, shibirName, paymentId, attendeeName];
+          }
+        } else if (prevStatusNormalized === "admin cancelled") {
+          if (isConfirmedStatus(newStatus)) {
+            templateName = "bk_adh_gu_b_adcanc2conf";
+            const transaction = await Transactions.findOne({
+              where: { bookingid: booking.bookingid }
+            });
+            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
+            parameters = [bookerName, shibirName, paymentId, attendeeName];
+          }
+        }
+
+        if (templateName) {
+          const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+          const components = buildBodyComponents(sanitizedParams);
+          console.log(`WA SENDING BOOKER: template=${templateName} to phone=${bookerPhone} (Booker cardno=${booking.bookedBy})`);
+          const result = await sendWithTemplateFallback(bookerPhone, templateName, components);
+          if (!result || !result.ok) {
+            console.error(`Error sending WhatsApp notification to booker for template ${templateName}`, result?.error);
+          } else {
+            console.log(`📩 WhatsApp booker notification sent successfully: template=${templateName} to ${bookerPhone}`);
+          }
+        } else {
+          console.log(`WA SKIP BOOKER: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}' (updatedBy=${updatedBy})`);
+        }
+      }
+    } else {
+      console.log(`WA SKIP: Adhyayan shibir_id=${booking.shibir_id} location is '${adhyayan?.location || ""}', not '${RESEARCH_CENTRE}'`);
+    }
+  } catch (err) {
+    console.error("Error in sendAdhyayanStatusChangeWhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
+
 

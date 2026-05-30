@@ -30,6 +30,7 @@ import {
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -91,6 +92,17 @@ async function runJob(systemUser, t) {
   await cancelMeals(systemUser, transactions, t);
   await t.commit();
 
+  // Trigger WhatsApp notifications for cancelled adhyayan bookings
+  for (const booking of bookings) {
+    if (getBookingTypeFromBooking(booking) === TYPE_ADHYAYAN) {
+      try {
+        await sendAdhyayanStatusChangeWhatsApp(booking, null, 'pending');
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp: ${waErr.message}`);
+      }
+    }
+  }
+
   for (const cardno in userBookingIds) {
     const bookingIds = userBookingIds[cardno];
     await sendCancellationEmail(cardno, bookingIds, null);
@@ -131,7 +143,7 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookingI
         });
         let newBooking = await openAdhyayanSeat(adhyayan, systemUser.username, t);
 
-        if(newBooking){
+        if (newBooking) {
           addToOpenBookingIds(openBookingIds, newBooking);
         }
         break;
@@ -141,7 +153,7 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookingI
         });
         let newUtsavBooking = await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
 
-        if(newUtsavBooking){
+        if (newUtsavBooking) {
           addToOpenBookingIds(openBookingIds, newUtsavBooking);
         }
         break;

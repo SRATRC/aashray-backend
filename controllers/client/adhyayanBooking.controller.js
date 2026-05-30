@@ -163,17 +163,18 @@ export const CancelShibir = async (req, res) => {
     newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
   }
 
+  const previousStatus = booking.status;
   await userCancelBooking(req.user, booking, t);
   await t.commit();
 
 
-  await sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+  await sendAdhyayanBookingUpdateNotification(booking, adhyayan, false, previousStatus);
 
-if (newBooking) {
+  if (newBooking) {
     //sending notification and email to user who got moved from waiting to pending and cc to the bookedBy user if any.
-    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, false, 'waiting');
   }
-  
+
   return res.status(200).send({ message: 'Adhyayan booking cancelled' });
 };
 

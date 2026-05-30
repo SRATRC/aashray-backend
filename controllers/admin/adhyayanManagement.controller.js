@@ -26,7 +26,7 @@ import {
   reserveAdhyayanSeat,
   openAdhyayanSeat,
   validateAdhyayanBooking,
-  validateAdhyayans, 
+  validateAdhyayans,
   sendAdhyayanBookingUpdateNotification
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
@@ -259,15 +259,15 @@ export const fetchAdhyayanBookings = async (req, res) => {
   }
   let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED];
 
-if (status === 'waiting') {
-  statusToBeIncluded = [STATUS_WAITING];
-} else if (status === 'pending') {
-  statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
-} else if (status === 'cancelled') {
-  statusToBeIncluded = [STATUS_CANCELLED];
-} else if (status === 'admin cancelled' || status === 'admin_cancelled') {
-  statusToBeIncluded = [STATUS_ADMIN_CANCELLED];
-}
+  if (status === 'waiting') {
+    statusToBeIncluded = [STATUS_WAITING];
+  } else if (status === 'pending') {
+    statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
+  } else if (status === 'cancelled') {
+    statusToBeIncluded = [STATUS_CANCELLED];
+  } else if (status === 'admin cancelled' || status === 'admin_cancelled') {
+    statusToBeIncluded = [STATUS_ADMIN_CANCELLED];
+  }
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
@@ -275,7 +275,7 @@ if (status === 'waiting') {
   await validateAdhyayans(shibir_id);
 
   const adhyayanData = await database.query(
-  `SELECT 
+    `SELECT 
       t1.bookingid, 
       t1.shibir_id, 
       t1.bookedby, 
@@ -299,17 +299,17 @@ if (status === 'waiting') {
       t1.shibir_id = :shibirId 
       AND t1.status IN (:status)
    `,
-  {
-    replacements: {
-      shibirId: shibir_id,
-      status: statusToBeIncluded,
-      pageSize,
-      page: offset
-    },
-    raw: true,
-    type: QueryTypes.SELECT
-  }
-);
+    {
+      replacements: {
+        shibirId: shibir_id,
+        status: statusToBeIncluded,
+        pageSize,
+        page: offset
+      },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
 
 
   return res
@@ -415,6 +415,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
   const booking = await validateAdhyayanBooking(bookingid, shibir_id);
+  const previousStatus = booking.status;
 
   if (status == booking.status) {
     throw new ApiError(400, 'Status is same as before');
@@ -507,9 +508,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
             bookedBy: booking.bookedBy && {
               token: bookedByCard.token,
               title: 'Adhyayan Booking Confirmed',
-              body: `Adhyayan booking for ${
-                booking.CardDb.issuedto.split(' ')[0]
-              } has been confirmed.`
+              body: `Adhyayan booking for ${booking.CardDb.issuedto.split(' ')[0]
+                } has been confirmed.`
             },
             screen: '/bookings'
           });
@@ -523,8 +523,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
         booking.status == STATUS_CONFIRMED ||
         booking.status == STATUS_PAYMENT_PENDING
       ) {
-         newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
-       
+        newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
+
       }
 
       if (transaction) {
@@ -546,20 +546,20 @@ export const adhyayanStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
-  
+
   // Send notifications and emails after transaction commit
   try {
-   
-    sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+
+    await sendAdhyayanBookingUpdateNotification(booking, adhyayan, true, previousStatus);
     // Send notification and email for new booking if exists
     if (newBooking) {
-      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, true, 'waiting');
     }
   } catch (error) {
     // Log error but don't fail the response since transaction is already committed
     console.error('Error sending notifications/emails:', error);
   }
-  
+
   return res.status(200).send({ message: 'Updated booking status' });
 };
 
