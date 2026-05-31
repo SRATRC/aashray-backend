@@ -12,7 +12,8 @@ import {
   STATUS_PAYMENT_PENDING,
   TYPE_ADHYAYAN,
   TYPE_FOOD,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  TYPE_ROOM
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
@@ -30,7 +31,7 @@ import {
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
-import { sendAdhyayanStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -92,13 +93,20 @@ async function runJob(systemUser, t) {
   await cancelMeals(systemUser, transactions, t);
   await t.commit();
 
-  // Trigger WhatsApp notifications for cancelled adhyayan bookings
+  // Trigger WhatsApp notifications for cancelled bookings
   for (const booking of bookings) {
-    if (getBookingTypeFromBooking(booking) === TYPE_ADHYAYAN) {
+    const bookingType = getBookingTypeFromBooking(booking);
+    if (bookingType === TYPE_ADHYAYAN) {
       try {
         await sendAdhyayanStatusChangeWhatsApp(booking, null, 'pending');
       } catch (waErr) {
-        logger.error(`Error sending cron WhatsApp: ${waErr.message}`);
+        logger.error(`Error sending cron WhatsApp for Adhyayan: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_ROOM) {
+      try {
+        await sendRoomStatusChangeWhatsApp(booking, 'pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Room: ${waErr.message}`);
       }
     }
   }

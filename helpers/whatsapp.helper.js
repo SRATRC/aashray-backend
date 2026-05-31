@@ -72,6 +72,31 @@ async function sendWithTemplateFallback(phone, template, components) {
       }
     } else if (template.startsWith("bn_adh_s_b_")) {
       fallbackTemplate = "bn_adh_s_b_cnf";
+    } else if (template.startsWith("bn_sha_gu_b_")) {
+      fallbackTemplate = "bn_sha_gu_b_cf";
+      fallbackComponents = JSON.parse(JSON.stringify(components));
+      const bodyComp = fallbackComponents.find(c => c.type === "body");
+      if (bodyComp && bodyComp.parameters && bodyComp.parameters.length >= 5) {
+        const roomType = bodyComp.parameters[4].text;
+        bodyComp.parameters[3] = { type: "text", text: roomType };
+        bodyComp.parameters[4] = { type: "text", text: "N/A" };
+      }
+    } else if (template.startsWith("bn_sha_gu_f_")) {
+      fallbackTemplate = "bn_sha_gu_f_cf";
+      fallbackComponents = JSON.parse(JSON.stringify(components));
+      const bodyComp = fallbackComponents.find(c => c.type === "body");
+      if (bodyComp && bodyComp.parameters && bodyComp.parameters.length >= 5) {
+        bodyComp.parameters.splice(3, 1);
+      }
+    } else if (template.startsWith("bn_sha_s_b_")) {
+      fallbackTemplate = "bn_sha_s_b_cf";
+      fallbackComponents = JSON.parse(JSON.stringify(components));
+      const bodyComp = fallbackComponents.find(c => c.type === "body");
+      if (bodyComp && bodyComp.parameters && bodyComp.parameters.length >= 5) {
+        const roomType = bodyComp.parameters[4].text;
+        bodyComp.parameters[3] = { type: "text", text: roomType };
+        bodyComp.parameters[4] = { type: "text", text: "N/A" };
+      }
     } else {
       fallbackTemplate = fallbackTemplate.replace(
         /_pending_for|_pending|_waiting_for|_waiting/gi,
@@ -431,81 +456,128 @@ async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = n
     console.warn("Failed to fetch transactions for room bookings (non-fatal):", err && (err.message || err));
   }
 
-  const bookedForCache = new Map();
-  if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
+  const cardCache = new Map();
+  if (user && user.cardno) cardCache.set(String(user.cardno), user.issuedto || "");
+  if (bookedForUser && bookedForUser.cardno) cardCache.set(String(bookedForUser.cardno), bookedForUser.issuedto || "");
+
+  async function getCardName(cardno) {
+    if (!cardno) return "";
+    const cno = String(cardno);
+    if (cardCache.has(cno)) return cardCache.get(cno);
+    try {
+      const card = await CardDb.findOne({ where: { cardno: cno } });
+      const name = card && card.issuedto ? card.issuedto : "";
+      cardCache.set(cno, name);
+      return name;
+    } catch (err) {
+      console.warn(`Failed to lookup card name for cardno=${cno}:`, err.message || err);
+      return "";
+    }
+  }
 
   for (const b of roomBookingDetails) {
     try {
       if (!b || typeof b !== "object") continue;
 
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
-      const status = rawStatus.trim().toLowerCase();
+      const bookingStatus = rawStatus.trim().toLowerCase();
 
-      // choose template names — adjust to actual template strings you use
-      let template = "booking_sharan_self_pending_for";
-      if (status === "waiting" || status.startsWith("wait")) template = "booking_sharan_self_pending_for";
-      else if (status === "pending" || status.includes("pend")) template = "booking_sharan_self_pending_for";
-
-      // resolve bookedFor name
-      let bookedForName = user.issuedto || "";
-      if (b.__bookedForCardno) {
-        const bf = String(b.__bookedForCardno);
-        if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
-        else {
-          const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
-          const nm = rec?.issuedto || "";
-          bookedForCache.set(bf, nm);
-          if (nm) bookedForName = nm;
-        }
-      } else if (bookedForUser && bookedForUser.issuedto) {
-        bookedForName = bookedForUser.issuedto;
+      // Normalize status to waiting, pending, or confirmed
+      let statusNormalized = "confirmed";
+      if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+        statusNormalized = "waiting";
+      } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
+        statusNormalized = "pending";
       }
 
-      // get transaction info
+      const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
+      const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
+
+      let template = "bn_sha_s_b_cf";
+      let bodyParams = [];
+      let headerParam = "";
+
+      const checkinFormatted = b.checkin ? moment(b.checkin).format("DD-MM-YYYY") : "";
+      const checkoutFormatted = b.checkout ? moment(b.checkout).format("DD-MM-YYYY") : "";
+      const roomTypeStr = (b.roomtype || "").toLowerCase().includes("nac") ? "non-ac" : "ac";
+
       const bookingId = String(b.bookingid || b.bookingId || b.id || "");
-      const tx = transactionsMap.get(bookingId) || { amount: null, discount: null, razorpay_order_id: null };
 
-      // build params (only include non-empty values to avoid template param mismatch)
+      if (isGuestBy) {
+        const attendeeName = bookedForUser.issuedto || "";
+        const bookerName = user.issuedto || "";
+        headerParam = attendeeName;
 
-      const rawParams = [
-        user.issuedto || "",
-        bookedForName,
-        bookingId,
-        rawStatus || "",
-        b.roomtype || "",
-        b.roomno || "",
-        b.checkin ? moment(b.checkin).format("Do MMMM, YYYY") : "",
-        b.checkout ? moment(b.checkout).format("Do MMMM, YYYY") : "",
-        tx.amount != null ? String(tx.amount) : "",
-        tx.discount != null ? String(tx.discount) : "",
-        //   tx.razorpay_order_id || ""
-      ];
+        if (statusNormalized === "waiting") {
+          template = "bn_sha_gu_b_w";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
+        } else if (statusNormalized === "pending") {
+          template = "bn_sha_gu_b_ppg";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+        } else {
+          template = "bn_sha_gu_b_cf";
+          const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
+          const paymentId = tx.razorpay_order_id || tx.id || "N/A";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, roomTypeStr, paymentId];
+        }
+      } else if (isGuestFor) {
+        const bookerName = await getCardName(b.bookedBy);
+        const attendeeName = user.issuedto || "";
+        headerParam = bookerName;
 
-      const sanitized = rawParams.map(sanitizeParamText);
-      const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
-      const components = buildBodyComponents(sanitized, expectedCount);
+        if (statusNormalized === "waiting") {
+          template = "bn_sha_gu_f_wg";
+          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
+        } else if (statusNormalized === "pending") {
+          template = "bn_sha_gu_f_pp";
+          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+        } else {
+          template = "bn_sha_gu_f_cf";
+          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, roomTypeStr];
+        }
+      } else {
+        const bookerName = user.issuedto || "";
 
-      // // add button param, sanitized:
-      // if ((template === "booking_sharan_self_pending_for" || template === "booking_sharan_self_pending_for") && bookingId) {
-      //   components.push({
-      //   type: "button",
-      //   sub_type: "url",
-      //   index: 0
-      // });
-      // }
+        if (statusNormalized === "waiting") {
+          template = "bn_sha_s_b_w";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
+        } else if (statusNormalized === "pending") {
+          template = "bn_sha_s_b_ppg";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+        } else {
+          template = "bn_sha_s_b_cf";
+          const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
+          const paymentId = tx.razorpay_order_id || tx.id || "N/A";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, roomTypeStr, paymentId];
+        }
+      }
 
-      // send with fallback wrapper if you have it, otherwise sendWhatsAppMessage(phone, template, components)
-      const result = await sendWithTemplateFallback ? await sendWithTemplateFallback(phone, template, components) : await sendWhatsAppMessage(phone, template, components);
+      const sanitizedParams = bodyParams.map(p => sanitizeParamText(p));
+      const bodyComp = buildBodyComponents(sanitizedParams)[0];
+      let components = [];
+
+      if (headerParam) {
+        const sanitizedHeader = sanitizeParamText(headerParam);
+        const headerParameters = [{ type: "text", text: sanitizedHeader === "" ? " " : sanitizedHeader }];
+        components = [
+          { type: "header", parameters: headerParameters },
+          bodyComp
+        ];
+      } else {
+        components = [bodyComp];
+      }
+
+      console.log(`WA ROOM: to=${user.cardno} phone=${phone} bookingId=${bookingId} statusNormalized='${statusNormalized}' -> template='${template}'`);
+
+      const result = await sendWithTemplateFallback(phone, template, components);
 
       if (!result || !result.ok) {
         console.error("Room WA failed for booking", bookingId, result && result.error ? result.error : "unknown");
       } else {
         console.log("📩 Room WhatsApp sent:", {
           toCard: user.cardno,
-          bookedFor: bookedForName,
           booking: bookingId,
-          template: result.usedTemplate || template,
-          transaction: tx
+          template: result.usedTemplate || template
         });
       }
     } catch (err) {
@@ -1098,6 +1170,187 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
     console.error("Error in sendAdhyayanStatusChangeWhatsApp:", err && (err.stack || err.message || err));
   }
 }
+
+export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, options = {}) {
+  try {
+    if (!booking) return;
+
+    const rawStatus = (booking.status === undefined || booking.status === null || String(booking.status).trim() === "") ? "pending" : String(booking.status);
+    const newStatus = rawStatus.trim().toLowerCase();
+    const prevStatusNormalized = previousStatus ? String(previousStatus).trim().toLowerCase() : "";
+    const updatedBy = (options.updatedBy || booking.updatedBy || "").trim().toLowerCase();
+
+    // Load attendee details
+    const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
+    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeeName = attendeeCard?.issuedto || "";
+
+    // Check if Guest booking
+    const hasBooker = booking.bookedBy && booking.bookedBy !== booking.cardno;
+    let bookerCard = null;
+    let bookerPhone = null;
+    let bookerName = "";
+    if (hasBooker) {
+      bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
+      bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+      bookerName = bookerCard?.issuedto || "";
+    }
+
+    const isPendingStatus = (status) => ["pending", "payment pending", "cash pending"].includes(status);
+    const isConfirmedStatus = (status) => ["confirmed", "pending checkin", "completed", "cash completed", "payment completed"].includes(status);
+
+    const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
+    const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";
+    const roomTypeStr = (booking.roomtype || "").toLowerCase().includes("nac") ? "non-ac" : "ac";
+
+    let creditsRefunded = options.credits || 0;
+    if ((newStatus === "cancelled" || newStatus === "admin cancelled") && !creditsRefunded) {
+      const transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid || booking.id }
+      }).catch(() => null);
+      if (transaction) {
+        if (transaction.status === "credited") {
+          creditsRefunded = transaction.amount;
+        } else {
+          const totalAmount = (transaction.amount || 0) + (transaction.discount || 0);
+          creditsRefunded = ["completed", "cash completed", "payment completed"].includes(transaction.status) ? totalAmount : (transaction.discount || 0);
+        }
+      }
+    }
+    const creditsStr = String(creditsRefunded);
+
+    // --- 1. DISPATCH ATTENDEE (SELF) NOTIFICATION ---
+    if (attendeePhone) {
+      let templateName = null;
+      let parameters = [];
+
+      if (prevStatusNormalized === "waiting") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_s_b_w2cn";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled"];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_sha_s_b_w2acn";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled"];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_sha_s_b_w2ppg";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending"];
+        }
+      } else if (isPendingStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_s_b_ppg2can";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled"];
+        } else if (newStatus === "admin cancelled") {
+          if (updatedBy === "cron" || options.isCron) {
+            templateName = "bk_sha_s_b_ppg2acn_c";
+          } else {
+            templateName = "bk_sha_s_b_ppg2acn_a";
+          }
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled"];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_s_b_ppg2pgci";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin"];
+        }
+      } else if (prevStatusNormalized === "pending checkin" || prevStatusNormalized === "pending_checkin") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_s_b_pgci2cn";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", creditsStr];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_sha_s_b_pgci2acan";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", creditsStr];
+        } else if (newStatus === "checkedin" || newStatus === "checked_in") {
+          templateName = "bk_sha_s_b_pci2ci";
+          parameters = [attendeeName, booking.roomno || "NA"];
+        }
+      } else if (prevStatusNormalized === "checkedin" || prevStatusNormalized === "checked_in") {
+        if (newStatus === "checkedout" || newStatus === "checked_out") {
+          const lateFee = options.lateFee || 0;
+          if (lateFee > 0) {
+            templateName = "bk_sha_s_b_ci2co_lcf";
+            const checkoutTimeStr = options.checkoutTime || moment().format("hh:mm a");
+            parameters = [attendeeName, checkoutTimeStr, String(lateFee)];
+          } else {
+            templateName = "bk_sha_s_b_ci2co";
+            const checkoutTimeStr = options.checkoutTime || moment().format("hh:mm a");
+            parameters = [attendeeName, checkoutTimeStr];
+          }
+        }
+      }
+
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA ROOM STATUS ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee cardno=${booking.cardno})`);
+        const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending room WhatsApp notification to attendee for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Room WhatsApp attendee notification sent successfully: template=${templateName} to ${attendeePhone}`);
+        }
+      } else {
+        console.log(`WA ROOM STATUS SKIP ATTENDEE: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
+      }
+    }
+
+    // --- 2. DISPATCH BOOKER (GUEST) NOTIFICATION ---
+    if (hasBooker && bookerPhone) {
+      let templateName = null;
+      let parameters = [];
+
+      if (prevStatusNormalized === "waiting") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_gu_b_wtg2cnfm";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_sha_gu_b_w2acn";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", attendeeName];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_sha_gu_b_w2ppg";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending", attendeeName];
+        }
+      } else if (isPendingStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_gu_b_ppg2cn";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          if (updatedBy === "cron" || options.isCron) {
+            templateName = "bk_sha_gu_b_ppg2acn_c";
+          } else {
+            templateName = "bk_sha_gu_b_ppg2acn_a";
+          }
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", attendeeName];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_gu_b_pypnd2pndchki";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin", attendeeName];
+        }
+      } else if (prevStatusNormalized === "pending checkin" || prevStatusNormalized === "pending_checkin") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_gu_b_pndgchki2canc";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", creditsStr, attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_sha_gu_b_pgci2acn";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", creditsStr, attendeeName];
+        }
+      }
+
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA ROOM STATUS BOOKER: template=${templateName} to phone=${bookerPhone} (Booker cardno=${booking.bookedBy})`);
+        const result = await sendWithTemplateFallback(bookerPhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending room WhatsApp notification to booker for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Room WhatsApp booker notification sent successfully: template=${templateName} to ${bookerPhone}`);
+        }
+      } else {
+        console.log(`WA ROOM STATUS SKIP BOOKER: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
+      }
+    }
+  } catch (err) {
+    console.error("Error in sendRoomStatusChangeWhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
 
 
 

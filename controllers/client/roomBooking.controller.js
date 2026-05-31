@@ -22,6 +22,8 @@ import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
+import { sendRoomStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+
 
 export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -123,8 +125,17 @@ export const CancelBooking = async (req, res) => {
 
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
+  const previousStatus = booking.status;
   await userCancelBooking(req.user, booking, t);
   await t.commit();
+
+  if (booking instanceof RoomBooking) {
+    try {
+      await sendRoomStatusChangeWhatsApp(booking, previousStatus);
+    } catch (waErr) {
+      console.error("Error sending room cancellation WhatsApp:", waErr);
+    }
+  }
 
   sendMail({
     email: req.user.email,

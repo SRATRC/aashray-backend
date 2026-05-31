@@ -52,6 +52,7 @@ import {
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
+import { sendRoomStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize, { Op } from 'sequelize';
@@ -296,6 +297,7 @@ export const manualCheckin = async (req, res) => {
     throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
+  const previousStatus = booking.status;
   await booking.update(
     {
       status: ROOM_STATUS_CHECKEDIN,
@@ -305,6 +307,13 @@ export const manualCheckin = async (req, res) => {
   );
 
   await t.commit();
+
+  try {
+    await sendRoomStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error("Error sending checkin WhatsApp:", waErr);
+  }
+
   return res
     .status(200)
     .send({ message: 'Successfully checked in', data: booking });
@@ -342,10 +351,20 @@ export const manualCheckout = async (req, res) => {
     where: { bookingid: booking.bookingid }
   });
 
-  const today = moment().format('YYYY-MM-DD');
-  const checkoutTime = moment().format('HH:mm:ss');
+  const previousStatus = booking.status;
+  let checkoutOptions = {
+    updatedBy: req.user.username,
+    checkoutTime: moment().format("hh:mm a"),
+    lateFee: 0
+  };
 
   if (today === booking.checkout) {
+    if (checkoutTime > CHECKOUT_DEADLINE && booking.nights >= 1) {
+      const isHalfDay = checkoutTime <= LATE_CHECKOUT_HALF;
+      const lateFee = calcLateCheckoutFee(booking.roomtype, isHalfDay);
+      checkoutOptions.lateFee = lateFee;
+      checkoutOptions.checkoutTime = moment(checkoutTime, "HH:mm:ss").format("hh:mm a");
+    }
     await handleSameDayCheckout({
       booking,
       checkoutTime,
@@ -377,6 +396,28 @@ export const manualCheckout = async (req, res) => {
   }
 
   await dbTransaction.commit();
+
+  try {
+    if (today < booking.checkout) {
+      // Find the new checkout booking created in handleEarlyCheckout
+      const newCheckoutBooking = await RoomBooking.findOne({
+        where: {
+          roomno: booking.roomno,
+          cardno: booking.cardno,
+          checkout: today,
+          status: ROOM_STATUS_CHECKEDOUT
+        }
+      });
+      if (newCheckoutBooking) {
+        await sendRoomStatusChangeWhatsApp(newCheckoutBooking, 'checked_in', checkoutOptions);
+      }
+    } else {
+      await sendRoomStatusChangeWhatsApp(booking, previousStatus, checkoutOptions);
+    }
+  } catch (waErr) {
+    logger.error("Error sending checkout WhatsApp:", waErr);
+  }
+
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
@@ -1415,6 +1456,13 @@ export const updateBookingStatus = async (req, res) => {
   }
 
   await t.commit();
+
+  try {
+    await sendRoomStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error("Error sending room status update WhatsApp:", waErr);
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 

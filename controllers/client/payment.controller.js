@@ -23,6 +23,7 @@ import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import { sendRoomStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
@@ -98,6 +99,7 @@ export const verifyPayment = async (req, res) => {
               ? ROOM_STATUS_PENDING_CHECKIN
               : STATUS_CONFIRMED;
 
+          const previousStatus = booking.status;
           await booking.update(
             {
               status: bookingStatus,
@@ -105,6 +107,13 @@ export const verifyPayment = async (req, res) => {
             },
             { transaction: t }
           );
+
+          if (bookingType === TYPE_ROOM) {
+            if (!userBookingIdMap.roomBookingStatusChanges) {
+              userBookingIdMap.roomBookingStatusChanges = [];
+            }
+            userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
+          }
 
           setBookingIdMap(
             userBookingIdMap,
@@ -137,6 +146,18 @@ export const verifyPayment = async (req, res) => {
     }
 
     await t.commit();
+
+    // Trigger Room status change WhatsApp messages
+    if (userBookingIdMap.roomBookingStatusChanges) {
+      for (const { booking, previousStatus } of userBookingIdMap.roomBookingStatusChanges) {
+        try {
+          await sendRoomStatusChangeWhatsApp(booking, previousStatus, { updatedBy: RAZORPAY_CALLBACK });
+        } catch (waErr) {
+          logger.error("Error sending room status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.roomBookingStatusChanges;
+    }
 
     for (const cardno in userBookingIdMap) {
       const bookings = userBookingIdMap[cardno];
