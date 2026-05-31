@@ -424,7 +424,9 @@ export async function sendUnifiedEmail(
         ),
         status: utsavBooking.status,
         bookingid: utsavBooking.bookingid,
-        package: utsavBooking.dataValues.UtsavPackagesDb.name
+        package: utsavBooking.dataValues.UtsavPackagesDb.name,
+        bookedBy: utsavBooking.bookedBy,
+        cardno: utsavBooking.cardno
       });
     });
   }

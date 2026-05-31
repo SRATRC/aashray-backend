@@ -31,7 +31,7 @@ import {
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
-import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -107,6 +107,12 @@ async function runJob(systemUser, t) {
         await sendRoomStatusChangeWhatsApp(booking, 'pending', { isCron: true });
       } catch (waErr) {
         logger.error(`Error sending cron WhatsApp for Room: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_UTSAV) {
+      try {
+        await sendUtsavStatusChangeWhatsApp(booking, 'payment pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Utsav: ${waErr.message}`);
       }
     }
   }

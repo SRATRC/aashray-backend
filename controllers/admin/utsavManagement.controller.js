@@ -41,6 +41,7 @@ import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
 import { sendWhatsAppMessage } from "../../utils/sendWhatsAppMessage.js";
+import { sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const createUtsavBookingByAdmin = async (req, res) => {
   const { utsavid, mumukshus } = req.body;
@@ -524,6 +525,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
   const utsav = await validateUtsav(utsav_id);
   const booking = await validateUtsavBooking(bookingid, utsav_id);
+  const previousStatus = booking.status;
 
   if (status === booking.status) {
     throw new ApiError(400, 'Status is same as before');
@@ -742,6 +744,13 @@ export const utsavStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
+
+  try {
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    console.error("Error sending utsav status change WhatsApp in utsavStatusUpdate:", waErr);
+  }
+
   return res.status(200).send({ message: 'Updated booking status' });
 };
 
@@ -906,9 +915,18 @@ console.log('📥 Received cardno:', req.body.cardno);
     });
   }
 
+  const previousStatus = booking.status;
+
   await booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t });
 
   await t.commit();
+
+  try {
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    console.error("Error sending utsav status change WhatsApp in utsavCheckin:", waErr);
+  }
+
   return res.status(200).send({
     message: 'Utsav booking status updated to checkedin.'
   });

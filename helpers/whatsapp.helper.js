@@ -97,6 +97,13 @@ async function sendWithTemplateFallback(phone, template, components) {
         bodyComp.parameters[3] = { type: "text", text: roomType };
         bodyComp.parameters[4] = { type: "text", text: "N/A" };
       }
+    } else if (template === "bk_usv_s_b_canc2adcanc_wcre") {
+      fallbackTemplate = "bk_usv_gu_b_canc2adcanc_wcre";
+      fallbackComponents = JSON.parse(JSON.stringify(components));
+      const bodyComp = fallbackComponents.find(c => c.type === "body");
+      if (bodyComp && bodyComp.parameters && bodyComp.parameters.length === 5) {
+        bodyComp.parameters.push(bodyComp.parameters[0]);
+      }
     } else {
       fallbackTemplate = fallbackTemplate.replace(
         /_pending_for|_pending|_waiting_for|_waiting/gi,
@@ -743,16 +750,27 @@ async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser =
   const bookedForCache = new Map();
   if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
 
+  async function getCardName(cardno) {
+    if (!cardno) return "";
+    const cno = String(cardno);
+    if (bookedForCache.has(cno)) return bookedForCache.get(cno);
+    try {
+      const card = await CardDb.findOne({ where: { cardno: cno } });
+      const name = card && card.issuedto ? card.issuedto : "";
+      bookedForCache.set(cno, name);
+      return name;
+    } catch (err) {
+      console.warn(`Failed to lookup card name for cardno=${cno}:`, err.message || err);
+      return "";
+    }
+  }
+
   for (const b of utsavBookingDetails) {
     try {
       if (!b || typeof b !== "object") continue;
 
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
       const status = rawStatus.trim().toLowerCase();
-
-      let template = "booking_utsav_self_confirmed_for";
-      if (status === "waiting" || status.startsWith("wait")) template = "booking_utsav_self_confirmed_for";
-      else if (status === "pending" || status.includes("pend")) template = "booking_utsav_self_confirmed_for";
 
       // derive bookedFor name
       let bookedForName = user.issuedto || "";
@@ -769,45 +787,84 @@ async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser =
         bookedForName = bookedForUser.issuedto;
       }
 
-      // If the booking object already contains utsav/ package fields (from your earlier join), use them. Otherwise, attempt to fetch
       let utsavName = b.utsavname || (b.UtsavDb && b.UtsavDb.name) || "";
-      let location = (b.UtsavDb && b.UtsavDb.location) || "";
-      let startDate = b.startdate || (b.UtsavDb && b.UtsavDb.start_date ? moment(b.UtsavDb.start_date).format("Do MMMM, YYYY") : "");
-      let endDate = b.enddate || (b.UtsavDb && b.UtsavDb.end_date ? moment(b.UtsavDb.end_date).format("Do MMMM, YYYY") : "");
       let packageName = b.package || (b.UtsavPackagesDb && b.UtsavPackagesDb.name) || "";
 
       // transaction
       const bookingId = String(b.bookingid || b.bookingId || b.id || "");
       const tx = transactionsMap.get(bookingId) || { amount: null, discount: null, razorpay_order_id: null };
+      const paymentId = tx.razorpay_order_id || bookingId;
 
-      const rawParams = [
-        user.issuedto || "",
-        bookedForName,
-        bookingId,
-        rawStatus || "",
-        utsavName,
-        packageName,
-        location,
-        startDate,
-        endDate,
-        tx.amount != null ? String(tx.amount) : "",
-        tx.discount != null ? String(tx.discount) : "",
-        tx.razorpay_order_id || ""
-      ];
+      let template = "";
+      let bodyParams = [];
+      let headerParam = "";
 
-      const sanitized = rawParams.map(sanitizeParamText);
-      const expectedCount = TEMPLATE_PARAM_COUNTS[template] || Math.max(...Object.values(TEMPLATE_PARAM_COUNTS));
-      const components = buildBodyComponents(sanitized, expectedCount);
+      const isWaiting = status === "waiting" || status.includes("wait");
+      const isPending = status === "pending" || status.includes("pend") || status.includes("pay");
+      const isConfirmed = status === "confirmed" || status.includes("confirm") || status.includes("complete");
 
-      // add button param, sanitized:
-      // if ((template === "booking_utsav_self_confirmed_for" || template === "booking_utsav_self_confirmed_for") && bookingId) {
-      //   components.push({
-      //     type: "button",
-      //     sub_type: "url",
-      //     index: 0,
-      //     // parameters: [{ type: "text", text: sanitizeParamText(bookingId) }]
-      //   });
-      // }
+      const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
+      const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
+
+      if (isGuestBy) {
+        const attendeeName = bookedForUser.issuedto || "";
+        const bookerName = user.issuedto || "";
+        headerParam = attendeeName;
+
+        if (isWaiting) {
+          template = "bn_usv_gu_b_waiting";
+          bodyParams = [bookerName, utsavName, "waiting", packageName];
+        } else if (isPending) {
+          template = "bn_usv_gu_b_pymtpndg";
+          bodyParams = [bookerName, utsavName, "payment pending", packageName];
+        } else {
+          template = "bn_usv_gu_b_cf";
+          bodyParams = [bookerName, utsavName, packageName, paymentId];
+        }
+      } else if (isGuestFor) {
+        const bookerName = await getCardName(b.bookedBy);
+        const attendeeName = user.issuedto || "";
+        headerParam = bookerName;
+
+        if (isWaiting) {
+          template = "bn_usv_gu_f_w";
+          bodyParams = [attendeeName, utsavName, "waiting", packageName];
+        } else if (isPending) {
+          template = "bn_usv_gu_f_ppg";
+          bodyParams = [attendeeName, utsavName, "payment pending", packageName];
+        } else {
+          template = "bn_usv_gu_f_cf";
+          bodyParams = [attendeeName, utsavName, packageName];
+        }
+      } else {
+        const selfName = user.issuedto || "";
+        if (isWaiting) {
+          template = "bn_usv_s_b_wg";
+          bodyParams = [selfName, utsavName, "waiting", packageName];
+        } else if (isPending) {
+          template = "bn_usv_s_b_pymtpndg";
+          bodyParams = [selfName, utsavName, "payment pending", packageName];
+        } else {
+          template = "bn_usv_s_b_cf";
+          bodyParams = [selfName, utsavName, packageName, paymentId];
+        }
+      }
+
+      const sanitizedParams = bodyParams.map(p => sanitizeParamText(p));
+      const bodyComp = buildBodyComponents(sanitizedParams)[0];
+      let components = [];
+
+      if (headerParam) {
+        const sanitizedHeader = sanitizeParamText(headerParam);
+        const headerParameters = [{ type: "text", text: sanitizedHeader === "" ? " " : sanitizedHeader }];
+        components = [
+          { type: "header", parameters: headerParameters },
+          bodyComp
+        ];
+      } else {
+        components = [bodyComp];
+      }
+
       const result = await (sendWithTemplateFallback ? sendWithTemplateFallback(phone, template, components) : sendWhatsAppMessage(phone, template, components));
 
       if (!result || !result.ok) {
@@ -1598,6 +1655,211 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
 
   } catch (err) {
     console.error("Error in sendTravelStatusChangeWhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
+export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, options = {}) {
+  try {
+    if (!booking) return;
+
+    const rawStatus = (booking.status === undefined || booking.status === null || String(booking.status).trim() === "") ? "pending" : String(booking.status);
+    const newStatus = rawStatus.trim().toLowerCase();
+    const prevStatusNormalized = previousStatus ? String(previousStatus).trim().toLowerCase() : "";
+    const updatedBy = (options.updatedBy || booking.updatedBy || "").trim().toLowerCase();
+
+    // 1. Load attendee details
+    const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
+    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeeName = attendeeCard?.issuedto || "";
+
+    // 2. Check if Guest booking
+    const hasBooker = booking.bookedBy && booking.bookedBy !== booking.cardno;
+    let bookerCard = null;
+    let bookerPhone = null;
+    let bookerName = "";
+    if (hasBooker) {
+      bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
+      bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+      bookerName = bookerCard?.issuedto || "";
+    }
+
+    // Determine target recipient and phone
+    let recipientPhone = null;
+    let recipientName = "";
+    if (hasBooker) {
+      recipientPhone = bookerPhone;
+      recipientName = bookerName;
+    } else {
+      recipientPhone = attendeePhone;
+      recipientName = attendeeName;
+    }
+
+    if (!recipientPhone) {
+      console.warn(`No target phone for utsav status change bookingid=${booking.bookingid || booking.id}; skipping.`);
+      return;
+    }
+
+    // 3. Load utsav details
+    let utsavName = "";
+    if (booking.utsavid) {
+      const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
+      utsavName = utsav?.name || "";
+    }
+
+    // 4. Load package details
+    let packageName = "";
+    if (booking.packageid) {
+      const pkg = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
+      packageName = pkg?.name || "";
+    }
+
+    // 5. Determine credit refunds
+    let creditsRefunded = options.credits || 0;
+    if ((newStatus === "cancelled" || newStatus === "admin cancelled") && !creditsRefunded) {
+      const transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid || booking.id }
+      }).catch(() => null);
+      if (transaction) {
+        if (transaction.status === "credited") {
+          creditsRefunded = transaction.amount || 0;
+        } else {
+          const totalAmount = (transaction.amount || 0) + (transaction.discount || 0);
+          creditsRefunded = ["completed", "cash completed", "payment completed"].includes(transaction.status) ? totalAmount : (transaction.discount || 0);
+        }
+      }
+    }
+    const creditsStr = String(creditsRefunded);
+
+    // 6. Resolve payment ID for confirmed status
+    let paymentId = options.paymentId || "";
+    if (!paymentId && newStatus === "confirmed") {
+      const transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid || booking.id }
+      }).catch(() => null);
+      paymentId = transaction?.razorpay_order_id || transaction?.upi_ref || booking.bookingid || booking.id || "";
+    }
+
+    const isPendingStatus = (status) => ["pending", "payment pending", "cash pending"].includes(status);
+    const isConfirmedStatus = (status) => ["confirmed", "completed", "cash completed", "payment completed"].includes(status);
+
+    let templateName = null;
+    let parameters = [];
+
+    if (hasBooker) {
+      // --- GUEST UTSAV BOOKING STATUS CHANGES ---
+      if (prevStatusNormalized === "waiting") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_gu_b_wtng2canc";
+          parameters = [recipientName, utsavName, packageName, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_usv_gu_b_w2acn";
+          parameters = [recipientName, utsavName, packageName, "admin cancelled", attendeeName];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_usv_gu_b_w2ppg";
+          parameters = [recipientName, utsavName, packageName, "payment pending", attendeeName];
+        }
+      } else if (isPendingStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_gu_b_pymtpndg2canc";
+          parameters = [recipientName, utsavName, packageName, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          if (updatedBy === "cron" || options.isCron) {
+            templateName = "bk_usv_gu_b_ppg2acn_c";
+          } else {
+            templateName = "bk_usv_gu_b_ppg2acn_a";
+          }
+          parameters = [recipientName, utsavName, packageName, "admin cancelled", attendeeName];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_usv_gu_b_ppg2cf";
+          parameters = [recipientName, utsavName, packageName, paymentId, attendeeName];
+        }
+      } else if (isConfirmedStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_gu_b_cnfc2canc";
+          parameters = [recipientName, utsavName, packageName, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          if (creditsRefunded > 0) {
+            templateName = "bk_usv_gu_b_cf2acn_wc";
+            parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr, attendeeName];
+          } else {
+            templateName = "bk_usv_gu_b_cf2acn_woc";
+            parameters = [recipientName, utsavName, packageName, "admin cancelled", attendeeName];
+          }
+        }
+      } else if (prevStatusNormalized === "cancelled") {
+        if (newStatus === "admin cancelled" && creditsRefunded > 0) {
+          templateName = "bk_usv_gu_b_canc2adcanc_wcre";
+          parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr, attendeeName];
+        }
+      }
+    } else {
+      // --- SELF UTSAV BOOKING STATUS CHANGES ---
+      if (prevStatusNormalized === "waiting") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_s_b_w2cn";
+          parameters = [recipientName, utsavName, packageName, "cancelled"];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_usv_s_b_w2acn";
+          parameters = [recipientName, utsavName, packageName, "admin cancelled"];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_usv_s_b_wtng2pymtpndg";
+          parameters = [recipientName, utsavName, packageName, "payment pending"];
+        }
+      } else if (isPendingStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_s_b_pymtpndg2canc";
+          parameters = [recipientName, utsavName, packageName, "cancelled"];
+        } else if (newStatus === "admin cancelled") {
+          if (updatedBy === "cron" || options.isCron) {
+            templateName = "bk_usv_s_b_ppg2acn_c";
+          } else {
+            templateName = "bk_usv_s_b_ppg2acn_a";
+          }
+          parameters = [recipientName, utsavName, packageName, "admin cancelled"];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_usv_s_b_ppg2cf";
+          parameters = [recipientName, utsavName, packageName, paymentId];
+        }
+      } else if (isConfirmedStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_s_b_cf2cn";
+          parameters = [recipientName, utsavName, packageName, "cancelled"];
+        } else if (newStatus === "checkedin" || newStatus === "checked_in") {
+          templateName = "bk_usv_s_b_cf2ci";
+          parameters = [recipientName, booking.roomno || options.roomno || "NA"];
+        } else if (newStatus === "admin cancelled") {
+          if (creditsRefunded > 0) {
+            templateName = "bk_usv_s_b_cf2acn_wc";
+            parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr];
+          } else {
+            templateName = "bk_usv_s_b_cf2acn_woc";
+            parameters = [recipientName, utsavName, packageName, "admin cancelled"];
+          }
+        }
+      } else if (prevStatusNormalized === "cancelled") {
+        if (newStatus === "admin cancelled" && creditsRefunded > 0) {
+          templateName = "bk_usv_s_b_canc2adcanc_wcre";
+          parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr];
+        }
+      }
+    }
+
+    if (templateName) {
+      const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+      const components = buildBodyComponents(sanitizedParams);
+      console.log(`WA UTSAV STATUS: template=${templateName} to phone=${recipientPhone} (recipientName=${recipientName})`);
+      const result = await sendWithTemplateFallback(recipientPhone, templateName, components);
+      if (!result || !result.ok) {
+        console.error(`Error sending utsav WhatsApp status change for template ${templateName}`, result?.error);
+      } else {
+        console.log(`📩 Utsav WhatsApp status change sent successfully: template=${templateName} to ${recipientPhone}`);
+      }
+    } else {
+      console.log(`WA UTSAV STATUS SKIP: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}' (hasBooker=${hasBooker})`);
+    }
+
+  } catch (err) {
+    console.error("Error in sendUtsavStatusChangeWhatsApp:", err && (err.stack || err.message || err));
   }
 }
 

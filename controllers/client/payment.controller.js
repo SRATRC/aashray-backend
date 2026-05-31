@@ -11,7 +11,8 @@ import {
   STATUS_PAYMENT_AUTHORIZED,
   STATUS_PAYMENT_COMPLETED,
   TYPE_FOOD,
-  TYPE_TRAVEL
+  TYPE_TRAVEL,
+  TYPE_UTSAV
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -24,7 +25,7 @@ import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
@@ -119,6 +120,11 @@ export const verifyPayment = async (req, res) => {
               userBookingIdMap.travelBookingStatusChanges = [];
             }
             userBookingIdMap.travelBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
+          } else if (bookingType === TYPE_UTSAV) {
+            if (!userBookingIdMap.utsavBookingStatusChanges) {
+              userBookingIdMap.utsavBookingStatusChanges = [];
+            }
+            userBookingIdMap.utsavBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
           }
 
           setBookingIdMap(
@@ -178,6 +184,21 @@ export const verifyPayment = async (req, res) => {
         }
       }
       delete userBookingIdMap.travelBookingStatusChanges;
+    }
+
+    // Trigger Utsav status change WhatsApp messages
+    if (userBookingIdMap.utsavBookingStatusChanges) {
+      for (const { booking, previousStatus, razorpay_payment_id } of userBookingIdMap.utsavBookingStatusChanges) {
+        try {
+          await sendUtsavStatusChangeWhatsApp(booking, previousStatus, {
+            updatedBy: RAZORPAY_CALLBACK,
+            paymentId: razorpay_payment_id
+          });
+        } catch (waErr) {
+          logger.error("Error sending utsav status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.utsavBookingStatusChanges;
     }
 
     for (const cardno in userBookingIdMap) {
