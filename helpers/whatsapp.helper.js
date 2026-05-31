@@ -599,43 +599,104 @@ async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser
   const bookedForCache = new Map();
   if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
 
+  async function getCardName(cardno) {
+    if (!cardno) return "";
+    const cno = String(cardno);
+    if (bookedForCache.has(cno)) return bookedForCache.get(cno);
+    try {
+      const card = await CardDb.findOne({ where: { cardno: cno } });
+      const name = card && card.issuedto ? card.issuedto : "";
+      bookedForCache.set(cno, name);
+      return name;
+    } catch (err) {
+      console.warn(`Failed to lookup card name for cardno=${cno}:`, err.message || err);
+      return "";
+    }
+  }
+
   for (const b of Array.isArray(travelBookingDetails) ? travelBookingDetails : []) {
     try {
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
       const status = rawStatus.trim().toLowerCase();
 
-      let template = "booking_travel_confirmed";
-      if (status === "waiting" || status.startsWith("wait")) template = "booking_travel_waiting";
-      else if (status === "pending" || status.includes("pend")) template = "booking_travel_pending";
+      let template = "";
+      let bodyParams = [];
+      let headerParam = "";
 
-      let bookedForName = user.issuedto || "";
-      if (b.__bookedForCardno) {
-        const bf = String(b.__bookedForCardno);
-        if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
-        else {
-          const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
-          const nm = rec?.issuedto || "";
-          bookedForCache.set(bf, nm);
-          if (nm) bookedForName = nm;
+      const isAwaiting = status === "awaiting confirmation" || status.includes("await");
+
+      if (isAwaiting) {
+        const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
+        const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
+
+        const passengerType = b.total_people ? (parseInt(b.total_people) === 1 ? "single person" : `${b.total_people} people`) : "single person";
+        const dateFormatted = b.date ? moment(b.date, "Do MMMM, YYYY").format("DD-MM-YYYY") : "";
+
+        if (isGuestBy) {
+          const attendeeName = bookedForUser.issuedto || "";
+          const bookerName = user.issuedto || "";
+          template = "bn_pvs_mu_b_awtgcnfm";
+          headerParam = attendeeName;
+          bodyParams = [bookerName, b.pickuppoint || b.pickup_point || "", b.dropoffpoint || b.drop_point || "", "awaiting confirmation", passengerType, dateFormatted];
+        } else if (isGuestFor) {
+          const bookerName = await getCardName(b.bookedBy);
+          const attendeeName = user.issuedto || "";
+          template = "bn_pvs_mu_f_awcf";
+          headerParam = bookerName;
+          bodyParams = [attendeeName, b.pickuppoint || b.pickup_point || "", b.dropoffpoint || b.drop_point || "", "awaiting confirmation", passengerType, dateFormatted];
+        } else {
+          const bookerName = user.issuedto || "";
+          template = "bn_pvs_s_b_awc";
+          bodyParams = [bookerName, b.pickuppoint || b.pickup_point || "", b.dropoffpoint || b.drop_point || "", "awaiting confirmation", passengerType, dateFormatted];
         }
-      } else if (bookedForUser && bookedForUser.issuedto) {
-        bookedForName = bookedForUser.issuedto;
+      } else {
+        template = "booking_travel_confirmed";
+        if (status === "waiting" || status.startsWith("wait")) template = "booking_travel_waiting";
+        else if (status === "pending" || status.includes("pend")) template = "booking_travel_pending";
+
+        let bookedForName = user.issuedto || "";
+        if (b.__bookedForCardno) {
+          const bf = String(b.__bookedForCardno);
+          if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
+          else {
+            const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
+            const nm = rec?.issuedto || "";
+            bookedForCache.set(bf, nm);
+            if (nm) bookedForName = nm;
+          }
+        } else if (bookedForUser && bookedForUser.issuedto) {
+          bookedForName = bookedForUser.issuedto;
+        }
+
+        bodyParams = [
+          user.issuedto || "",
+          bookedForName,
+          b.id || b.bookingid || "",
+          rawStatus || "",
+          b.pickuppoint || b.pickup_point || "",
+          b.dropoffpoint || b.drop_point || "",
+          b.date || ""
+        ];
       }
 
-      const params = [
-        user.issuedto || "",
-        bookedForName,
-        b.id || b.bookingid || "",
-        rawStatus || "",
-        b.pickup_point || "",
-        b.drop_point || "",
-        b.date || ""
-      ];
+      const sanitizedParams = bodyParams.map(p => sanitizeParamText(p));
+      const bodyComp = buildBodyComponents(sanitizedParams)[0];
+      let components = [];
 
-      const components = buildBodyComponents(params);
+      if (headerParam) {
+        const sanitizedHeader = sanitizeParamText(headerParam);
+        const headerParameters = [{ type: "text", text: sanitizedHeader === "" ? " " : sanitizedHeader }];
+        components = [
+          { type: "header", parameters: headerParameters },
+          bodyComp
+        ];
+      } else {
+        components = [bodyComp];
+      }
+
       const result = await sendWithTemplateFallback(phone, template, components);
       if (!result.ok) console.error("Travel WA failed for booking", b, result.error);
-      else console.log("📩 Travel WhatsApp sent:", { toCard: user.cardno, bookedFor: bookedForName, booking: b.id || b.bookingid || b, template: result.usedTemplate });
+      else console.log("📩 Travel WhatsApp sent:", { toCard: user.cardno, booking: b.id || b.bookingid || b, template: result.usedTemplate });
     } catch (err) {
       console.error("Error sending travel WhatsApp for", b.id || b.bookingid || b, err);
     }
@@ -1350,6 +1411,196 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
     console.error("Error in sendRoomStatusChangeWhatsApp:", err && (err.stack || err.message || err));
   }
 }
+
+export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, options = {}) {
+  try {
+    if (!booking) return;
+
+    const rawStatus = (booking.status === undefined || booking.status === null || String(booking.status).trim() === "") ? "pending" : String(booking.status);
+    const newStatus = rawStatus.trim().toLowerCase();
+    const prevStatusNormalized = previousStatus ? String(previousStatus).trim().toLowerCase() : "";
+
+    // Load Attendee details
+    const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
+    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeeName = attendeeCard?.issuedto || "";
+
+    // Check if Guest booking
+    const hasBooker = booking.bookedBy && booking.bookedBy !== booking.cardno;
+    let bookerCard = null;
+    let bookerPhone = null;
+    let bookerName = "";
+    if (hasBooker) {
+      bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
+      bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+      bookerName = bookerCard?.issuedto || "";
+    }
+
+    let dateFormatted = "";
+    if (booking.date) {
+      const dateStr = String(booking.date);
+      if (booking.date instanceof Date || dateStr.includes("GMT") || dateStr.includes(":") || dateStr.length > 20) {
+        dateFormatted = moment(booking.date).format("DD-MM-YYYY");
+      } else if (dateStr.includes("th") || dateStr.includes("st") || dateStr.includes("nd") || dateStr.includes("rd")) {
+        dateFormatted = moment(booking.date, "Do MMMM, YYYY").format("DD-MM-YYYY");
+      } else {
+        dateFormatted = moment(booking.date).format("DD-MM-YYYY");
+      }
+    }
+
+    const pickup = booking.pickuppoint || booking.pickup_point || "";
+    const drop = booking.dropoffpoint || booking.drop_point || "";
+
+    let creditsRefunded = options.credits || 0;
+    if ((newStatus === "cancelled" || newStatus === "admin cancelled") && !creditsRefunded) {
+      const transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid || booking.id }
+      }).catch(() => null);
+      if (transaction) {
+        if (transaction.status === "credited") {
+          creditsRefunded = transaction.amount || 0;
+        }
+      }
+    }
+    const creditsStr = String(creditsRefunded);
+
+    // Resolve payment ID for confirmations
+    let paymentId = options.razorpay_payment_id || options.paymentId || "";
+    if (!paymentId && newStatus === "confirmed") {
+      const transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid || booking.id }
+      }).catch(() => null);
+      paymentId = transaction?.razorpay_order_id || transaction?.upi_ref || booking.bookingid || booking.id || "";
+    }
+
+    // Determine target template and parameters
+    let templateName = null;
+    let parameters = [];
+    let recipientPhone = null;
+
+    if (!hasBooker) {
+      // --- SELF TRAVEL BOOKING TRANSITIONS ---
+      recipientPhone = attendeePhone;
+
+      if (prevStatusNormalized === "awaiting confirmation") {
+        if (newStatus === "proceed for payment" || newStatus === "payment pending" || newStatus === "pending") {
+          templateName = "bk_pvs_s_b_awc2ppg";
+          parameters = [attendeeName, pickup, drop, "proceed for payment", dateFormatted];
+        } else if (newStatus === "admin cancelled") {
+          if (booking.admin_comments === "admin_cancel_wrong_form" || newStatus === "wrong form cancel") {
+            templateName = "bk_pvs_s_b_awc2acn_wff";
+          } else if (booking.admin_comments === "admin_cancel_seats_full" || newStatus === "seats full cancel") {
+            templateName = "bk_pvs_s_b_awc2acn_asf";
+          } else {
+            templateName = "bk_pvs_s_b_awc2acn";
+          }
+          parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted];
+        } else if (newStatus === "cancelled") {
+          templateName = "bk_pvs_s_b_awc2cn";
+          parameters = [attendeeName, pickup, drop, "cancelled", dateFormatted];
+        }
+      } else if (prevStatusNormalized === "proceed for payment" || prevStatusNormalized === "payment pending" || prevStatusNormalized === "pending") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_pvs_s_b_ppg2cn";
+          parameters = [attendeeName, pickup, drop, "cancelled", dateFormatted];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_pvs_s_b_ppg2acn";
+          parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted];
+        } else if (newStatus === "confirmed") {
+          templateName = "bk_pvs_s_b_pypdg2conf";
+          parameters = [attendeeName, dateFormatted, pickup, drop, paymentId];
+        }
+      } else if (prevStatusNormalized === "confirmed") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_pvs_s_b_cf2cn";
+          parameters = [attendeeName, pickup, drop, "cancelled", dateFormatted];
+        } else if (newStatus === "admin cancelled") {
+          if (creditsRefunded > 0) {
+            templateName = "bk_pvs_s_b_conf2adcanc_wcre";
+            parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted, creditsStr];
+          } else {
+            templateName = "bk_pvs_s_b_cf2acn_woc";
+            parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted];
+          }
+        }
+      } else if (prevStatusNormalized === "cancelled") {
+        if (newStatus === "admin cancelled" && creditsRefunded > 0) {
+          templateName = "bk_pvs_s_b_canc2adcanc_wcre";
+          parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted, creditsStr];
+        }
+      }
+    } else {
+      // --- GUEST TRAVEL BOOKING TRANSITIONS ---
+      recipientPhone = bookerPhone;
+
+      if (prevStatusNormalized === "awaiting confirmation") {
+        if (newStatus === "proceed for payment" || newStatus === "payment pending" || newStatus === "pending") {
+          templateName = "bk_pvs_mu_b_awc2ppg";
+          parameters = [bookerName, pickup, drop, "proceed for payment", dateFormatted, attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          if (booking.admin_comments === "admin_cancel_wrong_form" || newStatus === "wrong form cancel") {
+            templateName = "bk_pvs_mu_b_awc2acn_wff";
+          } else if (booking.admin_comments === "admin_cancel_seats_full" || newStatus === "seats full cancel") {
+            templateName = "bk_pvs_mu_b_awc2acn_asf";
+          } else {
+            templateName = "bk_pvs_mu_b_awc2acn";
+          }
+          parameters = [bookerName, pickup, drop, "admin cancelled", dateFormatted, attendeeName];
+        } else if (newStatus === "cancelled") {
+          templateName = "bk_pvs_mu_b_awtconf2canc";
+          parameters = [bookerName, pickup, drop, "cancelled", dateFormatted, attendeeName];
+        }
+      } else if (prevStatusNormalized === "proceed for payment" || prevStatusNormalized === "payment pending" || prevStatusNormalized === "pending") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_pvs_mu_b_ppg2cn";
+          parameters = [bookerName, pickup, drop, "cancelled", dateFormatted, attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_pvs_mu_b_ppg2acn";
+          parameters = [bookerName, pickup, drop, "admin cancelled", dateFormatted, attendeeName];
+        } else if (newStatus === "confirmed") {
+          templateName = "bk_pvs_mu_b_pympndg2conf";
+          parameters = [bookerName, attendeeName, dateFormatted, pickup, drop, paymentId];
+        }
+      } else if (prevStatusNormalized === "confirmed") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_pvs_mu_b_conf2canc";
+          parameters = [bookerName, pickup, drop, "cancelled", dateFormatted, attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          if (creditsRefunded > 0) {
+            templateName = "bk_pvs_mu_b_cf2acn_wc";
+            parameters = [bookerName, pickup, drop, "admin cancelled", dateFormatted, creditsStr, attendeeName];
+          } else {
+            templateName = "bk_pvs_mu_b_cf2acn_woc";
+            parameters = [bookerName, pickup, drop, "admin cancelled", dateFormatted, attendeeName];
+          }
+        }
+      } else if (prevStatusNormalized === "cancelled") {
+        if (newStatus === "admin cancelled" && creditsRefunded > 0) {
+          templateName = "bk_pvs_mu_b_canc2adcanc_wcre";
+          parameters = [bookerName, pickup, drop, "admin cancelled", dateFormatted, creditsStr, attendeeName];
+        }
+      }
+    }
+
+    if (recipientPhone && templateName) {
+      const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+      const components = buildBodyComponents(sanitizedParams);
+
+      const result = await sendWithTemplateFallback(recipientPhone, templateName, components);
+      if (!result || !result.ok) {
+        console.error(`Error sending travel status change WhatsApp for template ${templateName}`, result?.error);
+      } else {
+        console.log(`📩 Travel WhatsApp status change sent successfully: template=${templateName} to ${recipientPhone}`);
+      }
+    } else {
+      console.log(`WA TRAVEL STATUS SKIP: No matching template or recipient for transition '${prevStatusNormalized}' -> '${newStatus}' (hasBooker=${hasBooker})`);
+    }
+
+  } catch (err) {
+    console.error("Error in sendTravelStatusChangeWhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
 
 
 

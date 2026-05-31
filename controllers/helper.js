@@ -497,7 +497,10 @@ export async function sendUnifiedEmail(
         bookingid: travelBooking.bookingid,
         date: moment(travelBooking.date).format('Do MMMM, YYYY'),
         pickuppoint: travelBooking.pickup_point,
-        dropoffpoint: travelBooking.drop_point
+        dropoffpoint: travelBooking.drop_point,
+        bookedBy: travelBooking.bookedBy,
+        total_people: travelBooking.total_people,
+        cardno: travelBooking.cardno
       });
     });
   }

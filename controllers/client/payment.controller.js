@@ -10,7 +10,8 @@ import {
   STATUS_PAYMENT_FAILED,
   STATUS_PAYMENT_AUTHORIZED,
   STATUS_PAYMENT_COMPLETED,
-  TYPE_FOOD
+  TYPE_FOOD,
+  TYPE_TRAVEL
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -23,7 +24,7 @@ import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import { sendRoomStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
@@ -113,6 +114,11 @@ export const verifyPayment = async (req, res) => {
               userBookingIdMap.roomBookingStatusChanges = [];
             }
             userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
+          } else if (bookingType === TYPE_TRAVEL) {
+            if (!userBookingIdMap.travelBookingStatusChanges) {
+              userBookingIdMap.travelBookingStatusChanges = [];
+            }
+            userBookingIdMap.travelBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
           }
 
           setBookingIdMap(
@@ -157,6 +163,21 @@ export const verifyPayment = async (req, res) => {
         }
       }
       delete userBookingIdMap.roomBookingStatusChanges;
+    }
+
+    // Trigger Travel status change WhatsApp messages
+    if (userBookingIdMap.travelBookingStatusChanges) {
+      for (const { booking, previousStatus, razorpay_payment_id } of userBookingIdMap.travelBookingStatusChanges) {
+        try {
+          await sendTravelStatusChangeWhatsApp(booking, previousStatus, {
+            updatedBy: RAZORPAY_CALLBACK,
+            razorpay_payment_id
+          });
+        } catch (waErr) {
+          logger.error("Error sending travel status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.travelBookingStatusChanges;
     }
 
     for (const cardno in userBookingIdMap) {

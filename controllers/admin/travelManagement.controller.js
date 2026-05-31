@@ -25,6 +25,7 @@ import {
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
+import { sendTravelStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import database from '../../config/database.js';
 import sendMail from '../../utils/sendMail.js';
@@ -429,6 +430,8 @@ export const updateBookingStatus = async (req, res) => {
 
   if (!booking) throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
 
+  const previousStatus = booking.status;
+
   if (status == booking.status)
   throw new ApiError(400, 'Status is same as before');
 
@@ -593,6 +596,13 @@ if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
   });
 
   await t.commit();
+
+  try {
+    await sendTravelStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    console.error("Error triggering travel status change WhatsApp on admin update:", waErr);
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 

@@ -10,6 +10,7 @@ import {
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { updateWaitingTravelBooking } from '../../helpers/travelBooking.helper.js';
+import { sendTravelStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
@@ -86,6 +87,12 @@ export const CancelTravel = async (req, res) => {
 
   await userCancelBooking(req.user, booking, t);
   await t.commit();
+
+  try {
+    await sendTravelStatusChangeWhatsApp(booking, bookingStatus);
+  } catch (waErr) {
+    console.error("Error triggering travel status change WhatsApp on cancel:", waErr);
+  }
 
   const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
 
