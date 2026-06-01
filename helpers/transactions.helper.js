@@ -1,4 +1,4 @@
-import { CardDb, Transactions } from '../models/associations.js';
+import { CardDb, Transactions, TravelBusPassengers, TravelBusGroup } from '../models/associations.js';
 import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_COMPLETED,
