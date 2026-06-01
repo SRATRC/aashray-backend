@@ -27,7 +27,8 @@ import {
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
-  ROOM_STATUS_CHECKEDOUT
+  ROOM_STATUS_CHECKEDOUT,
+  TYPE_FOOD
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -36,6 +37,7 @@ import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
+import { sendUnifiedWhatsApp } from '../helpers/whatsapp.helper.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   const startDate = new Date(checkin_date);
@@ -363,12 +365,15 @@ export async function sendUnifiedEmail(
   let wasFlatBooked =
     Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
+  let wasFoodBooked =
+    Array.isArray(bookingIds[TYPE_FOOD]) && bookingIds[TYPE_FOOD].length > 0;
 
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
     flatBookingDetails = [],
     utsavBookingDetails = [],
+    foodBookingDetails = [],
     includeProfile = false,
     user;
 
@@ -570,6 +575,43 @@ export async function sendUnifiedEmail(
     });
   }
 
+  if (wasFoodBooked) {
+    let includeOptions = [];
+    if (includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        where: { cardno: Sequelize.col('FoodDb.cardno') }
+      });
+    }
+    const foodBookings = await FoodDb.findAll({
+      include: includeOptions,
+      where: {
+        id: { [Sequelize.Op.in]: bookingIds[TYPE_FOOD] }
+      },
+      order: [
+        ['cardno', 'ASC'],
+        ['date', 'ASC']
+      ]
+    });
+
+    foodBookings.forEach((foodBooking) => {
+      foodBookingDetails.push({
+        id: foodBooking.id,
+        bookingid: foodBooking.id,
+        cardno: foodBooking.cardno,
+        bookedBy: foodBooking.bookedBy,
+        date: foodBooking.date,
+        breakfast: foodBooking.breakfast,
+        lunch: foodBooking.lunch,
+        dinner: foodBooking.dinner,
+        spicy: foodBooking.spicy,
+        hightea: foodBooking.hightea,
+        name: user ? user.issuedto : (foodBooking.dataValues.CardDb ? foodBooking.dataValues.CardDb.issuedto : '')
+      });
+    });
+  }
+
 
   const country =
     user && user.country ? user.country : bookedBy && bookedBy.country;
@@ -623,7 +665,16 @@ export async function sendUnifiedEmail(
     });
   }
   // ✅ Also send WhatsApp messages
-  await sendUnifiedWhatsApp(user, adhyanBookingDetails, travelBookingDetails, flatBookingDetails, utsavBookingDetails, roomBookingDetails);
+  await sendUnifiedWhatsApp(
+    user,
+    adhyanBookingDetails,
+    travelBookingDetails,
+    flatBookingDetails,
+    utsavBookingDetails,
+    roomBookingDetails,
+    null,
+    foodBookingDetails
+  );
 
 }
 

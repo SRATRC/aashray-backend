@@ -170,6 +170,7 @@ async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMa
       );
       amount += foodResult.amount;
       transactionIds.push(...foodResult.transactionIds);
+      setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:

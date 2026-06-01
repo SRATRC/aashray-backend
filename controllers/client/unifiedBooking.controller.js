@@ -193,7 +193,9 @@ async function book(
       break;
 
     case TYPE_FOOD:
-      t = await bookFood(body, user, data, t);
+      const foodRes = await bookFood(body, user, data, t);
+      t = foodRes.t;
+      setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodRes.result.userBookingIds);
       break;
 
     case TYPE_TRAVEL:
@@ -333,7 +335,7 @@ async function bookFood(body, user, data, t) {
     high_tea
   );
 
-  await bookFoodForMumukshus(
+  const result = await bookFoodForMumukshus(
     start_date,
     end_date,
     mumukshuGroup,
@@ -344,7 +346,7 @@ async function bookFood(body, user, data, t) {
     user.cardno
   );
 
-  return t;
+  return { t, result };
 }
 
 async function bookTravel(user, data, t) {

@@ -80,8 +80,9 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
   const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
   const flatIds   = Array.isArray(typeMap['FLAT']) ? typeMap['FLAT'].map(String).filter(Boolean) : [];
+  const foodIds   = Array.isArray(typeMap[TYPE_FOOD]) ? typeMap[TYPE_FOOD].map(String).filter(Boolean) : [];
 
-  console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)}`);
+  console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)} foodIds=${JSON.stringify(foodIds)}`);
 
   try {
     const [
@@ -89,7 +90,8 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
       travelBookingDetails,
       roomBookingDetails,
       utsavBookingDetails,
-      flatBookingDetails
+      flatBookingDetails,
+      foodBookingDetails
     ] = await Promise.all([
       adhyanIds.length
         ? ShibirBookingDb.findAll({
@@ -119,6 +121,12 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
         : [],
       flatIds.length
         ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
+        : [],
+      foodIds.length
+        ? FoodDb.findAll({
+            where: { id: { [Op.in]: foodIds } },
+            order: [['cardno', 'ASC'], ['date', 'ASC']]
+          })
         : []
     ]);
 
@@ -132,14 +140,15 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
     const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
     const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
 
-    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails||[]).length} utsavCount=${(utsavBookingDetails||[]).length}`);
+    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails||[]).length} utsavCount=${(utsavBookingDetails||[]).length} foodCount=${(foodBookingDetails||[]).length}`);
 
     return {
       adhyanBookingDetails,
       travelBookingDetails,
       roomBookingDetails,
       utsavBookingDetails,
-      flatBookingDetails
+      flatBookingDetails,
+      foodBookingDetails
     };
   } catch (err) {
     console.error(`WA DIAG: fetchFreshDetailsForCard(${cardno}) failed:`, err && (err.stack || err.message || err));
@@ -148,7 +157,8 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
       travelBookingDetails: [],
       roomBookingDetails: [],
       utsavBookingDetails: [],
-      flatBookingDetails: []
+      flatBookingDetails: [],
+      foodBookingDetails: []
     };
   }
 }
@@ -359,7 +369,8 @@ export const mumukshuBooking = async (req, res, next) => {
           details.flatBookingDetails,
           details.utsavBookingDetails,
           details.roomBookingDetails,
-          null
+          null,
+          details.foodBookingDetails
         ));
 
         if (cardno !== bookedByCard) {
@@ -370,7 +381,8 @@ export const mumukshuBooking = async (req, res, next) => {
             details.flatBookingDetails,
             details.utsavBookingDetails,
             details.roomBookingDetails,
-            cardno
+            cardno,
+            details.foodBookingDetails
           ));
         }
       }
@@ -472,7 +484,8 @@ async function book(
       break;
 
     case TYPE_FOOD:
-      await bookFood(body, data, t, user);
+      const foodResult = await bookFood(body, data, t, user);
+      setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
     case TYPE_TRAVEL:
@@ -599,7 +612,7 @@ async function bookRoom(body, data, t, user) {
 
 async function bookFood(body, data, t, user) {
   let { start_date, end_date, mumukshuGroup } = data.details;
-  await bookFoodForMumukshus(
+  const result = await bookFoodForMumukshus(
     start_date,
     end_date,
     mumukshuGroup,
@@ -610,7 +623,7 @@ async function bookFood(body, data, t, user) {
     user.cardno
   );
 
-  return t;
+  return result;
 }
 
 async function bookAdhyayan(data, t, user) {

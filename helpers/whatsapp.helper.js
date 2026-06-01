@@ -1,9 +1,9 @@
 import Sequelize from "sequelize";
 // at top of both files (whatsapp.helper and mumukshuBooking.controller)
 import { Op } from 'sequelize';
-import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb } from "../models/associations.js";
+import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb } from "../models/associations.js";
 import moment from "moment";
-import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE } from "../config/constants.js";
+import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 
 function sanitizeParamText(s) {
@@ -139,7 +139,8 @@ export async function sendUnifiedWhatsApp(
   flatBookingDetails = [],
   utsavBookingDetails = [],
   roomBookingDetails = [],
-  bookedForCardno = null // NEW optional arg
+  bookedForCardno = null, // NEW optional arg
+  foodBookingDetails = [] // NEW optional arg
 ) {
   try {
     if (!cardno) {
@@ -147,7 +148,13 @@ export async function sendUnifiedWhatsApp(
       return;
     }
 
-    const user = await CardDb.findOne({ where: { cardno } });
+    let user;
+    if (typeof cardno === "object" && cardno !== null && cardno.cardno) {
+      user = cardno;
+    } else {
+      user = await CardDb.findOne({ where: { cardno } });
+    }
+
     if (!user) {
       console.warn(`No Card record found for cardno=${cardno}`);
       return;
@@ -162,7 +169,7 @@ export async function sendUnifiedWhatsApp(
 
     const phone = user?.mobno ? String(user.mobno) : null;
     if (!phone) {
-      console.warn(`⚠️ No WhatsApp number found for ${user?.issuedto} (cardno=${cardno})`);
+      console.warn(`⚠️ No WhatsApp number found for ${user?.issuedto} (cardno=${user.cardno})`);
       return;
     }
 
@@ -183,6 +190,9 @@ export async function sendUnifiedWhatsApp(
     }
     if (Array.isArray(flatBookingDetails) && flatBookingDetails.length) {
       jobs.push(sendFlatWhatsApp(user, flatBookingDetails, bookedForUser));
+    }
+    if (Array.isArray(foodBookingDetails) && foodBookingDetails.length) {
+      jobs.push(sendFoodWhatsApp(user, foodBookingDetails, bookedForUser));
     }
 
     if (jobs.length === 0) {
@@ -1862,6 +1872,133 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
     console.error("Error in sendUtsavStatusChangeWhatsApp:", err && (err.stack || err.message || err));
   }
 }
+
+export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForUser = null) {
+  if (!user) return;
+  const phone = user?.mobno ? String(user.mobno) : null;
+  if (!phone) {
+    console.warn(`No mobile for cardno=${user.cardno}; skipping food WA.`);
+    return;
+  }
+
+  if (!Array.isArray(foodBookingDetails) || foodBookingDetails.length === 0) return;
+
+  try {
+    // 1. Gather all dates and find min/max
+    const dates = foodBookingDetails.map(b => b.date).filter(Boolean).sort();
+    if (dates.length === 0) return;
+    const minDate = moment(dates[0]).format("DD-MM-YYYY");
+    const maxDate = moment(dates[dates.length - 1]).format("DD-MM-YYYY");
+
+    // 2. Fetch transactions associated with the food bookings to determine payment status
+    const bookingIds = foodBookingDetails.map(b => b.id || b.bookingid).filter(Boolean);
+    let isPaymentPending = false;
+    let paymentId = "N/A";
+
+    if (bookingIds.length) {
+      const txs = await Transactions.findAll({
+        where: {
+          bookingid: { [Op.in]: bookingIds }
+        }
+      });
+      // Check if any transactions indicate payment pending
+      const pendingStatuses = ["payment_pending", "cash_pending", "payment_failed"];
+      isPaymentPending = txs.some(tx => pendingStatuses.includes(String(tx.status).trim().toLowerCase()));
+
+      // Resolve the payment ID (razorpay order ID)
+      const txWithOrder = txs.find(tx => tx.razorpay_order_id);
+      if (txWithOrder) {
+        paymentId = txWithOrder.razorpay_order_id;
+      }
+    }
+
+    // Determine booking details (bookedBy, traveler cardno)
+    const firstBooking = foodBookingDetails[0];
+    const attendeeCardno = firstBooking.cardno;
+    const bookedByCardno = firstBooking.bookedBy;
+
+    // Is it a guest booking?
+    const isGuest = !!(bookedByCardno && String(bookedByCardno) !== String(attendeeCardno));
+
+    let template = "";
+    let bodyParams = [];
+    let headerParam = "";
+
+    if (isGuest) {
+      const isBooker = String(user.cardno) === String(bookedByCardno);
+
+      if (isBooker) {
+        let attendeeName = "";
+        if (bookedForUser) {
+          attendeeName = bookedForUser.issuedto || "";
+        } else {
+          const attendee = await CardDb.findOne({ where: { cardno: attendeeCardno } }).catch(() => null);
+          attendeeName = attendee?.issuedto || "";
+        }
+        headerParam = attendeeName;
+
+        if (isPaymentPending) {
+          template = "bn_psd_gu_b_ppng";
+          bodyParams = [user.issuedto || "", minDate, maxDate, "payment pending"];
+        } else {
+          template = "bn_psd_gu_b_cnfm";
+          bodyParams = [user.issuedto || "", minDate, maxDate, paymentId];
+        }
+      } else {
+        let bookerName = "";
+        if (bookedForUser) {
+          bookerName = bookedForUser.issuedto || "";
+        } else {
+          const booker = await CardDb.findOne({ where: { cardno: bookedByCardno } }).catch(() => null);
+          bookerName = booker?.issuedto || "";
+        }
+        headerParam = bookerName;
+
+        if (isPaymentPending) {
+          template = "bn_psd_gu_f_pp";
+          bodyParams = [user.issuedto || "", minDate, maxDate, "payment pending"];
+        } else {
+          template = "bn_psd_gu_f_cf";
+          bodyParams = [user.issuedto || "", minDate, maxDate];
+        }
+      }
+    } else {
+      template = "bn_psd_s_b_cf";
+      bodyParams = [user.issuedto || "", minDate, maxDate];
+    }
+
+    const sanitizedParams = bodyParams.map(p => sanitizeParamText(p));
+    const bodyComp = buildBodyComponents(sanitizedParams)[0];
+    let components = [];
+
+    if (headerParam) {
+      const sanitizedHeader = sanitizeParamText(headerParam);
+      const headerParameters = [{ type: "text", text: sanitizedHeader === "" ? " " : sanitizedHeader }];
+      components = [
+        { type: "header", parameters: headerParameters },
+        bodyComp
+      ];
+    } else {
+      components = [bodyComp];
+    }
+
+    console.log(`WA FOOD: to=${user.cardno} phone=${phone} range=${minDate} to ${maxDate} isGuest=${isGuest} isPaymentPending=${isPaymentPending} -> template='${template}'`);
+    const result = await sendWithTemplateFallback(phone, template, components);
+
+    if (!result || !result.ok) {
+      console.error("Food WA failed for booking", bookingIds, result && result.error ? result.error : "unknown");
+    } else {
+      console.log("📩 Food WhatsApp sent:", {
+        toCard: user.cardno,
+        template: result.usedTemplate || template
+      });
+    }
+
+  } catch (err) {
+    console.error("Error sending food WhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
 
 
 
