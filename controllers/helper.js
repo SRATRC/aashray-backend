@@ -440,7 +440,7 @@ export async function sendUnifiedEmail(
     let includeOptions = [];
     includeOptions.push({
       model: ShibirDb,
-      attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
+      attributes: ['name', 'speaker', 'month', 'start_date', 'end_date', 'location'],
       where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
     });
     if (includeProfile) {
@@ -473,7 +473,9 @@ export async function sendUnifiedEmail(
         enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
           'Do MMMM, YYYY'
         ),
-        status: adhyanBooking.status
+        status: adhyanBooking.status,
+        bookedBy: adhyanBooking.bookedBy,
+        ShibirDb: adhyanBooking.ShibirDb || adhyanBooking.dataValues.ShibirDb
       });
     });
   }

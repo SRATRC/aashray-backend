@@ -164,8 +164,10 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
           {
             bookingid: bookingId,
             cardno: booking_user,
+            bookedBy: user.cardno !== booking_user ? user.cardno : null,
             shibir_id: adhyayan.id,
-            status: STATUS_WAITING
+            status: STATUS_WAITING,
+            updatedBy: user.cardno
           },
           { transaction: t }
         );

@@ -60,9 +60,15 @@ async function sendWithTemplateFallback(phone, template, components) {
     let fallbackTemplate = template;
     let fallbackComponents = components;
 
-    if (template.startsWith("bn_adh_gu_b_")) {
+    if (template.startsWith("bn_adh_gu_b_") || template.startsWith("bk_adh_gu_b_")) {
       fallbackTemplate = "bn_adh_gu_b_cf";
-    } else if (template.startsWith("bn_adh_gu_f_")) {
+      // bn_adh_gu_b_cf expects only 3 body parameters: [bookerName, shibirName, paymentId]
+      fallbackComponents = JSON.parse(JSON.stringify(components));
+      const bodyComp = fallbackComponents.find(c => c.type === "body");
+      if (bodyComp && bodyComp.parameters && bodyComp.parameters.length > 3) {
+        bodyComp.parameters = bodyComp.parameters.slice(0, 3);
+      }
+    } else if (template.startsWith("bn_adh_gu_f_") || template.startsWith("bk_adh_gu_f_")) {
       fallbackTemplate = "bn_adh_gu_f_cf";
       // bn_adh_gu_f_cf expects only 2 body parameters: [attendeeName, shibirName]
       fallbackComponents = JSON.parse(JSON.stringify(components));
@@ -70,9 +76,9 @@ async function sendWithTemplateFallback(phone, template, components) {
       if (bodyComp && bodyComp.parameters && bodyComp.parameters.length > 2) {
         bodyComp.parameters = bodyComp.parameters.slice(0, 2);
       }
-    } else if (template.startsWith("bn_adh_s_b_")) {
+    } else if (template.startsWith("bn_adh_s_b_") || template.startsWith("bk_adh_s_b_")) {
       fallbackTemplate = "bn_adh_s_b_cnf";
-    } else if (template.startsWith("bn_sha_gu_b_")) {
+    } else if (template.startsWith("bn_sha_gu_b_") || template.startsWith("bk_sha_gu_b_")) {
       fallbackTemplate = "bn_sha_gu_b_cf";
       fallbackComponents = JSON.parse(JSON.stringify(components));
       const bodyComp = fallbackComponents.find(c => c.type === "body");
@@ -81,14 +87,14 @@ async function sendWithTemplateFallback(phone, template, components) {
         bodyComp.parameters[3] = { type: "text", text: roomType };
         bodyComp.parameters[4] = { type: "text", text: "N/A" };
       }
-    } else if (template.startsWith("bn_sha_gu_f_")) {
+    } else if (template.startsWith("bn_sha_gu_f_") || template.startsWith("bk_sha_gu_f_")) {
       fallbackTemplate = "bn_sha_gu_f_cf";
       fallbackComponents = JSON.parse(JSON.stringify(components));
       const bodyComp = fallbackComponents.find(c => c.type === "body");
       if (bodyComp && bodyComp.parameters && bodyComp.parameters.length >= 5) {
         bodyComp.parameters.splice(3, 1);
       }
-    } else if (template.startsWith("bn_sha_s_b_")) {
+    } else if (template.startsWith("bn_sha_s_b_") || template.startsWith("bk_sha_s_b_")) {
       fallbackTemplate = "bn_sha_s_b_cf";
       fallbackComponents = JSON.parse(JSON.stringify(components));
       const bodyComp = fallbackComponents.find(c => c.type === "body");
@@ -1226,7 +1232,7 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
         let templateName = null;
         let parameters = [];
 
-        // --- TRANSITION LOGIC FOR ATTENDEE (SELF) ---
+        // --- TRANSITION LOGIC FOR ATTENDEE (SELF/GUEST REGARDLESS OF BOOKER) ---
         if (prevStatusNormalized === "waiting") {
           if (newStatus === "cancelled") {
             templateName = "bk_adh_s_b_w2cn";
@@ -1235,8 +1241,10 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
             templateName = "bk_adh_s_b_w2acn";
             parameters = [attendeeName, shibirName, "admin cancelled"];
           } else if (isPendingStatus(newStatus)) {
-            templateName = "bk_adh_s_b_w2ppg";
-            parameters = [attendeeName, shibirName, "payment pending"];
+            if (!hasBooker) {
+              templateName = "bk_adh_s_b_w2ppg";
+              parameters = [attendeeName, shibirName, "payment pending"];
+            }
           } else if (isConfirmedStatus(newStatus)) {
             templateName = "bk_adh_s_b_wtg2conf";
             parameters = [attendeeName, shibirName];
@@ -1321,7 +1329,7 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
             parameters = [bookerName, shibirName, "payment pending", attendeeName];
           } else if (isConfirmedStatus(newStatus)) {
             templateName = "bk_adh_gu_b_wtg2conf";
-            parameters = [bookerName, shibirName, "confirmed", attendeeName];
+            parameters = [bookerName, shibirName, attendeeName];
           }
         } else if (isPendingStatus(prevStatusNormalized)) {
           if (newStatus === "cancelled") {
@@ -1353,20 +1361,12 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
         } else if (prevStatusNormalized === "cancelled") {
           if (isConfirmedStatus(newStatus)) {
             templateName = "bk_adh_gu_b_canc2conf";
-            const transaction = await Transactions.findOne({
-              where: { bookingid: booking.bookingid }
-            });
-            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
-            parameters = [bookerName, shibirName, paymentId, attendeeName];
+            parameters = [bookerName, shibirName, attendeeName];
           }
         } else if (prevStatusNormalized === "admin cancelled") {
           if (isConfirmedStatus(newStatus)) {
             templateName = "bk_adh_gu_b_adcanc2conf";
-            const transaction = await Transactions.findOne({
-              where: { bookingid: booking.bookingid }
-            });
-            const paymentId = transaction?.razorpay_order_id || transaction?.id || "N/A";
-            parameters = [bookerName, shibirName, paymentId, attendeeName];
+            parameters = [bookerName, shibirName, attendeeName];
           }
         }
 
@@ -1453,8 +1453,10 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
           templateName = "bk_sha_s_b_w2acn";
           parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled"];
         } else if (isPendingStatus(newStatus)) {
-          templateName = "bk_sha_s_b_w2ppg";
-          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending"];
+          if (!hasBooker) {
+            templateName = "bk_sha_s_b_w2ppg";
+            parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending"];
+          }
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
