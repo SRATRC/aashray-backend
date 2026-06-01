@@ -52,7 +52,7 @@ import {
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
-import { sendRoomStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize, { Op } from 'sequelize';
@@ -449,6 +449,7 @@ export const cancelFlatBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const originalStatus = booking.status;
   await booking.update(
     {
       status: STATUS_ADMIN_CANCELLED,
@@ -458,6 +459,12 @@ export const cancelFlatBooking = async (req, res) => {
   );
 
   await t.commit();
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat booking cancellation WhatsApp:', waErr);
+  }
 
   sendDualUserNotifications({
     primary: {
@@ -507,6 +514,7 @@ export const flatCheckin = async (req, res) => {
     throw new ApiError(404, `Cannot check-in until ${booking.checkin}.`);
   }
 
+  const originalStatus = booking.status;
   await booking.update(
     {
       status: ROOM_STATUS_CHECKEDIN,
@@ -516,6 +524,13 @@ export const flatCheckin = async (req, res) => {
   );
 
   await t.commit();
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat checkin WhatsApp:', waErr);
+  }
+
   return res
     .status(200)
     .send({ message: 'Successfully checked in', data: booking });
@@ -547,6 +562,7 @@ export const flatCheckout = async (req, res) => {
   }
 
   const nights = await calculateNights(booking.checkin, today);
+  const originalStatus = booking.status;
 
   await booking.update(
     {
@@ -559,6 +575,13 @@ export const flatCheckout = async (req, res) => {
   );
 
   await t.commit();
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat checkout WhatsApp:', waErr);
+  }
+
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
@@ -813,6 +836,7 @@ export const updateFlatBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const originalStatus = booking.status;
   await booking.update({
     flatno,
     checkin: checkin_date,
@@ -830,6 +854,14 @@ export const updateFlatBooking = async (req, res) => {
     },
     screen: '/bookings'
   });
+
+  if (status && status !== originalStatus) {
+    try {
+      await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+    } catch (waErr) {
+      logger.error('Error sending flat booking update status WhatsApp:', waErr);
+    }
+  }
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
@@ -1801,5 +1833,12 @@ export const updateFlatBookingStatus = async (req, res) => {
   }
 
   await t.commit();
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat booking update status WhatsApp:', waErr);
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };

@@ -22,7 +22,7 @@ import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
-import { sendRoomStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 
 export const ViewAllBookings = async (req, res) => {
@@ -135,6 +135,12 @@ export const CancelBooking = async (req, res) => {
     } catch (waErr) {
       console.error("Error sending room cancellation WhatsApp:", waErr);
     }
+  } else if (booking instanceof FlatBooking) {
+    try {
+      await sendFlatStatusChangeWhatsApp(booking, previousStatus);
+    } catch (waErr) {
+      console.error("Error sending flat cancellation WhatsApp:", waErr);
+    }
   }
 
   sendMail({
@@ -190,7 +196,14 @@ export const FlatBookingMumukshu = async (req, res) => {
 
   await t.commit();
 
-  sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
+  const userBookingIdMap = {};
+  for (const cardno in userBookingIds) {
+    userBookingIdMap[cardno] = {
+      [TYPE_FLAT]: userBookingIds[cardno]
+    };
+  }
+
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user, BOOKING_STATUS_PENDING);
 
   Object.entries(userBookingIds)
     .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno

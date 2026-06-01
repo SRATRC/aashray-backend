@@ -903,49 +903,142 @@ async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = n
     return;
   }
 
-  const bookedForCache = new Map();
-  if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
+  if (!Array.isArray(flatBookingDetails)) flatBookingDetails = [];
 
-  for (const b of Array.isArray(flatBookingDetails) ? flatBookingDetails : []) {
+  // Fetch transactions in batch
+  const bookingIds = flatBookingDetails
+    .map((b) => (b.bookingid || b.bookingId || b.id ? String(b.bookingid || b.bookingId || b.id) : null))
+    .filter(Boolean);
+
+  let transactionsMap = new Map();
+  try {
+    if (bookingIds.length && typeof Transactions !== "undefined") {
+      const txRows = await Transactions.findAll({
+        where: { bookingid: { [Op.in]: bookingIds } },
+        attributes: ["bookingid", "amount", "discount", "razorpay_order_id"]
+      });
+
+      for (const tx of txRows) {
+        transactionsMap.set(String(tx.bookingid), {
+          amount: tx.amount,
+          discount: tx.discount,
+          razorpay_order_id: tx.razorpay_order_id
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch transactions for flat bookings (non-fatal):", err && (err.message || err));
+  }
+
+  const cardCache = new Map();
+  if (user && user.cardno) cardCache.set(String(user.cardno), user.issuedto || "");
+  if (bookedForUser && bookedForUser.cardno) cardCache.set(String(bookedForUser.cardno), bookedForUser.issuedto || "");
+
+  async function getCardName(cardno) {
+    if (!cardno) return "";
+    const cno = String(cardno);
+    if (cardCache.has(cno)) return cardCache.get(cno);
     try {
+      const card = await CardDb.findOne({ where: { cardno: cno } });
+      const name = card && card.issuedto ? card.issuedto : "";
+      cardCache.set(cno, name);
+      return name;
+    } catch (err) {
+      console.warn(`Failed to lookup card name for cardno=${cno}:`, err.message || err);
+      return "";
+    }
+  }
+
+  for (const b of flatBookingDetails) {
+    try {
+      if (!b || typeof b !== "object") continue;
+
+      const bookingId = String(b.bookingid || b.bookingId || b.id || "");
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
-      const status = rawStatus.trim().toLowerCase();
+      const bookingStatus = rawStatus.trim().toLowerCase();
+      const isPaymentPending = bookingStatus === "payment pending" || bookingStatus === "pending" || (bookingStatus.includes("payment") && !bookingStatus.includes("checkin"));
 
-      let template = "booking_flat_confirmed";
-      if (status === "waiting" || status.startsWith("wait")) template = "booking_flat_waiting";
-      else if (status === "pending" || status.includes("pend")) template = "booking_flat_pending";
+      const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
+      const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
 
-      let bookedForName = user.issuedto || "";
-      if (b.__bookedForCardno) {
-        const bf = String(b.__bookedForCardno);
-        if (bookedForCache.has(bf)) bookedForName = bookedForCache.get(bf);
-        else {
-          const rec = await CardDb.findOne({ where: { cardno: bf } }).catch(() => null);
-          const nm = rec?.issuedto || "";
-          bookedForCache.set(bf, nm);
-          if (nm) bookedForName = nm;
+      let template = "";
+      let bodyParams = [];
+      let headerParam = "";
+
+      const checkinDate = b.checkin || b.start_date || "";
+      const checkoutDate = b.checkout || b.end_date || "";
+      const checkinFormatted = checkinDate ? moment(checkinDate).format("DD-MM-YYYY") : "";
+      const checkoutFormatted = checkoutDate ? moment(checkoutDate).format("DD-MM-YYYY") : "";
+      const flatNoStr = String(b.flatno || b.flat_no || b.flatno || "");
+
+      if (isGuestBy) {
+        const attendeeName = bookedForUser.issuedto || "";
+        const bookerName = user.issuedto || "";
+        headerParam = attendeeName;
+
+        if (isPaymentPending) {
+          template = "bn_flt_gu_b_ppng";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, flatNoStr, "payment pending"];
+        } else {
+          template = "bn_flt_gu_b_cnfm";
+          const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
+          const paymentId = tx.razorpay_order_id || tx.id || "N/A";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, flatNoStr, paymentId];
         }
-      } else if (bookedForUser && bookedForUser.issuedto) {
-        bookedForName = bookedForUser.issuedto;
+      } else if (isGuestFor) {
+        const bookerName = await getCardName(b.bookedBy);
+        const attendeeName = user.issuedto || "";
+        headerParam = bookerName;
+
+        if (isPaymentPending) {
+          template = "bn_flt_gu_f_pp";
+          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, flatNoStr, "payment pending"];
+        } else {
+          template = "bn_flt_gu_f_cnfm";
+          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, flatNoStr];
+        }
+      } else {
+        const bookerName = user.issuedto || "";
+        if (isPaymentPending) {
+          template = "bn_flt_gu_b_ppng";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, flatNoStr, "payment pending"];
+        } else {
+          template = "bn_flt_gu_b_cnfm";
+          const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
+          const paymentId = tx.razorpay_order_id || tx.id || "N/A";
+          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, flatNoStr, paymentId];
+        }
       }
 
-      const params = [
-        user.issuedto || "",
-        bookedForName,
-        b.id || b.bookingid || "",
-        rawStatus || "",
-        b.flat_no || b.flatNo || "",
-        b.start_date ? moment(b.start_date).format("DD MMM YYYY") : "",
-        b.end_date ? moment(b.end_date).format("DD MMM YYYY") : ""
-      ];
+      const sanitizedParams = bodyParams.map(p => sanitizeParamText(p));
+      const bodyComp = buildBodyComponents(sanitizedParams)[0];
+      let components = [];
 
-      const components = buildBodyComponents(params);
+      if (headerParam) {
+        const sanitizedHeader = sanitizeParamText(headerParam);
+        const headerParameters = [{ type: "text", text: sanitizedHeader === "" ? " " : sanitizedHeader }];
+        components = [
+          { type: "header", parameters: headerParameters },
+          bodyComp
+        ];
+      } else {
+        components = [bodyComp];
+      }
 
+      console.log(`WA FLAT: to=${user.cardno} phone=${phone} bookingId=${bookingId} isPaymentPending=${isPaymentPending} -> template='${template}'`);
       const result = await sendWithTemplateFallback(phone, template, components);
-      if (!result.ok) console.error("Flat WA failed for booking", b, result.error);
-      else console.log("📩 Flat WhatsApp sent:", { toCard: user.cardno, bookedFor: bookedForName, booking: b.id || b.bookingid || b, template: result.usedTemplate });
+
+      if (!result || !result.ok) {
+        console.error("Flat WA failed for booking", bookingId, result && result.error ? result.error : "unknown");
+      } else {
+        console.log("📩 Flat WhatsApp sent:", {
+          toCard: user.cardno,
+          booking: bookingId,
+          template: result.usedTemplate || template
+        });
+      }
     } catch (err) {
-      console.error("Error sending flat WhatsApp for", b.id || b.bookingid || b, err);
+      console.error("Error sending flat WhatsApp for", b.id || b.bookingid || b, err && (err.stack || err.message || err));
     }
   }
 }
@@ -1478,6 +1571,173 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
     console.error("Error in sendRoomStatusChangeWhatsApp:", err && (err.stack || err.message || err));
   }
 }
+
+export async function sendFlatStatusChangeWhatsApp(booking, previousStatus, options = {}) {
+  try {
+    if (!booking) return;
+
+    const rawStatus = (booking.status === undefined || booking.status === null || String(booking.status).trim() === "") ? "pending" : String(booking.status);
+    const newStatus = rawStatus.trim().toLowerCase();
+    const prevStatusNormalized = previousStatus ? String(previousStatus).trim().toLowerCase() : "";
+    const updatedBy = (options.updatedBy || booking.updatedBy || "").trim().toLowerCase();
+
+    // Load attendee details
+    const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
+    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeeName = attendeeCard?.issuedto || "";
+
+    // Load booker details
+    const bookerCardno = booking.bookedBy || booking.cardno;
+    const bookerCard = await CardDb.findOne({ where: { cardno: bookerCardno } });
+    const bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+    const bookerName = bookerCard?.issuedto || "";
+
+    const isPendingStatus = (status) => ["pending", "payment pending", "cash pending"].includes(status);
+    const isConfirmedStatus = (status) => ["confirmed", "pending checkin", "completed", "cash completed", "payment completed"].includes(status);
+
+    const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
+    const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";
+    const flatNoStr = String(booking.flatno || "");
+
+    let creditsRefunded = options.credits || 0;
+    if ((newStatus === "cancelled" || newStatus === "admin cancelled") && !creditsRefunded) {
+      const transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid || booking.id }
+      }).catch(() => null);
+      if (transaction) {
+        if (transaction.status === "credited") {
+          creditsRefunded = transaction.amount;
+        } else {
+          const totalAmount = (transaction.amount || 0) + (transaction.discount || 0);
+          creditsRefunded = ["completed", "cash completed", "payment completed"].includes(transaction.status) ? totalAmount : (transaction.discount || 0);
+        }
+      }
+    }
+    const creditsStr = String(creditsRefunded);
+
+    let paymentId = "N/A";
+    if (isConfirmedStatus(newStatus)) {
+      const transaction = await Transactions.findOne({
+        where: { bookingid: booking.bookingid || booking.id }
+      }).catch(() => null);
+      if (transaction) {
+        paymentId = transaction.razorpay_order_id || transaction.id || "N/A";
+      }
+    }
+
+    // --- 1. DISPATCH BOOKER (GUEST BY) NOTIFICATION ---
+    if (bookerPhone) {
+      let templateName = null;
+      let parameters = [];
+
+      if (isPendingStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_flt_gu_b_ppg2canc";
+          parameters = [bookerName, checkinFormatted, checkoutFormatted, "cancelled", attendeeName, flatNoStr];
+        } else if (newStatus === "admin cancelled") {
+          if (updatedBy === "cron" || options.isCron) {
+            templateName = "bk_flt_gu_b_ppg2acn_cron";
+            parameters = [bookerName, checkinFormatted, checkoutFormatted, attendeeName, flatNoStr, "admin cancelled"];
+          } else {
+            templateName = "bk_flt_gu_b_ppg2acn";
+            parameters = [bookerName, checkinFormatted, checkoutFormatted, "admin cancelled", attendeeName, flatNoStr];
+          }
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_flt_gu_b_ppg2conf";
+          parameters = [bookerName, checkinFormatted, checkoutFormatted, "confirmed", attendeeName, flatNoStr, paymentId];
+        }
+      } else if (isConfirmedStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_flt_gu_b_conf2canc_wcre";
+          parameters = [bookerName, checkinFormatted, checkoutFormatted, "cancelled", attendeeName, flatNoStr, creditsStr];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_flt_gu_b_conf2adcanc_wcre";
+          parameters = [bookerName, checkinFormatted, checkoutFormatted, "admin cancelled", attendeeName, flatNoStr, creditsStr];
+        } else if (newStatus === "checkedin" || newStatus === "checked_in") {
+          templateName = "bk_flt_gu_b_conf2chki";
+          parameters = [bookerName, checkinFormatted, checkoutFormatted, "checked in", attendeeName, flatNoStr];
+        }
+      } else if (prevStatusNormalized === "checkedin" || prevStatusNormalized === "checked_in") {
+        if (newStatus === "checkedout" || newStatus === "checked_out") {
+          templateName = "bk_flt_gu_b_chki2chko";
+          parameters = [bookerName, checkinFormatted, checkoutFormatted, "checked out", attendeeName, flatNoStr];
+        }
+      }
+
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA FLAT STATUS BOOKER: template=${templateName} to phone=${bookerPhone} (Booker cardno=${bookerCardno})`);
+        const result = await sendWithTemplateFallback(bookerPhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending flat WhatsApp notification to booker for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Flat WhatsApp booker notification sent successfully: template=${templateName} to ${bookerPhone}`);
+        }
+      } else {
+        console.log(`WA FLAT STATUS SKIP BOOKER: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
+      }
+    }
+
+    // --- 2. DISPATCH ATTENDEE (GUEST FOR) NOTIFICATION ---
+    if (attendeePhone) {
+      let templateName = null;
+      let parameters = [];
+
+      if (isPendingStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_flt_gu_f_ppg2canc";
+          parameters = [attendeeName, checkinFormatted, checkoutFormatted, "cancelled", bookerName, flatNoStr];
+        } else if (newStatus === "admin cancelled") {
+          if (updatedBy === "cron" || options.isCron) {
+            templateName = "bk_flt_gu_f_ppg2acn_cron";
+            parameters = [attendeeName, checkinFormatted, checkoutFormatted, bookerName, flatNoStr, "admin cancelled"];
+          } else {
+            templateName = "bk_flt_gu_f_ppg2acn";
+            parameters = [attendeeName, checkinFormatted, checkoutFormatted, "admin cancelled", bookerName, flatNoStr];
+          }
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_flt_gu_f_ppg2conf";
+          parameters = [attendeeName, checkinFormatted, checkoutFormatted, "confirmed", bookerName, flatNoStr];
+        }
+      } else if (isConfirmedStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_flt_gu_f_conf2canc";
+          parameters = [attendeeName, checkinFormatted, checkoutFormatted, "cancelled", bookerName, flatNoStr];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_flt_gu_f_conf2adcanc";
+          parameters = [attendeeName, checkinFormatted, checkoutFormatted, "admin cancelled", bookerName, flatNoStr];
+        } else if (newStatus === "checkedin" || newStatus === "checked_in") {
+          templateName = "bk_flt_gu_f_conf2chki";
+          parameters = [attendeeName, checkinFormatted, checkoutFormatted, "checked in", bookerName, flatNoStr];
+        }
+      } else if (prevStatusNormalized === "checkedin" || prevStatusNormalized === "checked_in") {
+        if (newStatus === "checkedout" || newStatus === "checked_out") {
+          templateName = "bk_flt_gu_f_chki2chko";
+          parameters = [attendeeName, checkinFormatted, checkoutFormatted, "checked out", bookerName, flatNoStr];
+        }
+      }
+
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA FLAT STATUS ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee cardno=${booking.cardno})`);
+        const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending flat WhatsApp notification to attendee for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Flat WhatsApp attendee notification sent successfully: template=${templateName} to ${attendeePhone}`);
+        }
+      } else {
+        console.log(`WA FLAT STATUS SKIP ATTENDEE: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
+      }
+    }
+
+  } catch (err) {
+    console.error("Error in sendFlatStatusChangeWhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
 
 export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, options = {}) {
   try {

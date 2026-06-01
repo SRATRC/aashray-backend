@@ -13,7 +13,8 @@ import {
   TYPE_ADHYAYAN,
   TYPE_FOOD,
   TYPE_UTSAV,
-  TYPE_ROOM
+  TYPE_ROOM,
+  TYPE_FLAT
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
@@ -31,7 +32,7 @@ import {
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
-import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -113,6 +114,12 @@ async function runJob(systemUser, t) {
         await sendUtsavStatusChangeWhatsApp(booking, 'payment pending', { isCron: true });
       } catch (waErr) {
         logger.error(`Error sending cron WhatsApp for Utsav: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_FLAT) {
+      try {
+        await sendFlatStatusChangeWhatsApp(booking, 'payment pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Flat: ${waErr.message}`);
       }
     }
   }

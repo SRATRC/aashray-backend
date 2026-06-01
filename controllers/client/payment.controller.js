@@ -25,7 +25,7 @@ import { validateCard } from '../../helpers/card.helper.js';
 import logger from '../../config/logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
@@ -115,6 +115,11 @@ export const verifyPayment = async (req, res) => {
               userBookingIdMap.roomBookingStatusChanges = [];
             }
             userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
+          } else if (bookingType === TYPE_FLAT) {
+            if (!userBookingIdMap.flatBookingStatusChanges) {
+              userBookingIdMap.flatBookingStatusChanges = [];
+            }
+            userBookingIdMap.flatBookingStatusChanges.push({ booking, previousStatus });
           } else if (bookingType === TYPE_TRAVEL) {
             if (!userBookingIdMap.travelBookingStatusChanges) {
               userBookingIdMap.travelBookingStatusChanges = [];
@@ -169,6 +174,18 @@ export const verifyPayment = async (req, res) => {
         }
       }
       delete userBookingIdMap.roomBookingStatusChanges;
+    }
+
+    // Trigger Flat status change WhatsApp messages
+    if (userBookingIdMap.flatBookingStatusChanges) {
+      for (const { booking, previousStatus } of userBookingIdMap.flatBookingStatusChanges) {
+        try {
+          await sendFlatStatusChangeWhatsApp(booking, previousStatus, { updatedBy: RAZORPAY_CALLBACK });
+        } catch (waErr) {
+          logger.error("Error sending flat status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.flatBookingStatusChanges;
     }
 
     // Trigger Travel status change WhatsApp messages

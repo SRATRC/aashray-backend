@@ -351,8 +351,15 @@ export const guestBookingFlat = async (req, res) => {
 
   await t.commit();
 
+  const userBookingIdMap = {};
+  for (const cardno in userBookingIds) {
+    userBookingIdMap[cardno] = {
+      [TYPE_FLAT]: userBookingIds[cardno]
+    };
+  }
+
   sendUnifiedEmailForBookedBy(
-    userBookingIds,
+    userBookingIdMap,
     req.user,
     BOOKING_STATUS_PENDING
   );
