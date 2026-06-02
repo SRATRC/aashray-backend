@@ -14,6 +14,7 @@ import {
 } from '../../config/constants.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
+import { sendRoomStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -66,6 +67,8 @@ export const cancelBooking = async (req, res) => {
     result = await adminCancelTransaction(req.user, null, transaction, t);
   }
 
+  const originalStatus = booking.status;
+
   await booking.update(
     {
       status: STATUS_ADMIN_CANCELLED,
@@ -75,6 +78,12 @@ export const cancelBooking = async (req, res) => {
   );
 
   await t.commit();
+
+  try {
+    await sendRoomStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    console.error("Error sending room status change WhatsApp:", waErr);
+  }
 
   sendDualUserNotifications({
     primary: {

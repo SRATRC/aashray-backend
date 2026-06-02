@@ -31,7 +31,8 @@ import {
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
   STATUS_CREDITED,
-  STATUS_PAYMENT_COMPLETED
+  STATUS_PAYMENT_COMPLETED,
+  ERR_TRANSACTION_NOT_FOUND
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -281,8 +282,8 @@ export const manualCheckin = async (req, res) => {
     throw new ApiError(
       404,
       `Cannot check-in until ${booking.checkin}. Please ask the guest to create ` +
-        `a new booking on the mobile app or you can create a new booking on admin with the ` +
-        `desired check-in date.`
+      `a new booking on the mobile app or you can create a new booking on admin with the ` +
+      `desired check-in date.`
     );
   }
 
@@ -342,8 +343,7 @@ export const manualCheckout = async (req, res) => {
   }
 
   logger.info(
-    `Successfully checked out for bookingid ${booking.bookingid} of user ${
-      booking.cardno
+    `Successfully checked out for bookingid ${booking.bookingid} of user ${booking.cardno
     } on ${moment().format('DD-MM-YYYY')}, ${moment().format('HH:mm:ss')}`
   );
 
@@ -352,6 +352,9 @@ export const manualCheckout = async (req, res) => {
   });
 
   const previousStatus = booking.status;
+  const today = moment().format('YYYY-MM-DD');
+  const checkoutTime = moment().format('HH:mm:ss');
+
   let checkoutOptions = {
     updatedBy: req.user.username,
     checkoutTime: moment().format("hh:mm a"),
@@ -479,11 +482,10 @@ export const cancelFlatBooking = async (req, res) => {
     bookedBy: booking.bookedBy && {
       cardno: booking.bookedBy,
       title: 'Flat Booking Cancelled by Admin',
-      body: `Flat booking for ${
-        booking.CardDb.issuedto.split(' ')[0]
-      } from ${moment(booking.checkin).format('Do MMM, YYYY')} to ${moment(
-        booking.checkout
-      ).format('Do MMM, YYYY')} has been cancelled by admin.`
+      body: `Flat booking for ${booking.CardDb.issuedto.split(' ')[0]
+        } from ${moment(booking.checkin).format('Do MMM, YYYY')} to ${moment(
+          booking.checkout
+        ).format('Do MMM, YYYY')} has been cancelled by admin.`
     },
     screen: '/bookings'
   });
@@ -557,7 +559,7 @@ export const flatCheckout = async (req, res) => {
     throw new ApiError(
       404,
       `Original check-out date was ${booking.checkout}. Please create ` +
-        `a new booking for the guest for the remaining days and collect the difference.`
+      `a new booking for the guest for the remaining days and collect the difference.`
     );
   }
 
@@ -1117,8 +1119,8 @@ export const flatReservationReport = async (req, res) => {
   const statusArray = Array.isArray(statuses)
     ? statuses
     : statuses
-    ? [statuses]
-    : null;
+      ? [statuses]
+      : null;
 
   const whereClause = {
     [Sequelize.Op.or]: [
@@ -1439,9 +1441,8 @@ export const updateBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Raj Sharan Cancelled',
-          body: `Stay for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been cancelled by admin.`
+          body: `Stay for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been cancelled by admin.`
         },
         screen: '/bookings'
       });
@@ -1457,9 +1458,8 @@ export const updateBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Raj Sharan booking status update',
-          body: `Payment is required for stay of ${
-            booking.CardDb.issuedto.split(' ')[0]
-          }. Please complete payment within 24 hours.`
+          body: `Payment is required for stay of ${booking.CardDb.issuedto.split(' ')[0]
+            }. Please complete payment within 24 hours.`
         },
         screen: '/bookings'
       });
@@ -1475,9 +1475,8 @@ export const updateBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Raj Sharan booking confirmed',
-          body: `Room booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been confirmed by admin.`
+          body: `Room booking for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been confirmed by admin.`
         },
         screen: '/bookings'
       });
@@ -1784,9 +1783,8 @@ export const updateFlatBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Flat Booking Cancelled by Admin',
-          body: `Flat booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been cancelled by admin.`
+          body: `Flat booking for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been cancelled by admin.`
         },
         screen: '/bookings'
       });
@@ -1802,9 +1800,8 @@ export const updateFlatBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Flat Booking status update',
-          body: `Payment is required for stay of ${
-            booking.CardDb.issuedto.split(' ')[0]
-          }. Please complete payment within 24 hours.`
+          body: `Payment is required for stay of ${booking.CardDb.issuedto.split(' ')[0]
+            }. Please complete payment within 24 hours.`
         },
         screen: '/bookings'
       });
@@ -1820,9 +1817,8 @@ export const updateFlatBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Flat Booking confirmed',
-          body: `Flat booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been confirmed and is ready for check-in.`
+          body: `Flat booking for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been confirmed and is ready for check-in.`
         },
         screen: '/bookings'
       });

@@ -509,7 +509,7 @@ async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = n
       let statusNormalized = "confirmed";
       if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
         statusNormalized = "waiting";
-      } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
+      } else if ((bookingStatus === "pending" || bookingStatus.includes("pend")) && !bookingStatus.includes("checkin")) {
         statusNormalized = "pending";
       }
 
@@ -526,52 +526,75 @@ async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = n
 
       const bookingId = String(b.bookingid || b.bookingId || b.id || "");
 
-      if (isGuestBy) {
-        const attendeeName = bookedForUser.issuedto || "";
-        const bookerName = user.issuedto || "";
-        headerParam = attendeeName;
+      const isDayVisit = b.nights === 0 || b.checkin === b.checkout || b.roomtype === "NA";
 
-        if (statusNormalized === "waiting") {
-          template = "bn_sha_gu_b_w";
-          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
-        } else if (statusNormalized === "pending") {
-          template = "bn_sha_gu_b_ppg";
-          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+      if (isDayVisit) {
+        if (isGuestBy) {
+          template = "bn_sha_gu_b_cf_sdv";
+          const attendeeName = bookedForUser?.issuedto || "";
+          const bookerName = user.issuedto || "";
+          headerParam = attendeeName;
+          bodyParams = [bookerName, checkinFormatted];
+        } else if (isGuestFor) {
+          template = "bn_sha_gu_f_cf_sdv";
+          const bookerName = await getCardName(b.bookedBy);
+          const attendeeName = user.issuedto || "";
+          headerParam = bookerName;
+          bodyParams = [attendeeName, checkinFormatted];
         } else {
-          template = "bn_sha_gu_b_cf";
-          const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
-          const paymentId = tx.razorpay_order_id || tx.id || "N/A";
-          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, roomTypeStr, paymentId];
-        }
-      } else if (isGuestFor) {
-        const bookerName = await getCardName(b.bookedBy);
-        const attendeeName = user.issuedto || "";
-        headerParam = bookerName;
-
-        if (statusNormalized === "waiting") {
-          template = "bn_sha_gu_f_wg";
-          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
-        } else if (statusNormalized === "pending") {
-          template = "bn_sha_gu_f_pp";
-          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
-        } else {
-          template = "bn_sha_gu_f_cf";
-          bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, roomTypeStr];
+          template = "bn_sha_s_b_cf_sdv";
+          const bookerName = user.issuedto || "";
+          headerParam = "";
+          bodyParams = [bookerName, checkinFormatted];
         }
       } else {
-        const bookerName = user.issuedto || "";
+        if (isGuestBy) {
+          const attendeeName = bookedForUser.issuedto || "";
+          const bookerName = user.issuedto || "";
+          headerParam = attendeeName;
 
-        if (statusNormalized === "waiting") {
-          template = "bn_sha_s_b_w";
-          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
-        } else if (statusNormalized === "pending") {
-          template = "bn_sha_s_b_ppg";
-          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+          if (statusNormalized === "waiting") {
+            template = "bn_sha_gu_b_w";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
+          } else if (statusNormalized === "pending") {
+            template = "bn_sha_gu_b_ppg";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+          } else {
+            template = "bn_sha_gu_b_cf";
+            const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
+            const paymentId = tx.razorpay_order_id || tx.id || "N/A";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, roomTypeStr, paymentId];
+          }
+        } else if (isGuestFor) {
+          const bookerName = await getCardName(b.bookedBy);
+          const attendeeName = user.issuedto || "";
+          headerParam = bookerName;
+
+          if (statusNormalized === "waiting") {
+            template = "bn_sha_gu_f_wg";
+            bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
+          } else if (statusNormalized === "pending") {
+            template = "bn_sha_gu_f_pp";
+            bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+          } else {
+            template = "bn_sha_gu_f_cf";
+            bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, roomTypeStr];
+          }
         } else {
-          template = "bn_sha_s_b_cf";
-          const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
-          const paymentId = tx.razorpay_order_id || tx.id || "N/A";
-          bodyParams = [bookerName, checkinFormatted, checkoutFormatted, roomTypeStr, paymentId];
+          const bookerName = user.issuedto || "";
+
+          if (statusNormalized === "waiting") {
+            template = "bn_sha_s_b_w";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
+          } else if (statusNormalized === "pending") {
+            template = "bn_sha_s_b_ppg";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
+          } else {
+            template = "bn_sha_s_b_cf";
+            const tx = transactionsMap.get(bookingId) || { razorpay_order_id: null, id: null };
+            const paymentId = tx.razorpay_order_id || tx.id || "N/A";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, roomTypeStr, paymentId];
+          }
         }
       }
 
