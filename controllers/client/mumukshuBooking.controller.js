@@ -404,12 +404,13 @@ export const mumukshuBooking = async (req, res, next) => {
     sendUnifiedEmailForBookedBy(
       userBookingIdMap,
       req.user,
-      BOOKING_STATUS_PENDING
+      BOOKING_STATUS_PENDING,
+      false
     );
     for (const cardno in userBookingIdMap) {
       if (cardno != req.user.cardno) {
         const bookings = userBookingIdMap[cardno];
-        sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
+        sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING, 'unifiedBookingEmail', false);
       }
     }
 

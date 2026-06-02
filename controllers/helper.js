@@ -291,7 +291,8 @@ export function retrieveBookingIds(userBookingIdMap) {
 export async function sendUnifiedEmailForBookedBy(
   userBookingIdMap,
   bookedBy,
-  bookingStatus
+  bookingStatus,
+  sendWhatsApp = true
 ) {
   const flattenedMap = {};
   let isSelfBooking = true;
@@ -319,7 +320,9 @@ export async function sendUnifiedEmailForBookedBy(
       isSelfBooking ? bookedBy.cardno : null,
       flattenedMap,
       bookedBy,
-      bookingStatus
+      bookingStatus,
+      'unifiedBookingEmail',
+      sendWhatsApp
     );
   }
 }
@@ -357,7 +360,8 @@ export async function sendUnifiedEmail(
   bookingIds,
   bookedBy,
   bookingStatus =STATUS_CONFIRMED,
-  template = 'unifiedBookingEmail'
+  template = 'unifiedBookingEmail',
+  sendWhatsApp = true
 ) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
@@ -667,16 +671,18 @@ export async function sendUnifiedEmail(
     });
   }
   // ✅ Also send WhatsApp messages
-  await sendUnifiedWhatsApp(
-    user,
-    adhyanBookingDetails,
-    travelBookingDetails,
-    flatBookingDetails,
-    utsavBookingDetails,
-    roomBookingDetails,
-    null,
-    foodBookingDetails
-  );
+  if (sendWhatsApp) {
+    await sendUnifiedWhatsApp(
+      user,
+      adhyanBookingDetails,
+      travelBookingDetails,
+      flatBookingDetails,
+      utsavBookingDetails,
+      roomBookingDetails,
+      null,
+      foodBookingDetails
+    );
+  }
 
 }
 
