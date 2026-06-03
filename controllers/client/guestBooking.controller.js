@@ -87,7 +87,7 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
           })
         : [],
       travelIds.length
-        ? TravelDb.findAll({ where: { id: { [Op.in]: travelIds } } })
+        ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })
         : [],
       roomIds.length
         ? RoomBooking.findAll({

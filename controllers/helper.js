@@ -673,7 +673,7 @@ export async function sendUnifiedEmail(
   // ✅ Also send WhatsApp messages
   if (sendWhatsApp) {
     await sendUnifiedWhatsApp(
-      user,
+      user || bookedBy,
       adhyanBookingDetails,
       travelBookingDetails,
       flatBookingDetails,

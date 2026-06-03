@@ -82,17 +82,28 @@ async function sendWithTemplateFallback(phone, template, components) {
       fallbackTemplate = "bn_sha_gu_b_cf";
       fallbackComponents = JSON.parse(JSON.stringify(components));
       const bodyComp = fallbackComponents.find(c => c.type === "body");
-      if (bodyComp && bodyComp.parameters && bodyComp.parameters.length >= 5) {
-        const roomType = bodyComp.parameters[4].text;
-        bodyComp.parameters[3] = { type: "text", text: roomType };
-        bodyComp.parameters[4] = { type: "text", text: "N/A" };
+      if (bodyComp && bodyComp.parameters) {
+        if (bodyComp.parameters.length >= 7) {
+          bodyComp.parameters.splice(5, 1); // remove creditsStr if present
+        }
+        if (bodyComp.parameters.length >= 5) {
+          const statusVal = bodyComp.parameters[4].text;
+          bodyComp.parameters[3] = { type: "text", text: statusVal };
+          bodyComp.parameters[4] = { type: "text", text: "N/A" };
+        }
+        if (bodyComp.parameters.length > 6) {
+          bodyComp.parameters = bodyComp.parameters.slice(0, 6);
+        }
       }
     } else if (template.startsWith("bn_sha_gu_f_") || template.startsWith("bk_sha_gu_f_")) {
       fallbackTemplate = "bn_sha_gu_f_cf";
       fallbackComponents = JSON.parse(JSON.stringify(components));
       const bodyComp = fallbackComponents.find(c => c.type === "body");
       if (bodyComp && bodyComp.parameters && bodyComp.parameters.length >= 5) {
-        bodyComp.parameters.splice(3, 1);
+        bodyComp.parameters.splice(3, 1); // remove checkout date
+        if (bodyComp.parameters.length > 4) {
+          bodyComp.parameters = bodyComp.parameters.slice(0, 4);
+        }
       }
     } else if (template.startsWith("bn_sha_s_b_") || template.startsWith("bk_sha_s_b_")) {
       fallbackTemplate = "bn_sha_s_b_cf";
@@ -1498,11 +1509,21 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
         }
       } else if (prevStatusNormalized === "pending checkin" || prevStatusNormalized === "pending_checkin") {
         if (newStatus === "cancelled") {
-          templateName = "bk_sha_s_b_pgci2cn";
-          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", creditsStr];
+          if (hasBooker || attendeeCard?.res_status === "GUEST") {
+            templateName = "bk_sha_gu_f_pndgchki2canc_";
+            parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", bookerName || "Admin"];
+          } else {
+            templateName = "bk_sha_s_b_pgci2cn";
+            parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", creditsStr];
+          }
         } else if (newStatus === "admin cancelled") {
-          templateName = "bk_sha_s_b_pgci2acan";
-          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", creditsStr];
+          if (hasBooker || attendeeCard?.res_status === "GUEST") {
+            templateName = "bk_sha_gu_f_pgci2acn";
+            parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", bookerName || "Admin"];
+          } else {
+            templateName = "bk_sha_s_b_pgci2acan";
+            parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", creditsStr];
+          }
         } else if (newStatus === "checkedin" || newStatus === "checked_in") {
           templateName = "bk_sha_s_b_pci2ci";
           parameters = [attendeeName, booking.roomno || "NA"];
@@ -2187,7 +2208,7 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
         }
       });
       // Check if any transactions indicate payment pending
-      const pendingStatuses = ["payment_pending", "cash_pending", "payment_failed"];
+      const pendingStatuses = ["pending", "payment_pending", "cash pending", "cash_pending", "failed", "payment_failed"];
       isPaymentPending = txs.some(tx => pendingStatuses.includes(String(tx.status).trim().toLowerCase()));
 
       // Resolve the payment ID (razorpay order ID)

@@ -102,13 +102,13 @@ export const verifyPayment = async (req, res) => {
               : STATUS_CONFIRMED;
 
           const previousStatus = booking.status;
-          await booking.update(
-            {
-              status: bookingStatus,
-              updatedBy
-            },
-            { transaction: t }
-          );
+          const updateFields = {
+            updatedBy
+          };
+          if (bookingType !== TYPE_FOOD) {
+            updateFields.status = bookingStatus;
+          }
+          await booking.update(updateFields, { transaction: t });
 
           if (bookingType === TYPE_ROOM) {
             if (!userBookingIdMap.roomBookingStatusChanges) {
