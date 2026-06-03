@@ -1846,17 +1846,13 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
       paymentId = transaction?.razorpay_order_id || transaction?.upi_ref || booking.bookingid || booking.id || "";
     }
 
-    // Determine target template and parameters
-    let templateName = null;
-    let parameters = [];
-    let recipientPhone = null;
-
-    if (!hasBooker) {
-      // --- SELF TRAVEL BOOKING TRANSITIONS ---
-      recipientPhone = attendeePhone;
+    // --- 1. DISPATCH ATTENDEE (SELF/TRAVELER) NOTIFICATION ---
+    if (attendeePhone) {
+      let templateName = null;
+      let parameters = [];
 
       if (prevStatusNormalized === "awaiting confirmation") {
-        if (newStatus === "proceed for payment" || newStatus === "payment pending" || newStatus === "pending") {
+        if ((newStatus === "proceed for payment" || newStatus === "payment pending" || newStatus === "pending") && !hasBooker) {
           templateName = "bk_pvs_s_b_awc2ppg";
           parameters = [attendeeName, pickup, drop, "proceed for payment", dateFormatted];
         } else if (newStatus === "admin cancelled") {
@@ -1888,23 +1884,42 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
           templateName = "bk_pvs_s_b_cf2cn";
           parameters = [attendeeName, pickup, drop, "cancelled", dateFormatted];
         } else if (newStatus === "admin cancelled") {
-          if (creditsRefunded > 0) {
-            templateName = "bk_pvs_s_b_conf2adcanc_wcre";
-            parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted, creditsStr];
-          } else {
+          if (hasBooker || !(creditsRefunded > 0)) {
             templateName = "bk_pvs_s_b_cf2acn_woc";
             parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted];
+          } else {
+            templateName = "bk_pvs_s_b_conf2adcanc_wcre";
+            parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted, creditsStr];
           }
         }
       } else if (prevStatusNormalized === "cancelled") {
         if (newStatus === "admin cancelled" && creditsRefunded > 0) {
-          templateName = "bk_pvs_s_b_canc2adcanc_wcre";
-          parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted, creditsStr];
+          if (!hasBooker) {
+            templateName = "bk_pvs_s_b_canc2adcanc_wcre";
+            parameters = [attendeeName, pickup, drop, "admin cancelled", dateFormatted, creditsStr];
+          }
         }
       }
-    } else {
-      // --- GUEST TRAVEL BOOKING TRANSITIONS ---
-      recipientPhone = bookerPhone;
+
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA TRAVEL STATUS ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee cardno=${booking.cardno})`);
+        const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending travel WhatsApp notification to attendee for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Travel WhatsApp attendee notification sent successfully: template=${templateName} to ${attendeePhone}`);
+        }
+      } else {
+        console.log(`WA TRAVEL STATUS SKIP ATTENDEE: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
+      }
+    }
+
+    // --- 2. DISPATCH BOOKER (GUEST) NOTIFICATION ---
+    if (hasBooker && bookerPhone) {
+      let templateName = null;
+      let parameters = [];
 
       if (prevStatusNormalized === "awaiting confirmation") {
         if (newStatus === "proceed for payment" || newStatus === "payment pending" || newStatus === "pending") {
@@ -1953,20 +1968,20 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
           parameters = [bookerName, pickup, drop, "admin cancelled", dateFormatted, creditsStr, attendeeName];
         }
       }
-    }
 
-    if (recipientPhone && templateName) {
-      const sanitizedParams = parameters.map(p => sanitizeParamText(p));
-      const components = buildBodyComponents(sanitizedParams);
-
-      const result = await sendWithTemplateFallback(recipientPhone, templateName, components);
-      if (!result || !result.ok) {
-        console.error(`Error sending travel status change WhatsApp for template ${templateName}`, result?.error);
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA TRAVEL STATUS BOOKER: template=${templateName} to phone=${bookerPhone} (Booker cardno=${booking.bookedBy})`);
+        const result = await sendWithTemplateFallback(bookerPhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending travel WhatsApp notification to booker for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Travel WhatsApp booker notification sent successfully: template=${templateName} to ${bookerPhone}`);
+        }
       } else {
-        console.log(`📩 Travel WhatsApp status change sent successfully: template=${templateName} to ${recipientPhone}`);
+        console.log(`WA TRAVEL STATUS SKIP BOOKER: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
       }
-    } else {
-      console.log(`WA TRAVEL STATUS SKIP: No matching template or recipient for transition '${prevStatusNormalized}' -> '${newStatus}' (hasBooker=${hasBooker})`);
     }
 
   } catch (err) {
