@@ -200,8 +200,10 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
           {
             bookingid: bookingId,
             cardno: booking_user,
+            bookedBy: user.cardno !== booking_user ? user.cardno : null,
             shibir_id: adhyayan.id,
-            status: STATUS_WAITING
+            status: STATUS_WAITING,
+            updatedBy: user.cardno
           },
           { transaction: t }
         );
@@ -253,9 +255,13 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
   });
 
   if (booking) {
+    // Preserve booker attribution on promotion: keep the original bookedBy
+    // (already set at creation) and record who triggered the promotion.
     await booking.update(
       {
-        status: STATUS_PAYMENT_PENDING
+        status: STATUS_PAYMENT_PENDING,
+        bookedBy: booking.bookedBy,
+        updatedBy
       },
       { transaction: t }
     );
