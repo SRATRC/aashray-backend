@@ -22,7 +22,7 @@ import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
-import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 
 export const ViewAllBookings = async (req, res) => {
@@ -201,6 +201,53 @@ export const FlatBookingMumukshu = async (req, res) => {
     userBookingIdMap[cardno] = {
       [TYPE_FLAT]: userBookingIds[cardno]
     };
+  }
+
+  // --- WhatsApp notifications ---
+  try {
+    const bookedByCard = req.user.cardno;
+    const allCardnos = Object.keys(userBookingIdMap || {});
+    const jobs = [];
+
+    for (const cardno of allCardnos) {
+      const flatIds = userBookingIds[cardno] || [];
+      const flatBookingDetails = flatIds.length
+        ? await FlatBooking.findAll({ where: { bookingid: { [Sequelize.Op.in]: flatIds } } })
+        : [];
+
+      jobs.push(sendUnifiedWhatsApp(
+        cardno,
+        [],
+        [],
+        flatBookingDetails,
+        [],
+        [],
+        null
+      ));
+
+      if (cardno !== bookedByCard) {
+        jobs.push(sendUnifiedWhatsApp(
+          bookedByCard,
+          [],
+          [],
+          flatBookingDetails,
+          [],
+          [],
+          cardno
+        ));
+      }
+    }
+
+    const results = await Promise.allSettled(jobs);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error(`WhatsApp job #${i} failed:`, r.reason);
+      } else {
+        console.log(`WhatsApp job #${i} succeeded`);
+      }
+    });
+  } catch (waErr) {
+    console.error("Unexpected error in WhatsApp notification block:", waErr);
   }
 
   sendUnifiedEmailForBookedBy(userBookingIdMap, req.user, BOOKING_STATUS_PENDING);

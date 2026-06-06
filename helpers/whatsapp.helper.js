@@ -2014,22 +2014,6 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
       bookerName = bookerCard?.issuedto || "";
     }
 
-    // Determine target recipient and phone
-    let recipientPhone = null;
-    let recipientName = "";
-    if (hasBooker) {
-      recipientPhone = bookerPhone;
-      recipientName = bookerName;
-    } else {
-      recipientPhone = attendeePhone;
-      recipientName = attendeeName;
-    }
-
-    if (!recipientPhone) {
-      console.warn(`No target phone for utsav status change bookingid=${booking.bookingid || booking.id}; skipping.`);
-      return;
-    }
-
     // 3. Load utsav details
     let utsavName = "";
     if (booking.utsavid) {
@@ -2053,7 +2037,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
       if (transaction) {
         if (transaction.status === "credited") {
           creditsRefunded = transaction.amount || 0;
-        } else {
+        } else if (newStatus === "cancelled") {
           const totalAmount = (transaction.amount || 0) + (transaction.discount || 0);
           creditsRefunded = ["completed", "cash completed", "payment completed"].includes(transaction.status) ? totalAmount : (transaction.discount || 0);
         }
@@ -2073,120 +2057,139 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
     const isPendingStatus = (status) => ["pending", "payment pending", "cash pending"].includes(status);
     const isConfirmedStatus = (status) => ["confirmed", "completed", "cash completed", "payment completed"].includes(status);
 
-    let templateName = null;
-    let parameters = [];
+    // --- 1. DISPATCH ATTENDEE (SELF) NOTIFICATION ---
+    if (attendeePhone) {
+      let templateName = null;
+      let parameters = [];
 
-    if (hasBooker) {
-      // --- GUEST UTSAV BOOKING STATUS CHANGES ---
-      if (prevStatusNormalized === "waiting") {
-        if (newStatus === "cancelled") {
-          templateName = "bk_usv_gu_b_wtng2canc";
-          parameters = [recipientName, utsavName, packageName, "cancelled", attendeeName];
-        } else if (newStatus === "admin cancelled") {
-          templateName = "bk_usv_gu_b_w2acn";
-          parameters = [recipientName, utsavName, packageName, "admin cancelled", attendeeName];
-        } else if (isPendingStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_w2ppg";
-          parameters = [recipientName, utsavName, packageName, "payment pending", attendeeName];
-        }
-      } else if (isPendingStatus(prevStatusNormalized)) {
-        if (newStatus === "cancelled") {
-          templateName = "bk_usv_gu_b_pymtpndg2canc";
-          parameters = [recipientName, utsavName, packageName, "cancelled", attendeeName];
-        } else if (newStatus === "admin cancelled") {
-          if (updatedBy === "cron" || options.isCron) {
-            templateName = "bk_usv_gu_b_ppg2acn_c";
-          } else {
-            templateName = "bk_usv_gu_b_ppg2acn_a";
-          }
-          parameters = [recipientName, utsavName, packageName, "admin cancelled", attendeeName];
-        } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_ppg2cf";
-          parameters = [recipientName, utsavName, packageName, paymentId, attendeeName];
-        }
-      } else if (isConfirmedStatus(prevStatusNormalized)) {
-        if (newStatus === "cancelled") {
-          templateName = "bk_usv_gu_b_cnfc2canc";
-          parameters = [recipientName, utsavName, packageName, "cancelled", attendeeName];
-        } else if (newStatus === "admin cancelled") {
-          if (creditsRefunded > 0) {
-            templateName = "bk_usv_gu_b_cf2acn_wc";
-            parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr, attendeeName];
-          } else {
-            templateName = "bk_usv_gu_b_cf2acn_woc";
-            parameters = [recipientName, utsavName, packageName, "admin cancelled", attendeeName];
-          }
-        }
-      } else if (prevStatusNormalized === "cancelled") {
-        if (newStatus === "admin cancelled" && creditsRefunded > 0) {
-          templateName = "bk_usv_gu_b_canc2adcanc_wcre";
-          parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr, attendeeName];
-        }
-      }
-    } else {
-      // --- SELF UTSAV BOOKING STATUS CHANGES ---
       if (prevStatusNormalized === "waiting") {
         if (newStatus === "cancelled") {
           templateName = "bk_usv_s_b_w2cn";
-          parameters = [recipientName, utsavName, packageName, "cancelled"];
+          parameters = [attendeeName, utsavName, packageName, "cancelled"];
         } else if (newStatus === "admin cancelled") {
           templateName = "bk_usv_s_b_w2acn";
-          parameters = [recipientName, utsavName, packageName, "admin cancelled"];
-        } else if (isPendingStatus(newStatus)) {
+          parameters = [attendeeName, utsavName, packageName, "admin cancelled"];
+        } else if (isPendingStatus(newStatus) && !hasBooker) {
           templateName = "bk_usv_s_b_wtng2pymtpndg";
-          parameters = [recipientName, utsavName, packageName, "payment pending"];
+          parameters = [attendeeName, utsavName, packageName, "payment pending"];
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
           templateName = "bk_usv_s_b_pymtpndg2canc";
-          parameters = [recipientName, utsavName, packageName, "cancelled"];
+          parameters = [attendeeName, utsavName, packageName, "cancelled"];
         } else if (newStatus === "admin cancelled") {
           if (updatedBy === "cron" || options.isCron) {
             templateName = "bk_usv_s_b_ppg2acn_c";
           } else {
             templateName = "bk_usv_s_b_ppg2acn_a";
           }
-          parameters = [recipientName, utsavName, packageName, "admin cancelled"];
+          parameters = [attendeeName, utsavName, packageName, "admin cancelled"];
         } else if (isConfirmedStatus(newStatus)) {
           templateName = "bk_usv_s_b_ppg2cf";
-          parameters = [recipientName, utsavName, packageName, paymentId];
+          parameters = [attendeeName, utsavName, packageName, paymentId];
         }
       } else if (isConfirmedStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
           templateName = "bk_usv_s_b_cf2cn";
-          parameters = [recipientName, utsavName, packageName, "cancelled"];
+          parameters = [attendeeName, utsavName, packageName, "cancelled"];
         } else if (newStatus === "checkedin" || newStatus === "checked_in") {
           templateName = "bk_usv_s_b_cf2ci";
-          parameters = [recipientName, booking.roomno || options.roomno || "NA"];
+          parameters = [attendeeName, booking.roomno || options.roomno || "NA"];
         } else if (newStatus === "admin cancelled") {
-          if (creditsRefunded > 0) {
+          if (creditsRefunded > 0 && !hasBooker) {
             templateName = "bk_usv_s_b_cf2acn_wc";
-            parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr];
+            parameters = [attendeeName, utsavName, packageName, "admin cancelled", creditsStr];
           } else {
             templateName = "bk_usv_s_b_cf2acn_woc";
-            parameters = [recipientName, utsavName, packageName, "admin cancelled"];
+            parameters = [attendeeName, utsavName, packageName, "admin cancelled"];
+          }
+        }
+      } else if (prevStatusNormalized === "cancelled") {
+        if (newStatus === "admin cancelled" && creditsRefunded > 0 && !hasBooker) {
+          templateName = "bk_usv_s_b_canc2adcanc_wcre";
+          parameters = [attendeeName, utsavName, packageName, "admin cancelled", creditsStr];
+        }
+      }
+
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA UTSAV STATUS ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee name=${attendeeName})`);
+        const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending utsav WhatsApp notification to attendee for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Utsav WhatsApp attendee notification sent successfully: template=${templateName} to ${attendeePhone}`);
+        }
+      } else {
+        console.log(`WA UTSAV STATUS SKIP ATTENDEE: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
+      }
+    }
+
+    // --- 2. DISPATCH BOOKER (GUEST) NOTIFICATION ---
+    if (hasBooker && bookerPhone) {
+      let templateName = null;
+      let parameters = [];
+
+      if (prevStatusNormalized === "waiting") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_gu_b_wtng2canc";
+          parameters = [bookerName, utsavName, packageName, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          templateName = "bk_usv_gu_b_w2acn";
+          parameters = [bookerName, utsavName, packageName, "admin cancelled", attendeeName];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_usv_gu_b_w2ppg";
+          parameters = [bookerName, utsavName, packageName, "payment pending", attendeeName];
+        }
+      } else if (isPendingStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_gu_b_pymtpndg2canc";
+          parameters = [bookerName, utsavName, packageName, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          if (updatedBy === "cron" || options.isCron) {
+            templateName = "bk_usv_gu_b_ppg2acn_c";
+          } else {
+            templateName = "bk_usv_gu_b_ppg2acn_a";
+          }
+          parameters = [bookerName, utsavName, packageName, "admin cancelled", attendeeName];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_usv_gu_b_ppg2cf";
+          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName];
+        }
+      } else if (isConfirmedStatus(prevStatusNormalized)) {
+        if (newStatus === "cancelled") {
+          templateName = "bk_usv_gu_b_cnfc2canc";
+          parameters = [bookerName, utsavName, packageName, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled") {
+          if (creditsRefunded > 0) {
+            templateName = "bk_usv_gu_b_cf2acn_wc";
+            parameters = [bookerName, utsavName, packageName, "admin cancelled", creditsStr, attendeeName];
+          } else {
+            templateName = "bk_usv_gu_b_cf2acn_woc";
+            parameters = [bookerName, utsavName, packageName, "admin cancelled", attendeeName];
           }
         }
       } else if (prevStatusNormalized === "cancelled") {
         if (newStatus === "admin cancelled" && creditsRefunded > 0) {
-          templateName = "bk_usv_s_b_canc2adcanc_wcre";
-          parameters = [recipientName, utsavName, packageName, "admin cancelled", creditsStr];
+          templateName = "bk_usv_gu_b_canc2adcanc_wcre";
+          parameters = [bookerName, utsavName, packageName, "admin cancelled", creditsStr, attendeeName];
         }
       }
-    }
 
-    if (templateName) {
-      const sanitizedParams = parameters.map(p => sanitizeParamText(p));
-      const components = buildBodyComponents(sanitizedParams);
-      console.log(`WA UTSAV STATUS: template=${templateName} to phone=${recipientPhone} (recipientName=${recipientName})`);
-      const result = await sendWithTemplateFallback(recipientPhone, templateName, components);
-      if (!result || !result.ok) {
-        console.error(`Error sending utsav WhatsApp status change for template ${templateName}`, result?.error);
+      if (templateName) {
+        const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+        const components = buildBodyComponents(sanitizedParams);
+        console.log(`WA UTSAV STATUS BOOKER: template=${templateName} to phone=${bookerPhone} (Booker name=${bookerName})`);
+        const result = await sendWithTemplateFallback(bookerPhone, templateName, components);
+        if (!result || !result.ok) {
+          console.error(`Error sending utsav WhatsApp notification to booker for template ${templateName}`, result?.error);
+        } else {
+          console.log(`📩 Utsav WhatsApp booker notification sent successfully: template=${templateName} to ${bookerPhone}`);
+        }
       } else {
-        console.log(`📩 Utsav WhatsApp status change sent successfully: template=${templateName} to ${recipientPhone}`);
+        console.log(`WA UTSAV STATUS SKIP BOOKER: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}'`);
       }
-    } else {
-      console.log(`WA UTSAV STATUS SKIP: No matching template for transition '${prevStatusNormalized}' -> '${newStatus}' (hasBooker=${hasBooker})`);
     }
 
   } catch (err) {

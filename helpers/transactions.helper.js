@@ -120,16 +120,16 @@ export async function cancelTransaction(
   }
 
   if (!admin && getBookingType(transaction) === TYPE_TRAVEL) {
-  // user cancelling travel booking → no credits
-  await transaction.update(
-    {
-      status: STATUS_CANCELLED,
-      updatedBy: user.username,
-    },
-    { transaction: t }
-  );
-  return { credits: 0 };
-}
+    // user cancelling travel booking → no credits
+    await transaction.update(
+      {
+        status: STATUS_CANCELLED,
+        updatedBy: user.username,
+      },
+      { transaction: t }
+    );
+    return { credits: 0 };
+  }
 
 
   var status = admin ? STATUS_ADMIN_CANCELLED : STATUS_CANCELLED;
@@ -138,56 +138,56 @@ export async function cancelTransaction(
   const totalAmount = transaction.amount + transaction.discount;
   const credits =
     transaction.status == STATUS_PAYMENT_COMPLETED ||
-    transaction.status == STATUS_CASH_COMPLETED
+      transaction.status == STATUS_CASH_COMPLETED
       ? totalAmount
       : transaction.discount;
 
   const bookingType = getBookingType(transaction);
 
   switch (transaction.status) {
-  case STATUS_PAYMENT_COMPLETED:
-  case STATUS_CASH_COMPLETED:
-  case STATUS_PAYMENT_PENDING:
-  case STATUS_CASH_PENDING:
-  case STATUS_PAYMENT_FAILED:
-    if ([TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) || ifMigrated(transaction)) {
-      // for bookings that are not credited, keep txn status as completed for reports
-      if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-        status = transaction.status;
+    case STATUS_PAYMENT_COMPLETED:
+    case STATUS_CASH_COMPLETED:
+    case STATUS_PAYMENT_PENDING:
+    case STATUS_CASH_PENDING:
+    case STATUS_PAYMENT_FAILED:
+      if ([TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) || ifMigrated(transaction)) {
+        // for bookings that are not credited, keep txn status as completed for reports
+        if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
+          status = transaction.status;
+        }
+      } else if (credits > 0) {
+        await addCredit(user, card, bookingType, credits, t);
+        status = STATUS_CREDITED;
+        description = `credits added: ${credits}`;
       }
-    } else if (credits > 0) {
-      await addCredit(user, card, bookingType, credits, t);
-      status = STATUS_CREDITED;
-      description = `credits added: ${credits}`;
-    }
-    break;
+      break;
 
-  case STATUS_CANCELLED:
-  if (admin) {
-    // ✅ force credits to full amount if admin chooses to issue credits
-    const creditAmount = transaction.amount + transaction.discount;
-    if (creditAmount > 0) {
-      await addCredit(user, card, bookingType, creditAmount, t);
-      status = STATUS_CREDITED;
-      description = `credits added: ${creditAmount}`;
-    } else {
-      status = STATUS_ADMIN_CANCELLED;
-    }
-  } else {
-    throw new ApiError(400, 'Cannot cancel already cancelled transaction');
+    case STATUS_CANCELLED:
+      if (admin) {
+        // ✅ force credits to full amount if admin chooses to issue credits
+        const creditAmount = transaction.amount + transaction.discount;
+        if (creditAmount > 0) {
+          await addCredit(user, card, bookingType, creditAmount, t);
+          status = STATUS_CREDITED;
+          description = `credits added: ${creditAmount}`;
+        } else {
+          status = STATUS_ADMIN_CANCELLED;
+        }
+      } else {
+        throw new ApiError(400, 'Cannot cancel already cancelled transaction');
+      }
+      break;
+
+    case STATUS_ADMIN_CANCELLED:
+    case STATUS_CREDITED:
+      throw new ApiError(
+        400,
+        'Cannot cancel already admin cancelled or credited transaction'
+      );
+
+    default:
+      throw new ApiError(400, 'Invalid status provided');
   }
-  break;
-  
-  case STATUS_ADMIN_CANCELLED:
-  case STATUS_CREDITED:
-    throw new ApiError(
-      400,
-      'Cannot cancel already admin cancelled or credited transaction'
-    );
-
-  default:
-    throw new ApiError(400, 'Invalid status provided');
-}
 
   await transaction.update(
     {

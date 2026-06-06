@@ -17,11 +17,14 @@ import {
   STATUS_AWAITING_CONFIRMATION,
   BOOKING_STATUS_PENDING,
   STATUS_SEVA_KUTIR,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  TYPE_FLAT
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
-  checkRoomAvailabilityForMumukshus
+  checkRoomAvailabilityForMumukshus,
+  bookFlatForMumukshus,
+  roomCharge
 } from '../../helpers/roomBooking.helper.js';
 // import { UtsavDb } from '../../models/associations.js';
 import {
@@ -51,7 +54,10 @@ import {
   retrieveBookingIds,
   sendUnifiedEmailForBookedBy,
   sendUnifiedEmail,
-  setWaitingBookingCountMap
+  setWaitingBookingCountMap,
+  calculateNights,
+  validateDate,
+  checkFlatAlreadyBooked
 } from '../helper.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -79,7 +85,7 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const travelIds = Array.isArray(typeMap[TYPE_TRAVEL]) ? typeMap[TYPE_TRAVEL].map(String).filter(Boolean) : [];
   const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
   const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
-  const flatIds   = Array.isArray(typeMap['FLAT']) ? typeMap['FLAT'].map(String).filter(Boolean) : [];
+  const flatIds   = Array.isArray(typeMap[TYPE_FLAT]) ? typeMap[TYPE_FLAT].map(String).filter(Boolean) : [];
   const foodIds   = Array.isArray(typeMap[TYPE_FOOD]) ? typeMap[TYPE_FOOD].map(String).filter(Boolean) : [];
 
   console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)} foodIds=${JSON.stringify(foodIds)}`);
@@ -295,6 +301,7 @@ export const validateBooking = async (req, res) => {
 
   const response = {
     roomDetails: [],
+    flatDetails: [],
     adhyayanDetails: [],
     foodDetails: {},
     travelDetails: {},
@@ -533,6 +540,18 @@ async function book(
 
       break;
 
+    case TYPE_FLAT:
+      const flatResult = await bookFlatForMumukshus(
+        data.details.checkin_date || data.details.startDay,
+        data.details.checkout_date || data.details.endDay,
+        data.details.mumukshus || data.details.guests,
+        user,
+        t
+      );
+      amount += flatResult.order.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
@@ -589,6 +608,12 @@ async function validate(body, user, data, response) {
         (partialSum, utsav) => partialSum + utsav.charge,
         0
       );
+      break;
+
+    case TYPE_FLAT:
+      response.flatDetails = await checkFlatAvailability(data);
+      const nights = await calculateNights(data.details.checkin_date, data.details.checkout_date);
+      totalCharge += roomCharge('nac') * nights * (data.details.mumukshus || data.details.guests).length;
       break;
 
     default:
@@ -706,7 +731,30 @@ async function checkTravelAvailability(data) {
   };
 }
 
+async function checkFlatAvailability(data) {
+  const { checkin_date, checkout_date, mumukshus, guests } = data.details;
+  const list = mumukshus || guests || [];
+  validateDate(checkin_date, checkout_date);
 
+  const flatDetails = [];
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const chargePerGuest = roomCharge('nac') * nights;
+
+  for (const person of list) {
+    const isAlreadyBooked = await checkFlatAlreadyBooked(checkin_date, checkout_date, person);
+    if (isAlreadyBooked) {
+      throw new ApiError(400, `Flat already booked for ${person}`);
+    }
+
+    flatDetails.push({
+      mumukshu: person,
+      status: 'available',
+      charge: chargePerGuest
+    });
+  }
+
+  return flatDetails;
+}
 
 async function getBookingDetailsForCard(cardno, userBookingIdMap) {
   const typeMap = userBookingIdMap[cardno] || {};
@@ -715,7 +763,7 @@ async function getBookingDetailsForCard(cardno, userBookingIdMap) {
   const travelIds = typeMap[TYPE_TRAVEL] || [];
   const roomIds   = typeMap[TYPE_ROOM] || [];
   const utsavIds  = typeMap[TYPE_UTSAV] || [];
-  const flatIds   = typeMap["FLAT"] || []; // if used later
+  const flatIds   = typeMap[TYPE_FLAT] || []; // if used later
   
 
   const [

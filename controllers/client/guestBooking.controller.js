@@ -43,7 +43,8 @@ import {
   createFlatBooking,
   checkRoomAvailabilityForMumukshus,
   bookRoomForMumukshus,
-  bookFlatForMumukshus
+  bookFlatForMumukshus,
+  roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
   generateOrderId,
@@ -270,6 +271,7 @@ export const validateBooking = async (req, res) => {
 
   const response = {
     roomDetails: [],
+    flatDetails: [],
     adhyayanDetails: [],
     foodDetails: {},
     utsavDetails: [],
@@ -345,6 +347,18 @@ async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMa
       );
       break;
 
+    case TYPE_FLAT:
+      const flatResult = await bookFlatForMumukshus(
+        data.details.checkin_date || data.details.startDay,
+        data.details.checkout_date || data.details.endDay,
+        data.details.guests,
+        user,
+        t
+      );
+      amount += flatResult.order.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
@@ -399,6 +413,12 @@ async function validate(body, user, data, utsav, response) {
         (partialSum, utsav) => partialSum + utsav.charge,
         0
       );
+      break;
+
+    case TYPE_FLAT:
+      response.flatDetails = await checkFlatAvailability(data);
+      const nights = await calculateNights(data.details.checkin_date, data.details.checkout_date);
+      totalCharge += roomCharge('nac') * nights * data.details.guests.length;
       break;
 
     default:
@@ -477,6 +497,30 @@ async function bookAdhyayan(data, t, user) {
   const { shibir_ids, guests } = data.details;
   const result = await bookAdhyayanForMumukshus(shibir_ids, guests, t, user);
   return result;
+}
+
+async function checkFlatAvailability(data) {
+  const { checkin_date, checkout_date, guests } = data.details;
+  validateDate(checkin_date, checkout_date);
+
+  const flatDetails = [];
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const chargePerGuest = roomCharge('nac') * nights;
+
+  for (const guest of guests) {
+    const isAlreadyBooked = await checkFlatAlreadyBooked(checkin_date, checkout_date, guest);
+    if (isAlreadyBooked) {
+      throw new ApiError(400, `Flat already booked for ${guest}`);
+    }
+
+    flatDetails.push({
+      guest,
+      status: 'available',
+      charge: chargePerGuest
+    });
+  }
+
+  return flatDetails;
 }
 
 export const guestBookingFlat = async (req, res) => {

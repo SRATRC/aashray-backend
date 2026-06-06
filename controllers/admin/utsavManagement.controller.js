@@ -48,15 +48,15 @@ export const createUtsavBookingByAdmin = async (req, res) => {
 
   // Validation
   if (!utsavid || !Array.isArray(mumukshus) || mumukshus.length === 0) {
-    return res.status(400).send({ 
-      message: "utsavid and mumukshus are required" 
+    return res.status(400).send({
+      message: "utsavid and mumukshus are required"
     });
   }
 
   for (const m of mumukshus) {
     if (!m?.cardno || !m?.packageid) {
-      return res.status(400).send({ 
-        message: "Each mumukshu must include cardno and packageid" 
+      return res.status(400).send({
+        message: "Each mumukshu must include cardno and packageid"
       });
     }
   }
@@ -68,10 +68,10 @@ export const createUtsavBookingByAdmin = async (req, res) => {
   try {
     // Create bookings
     const result = await bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, req.user);
-    
+
     // Commit transaction
     await t.commit();
-    
+
     console.log("✅ Transaction committed successfully");
     console.log("📦 Booking result:", result);
 
@@ -83,8 +83,8 @@ export const createUtsavBookingByAdmin = async (req, res) => {
         console.log(`\n📋 Processing booking: ${id}`);
 
         // Fetch booking and card details
-        const booking = await UtsavBooking.findOne({ 
-          where: { bookingid: id } 
+        const booking = await UtsavBooking.findOne({
+          where: { bookingid: id }
         });
 
         if (!booking) {
@@ -92,8 +92,8 @@ export const createUtsavBookingByAdmin = async (req, res) => {
           continue;
         }
 
-        const card = await CardDb.findOne({ 
-          where: { cardno: booking.cardno } 
+        const card = await CardDb.findOne({
+          where: { cardno: booking.cardno }
         });
 
         if (!card) {
@@ -130,15 +130,15 @@ export const createUtsavBookingByAdmin = async (req, res) => {
 
           // Clean and format phone number
           const cleanPhone = String(phone).replace(/\D/g, '');
-          const formattedPhone = cleanPhone.startsWith('91') 
-            ? cleanPhone 
+          const formattedPhone = cleanPhone.startsWith('91')
+            ? cleanPhone
             : `91${cleanPhone}`;
 
           console.log(`📞 Sending WhatsApp to: ${formattedPhone}`);
 
           // Get utsav details for the message
-          const utsav = await UtsavDb.findOne({ 
-            where: { id: booking.utsavid } 
+          const utsav = await UtsavDb.findOne({
+            where: { id: booking.utsavid }
           });
 
           await sendWhatsAppMessage(
@@ -150,15 +150,15 @@ export const createUtsavBookingByAdmin = async (req, res) => {
               utsav?.start_date || "TBD"
             ]
           );
-  
+
           console.log(`✅ WhatsApp sent successfully for booking: ${id}`);
         } catch (err) {
-    console.error(`❌ WhatsApp failed for ${phone}`);
-    console.error("Status:", err.response?.status);
-    console.error("Data:", JSON.stringify(err.response?.data, null, 2));
-    console.error("Message:", err.message);
-    throw err;
-  }
+          console.error(`❌ WhatsApp failed for ${phone}`);
+          console.error("Status:", err.response?.status);
+          console.error("Data:", JSON.stringify(err.response?.data, null, 2));
+          console.error("Message:", err.message);
+          throw err;
+        }
       }
     }
 
@@ -186,11 +186,11 @@ export const createUtsav = async (req, res) => {
     registration_deadline
   } = req.body;
 
-   if (!moment(registration_deadline, "YYYY-MM-DD").isBefore(moment(start_date, "YYYY-MM-DD"), "day")) {
-  return res.status(400).send({
-    message: 'Registration deadline must be before the start date'
-  });
-}
+  if (!moment(registration_deadline, "YYYY-MM-DD").isBefore(moment(start_date, "YYYY-MM-DD"), "day")) {
+    return res.status(400).send({
+      message: 'Registration deadline must be before the start date'
+    });
+  }
 
   const alreadyExists = await UtsavDb.findOne({
     where: {
@@ -222,16 +222,17 @@ export const createUtsav = async (req, res) => {
     { transaction: t }
   );
 
-  if((location || RESEARCH_CENTRE) === RESEARCH_CENTRE){
-  await BlockDates.create(
-    {
-      checkin: start_date,
-      checkout: moment(end_date).add(1, 'day').format('YYYY-MM-DD'),
-      comments: name,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );}
+  if ((location || RESEARCH_CENTRE) === RESEARCH_CENTRE) {
+    await BlockDates.create(
+      {
+        checkin: start_date,
+        checkout: moment(end_date).add(1, 'day').format('YYYY-MM-DD'),
+        comments: name,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
 
   await t.commit();
 
@@ -515,7 +516,7 @@ export const activateUtsav = async (req, res) => {
 };
 
 export const utsavStatusUpdate = async (req, res) => {
-  const { utsav_id, bookingid, status, description } = req.body;
+  const { utsav_id, bookingid, status, description, issueCredits } = req.body;
 
   let newBookingStatus = status;
   console.log('Received status:', status);
@@ -542,59 +543,59 @@ export const utsavStatusUpdate = async (req, res) => {
 
   switch (status) {
     case STATUS_CONFIRMED:
-  // Confirmed allowed from payment pending or cancelled
-  if (
-    booking.status !== STATUS_PAYMENT_PENDING &&
-    booking.status !== STATUS_CANCELLED
-  ) {
-    throw new ApiError(
-      400,
-      'Confirmed status can only be set from payment pending or cancelled'
-    );
-  }
+      // Confirmed allowed from payment pending or cancelled
+      if (
+        booking.status !== STATUS_PAYMENT_PENDING &&
+        booking.status !== STATUS_CANCELLED
+      ) {
+        throw new ApiError(
+          400,
+          'Confirmed status can only be set from payment pending or cancelled'
+        );
+      }
 
-  if (booking.status === STATUS_WAITING) {
-    await reserveUtsavSeat(utsav, t);
-  }
+      if (booking.status === STATUS_WAITING) {
+        await reserveUtsavSeat(utsav, t);
+      }
 
-  if (!transaction) {
-    const cardno = booking.bookedBy || booking.cardno;
-    const card = await validateCard(cardno);
+      if (!transaction) {
+        const cardno = booking.bookedBy || booking.cardno;
+        const card = await validateCard(cardno);
 
-    transaction = await createPendingTransaction(
-      card,
-      booking,
-      TYPE_UTSAV,
-      utsav.amount,
-      req.user.username,
-      t,
-      true
-    );
-  } else {
-    if (transaction.status === STATUS_CANCELLED) {
-  await transaction.update(
-    {
-      status: STATUS_PAYMENT_PENDING,
-      updatedBy: req.user.username,
-      description: description || 'Reopened after cancellation'
-    },
-    { transaction: t }
-  );
-} else if (transaction.status === STATUS_CONFIRMED) {
-  console.log('Transaction already confirmed. No action needed.');
-} else if (transaction.status === STATUS_PAYMENT_PENDING) {
-  await transaction.update(
-    {
-      status: STATUS_PAYMENT_COMPLETED,  // ✅ add this line
-      description: description,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-}
+        transaction = await createPendingTransaction(
+          card,
+          booking,
+          TYPE_UTSAV,
+          utsav.amount,
+          req.user.username,
+          t,
+          true
+        );
+      } else {
+        if (transaction.status === STATUS_CANCELLED) {
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_PENDING,
+              updatedBy: req.user.username,
+              description: description || 'Reopened after cancellation'
+            },
+            { transaction: t }
+          );
+        } else if (transaction.status === STATUS_CONFIRMED) {
+          console.log('Transaction already confirmed. No action needed.');
+        } else if (transaction.status === STATUS_PAYMENT_PENDING) {
+          await transaction.update(
+            {
+              status: STATUS_PAYMENT_COMPLETED,  // ✅ add this line
+              description: description,
+              updatedBy: req.user.username
+            },
+            { transaction: t }
+          );
+        }
 
-  }
-  break;
+      }
+      break;
 
     case STATUS_PAYMENT_PENDING:
       if (booking.status !== STATUS_WAITING) {
@@ -710,17 +711,51 @@ export const utsavStatusUpdate = async (req, res) => {
         transaction?.status
       );
 
-      if (
-        transaction &&
-        ![STATUS_CREDITED, STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(
-          transaction.status
-        )
-      ) {
-        await adminCancelTransaction(req.user, null, transaction, t);
-        console.log('>> Cancelling transaction...');
+      if (transaction) {
+        if (transaction.status === STATUS_CANCELLED) {
+          if (issueCredits === 'yes' || issueCredits === true) {
+            await adminCancelTransaction(req.user, null, transaction, t);
+            console.log('>> Upgrading cancelled transaction to credited...');
+          } else {
+            await transaction.update(
+              {
+                status: STATUS_ADMIN_CANCELLED,
+                updatedBy: req.user.username,
+              },
+              { transaction: t }
+            );
+            console.log('>> Upgrading cancelled transaction to admin cancelled...');
+          }
+        } else if (![STATUS_CREDITED, STATUS_ADMIN_CANCELLED].includes(transaction.status)) {
+          if (issueCredits === 'yes' || issueCredits === true) {
+            await adminCancelTransaction(req.user, null, transaction, t);
+            console.log('>> Cancelling transaction and issuing credits...');
+          } else {
+            const isCompletedStatus = [
+              STATUS_PAYMENT_COMPLETED,
+              STATUS_CASH_COMPLETED,
+              'payment completed',
+              'completed',
+              'cash completed'
+            ].includes(transaction.status);
+
+            if (isCompletedStatus) {
+              console.log('>> Transaction is already completed and no credits requested. Leaving transaction status as is:', transaction.status);
+            } else {
+              await transaction.update(
+                {
+                  status: STATUS_ADMIN_CANCELLED,
+                  updatedBy: req.user.username,
+                },
+                { transaction: t }
+              );
+              console.log('>> Cancelling transaction without credits...');
+            }
+          }
+        }
       } else {
         console.warn(
-          'Skipping transaction cancellation - already credited or cancelled'
+          'Skipping transaction cancellation - transaction not found'
         );
       }
 
@@ -746,7 +781,11 @@ export const utsavStatusUpdate = async (req, res) => {
   await t.commit();
 
   try {
-    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+    let waOptions = { updatedBy: req.user.username };
+    if (status === STATUS_ADMIN_CANCELLED && (issueCredits === 'yes' || issueCredits === true) && transaction) {
+      waOptions.credits = (transaction.amount || 0) + (transaction.discount || 0);
+    }
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, waOptions);
   } catch (waErr) {
     console.error("Error sending utsav status change WhatsApp in utsavStatusUpdate:", waErr);
   }
@@ -876,7 +915,7 @@ export const fetchAllUtsavList = async (req, res) => {
 
 export const utsavCheckin = async (req, res) => {
   console.log('📥 Received utsavid:', req.body.utsavid);
-console.log('📥 Received cardno:', req.body.cardno);
+  console.log('📥 Received cardno:', req.body.cardno);
 
   const t = await database.transaction();
   req.transaction = t;
@@ -962,7 +1001,7 @@ export const utsavCheckinReport = async (req, res) => {
   await validateUtsav(utsavid);
 
   const utsavData = await database.query(
-  `SELECT 
+    `SELECT 
       t1.cardno,
       t1.bookingid,
       t1.bookedby,
@@ -986,15 +1025,15 @@ export const utsavCheckinReport = async (req, res) => {
     WHERE t1.utsavid = :utsavid 
       AND t1.status IN (:status)
   `,
-  {
-    replacements: {
-      utsavid,
-      status: statusToBeIncluded
-    },
-    raw: true,
-    type: QueryTypes.SELECT
-  }
-);
+    {
+      replacements: {
+        utsavid,
+        status: statusToBeIncluded
+      },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
 
   return res.status(200).send({
     message: 'Filtered Utsav Bookings',
@@ -1040,16 +1079,16 @@ export const uploadRoomNoExcel = async (req, res) => {
 
     // Fetch existing bookings for this utsavid (no transaction yet)
     // Fetch existing bookings for this utsavid but ONLY confirmed ones
-const existingBookings = await database.query(
-  `SELECT bookingid, cardno, packageid, utsavid, status
+    const existingBookings = await database.query(
+      `SELECT bookingid, cardno, packageid, utsavid, status
    FROM utsav_booking
    WHERE utsavid = :utsavid
-   AND status IN ('confirmed', 'checkedin')`,   
-  { 
-    replacements: { utsavid }, 
-    type: database.QueryTypes.SELECT 
-  }
-);
+   AND status IN ('confirmed', 'checkedin')`,
+      {
+        replacements: { utsavid },
+        type: database.QueryTypes.SELECT
+      }
+    );
 
     const bookingMap = new Map();
     existingBookings.forEach(b => {
@@ -1095,9 +1134,9 @@ const existingBookings = await database.query(
     try {
       const caseStatements = validRows.map(r => `WHEN '${r.bookingid}' THEN '${r.roomno}'`);
       const bookingIds = validRows.map(r => `'${r.bookingid}'`);
-    // define updatedBy and updatedAt
-    const updatedBy = req.user?.username || "system"; // adjust based on your auth
-    
+      // define updatedBy and updatedAt
+      const updatedBy = req.user?.username || "system"; // adjust based on your auth
+
       const query = `
         UPDATE utsav_booking
         SET roomno = CASE bookingid
@@ -1133,7 +1172,7 @@ export const updateRoomNo = async (req, res) => {
     const { bookingid, roomno } = req.body;
 
     // assuming you’re attaching logged-in user info in req.user
-    const updatedBy = req.user?.username || req.user?.id || "system";  
+    const updatedBy = req.user?.username || req.user?.id || "system";
 
     if (!bookingid || !roomno) {
       return res.status(400).json({ error: "bookingid and roomno are required" });
@@ -1151,9 +1190,9 @@ export const updateRoomNo = async (req, res) => {
     booking.updatedBy = updatedBy;
     await booking.save();
 
-    return res.status(200).json({ 
-      message: "Room number updated successfully", 
-      booking 
+    return res.status(200).json({
+      message: "Room number updated successfully",
+      booking
     });
   } catch (error) {
     console.error("Error updating room number:", error);
