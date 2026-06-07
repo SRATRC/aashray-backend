@@ -241,6 +241,8 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
     return;
   }
 
+  const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
+
   // Cache for card name lookups (minimize DB hits)
   const cardCache = new Map();
   if (user && user.cardno) cardCache.set(String(user.cardno), user.issuedto || "");
@@ -304,7 +306,7 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
             template = "bn_adh_gu_b_wg";
             bodyParams = [bookerName, shibir.name || "", "waiting"];
           } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
-            template = "bn_adh_gu_b_ppg";
+            template = isNRI ? "bn_adh_gu_b_ppg_nri" : "bn_adh_gu_b_ppg";
             bodyParams = [bookerName, shibir.name || "", "payment pending"];
           } else {
             template = "bn_adh_gu_b_cf";
@@ -334,7 +336,7 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
             template = "bn_adh_s_b_w";
             bodyParams = [user.issuedto || "", shibir.name || "", "waiting"];
           } else if (bookingStatus === "pending" || bookingStatus.includes("pend")) {
-            template = "bn_adh_s_b_ppg";
+            template = isNRI ? "bn_adh_s_b_ppg_nri" : "bn_adh_s_b_ppg";
             bodyParams = [user.issuedto || "", shibir.name || "", "payment pending"];
           } else {
             template = "bn_adh_s_b_cnf";
@@ -454,13 +456,15 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
 
 // ROOM
 
-async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = null) {
+export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = null) {
   if (!user) return;
   const phone = user?.mobno ? String(user.mobno) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping room WA.`);
     return;
   }
+
+  const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
 
   if (!Array.isArray(roomBookingDetails)) roomBookingDetails = [];
 
@@ -568,7 +572,7 @@ async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = n
             template = "bn_sha_gu_b_w";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
-            template = "bn_sha_gu_b_ppg";
+            template = isNRI ? "bn_sha_gu_b_ppg_nri" : "bn_sha_gu_b_ppg";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
           } else {
             template = "bn_sha_gu_b_cf";
@@ -598,7 +602,7 @@ async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = n
             template = "bn_sha_s_b_w";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
-            template = "bn_sha_s_b_ppg";
+            template = isNRI ? "bn_sha_s_b_ppg_nri" : "bn_sha_s_b_ppg";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "payment pending", roomTypeStr];
           } else {
             template = "bn_sha_s_b_cf";
@@ -645,13 +649,15 @@ async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = n
 
 
 // TRAVEL
-async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser = null) {
+export async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser = null) {
   if (!user) return;
   const phone = user?.mobno ? String(user.mobno) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping travel WA.`);
     return;
   }
+
+  const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
 
   const bookedForCache = new Map();
   if (bookedForUser && bookedForUser.cardno) bookedForCache.set(bookedForUser.cardno, bookedForUser.issuedto || "");
@@ -709,7 +715,9 @@ async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser
       } else {
         template = "booking_travel_confirmed";
         if (status === "waiting" || status.startsWith("wait")) template = "booking_travel_waiting";
-        else if (status === "pending" || status.includes("pend")) template = "booking_travel_pending";
+        else if (status === "pending" || status.includes("pend")) {
+          template = "";
+        }
 
         let bookedForName = user.issuedto || "";
         if (b.__bookedForCardno) {
@@ -751,6 +759,11 @@ async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser
         components = [bodyComp];
       }
 
+      if (!template) {
+        console.log(`WA TRAVEL SKIP: No template defined for status '${status}'`);
+        continue;
+      }
+
       const result = await sendWithTemplateFallback(phone, template, components);
       if (!result.ok) console.error("Travel WA failed for booking", b, result.error);
       else console.log("📩 Travel WhatsApp sent:", { toCard: user.cardno, booking: b.id || b.bookingid || b, template: result.usedTemplate });
@@ -761,13 +774,15 @@ async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser
 }
 
 // UTSAV
-async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser = null) {
+export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser = null) {
   if (!user) return;
   const phone = user?.mobno ? String(user.mobno) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping utsav WA.`);
     return;
   }
+
+  const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
 
   // defensive array
   if (!Array.isArray(utsavBookingDetails)) utsavBookingDetails = [];
@@ -865,7 +880,7 @@ async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser =
           template = "bn_usv_gu_b_waiting";
           bodyParams = [bookerName, utsavName, "waiting", packageName];
         } else if (isPending) {
-          template = "bn_usv_gu_b_pymtpndg";
+          template = isNRI ? "bn_usv_gu_b_pymtpndg_nri" : "bn_usv_gu_b_pymtpndg";
           bodyParams = [bookerName, utsavName, "payment pending", packageName];
         } else {
           template = "bn_usv_gu_b_cf";
@@ -892,7 +907,7 @@ async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser =
           template = "bn_usv_s_b_wg";
           bodyParams = [selfName, utsavName, "waiting", packageName];
         } else if (isPending) {
-          template = "bn_usv_s_b_pymtpndg";
+          template = isNRI ? "bn_usv_s_b_pymtpndg_nri" : "bn_usv_s_b_pymtpndg";
           bodyParams = [selfName, utsavName, "payment pending", packageName];
         } else {
           template = "bn_usv_s_b_cf";
@@ -935,13 +950,15 @@ async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser =
 }
 
 // FLAT / FOOD or other
-async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = null) {
+export async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = null) {
   if (!user) return;
   const phone = user?.mobno ? String(user.mobno) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping flat WA.`);
     return;
   }
+
+  const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
 
   if (!Array.isArray(flatBookingDetails)) flatBookingDetails = [];
 
@@ -1017,7 +1034,7 @@ async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = n
         headerParam = attendeeName;
 
         if (isPaymentPending) {
-          template = "bn_flt_gu_b_ppng";
+          template = isNRI ? "bn_flt_gu_b_ppng_nri" : "bn_flt_gu_b_ppng";
           bodyParams = [bookerName, checkinFormatted, checkoutFormatted, flatNoStr, "payment pending"];
         } else {
           template = "bn_flt_gu_b_cnfm";
@@ -1040,7 +1057,7 @@ async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = n
       } else {
         const bookerName = user.issuedto || "";
         if (isPaymentPending) {
-          template = "bn_flt_gu_b_ppng";
+          template = isNRI ? "bn_flt_gu_b_ppng_nri" : "bn_flt_gu_b_ppng";
           bodyParams = [bookerName, checkinFormatted, checkoutFormatted, flatNoStr, "payment pending"];
         } else {
           template = "bn_flt_gu_b_cnfm";
@@ -1853,7 +1870,8 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
 
       if (prevStatusNormalized === "awaiting confirmation") {
         if ((newStatus === "proceed for payment" || newStatus === "payment pending" || newStatus === "pending") && !hasBooker) {
-          templateName = "bk_pvs_s_b_awc2ppg";
+          const isAttendeeNRI = attendeeCard && attendeeCard.country && String(attendeeCard.country).trim().toLowerCase() !== 'india';
+          templateName = isAttendeeNRI ? "bk_pvs_s_b_awc2ppg_nri" : "bk_pvs_s_b_awc2ppg";
           parameters = [attendeeName, pickup, drop, "proceed for payment", dateFormatted];
         } else if (newStatus === "admin cancelled") {
           if (booking.admin_comments === "admin_cancel_wrong_form" || newStatus === "wrong form cancel") {
@@ -1923,7 +1941,8 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
 
       if (prevStatusNormalized === "awaiting confirmation") {
         if (newStatus === "proceed for payment" || newStatus === "payment pending" || newStatus === "pending") {
-          templateName = "bk_pvs_mu_b_awc2ppg";
+          const isBookerNRI = bookerCard && bookerCard.country && String(bookerCard.country).trim().toLowerCase() !== 'india';
+          templateName = isBookerNRI ? "bk_pvs_mu_b_awc2ppg_nri" : "bk_pvs_mu_b_awc2ppg";
           parameters = [bookerName, pickup, drop, "proceed for payment", dateFormatted, attendeeName];
         } else if (newStatus === "admin cancelled") {
           if (booking.admin_comments === "admin_cancel_wrong_form" || newStatus === "wrong form cancel") {
@@ -2205,6 +2224,8 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
     return;
   }
 
+  const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
+
   if (!Array.isArray(foodBookingDetails) || foodBookingDetails.length === 0) return;
 
   try {
@@ -2262,7 +2283,7 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
         headerParam = attendeeName;
 
         if (isPaymentPending) {
-          template = "bn_psd_gu_b_ppng";
+          template = isNRI ? "bn_psd_gu_b_ppng_nri" : "bn_psd_gu_b_ppng";
           bodyParams = [user.issuedto || "", minDate, maxDate, "payment pending"];
         } else {
           template = "bn_psd_gu_b_cnfm";
