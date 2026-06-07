@@ -214,9 +214,6 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
         bookedForName = bookedForUser.issuedto;
       }
 
-      // Debug log so we can verify behavior
-      console.log(`WA ADHYAYAN: to=${user.cardno} phone=${phone} bookingId=${bookingId} rawStatus='${String(b.status)}' normalized='${bookingStatus}' -> template='${template}' bookedFor='${bookedForName}' shibirExists=${!!shibir && !!shibir.name}`);
-
       const params = [
         user.issuedto || "",   // recipient name (who gets the message)
         bookedForName,         // booked-for name
@@ -742,7 +739,7 @@ export async function sendWifiRequestWhatsApp(cardno, username, status, code = n
 
 export async function sendWifiLowAlertWhatsApp(activeCount) {
   try {
-    const phone = "919819988657";
+    const phone = process.env.WIFI_ALERT_PHONE || "919819988657";
     const templateName = "temp_wifi_code_alert";
 
     const components = [

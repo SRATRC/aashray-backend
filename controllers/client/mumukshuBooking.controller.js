@@ -81,8 +81,6 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const utsavIds = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
   const flatIds = Array.isArray(typeMap['FLAT']) ? typeMap['FLAT'].map(String).filter(Boolean) : [];
 
-  console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)}`);
-
   try {
     const [
       adhyanBookingDetailsFromDb,
@@ -126,13 +124,8 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
     const requested = adhyanIds.map(String);
     const foundIds = new Set((adhyanBookingDetailsFromDb || []).map((r) => String(r.bookingid || r.bookingId || r.id)));
     const missing = requested.filter(id => !foundIds.has(id));
-    if (missing.length) {
-      console.log(`WA DIAG: synthesize missing adhyan ids for ${cardno}:`, missing);
-    }
     const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
     const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
-
-    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails || []).length} utsavCount=${(utsavBookingDetails || []).length}`);
 
     return {
       adhyanBookingDetails,
@@ -274,8 +267,6 @@ export const mumukshuBooking = async (req, res, next) => {
       results.forEach((r, i) => {
         if (r.status === 'rejected') {
           console.error(`WhatsApp job #${i} failed:`, r.reason);
-        } else {
-          console.log(`WhatsApp job #${i} succeeded`);
         }
       });
     } catch (waErr) {
@@ -676,48 +667,4 @@ function validateFlatBookingConstraints(primary_booking, addons) {
   }
 }
 
-async function getBookingDetailsForCard(cardno, userBookingIdMap) {
-  const typeMap = userBookingIdMap[cardno] || {};
-
-  const adhyanIds = typeMap[TYPE_ADHYAYAN] || [];
-  const travelIds = typeMap[TYPE_TRAVEL] || [];
-  const roomIds = typeMap[TYPE_ROOM] || [];
-  const utsavIds = typeMap[TYPE_UTSAV] || [];
-  const flatIds = typeMap["FLAT"] || []; // if used later
-
-
-  const [
-    adhyanBookingDetails,
-    travelBookingDetails,
-    roomBookingDetails,
-    utsavBookingDetails,
-    flatBookingDetails
-  ] = await Promise.all([
-    adhyanIds.length
-      ? ShibirBookingDb.findAll({
-        where: { bookingid: { [Op.in]: adhyanIds } },
-        include: [{ model: ShibirDb, as: "ShibirDb" }]
-      })
-      : [],
-    travelIds.length
-      ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })
-      : [],
-    roomIds.length
-      ? RoomBooking.findAll({ where: { bookingid: { [Op.in]: roomIds } } })
-      : [],
-    utsavIds.length
-      ? UtsavBooking.findAll({ where: { bookingid: { [Op.in]: utsavIds } } })
-      : [],
-    flatIds.length
-      ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
-      : []
-  ]);
-
-  return {
-    adhyanBookingDetails,
-    travelBookingDetails,
-    roomBookingDetails,
-    utsavBookingDetails,
-    flatBookingDetails
-  };
-}
+// (removed unused getBookingDetailsForCard — superseded by fetchFreshDetailsForCard)

@@ -11,7 +11,8 @@ import {
   STATUS_APPROVED,
   STATUS_REJECTED,
   STATUS_DELETED,
-  STATUS_RESET
+  STATUS_RESET,
+  STATUS_ACTIVE
 } from '../../config/constants.js';
 import ApiError from '../../utils/ApiError.js';
 import { sendWifiRequestWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -35,7 +36,7 @@ export const uploadWiFiCodes = async (req, res) => {
         cardno: null,
         password: row.password,
         roombookingid: null,
-        status: 'active',
+        status: STATUS_ACTIVE,
         updatedBy: req.user?.username || 'wifiAdmin', // fallback
         created_at: createdAt // ✅ your DB expects this name
       });
@@ -286,7 +287,8 @@ export const updatePermanentCodeRequest = async (req, res) => {
       const existingCode = await PermanentWifiCodes.findOne({
         where: {
           code: permanent_code,
-          status: STATUS_APPROVED
+          status: STATUS_APPROVED,
+          id: { [Sequelize.Op.ne]: requestId }
         },
         transaction: t
       });
@@ -388,11 +390,6 @@ export const uploadPerWiFiCodes = async (req, res) => {
       workbook.Sheets[workbook.SheetNames[0]],
       { defval: '' }
     );
-
-    if (sheet.length > 0) {
-      console.log('DEBUG PARSED EXCEL ROW KEYS:', Object.keys(sheet[0]));
-      console.log('DEBUG PARSED EXCEL ROW CONTENT:', sheet[0]);
-    }
 
     if (!sheet.length) {
       await transaction.rollback();
@@ -739,8 +736,8 @@ export const addPermanentCodeManually = async (req, res) => {
     });
 
   } catch (err) {
-    // IMPORTANT: rollback on ANY failure
-    if (t) await t.rollback();
+    // req.transaction is set, so CatchAsync handles rollback — just log and rethrow
+    // (a manual t.rollback() here would double-rollback and mask the real error).
     req.log.error('add_permanent_code_manually_error', { error: err.message });
     throw err; // let global error handler respond
   }
@@ -763,11 +760,6 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
       workbook.Sheets[workbook.SheetNames[0]],
       { defval: '' }
     );
-
-    if (sheet.length > 0) {
-      console.log('DEBUG PARSED EXCEL ROW KEYS (INSERT):', Object.keys(sheet[0]));
-      console.log('DEBUG PARSED EXCEL ROW CONTENT (INSERT):', sheet[0]);
-    }
 
     if (!sheet.length) {
       await transaction.rollback();

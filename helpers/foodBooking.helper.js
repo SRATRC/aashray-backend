@@ -603,7 +603,6 @@ export async function bookFoodForAllMeals(
       foodBooking.dinner = dinner;
       foodBooking.spicy = 1;
       foodBooking.hightea = 'TEA';
-      foodBooking.plateissued = 0;
       foodBooking.updatedBy = updatedBy;
       bookingsToUpdate.push(foodBooking);
 
@@ -617,8 +616,7 @@ export async function bookFoodForAllMeals(
       lunch,
       dinner,
       spicy: 1,
-      hightea: 1,
-      plateissued: 0,
+      hightea: 'TEA',
       updatedBy: updatedBy
     });
   }

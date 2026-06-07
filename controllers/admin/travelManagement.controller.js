@@ -302,8 +302,6 @@ export const fetchUpcomingBookings = async (req, res) => {
     `SELECT t1.bookingid, t1.bookedBy, t1.date,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
-t3.mobno,
-t3.center,
 tbp.bus_group_id,
 tbg.bus_name,
 tbg.capacity AS bus_capacity,
@@ -826,7 +824,9 @@ export async function updateBooking(req, res) {
     drop_point,
     type,
     date,
-    leaving_post_adhyayan
+    leaving_post_adhyayan,
+    bus_group_id,
+    is_coordinator
   } = req.body;
 
   let removedFromOldBus = false;
@@ -1932,11 +1932,16 @@ export async function fetchAvailableTravelBookings(req, res) {
           'proceed for payment'
         ]
       },
-
-      bookingid: {
-        [Sequelize.Op.notIn]: assignedBookingIds,
-      },
     };
+
+    // Only exclude already-assigned bookings when there are any.
+    // Op.notIn: [] resolves to NOT IN (NULL) on some Sequelize versions,
+    // which matches zero rows and would hide all available bookings.
+    if (assignedBookingIds.length > 0) {
+      whereCondition.bookingid = {
+        [Sequelize.Op.notIn]: assignedBookingIds,
+      };
+    }
 
     // RC → Mumbai
     if (
@@ -2878,19 +2883,19 @@ export async function previewBulkUpload(
           pickup_point:
             excelRow.pickup_point ||
 
-            booking.pickup_point ||
+            booking?.pickup_point ||
 
             '',
 
           drop_point:
             excelRow.drop_point ||
 
-            booking.drop_point ||
+            booking?.drop_point ||
 
             '',
 
           status:
-            booking.status,
+            booking?.status,
 
           result:
             'Already Assigned',
@@ -2928,19 +2933,19 @@ export async function previewBulkUpload(
           pickup_point:
             excelRow.pickup_point ||
 
-            booking.pickup_point ||
+            booking?.pickup_point ||
 
             '',
 
           drop_point:
             excelRow.drop_point ||
 
-            booking.drop_point ||
+            booking?.drop_point ||
 
             '',
 
           status:
-            booking.status,
+            booking?.status,
 
           result:
             'Invalid',
@@ -2983,19 +2988,19 @@ export async function previewBulkUpload(
           pickup_point:
             excelRow.pickup_point ||
 
-            booking.pickup_point ||
+            booking?.pickup_point ||
 
             '',
 
           drop_point:
             excelRow.drop_point ||
 
-            booking.drop_point ||
+            booking?.drop_point ||
 
             '',
 
           status:
-            booking.status,
+            booking?.status,
 
           result:
             'Wrong Date',
@@ -3054,19 +3059,19 @@ export async function previewBulkUpload(
           pickup_point:
             excelRow.pickup_point ||
 
-            booking.pickup_point ||
+            booking?.pickup_point ||
 
             '',
 
           drop_point:
             excelRow.drop_point ||
 
-            booking.drop_point ||
+            booking?.drop_point ||
 
             '',
 
           status:
-            booking.status,
+            booking?.status,
 
           result:
             'Wrong Route',
@@ -3903,10 +3908,6 @@ export async function
 
 
     for (const row of buses) {
-      console.log(
-        'ROW:',
-        row
-      );
 
       const key =
         `${row['Bus Name']}__${row['Event Date']}`;
@@ -4442,14 +4443,6 @@ export async function
 
     for (const item of parsedBuses) {
 
-
-      console.log(
-        'CREATING BUS:',
-        item.bus_name
-      );
-
-
-
       const stopNames =
         item.stops.map(
           stop => stop.stop_name
@@ -4834,10 +4827,7 @@ export async function
 
     await t.rollback();
 
-    console.log(
-      'BULK CREATE ERROR:',
-      error
-    );
+    req.log.error('travel_bulk_master_create_error', { error: error.message });
 
     return res.status(
       error.statusCode || 500
@@ -4848,9 +4838,6 @@ export async function
 
       errors:
         error.errors || null,
-
-      stack:
-        error.stack || null,
     });
   }
 }
