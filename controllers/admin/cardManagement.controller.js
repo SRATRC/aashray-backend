@@ -1,4 +1,4 @@
-import { CardDb,GuestRelationship } from '../../models/associations.js';
+import { CardDb, GuestRelationship } from '../../models/associations.js';
 import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import bcrypt from 'bcryptjs';
@@ -168,6 +168,31 @@ export const createCard = async (req, res) => {
     // --- Commit everything ---
     await t.commit();
 
+    // --- Send WhatsApp notification if mobno is present ---
+    const phone = newCard.mobno;
+    if (phone) {
+      try {
+        const cleanPhone = String(phone).replace(/\D/g, '');
+        const formattedPhone = cleanPhone.startsWith('91')
+          ? cleanPhone
+          : `91${cleanPhone}`;
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: newCard.issuedto || 'Mumukshu' },
+              { type: 'text', text: newCard.cardno }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'card_account_created', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp message in createCard:', waErr.message || waErr);
+      }
+    }
+
     return res.status(200).json({
       message: 'Card created successfully',
       data: newCard
@@ -187,7 +212,7 @@ export const createCard = async (req, res) => {
 };
 
 export const fetchAllCards = async (req, res) => {
-  
+
   const data = await CardDb.findAll({
   });
 

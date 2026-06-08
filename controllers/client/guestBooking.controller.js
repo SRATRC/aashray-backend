@@ -14,6 +14,7 @@ import {
 } from '../../models/associations.js';
 import { Op } from 'sequelize';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -652,6 +653,38 @@ export const createGuests = async (req, res) => {
   const allGuests = await createGuestsHelper(cardno, guests, t);
 
   await t.commit();
+
+  // --- Send WhatsApp notification to newly created guests ---
+  const newlyCreatedGuests = allGuests.filter((guest) => {
+    const wasRegistered = guests.some((g) => g.cardno === guest.cardno);
+    return !wasRegistered;
+  });
+
+  for (const newGuest of newlyCreatedGuests) {
+    const phone = newGuest.mobno;
+    if (phone) {
+      try {
+        const cleanPhone = String(phone).replace(/\D/g, '');
+        const formattedPhone = cleanPhone.startsWith('91')
+          ? cleanPhone
+          : `91${cleanPhone}`;
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: newGuest.issuedto || 'Mumukshu' },
+              { type: 'text', text: newGuest.cardno }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'card_account_created', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp message in createGuests:', waErr.message || waErr);
+      }
+    }
+  }
 
   return res.status(200).send({
     message: MSG_UPDATE_SUCCESSFUL,
