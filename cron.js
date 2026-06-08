@@ -32,7 +32,7 @@ import {
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
-import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from './helpers/whatsapp.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendTomorrowMealsCount, checkAndSendMealsCountUpdate } from './helpers/whatsapp.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -246,7 +246,51 @@ async function getUnpaidPastBookings() {
  * ==============================
  */
 
+// Schedule the new meals count notification cron jobs with Asia/Kolkata timezone
+const mealsCount9PMJob = cron.schedule('0 21 * * *', async () => {
+  logger.info('mealsCount9PMJob cron job started.');
+  try {
+    const recipients = ['0002849952', '0012754172', '0002823407'];
+    await sendTomorrowMealsCount(recipients);
+    logger.info('mealsCount9PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount9PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+const mealsCount10PMJob = cron.schedule('0 22 * * *', async () => {
+  logger.info('mealsCount10PMJob cron job started.');
+  try {
+    await checkAndSendMealsCountUpdate();
+    logger.info('mealsCount10PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount10PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+const mealsCount11PMJob = cron.schedule('0 23 * * *', async () => {
+  logger.info('mealsCount11PMJob cron job started.');
+  try {
+    await checkAndSendMealsCountUpdate();
+    logger.info('mealsCount11PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount11PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
 job.start();
+mealsCount9PMJob.start();
+mealsCount10PMJob.start();
+mealsCount11PMJob.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
@@ -254,6 +298,9 @@ const gracefulShutdown = async () => {
 
   // Stop future jobs from being triggered
   job.stop();
+  mealsCount9PMJob.stop();
+  mealsCount10PMJob.stop();
+  mealsCount11PMJob.stop();
 
   // Wait for the current task to finish if it's running
   const waitInterval = setInterval(() => {

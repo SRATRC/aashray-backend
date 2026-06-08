@@ -1,10 +1,12 @@
 import Sequelize from "sequelize";
 // at top of both files (whatsapp.helper and mumukshuBooking.controller)
 import { Op } from 'sequelize';
-import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb } from "../models/associations.js";
+import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking } from "../models/associations.js";
 import moment from "moment";
 import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
+import fs from "fs";
+import path from "path";
 
 function sanitizeParamText(s) {
   if (s === null || s === undefined) return "";
@@ -2341,6 +2343,157 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
 
   } catch (err) {
     console.error("Error sending food WhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
+const COUNT_FILE = path.join(process.cwd(), 'last_meals_count.json');
+
+export async function sendTomorrowMealsCount(recipients = []) {
+  try {
+    const nowIST = moment().tz('Asia/Kolkata');
+    const tomorrowStr = nowIST.clone().add(1, 'day').format('YYYY-MM-DD');
+    const tomorrowFormatted = nowIST.clone().add(1, 'day').format('DD-MM-YYYY');
+
+    // Query meal counts for tomorrow
+    const [individualCounts, bulkCounts] = await Promise.all([
+      FoodDb.findOne({
+        attributes: [
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.literal('CASE WHEN breakfast = 1 THEN 1 ELSE 0 END')), 0), 'breakfast'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.literal('CASE WHEN lunch = 1 THEN 1 ELSE 0 END')), 0), 'lunch'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.literal('CASE WHEN dinner = 1 THEN 1 ELSE 0 END')), 0), 'dinner']
+        ],
+        where: { date: tomorrowStr }
+      }),
+      BulkFoodBooking.findOne({
+        attributes: [
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('breakfast')), 0), 'breakfast'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('lunch')), 0), 'lunch'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('dinner')), 0), 'dinner']
+        ],
+        where: { date: tomorrowStr }
+      })
+    ]);
+
+    const breakfast = parseInt(individualCounts?.dataValues?.breakfast || 0) + parseInt(bulkCounts?.dataValues?.breakfast || 0);
+    const lunch = parseInt(individualCounts?.dataValues?.lunch || 0) + parseInt(bulkCounts?.dataValues?.lunch || 0);
+    const dinner = parseInt(individualCounts?.dataValues?.dinner || 0) + parseInt(bulkCounts?.dataValues?.dinner || 0);
+
+    // Write counts to file to establish/update baseline
+    const dataToSave = {
+      tomorrowDate: tomorrowStr,
+      breakfast,
+      lunch,
+      dinner
+    };
+    fs.writeFileSync(COUNT_FILE, JSON.stringify(dataToSave, null, 2), 'utf8');
+
+    // Retrieve recipient phone numbers
+    const cards = await CardDb.findAll({
+      where: { cardno: recipients },
+      attributes: ['cardno', 'mobno']
+    });
+
+    const components = [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: tomorrowFormatted },
+          { type: 'text', text: String(breakfast) },
+          { type: 'text', text: String(lunch) },
+          { type: 'text', text: String(dinner) }
+        ]
+      }
+    ];
+
+    for (const card of cards) {
+      const phone = card.mobno;
+      if (phone) {
+        const cleanPhone = String(phone).replace(/\D/g, '');
+        const formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
+        try {
+          await sendWhatsAppMessage(formattedPhone, 'daily_kitchen_meal_count', components);
+          console.log(`✅ WhatsApp sent to ${card.cardno} (${formattedPhone}) for tomorrow's meals count`);
+        } catch (err) {
+          console.error(`❌ Error sending tomorrow's meals count to ${card.cardno} (${formattedPhone}):`, err.message || err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error in sendTomorrowMealsCount:", err && (err.stack || err.message || err));
+  }
+}
+
+export async function checkAndSendMealsCountUpdate() {
+  try {
+    const nowIST = moment().tz('Asia/Kolkata');
+    const tomorrowStr = nowIST.clone().add(1, 'day').format('YYYY-MM-DD');
+
+    // Query current meal counts for tomorrow
+    const [individualCounts, bulkCounts] = await Promise.all([
+      FoodDb.findOne({
+        attributes: [
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.literal('CASE WHEN breakfast = 1 THEN 1 ELSE 0 END')), 0), 'breakfast'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.literal('CASE WHEN lunch = 1 THEN 1 ELSE 0 END')), 0), 'lunch'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.literal('CASE WHEN dinner = 1 THEN 1 ELSE 0 END')), 0), 'dinner']
+        ],
+        where: { date: tomorrowStr }
+      }),
+      BulkFoodBooking.findOne({
+        attributes: [
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('breakfast')), 0), 'breakfast'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('lunch')), 0), 'lunch'],
+          [Sequelize.fn('COALESCE', Sequelize.fn('SUM', Sequelize.col('dinner')), 0), 'dinner']
+        ],
+        where: { date: tomorrowStr }
+      })
+    ]);
+
+    const breakfast = parseInt(individualCounts?.dataValues?.breakfast || 0) + parseInt(bulkCounts?.dataValues?.breakfast || 0);
+    const lunch = parseInt(individualCounts?.dataValues?.lunch || 0) + parseInt(bulkCounts?.dataValues?.lunch || 0);
+    const dinner = parseInt(individualCounts?.dataValues?.dinner || 0) + parseInt(bulkCounts?.dataValues?.dinner || 0);
+
+    // Read last baseline count
+    let lastCount = null;
+    if (fs.existsSync(COUNT_FILE)) {
+      try {
+        const fileData = JSON.parse(fs.readFileSync(COUNT_FILE, 'utf8'));
+        if (fileData.tomorrowDate === tomorrowStr) {
+          lastCount = fileData;
+        }
+      } catch (err) {
+        console.error("Error reading last meals count file:", err);
+      }
+    }
+
+    let hasChanged = false;
+    if (lastCount) {
+      hasChanged = (
+        lastCount.breakfast !== breakfast ||
+        lastCount.lunch !== lunch ||
+        lastCount.dinner !== dinner
+      );
+    } else {
+      // No baseline exists (e.g. server restarted). Save current count as the new baseline but don't notify to avoid false/duplicate alerts.
+      const dataToSave = {
+        tomorrowDate: tomorrowStr,
+        breakfast,
+        lunch,
+        dinner
+      };
+      fs.writeFileSync(COUNT_FILE, JSON.stringify(dataToSave, null, 2), 'utf8');
+      console.log(`Saved baseline tomorrow meals count since last_meals_count.json did not exist.`);
+      return;
+    }
+
+    if (hasChanged) {
+      console.log(`Tomorrow's meals count changed! Old: B:${lastCount.breakfast} L:${lastCount.lunch} D:${lastCount.dinner} -> New: B:${breakfast} L:${lunch} D:${dinner}. Triggering update message to Maharaj.`);
+      // Send updated count to Maharaj (0002823407) and save the new count baseline
+      await sendTomorrowMealsCount(['0002823407']);
+    } else {
+      console.log(`Checked tomorrow's meals count. No change detected (B:${breakfast}, L:${lunch}, D:${dinner}).`);
+    }
+  } catch (err) {
+    console.error("Error in checkAndSendMealsCountUpdate:", err && (err.stack || err.message || err));
   }
 }
 
