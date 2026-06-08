@@ -27,6 +27,7 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
+import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const issuePlate = async (req, res) => {
   const currentTime = moment.utc();
@@ -159,7 +160,7 @@ export const bookFood = async (req, res) => {
     hightea
   );
 
-  await bookFoodForMumukshus(
+  const result = await bookFoodForMumukshus(
     start_date,
     end_date,
     mumukshuGroup,
@@ -173,6 +174,47 @@ export const bookFood = async (req, res) => {
   );
   
   await t.commit();
+
+  try {
+    const userBookingIds = result?.userBookingIds || {};
+    const bookingIds = userBookingIds[card.cardno] || [];
+    if (bookingIds.length) {
+      const foodBookings = await FoodDb.findAll({
+        where: {
+          id: { [Sequelize.Op.in]: bookingIds }
+        },
+        order: [['date', 'ASC']]
+      });
+
+      const foodBookingDetails = foodBookings.map((fb) => ({
+        id: fb.id,
+        bookingid: fb.id,
+        cardno: fb.cardno,
+        bookedBy: fb.bookedBy,
+        date: fb.date,
+        breakfast: fb.breakfast,
+        lunch: fb.lunch,
+        dinner: fb.dinner,
+        spicy: fb.spicy,
+        hightea: fb.hightea,
+        name: card.issuedto
+      }));
+
+      sendUnifiedWhatsApp(
+        card,
+        [], // adhyan
+        [], // travel
+        [], // flat
+        [], // utsav
+        [], // room
+        null, // bookedForCardno
+        foodBookingDetails
+      ).catch(err => console.error("Error sending admin food booking WhatsApp:", err));
+    }
+  } catch (waErr) {
+    console.error("Error triggering WhatsApp notification for admin food booking:", waErr);
+  }
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
