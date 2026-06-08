@@ -1,8 +1,10 @@
-import { MSG_UPDATE_SUCCESSFUL } from '../../config/constants.js';
+import { MSG_UPDATE_SUCCESSFUL, WHATSAPP_SUPPORT_NUMBER } from '../../config/constants.js';
 import { CardDb, FlatDb } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
 import sendMail from '../../utils/sendMail.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+
 
 export const updatePassword = async (req, res) => {
   const current_password = req.body.current_password.trim();
@@ -30,12 +32,39 @@ export const updatePassword = async (req, res) => {
     { where: { cardno: req.user.cardno } }
   );
 
+  const phone = details.mobno;
+  if (phone) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: details.issuedto || 'Mumukshu'
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'password_update_app', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in updatePassword:', err.message || err);
+    }
+  }
+
   details.password = '';
 
   return res
     .status(200)
     .send({ message: MSG_UPDATE_SUCCESSFUL, data: details });
 };
+
 
 export const logout = async (req, res) => {
   const { cardno } = req.query;
@@ -144,8 +173,51 @@ export async function forgotPassword(req, res) {
       name: details.issuedto
     }
   });
+
+  const phone = details.mobno;
+  if (phone) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: temporaryPassword
+            },
+            {
+              type: 'text',
+              text: WHATSAPP_SUPPORT_NUMBER
+            }
+          ]
+        },
+        {
+          type: 'button',
+          sub_type: 'copy_code',
+          index: '0',
+          parameters: [
+            {
+              type: 'text',
+              text: temporaryPassword
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'password_reset_app', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in forgotPassword:', err.message || err);
+    }
+  }
+
   return res.status(200).send({
-    message: 'Temporary password sent to your email',
+    message: 'Temporary password sent to your email and WhatsApp',
     data: { email: details.email }
   });
 }
+

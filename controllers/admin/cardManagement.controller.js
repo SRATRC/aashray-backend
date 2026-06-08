@@ -5,6 +5,8 @@ import bcrypt from 'bcryptjs';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import { Op } from 'sequelize';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+
 
 // export const createCard = async (req, res) => {
 //   const {
@@ -367,10 +369,37 @@ export const resetPasswordDefault = async (req, res) => {
     { where: { cardno } }
   );
 
+  const phone = card.mobno;
+  if (phone) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: card.issuedto || 'Mumukshu'
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'password_reset_admin', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in resetPasswordDefault:', err.message || err);
+    }
+  }
+
   return res
     .status(200)
     .json({ message: 'Password reset successfully to default.' });
 };
+
 
 export const getCardByMobile = async (req, res) => {
   const { mobno } = req.params;

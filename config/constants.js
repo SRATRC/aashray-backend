@@ -156,3 +156,6 @@ export const SUBJECT_BOOKING = 'Vitraag Vigyaan Aashray: ';
 export const BOOKING_STATUS_PENDING = 'pending';
 
 export const RAJ_PRAVAS_EMAIL = 'rajpravas7@gmail.com';
+
+export const WHATSAPP_SUPPORT_NUMBER = '+917875432613';
+
