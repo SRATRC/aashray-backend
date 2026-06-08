@@ -53,7 +53,7 @@ import {
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
-import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize, { Op } from 'sequelize';
@@ -637,10 +637,34 @@ export const roomBooking = async (req, res) => {
   }
 
   await t.commit();
-  if (booking.bookingId != null) {
+  const bookingIdToUse = nights === 0 ? booking.bookingid : booking.bookingId;
+  if (bookingIdToUse != null) {
     let bookingIds = {};
-    bookingIds[TYPE_ROOM] = [booking.bookingId];
+    bookingIds[TYPE_ROOM] = [bookingIdToUse];
     sendUnifiedEmail(card.cardno, bookingIds, card);
+  }
+
+  if (bookingIdToUse) {
+    (async () => {
+      try {
+        const freshBooking = await RoomBooking.findOne({
+          where: { bookingid: bookingIdToUse }
+        });
+        if (freshBooking) {
+          await sendUnifiedWhatsApp(
+            card.cardno,
+            [],
+            [],
+            [],
+            [],
+            [freshBooking],
+            null
+          );
+        }
+      } catch (waErr) {
+        logger.error('Error sending room booking WhatsApp notification:', waErr);
+      }
+    })();
   }
 
   sendDualUserNotifications({
@@ -719,6 +743,48 @@ export const flatBooking = async (req, res) => {
     let bookingIds = {};
     bookingIds[TYPE_FLAT] = [booking.bookingId];
     sendUnifiedEmail(card.cardno, bookingIds, card);
+  }
+
+  if (booking.bookingId) {
+    (async () => {
+      try {
+        const [freshBooking, flatDetails] = await Promise.all([
+          FlatBooking.findOne({
+            where: { bookingid: booking.bookingId }
+          }),
+          FlatDb.findOne({
+            where: { flatno: req.body.flat_no }
+          })
+        ]);
+        if (freshBooking) {
+          // Notify the attendee
+          await sendUnifiedWhatsApp(
+            card.cardno,
+            [],
+            [],
+            [freshBooking],
+            [],
+            [],
+            null
+          );
+
+          // If flat has an owner and flat owner is different from attendee, notify owner too
+          if (flatDetails && flatDetails.owner && flatDetails.owner !== card.cardno) {
+            await sendUnifiedWhatsApp(
+              flatDetails.owner,
+              [],
+              [],
+              [freshBooking],
+              [],
+              [],
+              card.cardno
+            );
+          }
+        }
+      } catch (waErr) {
+        logger.error('Error sending flat booking WhatsApp notification:', waErr);
+      }
+    })();
   }
 
   sendDualUserNotifications({
