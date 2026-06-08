@@ -9,6 +9,8 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import moment from 'moment-timezone';
 
 export const updateProfile = async (req, res) => {
   const {
@@ -26,6 +28,26 @@ export const updateProfile = async (req, res) => {
     pin,
     center
   } = req.body;
+
+  const card = await CardDb.findOne({ where: { cardno: req.user.cardno } });
+  if (!card) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  // --- Compare to find changed fields ---
+  const changed = [];
+  if (issuedto !== undefined && issuedto !== card.issuedto) changed.push('Name');
+  if (gender !== undefined && gender !== card.gender) changed.push('Gender');
+  if (dob !== undefined && dob !== card.dob) changed.push('Date of Birth');
+  if (mobno !== undefined && Number(mobno) !== Number(card.mobno)) changed.push('Mobile Number');
+  if (email !== undefined && email !== card.email) changed.push('Email');
+  if (address !== undefined && address !== card.address) changed.push('Address');
+  if (country !== undefined && country !== card.country) changed.push('Country');
+  if (state !== undefined && state !== card.state) changed.push('State');
+  if (city !== undefined && city !== card.city) changed.push('City');
+  if (pin !== undefined && pin !== card.pin) changed.push('Pin');
+  if (center !== undefined && center !== card.center) changed.push('Center');
+
   const updatedProfile = await CardDb.update(
     {
       issuedto,
@@ -48,6 +70,7 @@ export const updateProfile = async (req, res) => {
       }
     }
   );
+
   if (!updatedProfile) {
     throw new ApiError(404, 'user not updated');
   }
@@ -60,6 +83,38 @@ export const updateProfile = async (req, res) => {
       exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
     }
   });
+
+  // --- Send WhatsApp notification if any details were changed ---
+  if (changed.length > 0) {
+    const targetPhone = mobno || card.mobno;
+    if (targetPhone) {
+      try {
+        const cleanPhone = String(targetPhone).replace(/\D/g, '');
+        const formattedPhone = cleanPhone.startsWith('91')
+          ? cleanPhone
+          : `91${cleanPhone}`;
+
+        const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' },
+              { type: 'text', text: card.cardno },
+              { type: 'text', text: formattedTime },
+              { type: 'text', text: changed.join(', ') },
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'profile_updated', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp profile_updated message in updateProfile:', waErr.message || waErr);
+      }
+    }
+  }
 
   return res
     .status(200)
