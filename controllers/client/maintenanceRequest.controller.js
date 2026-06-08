@@ -13,6 +13,8 @@ import database from '../../config/database.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+
 
 export const CreateRequest = CatchAsync(async (req, res) => {
   const t = await database.transaction();
@@ -72,10 +74,49 @@ export const CreateRequest = CatchAsync(async (req, res) => {
 
   await t.commit();
 
+  const phone = req.user.mobno;
+  if (phone) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: req.user.issuedto || 'Mumukshu'
+            },
+            {
+              type: 'text',
+              text: req.body.department || ' '
+            },
+            {
+              type: 'text',
+              text: req.body.area_of_work || ' '
+            },
+            {
+              type: 'text',
+              text: req.body.work_detail || ' '
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'maintenance_request_received', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in CreateRequest:', err.message || err);
+    }
+  }
+
   return res.status(201).send({
     message: 'successfully created request'
   });
 });
+
 
 export const ViewRequest = CatchAsync(async (req, res) => {
   const page = parseInt(req.query.page) || 1;
