@@ -1,93 +1,12 @@
-import { CardDb,GuestRelationship } from '../../models/associations.js';
-import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
+import { CardDb,GuestRelationship, FlatBooking, RoomBooking, FoodDb, GateRecord, MaintenanceDb, ShibirBookingDb, TravelDb, UtsavBooking,  PermanentWifiCodes, ShibirDb, UtsavDb } from '../../models/associations.js';
+import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM, STATUS_OPEN } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import bcrypt from 'bcryptjs';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import { Op } from 'sequelize';
+import moment from "moment";
 
-// export const createCard = async (req, res) => {
-//   const {
-//     cardno,
-//     issuedto,
-//     gender,
-//     dob,
-//     mobno,
-//     email,
-//     idType,
-//     idNo,
-//     address,
-//     country,
-//     state,
-//     city,
-//     pin,
-//     centre,
-//     res_status,
-//     referenceCardno,  // New: cardno of mumukshu
-//     guestType         // New: guest type (Driver, VIP, Friend, Family)
-//   } = req.body;
-
-//   const alreadyExists = await CardDb.findOne({ where: { cardno } });
-//   if (alreadyExists) {
-//     throw new ApiError(400, 'Card already exists');
-//   }
-
-//   const t = await CardDb.sequelize.transaction();
-
-//   try {
-//     const user = await CardDb.create({
-//       cardno,
-//       issuedto,
-//       gender,
-//       dob,
-//       mobno,
-//       email,
-//       idType,
-//       idNo,
-//       address,
-//       country,
-//       state,
-//       city,
-//       pin,
-//       center: centre,
-//       status: STATUS_OFFPREM,
-//       res_status,
-//       updatedBy: req.user.username
-//     }, { transaction: t });
-
-//     if (!user) {
-//       throw new ApiError(500, 'Error occurred while registering the card');
-//     }
-
-//     // 🔄 If the person is a guest, add an entry in guest_relationship table
-//     if (res_status === 'GUEST') {
-//       if (!referenceCardno || !guestType) {
-//         throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
-//       }
-
-//       await GuestRelationship.create({
-//         cardno: referenceCardno,
-//         guest: cardno,
-//         type: guestType,
-//         updatedBy: req.user.username
-//       }, { transaction: t });
-//     }
-
-//     await t.commit();
-
-//     return res
-//       .status(200)
-//       .send({ message: 'Successfully registered card', data: user });
-
-//   } catch (error) {
-//     await t.rollback();
-//     console.error("Sequelize Validation Error:", error.errors || error);
-//     return res.status(500).json({
-//       message: "Validation error",
-//       details: error.errors || error.message
-//     });
-//   }
-// };
 
 export const createCard = async (req, res) => {
   const {
@@ -413,4 +332,207 @@ export const getCardByMobile = async (req, res) => {
 
   req.log.info('get_card_by_mobile_success', { mobno, cardno: card.cardno });
   return res.status(200).json({ message: 'Found card', data: card });
+};
+
+
+export const getPersonActivity = async (req, res) => {
+  try {
+    const { cardno } = req.query;
+
+    if (!cardno) {
+      return res.status(400).json({ message: "cardno is required" });
+    }
+
+    const today = moment().format("YYYY-MM-DD");
+    const past30 = moment().subtract(30, "days").format("YYYY-MM-DD");
+
+    // =================================================
+    // 🚀 PARALLEL QUERIES
+    // =================================================
+
+    const [
+      flats,
+      rooms,
+      food,
+      gate,
+      maintenanceOpen,
+      shibirBookings,
+      travel,
+      utsavBookings,
+      wifiCodes
+    ] = await Promise.all([
+      // 🏠 FLAT
+      FlatBooking.findAll({
+        where: {
+          cardno,
+          [Op.or]: [
+            { checkin: { [Op.gte]: past30 } },
+            { checkout: { [Op.gte]: past30 } }
+          ]
+        },
+        raw: true
+      }),
+
+      // 🛏 ROOM
+      RoomBooking.findAll({
+        where: {
+          cardno,
+          [Op.or]: [
+            { checkin: { [Op.gte]: past30 } },
+            { checkout: { [Op.gte]: past30 } }
+          ]
+        },
+        raw: true
+      }),
+
+      // 🍽 FOOD
+      FoodDb.findAll({
+        where: {
+          cardno,
+          date: { [Op.gte]: past30 }
+        },
+        raw: true
+      }),
+
+      // 🚪 GATE
+      GateRecord.findAll({
+        where: {
+          cardno,
+          createdAt: { [Op.gte]: past30 }
+        },
+        raw: true
+      }),
+
+      // 🔧 MAINTENANCE → ONLY OPEN (NO DATE)
+      MaintenanceDb.findAll({
+        where: {
+          requested_by: cardno,
+          status: STATUS_OPEN
+        },
+        raw: true
+      }),
+
+      // 📿 SHIBIR (JOIN MASTER)
+      ShibirBookingDb.findAll({
+        where: { cardno },
+        include: [
+          {
+            model: ShibirDb,
+            attributes: ["start_date", "end_date", "name"],
+            required: true
+          }
+        ],
+        raw: true,
+        nest: true
+      }),
+
+      // 🚗 TRAVEL
+      TravelDb.findAll({
+        where: {
+          cardno,
+          date: { [Op.gte]: past30 }
+        },
+        raw: true
+      }),
+
+      // 🎉 UTSAV (JOIN MASTER)
+      UtsavBooking.findAll({
+        where: { cardno },
+        include: [
+          {
+            model: UtsavDb,
+            attributes: ["start_date", "end_date", "name"],
+            required: true
+          }
+        ],
+        raw: true,
+        nest: true
+      }),
+
+      // 📶 WIFI (NO DATE FILTER)
+      PermanentWifiCodes.findAll({
+        where: { cardno },
+        raw: true
+      })
+    ]);
+
+    // =================================================
+    // 🧩 NORMALIZE
+    // =================================================
+
+    const timeline = [];
+    const pushItem = (type, date, data) =>
+      timeline.push({ type, date, ...data });
+
+    // ===== DATE BASED =====
+
+    flats.forEach(f => pushItem("flat_booking", f.checkin, f));
+    rooms.forEach(r => pushItem("room_booking", r.checkin, r));
+    food.forEach(f => pushItem("food_booking", f.date, f));
+    gate.forEach(g => pushItem("gate_record", g.createdAt, g));
+    travel.forEach(t => pushItem("travel_booking", t.date, t));
+
+    // ✅ SHIBIR (FROM MASTER DATE)
+    shibirBookings.forEach(s =>
+      pushItem(
+        "shibir_booking",
+        s.ShibirDb?.start_date,
+        s
+      )
+    );
+
+    // ✅ UTSAV (FROM MASTER DATE)
+    utsavBookings.forEach(u =>
+      pushItem(
+        "utsav_booking",
+        u.UtsavDb?.start_date,
+        u
+      )
+    );
+
+    // =================================================
+    // 📊 SPLIT
+    // =================================================
+
+    const upcoming = [];
+    const past30Days = [];
+
+    timeline.forEach(item => {
+      if (!item.date) return;
+
+      const d = moment(item.date).format("YYYY-MM-DD");
+
+      if (d > today) upcoming.push(item);
+      else if (d >= past30) past30Days.push(item);
+    });
+
+    const sortFn = (a, b) =>
+      moment(b.date).valueOf() - moment(a.date).valueOf();
+
+    upcoming.sort(sortFn);
+    past30Days.sort(sortFn);
+
+    // =================================================
+    // 🎁 FINAL RESPONSE
+    // =================================================
+
+    return res.json({
+      upcoming,
+      past30Days,
+      maintenanceOpen, // 👈 separate section
+      wifiCodes, // 👈 separate section
+      summary: {
+        totalUpcoming: upcoming.length,
+        totalPast: past30Days.length,
+        openMaintenance: maintenanceOpen.length,
+        wifiCodes: wifiCodes.length
+      }
+    });
+  } catch (error) {
+    console.error("Person activity error:", error);
+    return res.status(500).json({
+      message: "Failed to fetch person activity",
+      error: error.message
+    });
+  }
 };

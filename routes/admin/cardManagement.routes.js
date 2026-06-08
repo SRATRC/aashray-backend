@@ -8,7 +8,8 @@ import {
   transferCard,
   fetchTotalTransactions,
   resetPasswordDefault,
-  getCardByMobile
+  getCardByMobile,
+  getPersonActivity
 } from '../../controllers/admin/cardManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_CARD_ADMIN, ROLE_FOOD_ADMIN, ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN, ROLE_WIFI_ADMIN } from '../../config/constants.js';
@@ -25,7 +26,7 @@ router.put('/update', CatchAsync(updateCard));
 router.put('/transfer', CatchAsync(transferCard));
 router.get('/transactions/:cardno', CatchAsync(fetchTotalTransactions));
 router.post('/reset-pwd', CatchAsync(resetPasswordDefault));
+router.get('/person-activity', CatchAsync(getPersonActivity));
 
 export default router;
-
 
