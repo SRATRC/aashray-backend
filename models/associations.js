@@ -37,6 +37,16 @@ import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 
 // CardDb
+CardDb.hasOne(AdminUsers, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno'
+});
+AdminUsers.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'card'
+});
+
 CardDb.hasMany(GateRecord, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
