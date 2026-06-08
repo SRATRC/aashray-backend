@@ -58,11 +58,13 @@ import { validateCard } from '../../helpers/card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize, { Op } from 'sequelize';
 import logger from '../../config/logger.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import moment from 'moment';
 import BlockDates from '../../models/block_dates.model.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import moment from 'moment';
+// import moment from 'moment';
 
 const CHECKOUT_DEADLINE = '11:00:00';
 const LATE_CHECKOUT_HALF = '15:00:00';
@@ -851,7 +853,7 @@ export const updateRoomBooking = async (req, res) => {
     include: [
       {
         model: CardDb,
-        attributes: ['issuedto', 'token']
+        attributes: ['issuedto', 'token', 'cardno', 'mobno']
       }
     ],
     where: { bookingid }
@@ -882,6 +884,37 @@ export const updateRoomBooking = async (req, res) => {
   });
 
   await t.commit();
+
+  // --- Send WhatsApp notification for Room Number change ---
+  const phone = booking.CardDb?.mobno;
+  if (phone) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
+
+      const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
+      const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: booking.CardDb.issuedto || 'Mumukshu' },
+            { type: 'text', text: roomno },
+            { type: 'text', text: checkinFormatted },
+            { type: 'text', text: checkoutFormatted }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
+    } catch (waErr) {
+      console.error('Error sending WhatsApp room_number_updated message:', waErr.message || waErr);
+    }
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
