@@ -11,6 +11,7 @@ import {
   UtsavBooking,
   UtsavDb
 } from '../models/associations.js';
+import logger from '../config/logger.js';
 import {
   STATUS_CONFIRMED,
   TYPE_ROOM,
@@ -21,9 +22,7 @@ import {
   TYPE_UTSAV,
   STATUS_GUEST,
   STATUS_ACTIVE,
-  ERR_DATES_NOT_BETWEEN_UTSAV,
   RAJ_PRAVAS_EMAIL,
-  SUBJECT_BOOKING,
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
@@ -40,8 +39,8 @@ import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { sendUnifiedWhatsApp } from '../helpers/whatsapp.helper.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
-  const startDate = new Date(checkin_date);
-  const endDate = new Date(checkout_date);
+  // const startDate = new Date(checkin_date);
+  // const endDate = new Date(checkout_date);
 
   const blockedDates = await BlockDates.findAll({
     where: {
@@ -49,20 +48,20 @@ export async function getBlockedDates(checkin_date, checkout_date) {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: startDate } },
-            { checkout: { [Sequelize.Op.gte]: startDate } }
+            { checkin: { [Sequelize.Op.lte]: checkin_date } },
+            { checkout: { [Sequelize.Op.gte]: checkin_date } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: endDate } },
-            { checkout: { [Sequelize.Op.gte]: endDate } }
+            { checkin: { [Sequelize.Op.lte]: checkout_date } },
+            { checkout: { [Sequelize.Op.gte]: checkout_date } }
           ]
         },
         {
           [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: startDate } },
-            { checkin: { [Sequelize.Op.lte]: endDate } }
+            { checkin: { [Sequelize.Op.gte]: checkin_date } },
+            { checkin: { [Sequelize.Op.lte]: checkout_date } }
           ]
         }
       ]
@@ -72,7 +71,7 @@ export async function getBlockedDates(checkin_date, checkout_date) {
   return blockedDates;
 }
 
-export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
+export async function checkFlatAlreadyBooked(checkin, checkout, cardnos) {
   const result = await FlatBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -94,7 +93,6 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
             { checkout: { [Sequelize.Op.gte]: checkout } }
           ]
         }
-
       ],
       status: {
         [Sequelize.Op.notIn]: [
@@ -103,10 +101,9 @@ export async function checkFlatAlreadyBooked(checkin, checkout, card_no) {
           ROOM_STATUS_CHECKEDOUT
         ]
       },
-      cardno: card_no
+      cardno: cardnos
     }
   });
-
 
   return result.length > 0;
 }
@@ -327,30 +324,28 @@ export async function sendUnifiedEmailForBookedBy(
   }
 }
 
-export function getSubject(bookingStatus){
-  if(bookingStatus == BOOKING_STATUS_PENDING){
+export function getSubject(bookingStatus) {
+  if (bookingStatus == BOOKING_STATUS_PENDING) {
     return 'Bookings created';
   }
-  if(bookingStatus == STATUS_CANCELLED){
+  if (bookingStatus == STATUS_CANCELLED) {
     return 'Bookings cancelled';
   }
   return 'Bookings confirmed';
 }
 
-export function getWelcomeMessage(bookingStatus,country){
-
-  if (bookingStatus == BOOKING_STATUS_PENDING)
-  {
-
-    const bookingCreate ="Your bookings were created.";
-    return (country &&
-    country != 'India' ) ? 
-    bookingCreate+' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
-    :bookingCreate+" Payment is due within 24 hours to confirm any bookings in pending status.";
+export function getWelcomeMessage(bookingStatus, country) {
+  if (bookingStatus == BOOKING_STATUS_PENDING) {
+    const bookingCreate = 'Your bookings were created.';
+    return country && country != 'India'
+      ? bookingCreate +
+      ' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
+      : bookingCreate +
+      ' Payment is due within 24 hours to confirm any bookings in pending status.';
   }
 
-  if( bookingStatus == STATUS_CANCELLED){
-    return "We are sorry to inform you that your bookings have been cancelled.";
+  if (bookingStatus == STATUS_CANCELLED) {
+    return 'We are sorry to inform you that your bookings have been cancelled.';
   }
   return 'We are pleased to inform you that your bookings have been confirmed.';
 }
@@ -359,7 +354,7 @@ export async function sendUnifiedEmail(
   cardno,
   bookingIds,
   bookedBy,
-  bookingStatus =STATUS_CONFIRMED,
+  bookingStatus = STATUS_CONFIRMED,
   template = 'unifiedBookingEmail',
   sendWhatsApp = true
 ) {
@@ -618,12 +613,10 @@ export async function sendUnifiedEmail(
     });
   }
 
-
   const country =
     user && user.country ? user.country : bookedBy && bookedBy.country;
 
-  let welcomeMessage = getWelcomeMessage(bookingStatus,country) ;
-  
+  let welcomeMessage = getWelcomeMessage(bookingStatus, country);
 
   const email = user && user.email ? user.email : bookedBy && bookedBy.email;
   const name =
@@ -632,7 +625,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject:getSubject(bookingStatus),
+      subject: getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
@@ -659,7 +652,7 @@ export async function sendUnifiedEmail(
   ) {
     sendMail({
       email: RAJ_PRAVAS_EMAIL,
-      subject: getSubject(bookingStatus) + name,
+      subject: getSubject(bookingStatus) + " " + name,
       template: template,
       context: {
         showTravelDetail: wasRajprvasBooked,
@@ -788,11 +781,7 @@ export async function createCardIds(count) {
 
       // If we're struggling to find unique random IDs, switch to sequential
       if (attempts >= MAX_ATTEMPTS && newIds.length < count) {
-        console.warn(
-          `Random generation inefficient, switching to sequential for remaining ${
-            count - newIds.length
-          } IDs`
-        );
+        logger.warn('create_card_ids_switching_to_sequential', { remaining: count - newIds.length });
 
         // Find the next available ID
         let currentId = MIN_ID;
@@ -820,4 +809,48 @@ export async function createCardIds(count) {
   return newIds;
 }
 
+export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllowed = true) {
+  const startDate1 = new Date(start1);
+  const endDate1 = new Date(end1);
+  const startDate2 = new Date(start2);
+  const endDate2 = new Date(end2);
 
+  // No overlap if one range ends before the other starts
+  const noOverlap = boundaryAllowed
+    ? endDate1 <= startDate2 || endDate2 <= startDate1
+    : endDate1 < startDate2 || endDate2 < startDate1
+
+  return !noOverlap;
+}
+
+export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {
+  return isDateRangeOverlapping(
+    blockedDate.checkin,
+    blockedDate.checkout,
+    startDate,
+    endDate,
+    boundaryAllowed
+  );
+}
+
+export function validateBlockedDates(blockedDates, dateRanges) {
+  const conflictingBlocks = [];
+  for (const range of dateRanges) {
+    for (const blockedDate of blockedDates) {
+      if (isDateBlocked(blockedDate, range.start, range.end, range.overlappingWithUtsav)) {
+        conflictingBlocks.push(
+          `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
+            blockedDate.checkout).format('Do MMMM, YYYY')}`
+        );
+      }
+    }
+  }
+
+  if (conflictingBlocks.length > 0) {
+    const blockingInfo = conflictingBlocks.join(',');
+    throw new ApiError(
+      400,
+      `Dates are blocked during following periods: ${blockingInfo}`
+    );
+  }
+}

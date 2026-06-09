@@ -17,6 +17,7 @@ import {
 } from '../../config/constants.js';
 import logger from '../../config/logger.js';
 import database from '../../config/database.js';
+import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
 
@@ -176,7 +177,7 @@ export const gateEntry = async (req, res) => {
   });
 
   if (!user) {
-    return res.status(404).send({ message: 'User not found.' });
+    throw new ApiError(404, 'User not found');
   }
 
   if (user.status == STATUS_OFFPREM)
@@ -228,11 +229,10 @@ export const gateEntry = async (req, res) => {
 
   await t.commit();
   return res.status(200).send({
-  message: 'Success',
-  cardno: user.cardno,
-  issuedto: user.issuedto
-});
-
+    message: 'Success',
+    cardno: user.cardno,
+    issuedto: user.issuedto
+  });
 };
 
 export const gateExit = async (req, res) => {
@@ -275,10 +275,10 @@ export const gateExit = async (req, res) => {
   await t.commit();
 
   return res.status(200).send({
-  message: 'Success',
-  cardno: user.cardno,
-  issuedto: user.issuedto
-});
+    message: 'Success',
+    cardno: user.cardno,
+    issuedto: user.issuedto
+  });
 };
 
 export const gateRecord = async (req, res) => {
@@ -304,7 +304,6 @@ ORDER BY
 
   return res.status(200).send({ message: 'Success', data: result });
 };
-
 
 export const fetchGateHistoryByCard = async (req, res) => {
   const { cardno } = req.params;

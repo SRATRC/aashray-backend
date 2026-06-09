@@ -1,5 +1,6 @@
 import { MSG_UPDATE_SUCCESSFUL, WHATSAPP_SUPPORT_NUMBER } from '../../config/constants.js';
 import { CardDb, FlatDb } from '../../models/associations.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
 import sendMail from '../../utils/sendMail.js';
@@ -7,10 +8,14 @@ import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 
 
 export const updatePassword = async (req, res) => {
+  attachUserContext(req);
+  req.log.info('update_password_start', { cardno: req.user.cardno });
+
   const current_password = req.body.current_password.trim();
   const new_password = req.body.new_password.trim();
 
   if (!current_password || !new_password) {
+    req.log.warn('update_password_missing_fields', { cardno: req.user.cardno });
     throw new ApiError(404, 'Please provide all the fields');
   }
   const details = await CardDb.findOne({
@@ -22,6 +27,7 @@ export const updatePassword = async (req, res) => {
 
   const match = bcrypt.compareSync(current_password, details.password);
   if (!match) {
+    req.log.warn('update_password_incorrect_current', { cardno: req.user.cardno });
     throw new ApiError(404, 'incorrect password provided');
   }
 
@@ -31,6 +37,7 @@ export const updatePassword = async (req, res) => {
     { password: hash },
     { where: { cardno: req.user.cardno } }
   );
+  req.log.info('update_password_success', { cardno: req.user.cardno });
 
   const phone = details.mobno;
   if (phone) {
@@ -68,6 +75,8 @@ export const updatePassword = async (req, res) => {
 
 export const logout = async (req, res) => {
   const { cardno } = req.query;
+  req.log.info('logout_start', { cardno });
+
   const updated = await CardDb.update(
     {
       token: null
@@ -79,14 +88,17 @@ export const logout = async (req, res) => {
     }
   );
   if (!updated) {
+    req.log.error('logout_failed', { cardno });
     throw new ApiError(500, 'Error while logging out user');
   }
 
+  req.log.info('logout_success', { cardno });
   return res.status(200).send({ message: 'logged out' });
 };
 
 export const verifyAndLogin = async (req, res) => {
-  const { mobno, password, token } = req.body;
+  const { mobno, token } = req.body;
+  req.log.info('login_start', { mobno });
 
   const details = await CardDb.findOne({
     where: {
@@ -106,12 +118,15 @@ export const verifyAndLogin = async (req, res) => {
   });
 
   if (!details) {
+    req.log.warn('login_user_not_found', { mobno });
     throw new ApiError(404, 'user not found');
   }
 
+  const { password } = req.body;
   const match = bcrypt.compareSync(password, details.password);
 
   if (!match) {
+    req.log.warn('login_incorrect_password', { mobno });
     throw new ApiError(404, 'Incorrect Password');
   }
 
@@ -120,6 +135,7 @@ export const verifyAndLogin = async (req, res) => {
     { where: { mobno: mobno } }
   );
   if (!updated) {
+    req.log.error('login_token_update_failed', { mobno });
     throw new ApiError(500, 'Error while logging in user');
   }
 
@@ -131,6 +147,8 @@ export const verifyAndLogin = async (req, res) => {
   });
   details.setDataValue('isFlatOwner', !!isFlatOwner);
   details.setDataValue('password', '');
+
+  req.log.info('login_success', { cardno: details.cardno, isFlatOwner: !!isFlatOwner });
   return res.status(200).send({ message: 'logged in', data: details });
 };
 
@@ -152,10 +170,13 @@ export function generateTemporaryPassword() {
 
 export async function forgotPassword(req, res) {
   const { mobno } = req.body;
+  req.log.info('forgot_password_start', { mobno });
+
   const details = await CardDb.findOne({
     where: { mobno: mobno }
   });
   if (!details) {
+    req.log.warn('forgot_password_user_not_found', { mobno });
     throw new ApiError(404, 'user not found');
   }
   let temporaryPassword = generateTemporaryPassword();
@@ -164,6 +185,8 @@ export async function forgotPassword(req, res) {
   const hash = bcrypt.hashSync(temporaryPassword, salt);
 
   await CardDb.update({ password: hash }, { where: { mobno: mobno } });
+  req.log.info('forgot_password_temp_set', { mobno, cardno: details.cardno });
+
   sendMail({
     email: details.email,
     subject: 'Temporary Password',
@@ -173,6 +196,7 @@ export async function forgotPassword(req, res) {
       name: details.issuedto
     }
   });
+  req.log.info('forgot_password_email_sent', { mobno, email: details.email });
 
   const phone = details.mobno;
   if (phone) {

@@ -1,6 +1,6 @@
 import winston from 'winston';
-import 'winston-daily-rotate-file';
 import path from 'path';
+import 'winston-daily-rotate-file';
 
 // Define log levels
 const levels = {
@@ -14,48 +14,65 @@ const levels = {
 // Define log level based on environment
 const level = () => {
   const env = process.env.NODE_ENV || 'dev';
-  return env === 'prod' ? 'warn' : 'debug';
+  return env === 'prod' ? 'info' : 'debug';
 };
 
-// Define custom format
-const format = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
+// Structured JSON format — New Relic parses each key as a queryable attribute
+const jsonFormat = winston.format.combine(
+  winston.format.timestamp(),
+  winston.format.errors({ stack: true }),
+  winston.format.json()
+);
+
+// Human-readable format for console only
+const consoleFormat = winston.format.combine(
+  winston.format.colorize(),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(
-    (info) => `${info.timestamp} ${info.level}: ${info.message}`
+    ({ timestamp, level, message, correlationId, userId, ...meta }) => {
+      const ctx = [
+        correlationId && `reqId=${correlationId}`,
+        userId && `user=${userId}`
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const metaStr = Object.keys(meta).length
+        ? ` ${JSON.stringify(meta)}`
+        : '';
+      return `${timestamp} ${level}${ctx ? ` [${ctx}]` : ''}: ${message}${metaStr}`;
+    }
   )
 );
 
-// Define file transports
+const LOG_DIR = process.env.LOG_DIR || '/home/ubuntu/logs';
+
 const fileTransport = new winston.transports.DailyRotateFile({
-  filename: path.join('logs', 'application-%DATE%.log'),
+  filename: path.join(LOG_DIR, 'application-%DATE%.log'),
   datePattern: 'YYYY-MM-DD',
   zippedArchive: true,
   maxSize: '20m',
-  maxFiles: '14d',
-  level: 'debug'
+  maxFiles: '90d',
+  format: jsonFormat
 });
 
-// Define error file transport
 const errorFileTransport = new winston.transports.DailyRotateFile({
-  filename: path.join('logs', 'error-%DATE%.log'),
+  filename: path.join(LOG_DIR, 'error-%DATE%.log'),
   datePattern: 'YYYY-MM-DD',
   zippedArchive: true,
   maxSize: '20m',
-  maxFiles: '14d',
-  level: 'error'
+  maxFiles: '90d',
+  level: 'error',
+  format: jsonFormat
 });
 
-// Define console transport
 const consoleTransport = new winston.transports.Console({
-  format: winston.format.combine(winston.format.colorize(), format),
+  format: consoleFormat,
   forceConsole: true
 });
 
-// Create the logger
 const logger = winston.createLogger({
   level: level(),
   levels,
-  format,
   transports: [fileTransport, errorFileTransport, consoleTransport]
 });
 

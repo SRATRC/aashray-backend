@@ -6,8 +6,12 @@ import {
   STATUS_WAITING,
   STATUS_OPEN,
   ERR_UTSAV_ALREADY_BOOKED,
-  STATUS_AVAILABLE
+  STATUS_AVAILABLE,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED,
+  RESEARCH_CENTRE
 } from '../config/constants.js';
+import logger from '../config/logger.js';
 import {
   UtsavDb,
   UtsavPackagesDb,
@@ -19,33 +23,32 @@ import {
   usableCredits
 } from './transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
+import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
+import {
+  getBlockedDates,
+  isDateRangeOverlapping,
+  validateBlockedDates
+} from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
+import { bookFoodForAllMeals, cancelAllMeals } from './foodBooking.helper.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
-  const utsav = await UtsavDb.findOne({
-    where: {
-      id: utsavid
-    }
-  });
+  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
-  const packages = await UtsavPackagesDb.findAll({
-    where: { utsavid }
-  });
-
+  const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
   await checkUtsavAlreadyBooked(utsavid, mumukshus);
 
   let total_amount = 0;
   let available_seats = utsav.available_seats;
-
-  let status = STATUS_PAYMENT_PENDING;
   let userBookingIds = {},
     waitingBookingCount = 0;
+
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
@@ -53,16 +56,19 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
     const package_info = packages.find(
       (p) => p.id === Number(mumukshu.packageid)
     );
-
-    if (!package_info) {
+    if (!package_info)
       throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
-    }
 
+    // 🟢 NEW LOGIC
+    let status;
     if (available_seats <= 0) {
       status = STATUS_WAITING;
       waitingBookingCount++;
-    } else {
+    } else if (package_info.amount > 0) {
       status = STATUS_PAYMENT_PENDING;
+      available_seats--;
+    } else {
+      status = STATUS_CONFIRMED; // auto-confirm free packages
       available_seats--;
     }
 
@@ -82,8 +88,13 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       },
       { transaction: t }
     );
-
-    if (utsav.status === STATUS_OPEN && status === STATUS_PAYMENT_PENDING) {
+    
+    // 🟢 UPDATED CONDITIONAL
+    if (
+      utsav.status === STATUS_OPEN &&
+      status === STATUS_PAYMENT_PENDING &&
+      package_info.amount > 0
+    ) {
       await createPendingTransaction(
         user,
         booking,
@@ -92,29 +103,58 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-
+      
       total_amount += package_info.amount;
+      
+      
+    }
+    // Only provision food for non-waitlisted bookings
+    if (booking.status !== STATUS_WAITING) {
+      await bookFoodForUtsav(package_info, utsav, mumukshu, t, user.cardno);
     }
     bookings.push(bookingid);
     userBookingIds[mumukshu.cardno] = bookings;
   }
 
-  UtsavDb.update(
-    {
-      available_seats: available_seats
-    },
-    {
-      where: {
-        id: utsavid
-      }
-    },
-    { transaction: t }
+  await UtsavDb.update(
+    { available_seats },
+    { where: { id: utsavid }, transaction: t }
   );
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
-export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUser) {
+export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
+  
+  if(utsav.location !== RESEARCH_CENTRE) 
+    return;
+
+  const effectiveStartingMeal = moment(package_info.start_date).isSame(utsav.start_date, 'day')
+    ? utsav.starting_meal
+    : null;
+
+  const effectiveEndingMeal = moment(package_info.end_date).isSame(utsav.end_date, 'day')
+    ? utsav.ending_meal
+    : null;
+
+  await bookFoodForAllMeals(
+    package_info.start_date,
+    package_info.end_date,
+    effectiveStartingMeal,
+    effectiveEndingMeal,
+    mumukshu.cardno,
+    t,
+    updatedBy
+  );
+
+}
+
+export async function bookUtsavForMumukshusAdmin(
+  utsavid,
+  mumukshus,
+  t,
+  adminUser
+) {
   const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
@@ -123,16 +163,20 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
   await checkUtsavAlreadyBooked(utsavid, mumukshus);
 
   let total_amount = 0;
-  let userBookingIds = {}, waitingBookingCount = 0;
+  let userBookingIds = {},
+    waitingBookingCount = 0;
 
   for (const mumukshu of mumukshus) {
     let bookings = [];
     const bookingid = uuidv4();
 
-    const package_info = packages.find((p) => p.id === Number(mumukshu.packageid));
-    if (!package_info) throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
+    const package_info = packages.find(
+      (p) => p.id === Number(mumukshu.packageid)
+    );
+    if (!package_info)
+      throw new ApiError(400, `Package ${mumukshu.packageid} not found`);
 
-    // Admin flow: do not check or decrement available seats; set to payment pending
+    // ⭐ Create booking in WAITING status
     const booking = await UtsavBooking.create(
       {
         bookingid,
@@ -144,33 +188,23 @@ export async function bookUtsavForMumukshusAdmin(utsavid, mumukshus, t, adminUse
         carno: mumukshu.carno,
         other: mumukshu.other,
         volunteer: mumukshu.volunteer,
-        status: STATUS_PAYMENT_PENDING,
+        status: STATUS_WAITING, // ⭐ Changed
         updatedBy: adminUser.username || 'admin'
       },
       { transaction: t }
     );
 
-    // Always create pending/cash transaction for admin
-    const cardRecord = await CardDb.findOne({ where: { cardno: mumukshu.cardno } });
-    if (!cardRecord) throw new ApiError(400, `Card not found for cardno ${mumukshu.cardno}`);
+    // ⭐ NO TRANSACTION CREATION AT ALL
+    // (Admin WAITING → later converted to PENDING, then transaction will be created)
 
-    await createPendingTransaction(
-      cardRecord,
-      booking,
-      TYPE_UTSAV,
-      package_info.amount,
-      adminUser.username || 'admin',
-      t,
-      true
-    );
-
-    total_amount += package_info.amount;
+    // accumulate only for info — optional
+    total_amount += Number(package_info.amount) || 0;
 
     bookings.push(bookingid);
     userBookingIds[mumukshu.cardno] = bookings;
-  }
 
-  // Admin flow: do not adjust available_seats here
+    waitingBookingCount++;
+  }
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
@@ -225,12 +259,12 @@ export async function checkOverlapWithSamvatsari(mumukshus) {
         status: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED, STATUS_WAITING],
         samvatsari_package_id: SAMVATSARI_PACKAGE_ID,
         samvatsari_overlapping_packages: SAMVATSARI_OVERLAPPING_PACKAGE_IDS,
-        packages_overlap_with_samvatsari:
-          mumukshu_packages.some((packageid) =>
-            SAMVATSARI_OVERLAPPING_PACKAGE_IDS.includes(packageid)
-          ),
-        packages_include_samvatsari:
-          mumukshu_packages.includes(SAMVATSARI_PACKAGE_ID)
+        packages_overlap_with_samvatsari: mumukshu_packages.some((packageid) =>
+          SAMVATSARI_OVERLAPPING_PACKAGE_IDS.includes(packageid)
+        ),
+        packages_include_samvatsari: mumukshu_packages.includes(
+          SAMVATSARI_PACKAGE_ID
+        )
       },
       type: Sequelize.QueryTypes.SELECT
     }
@@ -254,6 +288,9 @@ export async function validateUtsavs(user, utsavid, mumukshus) {
     where: { utsavid }
   });
 
+  // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const mumukshu of mumukshus) {
     const package_info = packages.find((p) => p.id === mumukshu.packageid);
     if (!package_info) {
@@ -267,7 +304,7 @@ export async function validateUtsavs(user, utsavid, mumukshus) {
     if (utsav.status === STATUS_OPEN) {
       status = STATUS_AVAILABLE;
       charge = package_info.amount;
-      availableCredits = usableCredits(user, TYPE_UTSAV, charge);
+      availableCredits = usableCredits(tempUser, TYPE_UTSAV, charge);
     }
 
     utsavDetails.push({
@@ -310,7 +347,7 @@ export async function reserveUtsavSeat(utsav, t) {
 }
 
 export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
-  console.log('Input to openUtsavSeat:', utsav, cardno, updatedBy);
+  logger.info('open_utsav_seat_start', { utsavid: utsav?.id, cardno, updatedBy, utsavStatus: utsav?.status });
 
   // Only increase available seats if utsav is in "open" status
   if (utsav.status !== STATUS_OPEN) return;
@@ -342,11 +379,176 @@ export async function validateUtsavPackage(packageId, utsavId) {
   return packageData;
 }
 
+export function isUtsavOverlapping(utsav, startDate, endDate) {
+  if (!utsav) return false;
+
+  return isDateRangeOverlapping(
+    utsav.start_date,
+    utsav.end_date,
+    startDate,
+    endDate,
+    false
+  );
+}
+
+export async function getUtsavBookingsByCardno(cardnos, startDate, endDate) {
+  const bookings = await getUtsavBookings(cardnos, startDate, endDate);
+
+  const grouped = bookings.reduce((acc, booking) => {
+    acc[booking.cardno] = booking;
+    return acc;
+  }, {});
+
+  return grouped;
+}
+
+export async function getUtsavBookings(cardnos, startDate, endDate) {
+  const utsavBookings = await UtsavBooking.findAll({
+    where: {
+      cardno: cardnos,
+      status: {
+        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
+      }
+    },
+    include: [
+      {
+        model: UtsavDb,
+        where: {
+          [Sequelize.Op.or]: [
+            {
+              // utsav starts between start and end date
+              [Sequelize.Op.and]: [
+                { start_date: { [Sequelize.Op.gte]: startDate } },
+                { start_date: { [Sequelize.Op.lte]: endDate } }
+              ]
+            },
+            {
+              // utsav ends between start and end date
+              [Sequelize.Op.and]: [
+                { end_date: { [Sequelize.Op.gte]: startDate } },
+                { end_date: { [Sequelize.Op.lte]: endDate } }
+              ]
+            },
+            {
+              // utsav starts before start and ends after end date
+              [Sequelize.Op.and]: [
+                { start_date: { [Sequelize.Op.lte]: startDate } },
+                { end_date: { [Sequelize.Op.gte]: endDate } }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  });
+
+  return utsavBookings;
+}
+
+export function splitDateRanges(
+  utsavStart,
+  utsavEnd,
+  bookingStart,
+  bookingEnd
+) {
+  const ranges = [];
+
+  if (new Date(bookingStart) < new Date(utsavStart)) {
+    ranges.push({
+      start: bookingStart,
+      end: utsavStart,
+      overlappingWithUtsav: true
+    });
+  }
+
+  if (new Date(bookingEnd) > new Date(utsavEnd)) {
+    ranges.push({
+      start: utsavEnd,
+      end: bookingEnd,
+      overlappingWithUtsav: true
+    });
+  }
+
+  return ranges;
+}
+
+export async function getDateRangesDuringUtsav(
+  mumukshus,
+  startDate,
+  endDate,
+  utsav
+) {
+  const inProgressUtsavOverlapping = isUtsavOverlapping(
+    utsav,
+    startDate,
+    endDate
+  );
+
+  const existingUtsavBookings = inProgressUtsavOverlapping
+    ? {}
+    : await getUtsavBookingsByCardno(mumukshus, startDate, endDate);
+
+  const blockedDates = await getBlockedDates(startDate, endDate);
+
+  const dateRangesByMumukshu = {};
+  for (const mumukshu of mumukshus) {
+    const isDayVisit = startDate === endDate;
+
+if (isDayVisit) {
+  dateRangesByMumukshu[mumukshu] = [
+    {
+      start: startDate,
+      end: endDate,
+      overlappingWithUtsav: false
+    }
+  ];
+  continue;
+}
+
+    const utsavBooking = inProgressUtsavOverlapping
+      ? utsav
+      : existingUtsavBookings[mumukshu]?.UtsavDb;
+
+    const dateRanges = [];
+    if (utsavBooking) {
+      dateRanges.push(
+        ...splitDateRanges(
+          utsavBooking.start_date,
+          utsavBooking.end_date,
+          startDate,
+          endDate
+        )
+      );
+    } else {
+      // In case, utsav booking is not found for this mumukshu, check if there is any
+      // utsav starts on checkout or ends on checkin date
+      const utsavOnBoundary = await findUtsavOnBoundaryDates(
+        startDate,
+        endDate
+      );
+      dateRanges.push({
+        start: startDate,
+        end: endDate,
+        overlappingWithUtsav: utsavOnBoundary ? true : false
+      });
+    }
+
+    // validate blockedDates
+    validateBlockedDates(blockedDates, dateRanges);
+
+    dateRangesByMumukshu[mumukshu] = dateRanges;
+  }
+
+  return dateRangesByMumukshu;
+}
+
 export async function sendUtsavBookingUpdateEmail(booking, utsav) {
   // Parallel database queries for better performance
   const [card, bookedByCard, utsavData] = await Promise.all([
     CardDb.findOne({ where: { cardno: booking.cardno } }),
-    booking.bookedBy ? CardDb.findOne({ where: { cardno: booking.bookedBy } }) : null,
+    booking.bookedBy
+      ? CardDb.findOne({ where: { cardno: booking.bookedBy } })
+      : null,
     utsav || UtsavDb.findOne({ where: { id: booking.utsavid } })
   ]);
 
@@ -358,7 +560,7 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
     email: card.email,
     cc: bookedByCard?.email,
     subject: 'Utsav Booking Updated',
-    template: 'utsavStatusUpdate',    
+    template: 'utsavStatusUpdate',
     context: {
       name: card.issuedto,
       bookingid: booking.bookingid,
@@ -368,4 +570,29 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
       utsavEndDate: utsavData.end_date
     }
   });
+}
+
+export async function findUtsavOnBoundaryDates(checkin, checkout) {
+  const utsav = await UtsavDb.findOne({
+    where: {
+      [Sequelize.Op.or]: [{ end_date: checkin }, { start_date: checkout }]
+    }
+  });
+
+  return utsav;
+}
+
+export async function cancelUtsavFoodBookings(booking, updatedBy, t) {
+
+  // Mirror bookFoodForUtsav: food is only auto-created for Research Centre utsavs,
+  // so only cancel it for those (otherwise we'd wipe unrelated food on these dates).
+  const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
+  if (!utsav || utsav.location !== RESEARCH_CENTRE) return;
+
+  const utsavPackage = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
+
+  if (utsavPackage) {
+    await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
+  }
+  
 }

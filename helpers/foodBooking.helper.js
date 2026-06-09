@@ -1,6 +1,8 @@
 import {
   BREAKFAST_PRICE,
   DINNER_PRICE,
+  ERR_BOOKING_NOT_FOUND,
+  ERR_INVALID_MEAL_TIME,
   ERR_ROOM_MUST_BE_BOOKED,
   LUNCH_PRICE,
   ROLE_FOOD_ADMIN,
@@ -23,7 +25,12 @@ import {
   checkSpecialAllowance,
   validateDate
 } from '../controllers/helper.js';
-import { FoodDb, Transactions, UtsavDb } from '../models/associations.js';
+import {
+  CardDb,
+  FoodDb,
+  Transactions,
+  UtsavDb
+} from '../models/associations.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,6 +38,7 @@ import { cancelTransactions, usableCredits } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment';
+import logger from '../config/logger.js';
 
 const mealTypeMapping = {
   breakfast: TYPE_GUEST_BREAKFAST,
@@ -80,8 +88,16 @@ export async function bookFoodForMumukshus(
   t,
   updatedBy,
   userRoles = [],
-  cashAllowed = false
+  cashAllowed = false,
+  log = logger
 ) {
+  const mumukshus_peek = mumukshuGroup.flatMap((g) => g.mumukshus || g.guests);
+  log.info('food_booking_start', {
+    start_date,
+    end_date,
+    mumukshu_count: mumukshus_peek.length,
+    bookedBy
+  });
   if (!end_date) {
     end_date = start_date;
   }
@@ -201,6 +217,11 @@ export async function bookFoodForMumukshus(
     transaction: t
   });
   const transactionIds = transactions.map((item) => item.id);
+  log.info('food_booking_result', {
+    created: bookingsToCreate.length,
+    transactions: transactionIds.length,
+    amount
+  });
   return { amount, userBookingIds, transactionIds };
 }
 
@@ -232,6 +253,9 @@ export async function checkFoodAvailabilityForMumumkshus(
   var availableCredits = 0;
 
   if (isGuestBooking) {
+    // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
+    const tempUser = { ...user, credits: { ...user.credits } };
+
     const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
     const bookings = await getFoodBookings(allDates, mumukshus);
 
@@ -263,7 +287,7 @@ export async function checkFoodAvailabilityForMumumkshus(
       }
     }
 
-    availableCredits = usableCredits(user, TYPE_FOOD, charge);
+    availableCredits = usableCredits(tempUser, TYPE_FOOD, charge);
   }
 
   return {
@@ -433,6 +457,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
   await cancelTransactions(user, transactions, t, admin);
 }
 
+
 async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   start_date,
   end_date,
@@ -528,4 +553,161 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
 
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
+}
+
+export async function bookFoodForAllMeals(
+  start_date,
+  end_date,
+  starting_meal,
+  ending_meal,
+  cardno,
+  t,
+  updatedBy
+) {
+
+  const allDates = getDates(start_date, end_date);
+
+  const foodBookings = await FoodDb.findAll({
+    where: {
+      cardno: cardno,
+      date: allDates
+    },
+    transaction: t
+  });
+
+  const bookingsToCreate = [], bookingsToUpdate = [];
+
+  const firstDay = allDates[0];
+  const lastDay = allDates.at(-1);
+
+  for (const date of allDates) {
+    const foodBooking = foodBookings.find((item) => item.date === date);
+
+    let breakfast = 1, lunch = 1, dinner = 1;
+
+    if (date === firstDay && starting_meal?.length) {
+      breakfast = starting_meal.includes('breakfast') ? 1 : 0;
+      lunch     = starting_meal.includes('lunch')     ? 1 : 0;
+      dinner    = starting_meal.includes('dinner')    ? 1 : 0;
+    }
+
+    if (date === lastDay && ending_meal?.length) {
+      breakfast = ending_meal.includes('breakfast') ? 1 : 0;
+      lunch     = ending_meal.includes('lunch')     ? 1 : 0;
+      dinner    = ending_meal.includes('dinner')    ? 1 : 0;
+    }
+
+    if (foodBooking) {
+      foodBooking.breakfast = breakfast;
+      foodBooking.lunch = lunch;
+      foodBooking.dinner = dinner;
+      foodBooking.spicy = 1;
+      foodBooking.hightea = 'TEA';
+      foodBooking.updatedBy = updatedBy;
+      bookingsToUpdate.push(foodBooking);
+
+      continue;
+    }
+    bookingsToCreate.push({
+      id: uuidv4(),
+      cardno: cardno,
+      date: date,
+      breakfast,
+      lunch,
+      dinner,
+      spicy: 1,
+      hightea: 'TEA',
+      updatedBy: updatedBy
+    });
+  }
+  if (bookingsToCreate.length > 0) {
+    await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  }
+  if (bookingsToUpdate.length > 0) {
+    await Promise.all(bookingsToUpdate.map(booking => booking.save({ transaction: t })));
+  }
+
+}
+
+export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t) {
+  const allDates = getDates(start_date, end_date);
+
+  await FoodDb.update(
+    { breakfast: 0, lunch: 0, dinner: 0, updatedBy: updatedBy },
+    { where: { cardno: cardno, date: allDates }, transaction: t }
+  );
+}
+
+
+
+export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
+  // ✅ Use provided date or fallback to current date
+  const targetDate = providedDate
+    ? moment.utc(providedDate).format('YYYY-MM-DD')
+    : moment.utc().format('YYYY-MM-DD');
+
+  const currentTime = moment.utc();
+  const mealTimes = {
+    breakfast: moment.utc().hour(4).minute(30).second(0),
+    lunch: moment.utc().hour(8).minute(30).second(0),
+    dinner: moment.utc().hour(13).minute(30).second(0)
+  };
+
+  // ✅ Find booking for the TARGET DATE (not always today)
+  const booking = await FoodDb.findOne({
+    where: {
+      cardno: cardno,
+      date: targetDate // ✅ CRITICAL FIX: Use target date instead of currentTime
+    },
+    transaction: t
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  const card = await CardDb.findOne({
+    where: { cardno: cardno }
+  });
+
+  if (!card) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  let currentMeal = meal;
+
+  // Only auto-detect meal if not provided
+  if (!currentMeal) {
+    for (const mealType of ['breakfast', 'lunch', 'dinner']) {
+      if (currentTime.isSameOrBefore(mealTimes[mealType])) {
+        currentMeal = mealType;
+        break;
+      }
+    }
+  } else if (!['breakfast', 'lunch', 'dinner'].includes(currentMeal)) {
+    throw new ApiError(400, 'Invalid meal type provided');
+  }
+
+  if (!currentMeal) {
+    throw new ApiError(400, ERR_INVALID_MEAL_TIME);
+  }
+
+  if (!booking[currentMeal]) {
+    throw new ApiError(400, `${currentMeal} not booked`);
+  }
+
+  const plateField = `${currentMeal}_plate_issued`;
+
+  if (booking[plateField]) {
+    throw new ApiError(400, `Plate for ${currentMeal} already issued`);
+  }
+
+  await booking.update({ [plateField]: true }, { transaction: t });
+
+  logger.info('food_plate_issued', { cardno, meal: currentMeal, targetDate });
+
+  return {
+    message: `Plate for ${currentMeal} issued successfully`,
+    issuedto: card.issuedto
+  };
 }

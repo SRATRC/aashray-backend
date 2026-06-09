@@ -41,7 +41,6 @@ import {
   setWaitingBookingCountMap
 } from '../helper.js';
 import {
-  createFlatBooking,
   checkRoomAvailabilityForMumukshus,
   bookRoomForMumukshus,
   bookFlatForMumukshus,
@@ -51,8 +50,6 @@ import {
   generateOrderId,
   updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
-import database from '../../config/database.js';
-import ApiError from '../../utils/ApiError.js';
 import {
   bookFoodForMumukshus,
   checkFoodAvailabilityForMumumkshus
@@ -61,7 +58,14 @@ import {
   validateUtsavs,
   bookUtsavForMumukshus
 } from '../../helpers/utsavBooking.helper.js';
-import { bookAdhyayanForMumukshus, checkAdhyayanAvailabilityForMumukshus } from '../../helpers/adhyayanBooking.helper.js';
+import {
+  bookAdhyayanForMumukshus,
+  checkAdhyayanAvailabilityForMumukshus
+} from '../../helpers/adhyayanBooking.helper.js';
+import { validateCards } from '../../helpers/card.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
+import database from '../../config/database.js';
+import ApiError from '../../utils/ApiError.js';
 
 async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const typeMap = userBookingIdMap[cardno] || {};
@@ -147,7 +151,16 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
 }
 
 export const guestBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+  req.log.info('guest_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
+
+  validateFlatBookingConstraints(primary_booking, addons);
+
   var t = await database.transaction();
   req.transaction = t;
 
@@ -155,11 +168,21 @@ export const guestBooking = async (req, res) => {
   const waitingBookingCountMap = {};
   const transactionIds = [];
 
+  let utsav = null;
+  if (primary_booking.booking_type == TYPE_UTSAV) {
+    utsav = await UtsavDb.findOne({
+      where: {
+        id: primary_booking.details.utsavid
+      }
+    });
+  }
+
   let amount = await book(
     req.body,
     primary_booking,
     t,
     req.user,
+    utsav,
     userBookingIdMap,
     waitingBookingCountMap,
     transactionIds
@@ -172,6 +195,7 @@ export const guestBooking = async (req, res) => {
         addon,
         t,
         req.user,
+        utsav,
         userBookingIdMap,
         waitingBookingCountMap,
         transactionIds
@@ -181,12 +205,15 @@ export const guestBooking = async (req, res) => {
 
   var order = null;
   if (req.user.country == 'India' && amount > 0) {
+    req.log.info('guest_booking_creating_order', { cardno: req.user.cardno, amount });
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
+    req.log.info('guest_booking_order_created', { cardno: req.user.cardno, orderId: order.id, amount });
   }
 
   await t.commit();
+  req.log.info('guest_booking_committed', { cardno: req.user.cardno });
 
   // --- WhatsApp notifications ---
   try {
@@ -259,7 +286,17 @@ export const guestBooking = async (req, res) => {
   let message = MSG_BOOKING_SUCCESSFUL;
   if (Object.keys(waitingBookingCountMap).length > 0) {
     message = MSG_BOOKING_WAITING;
+    req.log.info('guest_booking_waiting', {
+      cardno: req.user.cardno,
+      waitingBookingCountMap
+    });
   }
+  req.log.info('guest_booking_success', {
+    cardno: req.user.cardno,
+    totalAmount: amount,
+    orderId: order?.id,
+    message
+  });
   return res.status(200).send({
     message: message,
     data: order ? order : { amount: 0 },
@@ -268,7 +305,13 @@ export const guestBooking = async (req, res) => {
 };
 
 export const validateBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+  req.log.info('validate_guest_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   const response = {
     roomDetails: [],
@@ -276,6 +319,7 @@ export const validateBooking = async (req, res) => {
     adhyayanDetails: [],
     foodDetails: {},
     utsavDetails: [],
+    flatDetails: [],
     totalCharge: 0
   };
 
@@ -296,25 +340,34 @@ export const validateBooking = async (req, res) => {
     }
   }
 
+  req.log.info('validate_guest_booking_success', {
+    cardno: req.user.cardno,
+    totalCharge: response.totalCharge
+  });
   return res.status(200).send({ data: response });
 };
-async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMap, transactionIds) {
+
+async function book(
+  body,
+  data,
+  t,
+  user,
+  utsav,
+  userBookingIdMap,
+  waitingBookingCountMap,
+  transactionIds
+) {
   let amount = 0;
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(data, t, user);
+      const roomResult = await bookRoom(data, t, user, utsav);
       amount += roomResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
 
     case TYPE_FOOD:
-      const foodResult = await bookFood(
-        body,
-        data,
-        t,
-        user
-      );
+      const foodResult = await bookFood(body, data, t, user);
       amount += foodResult.amount;
       transactionIds.push(...foodResult.transactionIds);
       setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
@@ -349,14 +402,8 @@ async function book(body, data, t, user, userBookingIdMap, waitingBookingCountMa
       break;
 
     case TYPE_FLAT:
-      const flatResult = await bookFlatForMumukshus(
-        data.details.checkin_date || data.details.startDay,
-        data.details.checkout_date || data.details.endDay,
-        data.details.guests,
-        user,
-        t
-      );
-      amount += flatResult.order.amount;
+      const flatResult = await bookFlat(data, t, user);
+      amount += flatResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
       break;
 
@@ -372,11 +419,7 @@ async function validate(body, user, data, utsav, response) {
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      response.roomDetails = await checkRoomAvailability(
-        data,
-        user,
-        utsav
-      );
+      response.roomDetails = await checkRoomAvailability(data, user, utsav);
       totalCharge += response.roomDetails.reduce(
         (partialSum, room) => partialSum + room.charge,
         0
@@ -417,9 +460,11 @@ async function validate(body, user, data, utsav, response) {
       break;
 
     case TYPE_FLAT:
-      response.flatDetails = await checkFlatAvailability(data);
-      const nights = await calculateNights(data.details.checkin_date, data.details.checkout_date);
-      totalCharge += roomCharge('nac') * nights * data.details.guests.length;
+      response.flatDetails = await checkFlatAvailability(data, user);
+      totalCharge += response.flatDetails.reduce(
+        (partialSum, flat) => partialSum + flat.charge,
+        0
+      );
       break;
 
     default:
@@ -449,14 +494,15 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function bookRoom(data, t, user) {
+async function bookRoom(data, t, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     guestGroup,
     t,
-    user
+    user,
+    utsav
   );
   return result;
 }
@@ -500,32 +546,23 @@ async function bookAdhyayan(data, t, user) {
   return result;
 }
 
-async function checkFlatAvailability(data) {
-  const { checkin_date, checkout_date, guests } = data.details;
-  validateDate(checkin_date, checkout_date);
-
-  const flatDetails = [];
-  const nights = await calculateNights(checkin_date, checkout_date);
-  const chargePerGuest = roomCharge('nac') * nights;
-
-  for (const guest of guests) {
-    const isAlreadyBooked = await checkFlatAlreadyBooked(checkin_date, checkout_date, guest);
-    if (isAlreadyBooked) {
-      throw new ApiError(400, `Flat already booked for ${guest}`);
-    }
-
-    flatDetails.push({
-      guest,
-      status: 'available',
-      charge: chargePerGuest
-    });
-  }
-
-  return flatDetails;
-}
-
+/**
+ * @deprecated This endpoint is deprecated. Use the unified booking endpoint with TYPE_FLAT as primary_booking instead.
+ */
 export const guestBookingFlat = async (req, res) => {
+  attachUserContext(req);
+  req.log.warn('guest_booking_flat_deprecated', {
+    cardno: req.user.cardno,
+    message: 'guestBookingFlat endpoint is deprecated. Use unified booking endpoint instead.'
+  });
+
   const { guests, startDay, endDay } = req.body;
+  req.log.info('guest_booking_flat_start', {
+    cardno: req.user.cardno,
+    startDay,
+    endDay,
+    guestCount: guests?.length
+  });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -539,6 +576,11 @@ export const guestBookingFlat = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('guest_booking_flat_committed', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
 
   const userBookingIdMap = {};
   for (const cardno in userBookingIds) {
@@ -614,6 +656,11 @@ export const guestBookingFlat = async (req, res) => {
       );
     });
 
+  req.log.info('guest_booking_flat_success', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
   return res.status(200).send({
     message: MSG_BOOKING_SUCCESSFUL,
     data: order
@@ -621,7 +668,9 @@ export const guestBookingFlat = async (req, res) => {
 };
 
 export const fetchGuests = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
+  req.log.info('fetch_guests_start', { cardno });
 
   const guests = await CardDb.findAll({
     attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'updatedAt'],
@@ -637,6 +686,7 @@ export const fetchGuests = async (req, res) => {
     limit: 10
   });
 
+  req.log.info('fetch_guests_success', { cardno, count: guests.length });
   return res.status(200).send({
     message: 'fetched results',
     data: guests
@@ -644,8 +694,10 @@ export const fetchGuests = async (req, res) => {
 };
 
 export const createGuests = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
   const { guests } = req.body;
+  req.log.info('create_guests_start', { cardno, guestCount: guests?.length });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -653,6 +705,7 @@ export const createGuests = async (req, res) => {
   const allGuests = await createGuestsHelper(cardno, guests, t);
 
   await t.commit();
+  req.log.info('create_guests_success', { cardno, createdCount: allGuests?.length });
 
   // --- Send WhatsApp notification to newly created guests ---
   const newlyCreatedGuests = allGuests.filter((guest) => {
@@ -694,6 +747,7 @@ export const createGuests = async (req, res) => {
 
 export const checkGuests = async (req, res) => {
   const { mobno } = req.params;
+  req.log.info('check_guests_start', { mobno });
 
   const user = await CardDb.findOne({
     attributes: [
@@ -707,12 +761,139 @@ export const checkGuests = async (req, res) => {
     where: { mobno: mobno }
   });
   if (!user) {
+    req.log.info('check_guests_not_found', { mobno });
     return res.status(200).send({ message: 'Guest not found', data: null });
   }
 
   if (user.res_status == STATUS_GUEST) {
+    req.log.info('check_guests_found', { mobno, cardno: user.cardno });
     return res.status(200).send({ message: 'Guest found', data: user });
   } else {
+    req.log.warn('check_guests_not_a_guest', { mobno, cardno: user.cardno, resStatus: user.res_status });
     throw new ApiError(401, 'User is not a guest');
   }
 };
+
+async function bookFlat(data, t, user) {
+  const { checkin_date, checkout_date, guests } = data.details;
+
+  // Handle missing checkout_date
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout_date is required for flat booking');
+  }
+
+  if (guests.length === 0) {
+    throw new ApiError(
+      400,
+      'At least one guest must be specified for flat booking'
+    );
+  }
+
+  const result = await bookFlatForMumukshus(
+    checkin_date,
+    checkout_date,
+    guests,
+    user,
+    t
+  );
+  return {
+    amount: result.order.amount,
+    userBookingIds: result.userBookingIds
+  };
+}
+
+async function checkFlatAvailability(data, user) {
+  const { checkin_date, checkout_date, guests } = data.details;
+
+  // Handle missing checkout_date
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout_date is required for flat booking');
+  }
+
+  if (guests.length === 0) {
+    throw new ApiError(
+      400,
+      'At least one guest must be specified for flat booking'
+    );
+  }
+
+  // Check if user owns a flat
+  const flat = await FlatDb.findOne({
+    attributes: ['flatno'],
+    where: {
+      owner: user.cardno
+    }
+  });
+
+  if (!flat) {
+    throw new ApiError(404, `Flat not found for ${user.cardno}`);
+  }
+
+  validateDate(checkin_date, checkout_date);
+  await validateCards(guests);
+
+  // Check if any guest already has a flat booking for these dates
+  for (const guest of guests) {
+    if (await checkFlatAlreadyBooked(checkin_date, checkout_date, guest)) {
+      throw new ApiError(
+        400,
+        `Flat already booked for ${guest} during selected dates`
+      );
+    }
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const flatDetails = [];
+
+  for (const guest of guests) {
+    // Check if this guest is the flat owner
+    const isFlatOwner = await FlatDb.findOne({
+      where: {
+        owner: guest,
+        flatno: flat.flatno
+      }
+    });
+
+    const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+
+    flatDetails.push({
+      guest: guest,
+      flatno: flat.flatno,
+      nights: nights,
+      charge: charge,
+      status: 'available'
+    });
+  }
+
+  return flatDetails;
+}
+
+function validateFlatBookingConstraints(primary_booking, addons) {
+  // Check if TYPE_FLAT is in addons (not allowed)
+  if (addons && addons.length > 0) {
+    const flatAddon = addons.find((addon) => addon.booking_type === TYPE_FLAT);
+    if (flatAddon) {
+      throw new ApiError(
+        400,
+        'Flat booking cannot be added as an addon. It must be the primary booking type.'
+      );
+    }
+  }
+
+  // Check if TYPE_FLAT is primary booking with other primary booking types
+  if (primary_booking && primary_booking.booking_type === TYPE_FLAT) {
+    // Flat booking should be standalone - no addons of accommodation types allowed
+    if (addons && addons.length > 0) {
+      const accommodationAddons = addons.filter(
+        (addon) =>
+          addon.booking_type === TYPE_ROOM || addon.booking_type === TYPE_UTSAV
+      );
+      if (accommodationAddons.length > 0) {
+        throw new ApiError(
+          400,
+          'Flat booking cannot be combined with other accommodation types (room or utsav bookings).'
+        );
+      }
+    }
+  }
+}

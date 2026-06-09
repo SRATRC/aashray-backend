@@ -18,6 +18,8 @@ import ApiError from '../utils/ApiError.js';
 import moment from 'moment';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
+import { createPendingTransaction } from './transactions.helper.js';
+import logger from '../config/logger.js';
 
 export async function checkTravelAlreadyBooked(
   date,
@@ -53,69 +55,100 @@ export async function checkTravelAlreadyBooked(
   }
 }
 
-async function getTravelBookingStatus(type, date, travelBookingsFordate) {
-  //if regular travel and more than 5 bookings for the date, then waiting.
-  // But if it is a gyan sabha or utsav, then return awaiting confirmation.
-  if (type!= null && type.toLowerCase() == TRAVEL_TYPE_REGULAR.toLowerCase() && travelBookingsFordate > 4) {
-    if (await checkAdhyayanParamGyanSabhaOrUtsav(date)) {
-      return STATUS_AWAITING_CONFIRMATION;
-    }
-    return STATUS_WAITING;
-  } else {
-    return STATUS_AWAITING_CONFIRMATION;
-  }
-}
+export async function updateWaitingTravelBooking(booking, t) {
+  const { date, drop_point, pickup_point } = booking;
 
-export async function updateWaitingTravelBooking(date) {
-  const travelBookingsFordate = await TravelDb.findOne({
-    where: {
-      date: date,
-      status: STATUS_WAITING
-    },
+  const conditions = [];
+  conditions.push({
+    status: STATUS_WAITING
+  });
+  conditions.push({
+    date: date
+  });
+  if (drop_point === RESEARCH_CENTRE) {
+    conditions.push({
+      drop_point: {
+        [Sequelize.Op.eq]: RESEARCH_CENTRE
+      }
+    });
+  }
+  if (pickup_point === RESEARCH_CENTRE) {
+    conditions.push({
+      pickup_point: {
+        [Sequelize.Op.eq]: RESEARCH_CENTRE
+      }
+    });
+  }
+  const travelBookingFordate = await TravelDb.findOne({
+    where: conditions,
     order: [['createdAt', 'ASC']]
   });
-
-  if (travelBookingsFordate) {
-    await TravelDb.update(
+  if (travelBookingFordate) {
+    await travelBookingFordate.update(
       {
         status: STATUS_AWAITING_CONFIRMATION
       },
-      {
-        where: {
-          bookingid: travelBookingsFordate.bookingid
-        }
-      }
+      { transaction: t }
     );
-    const user = await CardDb.findOne({
+    logger.info('travel_waiting_booking_promoted', {
+      bookingid: travelBookingFordate.bookingid,
+      date: travelBookingFordate.date
+    });
+    return travelBookingFordate;
+  }
+}
+
+export async function sendTravelBookingStatusUpdateMail(travelBookingFordate) {
+  let bookedBy = travelBookingFordate.bookedBy;
+  const user = await CardDb.findOne({
+    where: {
+      cardno: travelBookingFordate.cardno
+    }
+  });
+
+  if (bookedBy) {
+    bookedBy = await CardDb.findOne({
       where: {
-        cardno: travelBookingsFordate.cardno
+        cardno: bookedBy
       }
     });
-
+  }
+  if (user) {
     sendMail({
       email: user.email,
+      cc: bookedBy ? bookedBy.email : null,
       subject: 'Raj Pravas - Travel Booking Updated',
       template: 'rajPravasStatusUpdate',
       context: {
         name: user.issuedto,
-        bookingid: travelBookingsFordate.bookingid,
-        date: moment(travelBookingsFordate.date).format('Do MMMM, YYYY'),
-        pickup: travelBookingsFordate.pickup_point,
-        drop: travelBookingsFordate.drop_point,
-        status: STATUS_AWAITING_CONFIRMATION
+        bookingid: travelBookingFordate.bookingid,
+        date: moment(travelBookingFordate.date).format('Do MMMM, YYYY'),
+        pickup: travelBookingFordate.pickup_point,
+        drop: travelBookingFordate.drop_point,
+        status: travelBookingFordate.status
       }
     });
   }
 }
 
-export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
+export async function bookTravelForMumukshus(
+  date,
+  mumukshuGroup,
+  t,
+  user,
+  log = logger
+) {
   const today = moment().format('YYYY-MM-DD');
   if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
-  let userBookingIds = {},
-    waitingBookingCount = 0;
+  let userBookingIds = {};
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  log.info('travel_booking_start', {
+    date,
+    mumukshu_count: mumukshus.length,
+    bookedBy: user.cardno
+  });
   await validateCards(mumukshus);
 
   // Check for existing bookings with same pickup/drop points
@@ -127,16 +160,6 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     });
   }
 
-  const bookings = await TravelDb.findAll({
-    where: {
-      type: TRAVEL_TYPE_REGULAR,
-      status: {
-        [Sequelize.Op.notIn]: [STATUS_ADMIN_CANCELLED, STATUS_CANCELLED]
-      },
-      date: date
-    }
-  });
-  let travelBookingsFordate = bookings.length;
   var bookingsToCreate = [],
     bookingId;
   for (const group of mumukshuGroup) {
@@ -154,19 +177,11 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
 
     for (const mumukshu of mumukshus) {
       bookingId = uuidv4();
-      let travelbookingStatus = await getTravelBookingStatus(
-        type,
-        date,
-        travelBookingsFordate
-      );
-      if (travelbookingStatus == STATUS_WAITING) {
-        waitingBookingCount++;
-      }
       bookingsToCreate.push({
         bookingid: bookingId,
         cardno: mumukshu,
         bookedBy: user.cardno !== mumukshu ? user.cardno : null,
-        status: travelbookingStatus,
+        status: STATUS_AWAITING_CONFIRMATION,
         date,
         type,
         pickup_point,
@@ -178,10 +193,10 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
         comments,
         updatedBy: user.cardno
       });
-      travelBookingsFordate++;
       userBookingIds[mumukshu] = [bookingId];
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return { userBookingIds, waitingBookingCount };
+  log.info('travel_booking_result', { count: bookingsToCreate.length, date });
+  return { userBookingIds, waitingBookingCount: 0 };
 }

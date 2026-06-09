@@ -20,9 +20,9 @@ const sequelize = new Sequelize(
     },
     pool: {
       max: 25,
-      min: 2,
+      min: 3,
       acquire: 300000, // Maximum time (ms) to try getting connection before throwing error
-      idle: 15000, // Maximum time (ms) a connection can be idle before being released
+      idle: 10000, // Maximum time (ms) a connection can be idle before being released
       evict: 1000, // Time interval (ms) to run eviction to free idle connections
       handleDisconnects: true // Automatically handle disconnects
     },

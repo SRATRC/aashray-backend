@@ -14,7 +14,8 @@ import {
   TYPE_FOOD,
   TYPE_UTSAV,
   TYPE_ROOM,
-  TYPE_FLAT
+  TYPE_FLAT,
+  TYPE_TRAVEL
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
@@ -31,7 +32,8 @@ import {
   getBookingTypeFromBooking
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
-import { openUtsavSeat } from './helpers/utsavBooking.helper.js';
+import { openUtsavSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
+import { updateWaitingTravelBooking } from './helpers/travelBooking.helper.js';
 import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendTomorrowMealsCount, checkAndSendMealsCountUpdate } from './helpers/whatsapp.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
@@ -79,7 +81,7 @@ async function cancelMeals(systemUser, transactions, t) {
 
 async function runJob(systemUser, t) {
   const userBookingIds = {};
-  const openBookingIds = {};
+  const openBookings = {};
   const transactions = [];
   const bookings = [];
 
@@ -89,7 +91,7 @@ async function runJob(systemUser, t) {
   logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings)}`);
   logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions)}`);
 
-  await cancelBookings(systemUser, bookings, userBookingIds, openBookingIds, t);
+  await cancelBookings(systemUser, bookings, userBookingIds, openBookings, t);
   await cancelTransactions(systemUser, transactions, t, true);
   await cancelMeals(systemUser, transactions, t);
   await t.commit();
@@ -128,9 +130,9 @@ async function runJob(systemUser, t) {
     const bookingIds = userBookingIds[cardno];
     await sendCancellationEmail(cardno, bookingIds, null);
   }
-  for (const bookingType in openBookingIds) {
-    const bookingIds = openBookingIds[bookingType];
-    await sendOpenBookingEmail(bookingType, bookingIds, null);
+  for (const bookingType in openBookings) {
+    const bookings = openBookings[bookingType];
+    await sendOpenBookingEmail(bookingType, bookings);
   }
 }
 
@@ -147,13 +149,15 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
       const booking = await getBooking(bookingType, transaction.bookingid);
-      bookings.push(booking);
+      if (booking) {
+        bookings.push(booking);
+      }
     }
     transactions.push(transaction);
   }
 }
 
-async function cancelBookings(systemUser, bookings, userBookingIds, openBookingIds, t) {
+async function cancelBookings(systemUser, bookings, userBookingIds, openBookings, t) {
   for (const booking of bookings) {
     const bookingType = getBookingTypeFromBooking(booking);
 
@@ -162,20 +166,42 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookingI
         const adhyayan = await ShibirDb.findOne({
           where: { id: booking.shibir_id }
         });
-        let newBooking = await openAdhyayanSeat(adhyayan, systemUser.username, t);
+
+        let newBooking = await openAdhyayanSeat(
+          adhyayan,
+          systemUser.username,
+          t
+        );
 
         if (newBooking) {
-          addToOpenBookingIds(openBookingIds, newBooking);
+          addToOpenBookings(openBookings, newBooking);
+
+          // 🔥 CREATE ATTENDANCE FOR PROMOTED USER
+          const { createShibirAttendanceEntry } = await import(
+            './helpers/adhyayanBooking.helper.js'
+          );
+
+          await createShibirAttendanceEntry(
+            newBooking,
+            systemUser,
+            t
+          );
         }
         break;
       case TYPE_UTSAV:
         const utsav = await UtsavDb.findOne({
           where: { id: booking.utsavid }
         });
-        let newUtsavBooking = await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
+        //Not automatically moving from waiting to payment pending for now
+        await cancelUtsavFoodBookings(booking, systemUser.username, t);
+        await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
 
-        if (newUtsavBooking) {
-          addToOpenBookingIds(openBookingIds, newUtsavBooking);
+
+        break;
+      case TYPE_TRAVEL:
+        let newTravelBooking = await updateWaitingTravelBooking(booking, t);
+        if (newTravelBooking) {
+          addToOpenBookings(openBookings, newTravelBooking);
         }
         break;
     }
@@ -187,6 +213,16 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookingI
       },
       { transaction: t }
     );
+
+    // 🔥 ADD THIS
+    if (bookingType === TYPE_ADHYAYAN) {
+      const { resetShibirAttendance } = await import('./helpers/adhyayanBooking.helper.js');
+      await resetShibirAttendance(
+        booking.bookingid,
+        systemUser.username,
+        t
+      );
+    }
     addToUserBookingIdMap(userBookingIds, booking);
   }
 }
@@ -203,11 +239,11 @@ function addToUserBookingIdMap(userBookingIds, booking) {
   userBookingIds[cardno] = bookingIdsByType;
 }
 
-function addToOpenBookingIds(openBookingIds, booking) {
+function addToOpenBookings(openBookings, booking) {
   const bookingType = getBookingTypeFromBooking(booking);
-  const bookingIdsByType = openBookingIds[bookingType] || {};
-  bookingIdsByType.push(booking.bookingid);
-  openBookingIds[bookingType] = bookingIdsByType;
+  const bookingsByType = openBookings[bookingType] || [];
+  bookingsByType.push(booking);
+  openBookings[bookingType] = bookingsByType;
 }
 
 async function getUnpaidPastBookingsAndTransactions(bookings, transactions) {
@@ -287,32 +323,70 @@ const mealsCount11PMJob = cron.schedule('0 23 * * *', async () => {
   timezone: "Asia/Kolkata"
 });
 
+let isWifiJobRunning = false;
+let isLowWifiAlertSent = false;
+
+// Schedule WiFi low code alert cron job to run every 30 minutes
+const wifiLowAlertJob = cron.schedule('*/30 * * * *', async () => {
+  logger.info('WiFi low code alert check cron job started.');
+  isWifiJobRunning = true;
+
+  try {
+    const { WifiDb } = await import('./models/associations.js');
+    const { STATUS_ACTIVE } = await import('./config/constants.js');
+    const { sendWifiLowAlertWhatsApp } = await import('./helpers/whatsapp.helper.js');
+
+    const count = await WifiDb.count({
+      where: { status: STATUS_ACTIVE }
+    });
+
+    logger.info(`WiFi low code alert check: ${count} active codes remaining.`);
+
+    if (count < 50) {
+      if (!isLowWifiAlertSent) {
+        await sendWifiLowAlertWhatsApp(count);
+        isLowWifiAlertSent = true;
+      }
+    } else {
+      isLowWifiAlertSent = false;
+    }
+  } catch (error) {
+    logger.error(`WiFi low code alert check error: ${error.message}`);
+  } finally {
+    isWifiJobRunning = false;
+    logger.info('WiFi low code alert check cron job finished.');
+  }
+});
+
 job.start();
 mealsCount9PMJob.start();
 mealsCount10PMJob.start();
 mealsCount11PMJob.start();
+wifiLowAlertJob.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
-  console.log('Gracefully shutting down cron service...');
+  logger.info('cron_shutdown_initiated');
 
   // Stop future jobs from being triggered
   job.stop();
   mealsCount9PMJob.stop();
   mealsCount10PMJob.stop();
   mealsCount11PMJob.stop();
+  wifiLowAlertJob.stop();
 
   // Wait for the current task to finish if it's running
   const waitInterval = setInterval(() => {
-    if (!isRunning) {
-      console.log('All tasks completed. Exiting...');
+    if (!isRunning && !isWifiJobRunning) {
+      logger.info('cron_shutdown_complete');
       clearInterval(waitInterval);
       process.exit(0);
     } else {
-      console.log('Waiting for current task to finish...');
+      logger.info('cron_shutdown_waiting_for_task');
     }
   }, 10000);
 };
 
 process.on('SIGINT', gracefulShutdown); // e.g., Ctrl+C
 process.on('SIGTERM', gracefulShutdown); // PM2 stop/reload
+

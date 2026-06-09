@@ -1,15 +1,20 @@
 import express from 'express';
+import { validateCard } from '../../middleware/validate.js';
+import ApiError from '../../utils/ApiError.js';
+
 const router = express.Router();
-import {
-  unifiedBooking,
-  validateBooking
-} from '../../controllers/client/unifiedBooking.controller.js';
-import CatchAsync from '../../utils/CatchAsync.js';
-import { validateCard, CheckDatesBlocked } from '../../middleware/validate.js';
+
+const deprecatedEndpoint = (req, res, next) => {
+  throw new ApiError(
+    410,
+    'Please update Aashray app to continue using it.',
+    {}
+  );
+};
 
 router.use(validateCard);
 
-router.post('/booking', CheckDatesBlocked, CatchAsync(unifiedBooking));
-router.post('/validate', CheckDatesBlocked, CatchAsync(validateBooking));
+router.post('/booking', deprecatedEndpoint);
+router.post('/validate', deprecatedEndpoint);
 
 export default router;

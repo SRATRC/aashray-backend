@@ -62,6 +62,8 @@ export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
+export const AMT_TYPE_LATE_CHECKOUT_ROOM = 'late_checkout_room';
+
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
@@ -101,6 +103,7 @@ export const ROLE_WIFI_ADMIN = 'wifiAdmin';
 export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
+export const ROLE_UTSAV_ADMIN_RAJ = 'utsavAdminRaj';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
@@ -136,7 +139,8 @@ export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 
 export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
-export const ERR_FLAT_ALREADY_BOOKED = 'Flat already booked';
+export const ERR_FLAT_ALREADY_BOOKED =
+  'Flat already booked for one or more mumukshus during selected dates';
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
 
 export const ERR_FEEDBACK_ALREADY_SUBMITTED =
@@ -145,7 +149,7 @@ export const ERR_FEEDBACK_NOT_ALLOWED =
   'You are not eligible to submit feedback for this adhyayan';
 export const ERR_ADHYAYAN_NOT_COMPLETED =
   'Cannot submit feedback for ongoing or future adhyayan';
-
+export const ERR_UTSAV_NO_SEATS_AVAILABLE = 'No seats available for this utsav';
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';

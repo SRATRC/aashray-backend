@@ -113,9 +113,12 @@ export const createCard = async (req, res) => {
     guestType         // guest type: Driver, VIP, Friend, Family
   } = req.body;
 
+  req.log.info('create_card_start', { cardno, issuedto, res_status });
+
   // --- Check if cardno already exists ---
   const existingCard = await CardDb.findOne({ where: { cardno } });
   if (existingCard) {
+    req.log.warn('create_card_already_exists', { cardno });
     return res.status(400).json({ message: `Card number ${cardno} already exists` });
   }
 
@@ -169,6 +172,8 @@ export const createCard = async (req, res) => {
     // --- Commit everything ---
     await t.commit();
 
+    req.log.info('create_card_success', { cardno, issuedto, res_status });
+
     // --- Send WhatsApp notification if mobno is present ---
     const phone = newCard.mobno;
     if (phone) {
@@ -203,7 +208,7 @@ export const createCard = async (req, res) => {
     // --- Rollback on any error ---
     await t.rollback();
 
-    console.error('Error creating card:', error);
+    req.log.error('create_card_error', { cardno, error: error.message });
     const message = error.name === 'SequelizeUniqueConstraintError'
       ? 'Card number must be unique'
       : error.message || 'Internal server error';
@@ -213,10 +218,11 @@ export const createCard = async (req, res) => {
 };
 
 export const fetchAllCards = async (req, res) => {
-
+  req.log.info('fetch_all_cards_start');
   const data = await CardDb.findAll({
   });
 
+  req.log.info('fetch_all_cards_success', { count: data.length });
   return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
 
@@ -224,6 +230,7 @@ export const fetchAllCards = async (req, res) => {
 export const searchCardsByName = async (req, res) => {
   try {
     const term = req.params.name;
+    req.log.info('search_cards_by_name_start', { term });
 
     const data = await CardDb.findAll({
       where: {
@@ -235,9 +242,10 @@ export const searchCardsByName = async (req, res) => {
       }
     });
 
+    req.log.info('search_cards_by_name_success', { term, count: data.length });
     return res.status(200).send({ message: 'Fetched all cards', data });
   } catch (err) {
-    console.error('Error in searchCardsByName:', err);
+    req.log.error('search_cards_by_name_error', { term: req.params.name, error: err.message });
     return res.status(500).send({ message: 'Internal server error' });
   }
 };
@@ -265,9 +273,12 @@ export const updateCard = async (req, res) => {
     guestType
   } = req.body;
 
+  req.log.info('update_card_start', { cardno, res_status, status });
+
   const card = await CardDb.findOne({ where: { cardno } });
 
   if (!card) {
+    req.log.warn('update_card_not_found', { cardno });
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
@@ -345,6 +356,8 @@ export const updateCard = async (req, res) => {
     await GuestRelationship.destroy({ where: { cardno: cardno } });
   }
 
+  req.log.info('update_card_success', { cardno, res_status });
+
   // --- Send WhatsApp notification if any details were changed ---
   if (changed.length > 0) {
     const targetPhone = mobno || card.mobno;
@@ -382,12 +395,14 @@ export const updateCard = async (req, res) => {
 
 export const transferCard = async (req, res) => {
   const { cardno, new_cardno } = req.body;
+  req.log.info('transfer_card_start', { cardno, new_cardno });
 
   const card = await CardDb.findOne({
     where: { cardno: cardno }
   });
 
   if (!card) {
+    req.log.warn('transfer_card_not_found', { cardno });
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
@@ -398,12 +413,14 @@ export const transferCard = async (req, res) => {
     }
   );
 
+  req.log.info('transfer_card_success', { oldCardno: cardno, newCardno: new_cardno });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 // TODO: FIX this
 export const fetchTotalTransactions = async (req, res) => {
   const cardno = req.params.cardno;
+  req.log.info('fetch_total_transactions_start', { cardno });
 
   const [results, _] = await database.query(
     `SELECT 
@@ -423,6 +440,7 @@ export const fetchTotalTransactions = async (req, res) => {
       GROUP BY 
           category) as t;`);
 
+  req.log.info('fetch_total_transactions_success', { cardno });
   return res
     .status(200)
     .send({ message: 'fetched all user transactions', data: results });
@@ -432,14 +450,17 @@ export const fetchTotalTransactions = async (req, res) => {
 
 export const resetPasswordDefault = async (req, res) => {
   const { cardno } = req.body;
+  req.log.info('reset_password_default_start', { cardno });
 
   if (!cardno) {
+    req.log.warn('reset_password_default_missing_cardno');
     throw new ApiError(400, 'cardno is required');
   }
 
   const card = await CardDb.findOne({ where: { cardno } });
 
   if (!card) {
+    req.log.warn('reset_password_default_card_not_found', { cardno });
     throw new ApiError(404, 'Card not found');
   }
 
@@ -450,6 +471,8 @@ export const resetPasswordDefault = async (req, res) => {
     { password: defaultPasswordHash },
     { where: { cardno } }
   );
+
+  req.log.info('reset_password_default_success', { cardno });
 
   const phone = card.mobno;
   if (phone) {
@@ -485,8 +508,10 @@ export const resetPasswordDefault = async (req, res) => {
 
 export const getCardByMobile = async (req, res) => {
   const { mobno } = req.params;
+  req.log.info('get_card_by_mobile_start', { mobno });
 
   if (!mobno) {
+    req.log.warn('get_card_by_mobile_missing_param');
     return res.status(400).json({ message: 'mobno is required' });
   }
 
@@ -496,8 +521,10 @@ export const getCardByMobile = async (req, res) => {
   });
 
   if (!card) {
+    req.log.warn('get_card_by_mobile_not_found', { mobno });
     return res.status(404).json({ message: 'Card not found' });
   }
 
+  req.log.info('get_card_by_mobile_success', { mobno, cardno: card.cardno });
   return res.status(200).json({ message: 'Found card', data: card });
 };

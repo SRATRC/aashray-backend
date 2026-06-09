@@ -2,7 +2,8 @@ import {
   ShibirDb,
   ShibirBookingDb,
   AdhyayanFeedback,
-  CardDb
+  CardDb,
+  ShibirAttendanceDb
 } from '../../models/associations.js';
 
 import {
@@ -24,6 +25,7 @@ import {
   getOtherBookingUser,
   notifyCardno
 } from '../../helpers/notification.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
@@ -31,6 +33,7 @@ import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
 
 export const FetchAllShibir = async (req, res) => {
+  req.log.info('fetch_all_shibir_start');
   const today = moment().format('YYYY-MM-DD');
 
   const page = parseInt(req.query.page) || 1;
@@ -68,13 +71,16 @@ export const FetchAllShibir = async (req, res) => {
     }))
   };
 
+  req.log.info('fetch_all_shibir_success', { count: shibirs.length });
   return res.status(200).send(formattedResponse);
 };
 
 export const FetchBookedShibir = async (req, res) => {
+  attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  req.log.info('fetch_booked_shibir_start', { cardno: req.user.cardno, page, pageSize });
 
   const shibirs = await database.query(
     `
@@ -127,11 +133,14 @@ export const FetchBookedShibir = async (req, res) => {
       shibir.status === STATUS_CONFIRMED;
   });
 
+  req.log.info('fetch_booked_shibir_success', { cardno: req.user.cardno, count: shibirs.length });
   return res.status(200).send({ data: shibirs });
 };
 
 export const CancelShibir = async (req, res) => {
+  attachUserContext(req);
   const { bookingid } = req.body;
+  req.log.info('cancel_shibir_start', { bookingid, cardno: req.user.cardno });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -147,12 +156,25 @@ export const CancelShibir = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('cancel_shibir_not_found', { bookingid, cardno: req.user.cardno });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(booking.status)) {
+    req.log.warn('cancel_shibir_already_cancelled', {
+      bookingid,
+      cardno: req.user.cardno,
+      currentStatus: booking.status
+    });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
+
+  req.log.info('cancel_shibir_found', {
+    bookingid,
+    cardno: req.user.cardno,
+    shibirId: booking.shibir_id,
+    currentStatus: booking.status
+  });
 
   const adhyayan = await ShibirDb.findOne({
     where: { id: booking.shibir_id }
@@ -160,13 +182,33 @@ export const CancelShibir = async (req, res) => {
 
   let newBooking = null;
   if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
+    req.log.info('cancel_shibir_opening_seat', { shibirId: booking.shibir_id });
     newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
+    if (newBooking) {
+      req.log.info('cancel_shibir_waitlist_promoted', {
+        newBookingId: newBooking.bookingid,
+        shibirId: booking.shibir_id
+      });
+    }
   }
+
+  const resetData = {};
+  for (let i = 1; i <= 9; i++) {
+    resetData[`session_${i}`] = 0;
+  }
+  await ShibirAttendanceDb.update(resetData, {
+    where: {
+      shibir_id: booking.shibir_id,
+      cardno: booking.cardno
+    },
+    transaction: t
+  });
 
   const previousStatus = booking.status;
   await userCancelBooking(req.user, booking, t);
+  req.log.info('cancel_shibir_cancelled', { bookingid, cardno: req.user.cardno });
   await t.commit();
-
+  req.log.info('cancel_shibir_committed', { bookingid });
 
   await sendAdhyayanBookingUpdateNotification(booking, adhyayan, false, previousStatus);
 
@@ -175,12 +217,14 @@ export const CancelShibir = async (req, res) => {
     await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, false, 'waiting');
   }
 
+  req.log.info('cancel_shibir_success', { bookingid, cardno: req.user.cardno });
   return res.status(200).send({ message: 'Adhyayan booking cancelled' });
 };
 
 export const FetchShibirInRange = async (req, res) => {
   const { start_date } = req.query;
   let { end_date } = req.query;
+  req.log.info('fetch_shibir_in_range_start', { start_date, end_date });
 
   const startDateObj = new Date(start_date);
   if (!end_date) {
@@ -208,11 +252,13 @@ export const FetchShibirInRange = async (req, res) => {
     order: [['start_date', 'ASC']]
   });
 
+  req.log.info('fetch_shibir_in_range_success', { start_date, end_date, count: shibirs.length });
   return res.status(200).send({ data: shibirs });
 };
 
 export const FetchShibirById = async (req, res) => {
   const { id } = req.params;
+  req.log.info('fetch_shibir_by_id_start', { shibirId: id });
 
   const shibir = await ShibirDb.findOne({
     where: {
@@ -220,12 +266,17 @@ export const FetchShibirById = async (req, res) => {
     }
   });
 
-  if (!shibir) throw new ApiError(404, 'Shibir not found');
+  if (!shibir) {
+    req.log.warn('fetch_shibir_by_id_not_found', { shibirId: id });
+    throw new ApiError(404, 'Shibir not found');
+  }
 
+  req.log.info('fetch_shibir_by_id_success', { shibirId: id });
   return res.status(200).send({ data: shibir });
 };
 
 export const submitFeedback = async (req, res) => {
+  attachUserContext(req);
   const {
     shibir_id,
     swadhay_karta_rating,
@@ -239,7 +290,10 @@ export const submitFeedback = async (req, res) => {
     stay_rating
   } = req.body;
 
+  req.log.info('submit_feedback_start', { cardno: req.user.cardno, shibirId: shibir_id });
+
   if (!shibir_id) {
+    req.log.warn('submit_feedback_missing_shibir_id', { cardno: req.user.cardno });
     throw new ApiError(400, 'Adhyayan ID is required');
   }
 
@@ -247,6 +301,7 @@ export const submitFeedback = async (req, res) => {
   req.transaction = t;
 
   await validateFeedbackEligibility(req.user.cardno, shibir_id);
+  req.log.info('submit_feedback_eligibility_passed', { cardno: req.user.cardno, shibirId: shibir_id });
 
   await AdhyayanFeedback.create(
     {
@@ -267,6 +322,7 @@ export const submitFeedback = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('submit_feedback_success', { cardno: req.user.cardno, shibirId: shibir_id });
 
   return res.status(201).send({
     message: 'Feedback submitted successfully'
@@ -274,13 +330,17 @@ export const submitFeedback = async (req, res) => {
 };
 
 export const feedbackValidation = async (req, res) => {
+  attachUserContext(req);
   const { shibir_id } = req.query;
+  req.log.info('feedback_validation_start', { cardno: req.user.cardno, shibirId: shibir_id });
 
   if (!shibir_id) {
+    req.log.warn('feedback_validation_missing_shibir_id', { cardno: req.user.cardno });
     throw new ApiError(400, 'Adhyayan ID is required');
   }
 
   await validateFeedbackEligibility(req.user.cardno, shibir_id);
+  req.log.info('feedback_validation_success', { cardno: req.user.cardno, shibirId: shibir_id });
 
   return res.status(200).send({
     message: 'Feedback is allowed'

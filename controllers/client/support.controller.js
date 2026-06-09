@@ -1,9 +1,13 @@
 import { SupportTickets } from '../../models/associations.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import sendMail from '../../utils/sendMail.js';
 import database from '../../config/database.js';
 
 export const createTicket = async (req, res) => {
+  attachUserContext(req);
   const { service, issue } = req.body;
+  req.log.info('create_support_ticket_start', { cardno: req.user.cardno, service });
+
   const t = await database.transaction();
 
   await SupportTickets.create(
@@ -16,6 +20,7 @@ export const createTicket = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('create_support_ticket_success', { cardno: req.user.cardno, service });
 
   // sendMail({
   //   email: 'tech@vitraagvigyaan.org',
