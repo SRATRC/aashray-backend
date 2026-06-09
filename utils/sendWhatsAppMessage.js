@@ -35,7 +35,7 @@ export async function sendWhatsAppMessage(phone, templateName, components = [], 
         "Content-Type": "application/json",
         Authorization: `Bearer ${TOKEN}`,
       },
-      timeout: 15000,
+      timeout: 30000,
     });
 
     console.log(`✅ WhatsApp sent to ${phone} using template ${templateName}`);

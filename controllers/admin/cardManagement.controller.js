@@ -279,20 +279,28 @@ export const updateCard = async (req, res) => {
   }
 
   // --- Compare to find changed fields ---
+  const isChanged = (newVal, oldVal) => {
+    if (newVal === undefined) return false;
+    const normalize = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    return normalize(newVal) !== normalize(oldVal);
+  };
+
   const changed = [];
-  if (issuedto !== undefined && issuedto !== card.issuedto) changed.push('Name');
-  if (gender !== undefined && gender !== card.gender) changed.push('Gender');
-  if (dob !== undefined && dob !== card.dob) changed.push('Date of Birth');
-  if (mobno !== undefined && Number(mobno) !== Number(card.mobno)) changed.push('Mobile Number');
-  if (email !== undefined && email !== card.email) changed.push('Email');
-  if (address !== undefined && address !== card.address) changed.push('Address');
-  if (country !== undefined && country !== card.country) changed.push('Country');
-  if (city !== undefined && city !== card.city) changed.push('City');
-  if (state !== undefined && state !== card.state) changed.push('State');
-  if (pin !== undefined && pin !== card.pin) changed.push('Pin');
-  if (centre !== undefined && centre !== card.center) changed.push('Center');
-  if (status !== undefined && status !== card.status) changed.push('Status');
-  if (res_status !== undefined && res_status !== card.res_status) changed.push('Resident Status');
+  if (isChanged(issuedto, card.issuedto)) changed.push('Name');
+  if (isChanged(gender, card.gender)) changed.push('Gender');
+  if (isChanged(dob, card.dob)) changed.push('Date of Birth');
+  if (isChanged(mobno, card.mobno)) changed.push('Mobile Number');
+  if (isChanged(idType, card.idType)) changed.push('ID Type');
+  if (isChanged(idNo, card.idNo)) changed.push('ID Number');
+  if (isChanged(email, card.email)) changed.push('Email');
+  if (isChanged(address, card.address)) changed.push('Address');
+  if (isChanged(country, card.country)) changed.push('Country');
+  if (isChanged(city, card.city)) changed.push('City');
+  if (isChanged(state, card.state)) changed.push('State');
+  if (isChanged(pin, card.pin)) changed.push('Pin');
+  if (isChanged(centre, card.center)) changed.push('Center');
+  if (isChanged(status, card.status)) changed.push('Status');
+  if (isChanged(res_status, card.res_status)) changed.push('Resident Status');
 
   await card.update({
     issuedto,

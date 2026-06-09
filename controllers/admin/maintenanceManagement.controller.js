@@ -109,36 +109,34 @@ export const updateMaintenanceRequest = async (req, res) => {
   if (status === STATUS_CLOSED && !wasClosed && maintenance.card) {
     const phone = maintenance.card.mobno;
     if (phone) {
-      try {
-        const cleanPhone = String(phone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91')
-          ? cleanPhone
-          : `91${cleanPhone}`;
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
 
-        const components = [
-          {
-            type: 'body',
-            parameters: [
-              {
-                type: 'text',
-                text: maintenance.card.issuedto || 'Mumukshu'
-              },
-              {
-                type: 'text',
-                text: maintenance.area_of_work || ' '
-              },
-              {
-                type: 'text',
-                text: maintenance.work_detail || ' '
-              }
-            ]
-          }
-        ];
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: maintenance.card.issuedto || 'Mumukshu'
+            },
+            {
+              type: 'text',
+              text: maintenance.area_of_work || ' '
+            },
+            {
+              type: 'text',
+              text: maintenance.work_detail || ' '
+            }
+          ]
+        }
+      ];
 
-        await sendWhatsAppMessage(formattedPhone, 'maintenance_request_closed', components);
-      } catch (err) {
+      sendWhatsAppMessage(formattedPhone, 'maintenance_request_closed', components).catch((err) => {
         console.error('Error sending WhatsApp message in updateMaintenanceRequest:', err.message || err);
-      }
+      });
     }
   }
 
