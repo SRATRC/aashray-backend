@@ -26,7 +26,25 @@ export async function sendWhatsAppMessage(phone, templateName, components = [], 
   };
 
   if (components.length > 0) {
-    payload.template.components = components;
+    const isFlatArray = components.some(
+      (c) => typeof c !== "object" || c === null || !("type" in c)
+    );
+    if (isFlatArray) {
+      payload.template.components = [
+        {
+          type: "body",
+          parameters: components.map((c) => {
+            const val = c === null || c === undefined ? "" : String(c);
+            return {
+              type: "text",
+              text: val === "" ? " " : val,
+            };
+          }),
+        },
+      ];
+    } else {
+      payload.template.components = components;
+    }
   }
 
   try {

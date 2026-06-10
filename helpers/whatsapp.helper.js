@@ -1510,6 +1510,9 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
             templateName = "bk_sha_s_b_w2ppg";
             parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending"];
           }
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_s_b_ppg2pgci";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin"];
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -1592,6 +1595,9 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
         } else if (isPendingStatus(newStatus)) {
           templateName = "bk_sha_gu_b_w2ppg";
           parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending", attendeeName];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_gu_b_pypnd2pndchki";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin", attendeeName];
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -1887,6 +1893,9 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
         } else if (newStatus === "cancelled") {
           templateName = "bk_pvs_s_b_awc2cn";
           parameters = [attendeeName, pickup, drop, "cancelled", dateFormatted];
+        } else if (newStatus === "confirmed") {
+          templateName = "bk_pvs_s_b_pypdg2conf";
+          parameters = [attendeeName, dateFormatted, pickup, drop, paymentId];
         }
       } else if (prevStatusNormalized === "proceed for payment" || prevStatusNormalized === "payment pending" || prevStatusNormalized === "pending") {
         if (newStatus === "cancelled") {
@@ -1958,6 +1967,9 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
         } else if (newStatus === "cancelled") {
           templateName = "bk_pvs_mu_b_awtconf2canc";
           parameters = [bookerName, pickup, drop, "cancelled", dateFormatted, attendeeName];
+        } else if (newStatus === "confirmed") {
+          templateName = "bk_pvs_mu_b_pympndg2conf";
+          parameters = [bookerName, attendeeName, dateFormatted, pickup, drop, paymentId];
         }
       } else if (prevStatusNormalized === "proceed for payment" || prevStatusNormalized === "payment pending" || prevStatusNormalized === "pending") {
         if (newStatus === "cancelled") {
@@ -2093,6 +2105,9 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
         } else if (isPendingStatus(newStatus) && !hasBooker) {
           templateName = "bk_usv_s_b_wtng2pymtpndg";
           parameters = [attendeeName, utsavName, packageName, "payment pending"];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_usv_s_b_ppg2cf";
+          parameters = [attendeeName, utsavName, packageName, paymentId];
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2162,6 +2177,9 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
         } else if (isPendingStatus(newStatus)) {
           templateName = "bk_usv_gu_b_w2ppg";
           parameters = [bookerName, utsavName, packageName, "payment pending", attendeeName];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_usv_gu_b_ppg2cf";
+          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName];
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {

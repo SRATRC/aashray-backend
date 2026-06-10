@@ -46,8 +46,7 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
-import { sendWhatsAppMessage } from "../../utils/sendWhatsAppMessage.js";
-import { sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendUtsavStatusChangeWhatsApp, sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { issueFoodPlate } from '../../helpers/foodBooking.helper.js';
 
 export const createUtsavBookingByAdmin = async (req, res) => {
@@ -101,7 +100,11 @@ export const createUtsavBookingByAdmin = async (req, res) => {
 
           // Fetch booking and card details
           const booking = await UtsavBooking.findOne({
-            where: { bookingid: id }
+            where: { bookingid: id },
+            include: [
+              { model: UtsavDb },
+              { model: UtsavPackagesDb }
+            ]
           });
 
           if (!booking) {
@@ -138,42 +141,20 @@ export const createUtsavBookingByAdmin = async (req, res) => {
 
           // Send WhatsApp (with separate error handling)
           try {
-            const phone = card.mobno;
-
-            if (!phone) {
+            if (card.mobno) {
+              await sendUnifiedWhatsApp(
+                card.cardno,
+                [],
+                [],
+                [],
+                [booking]
+              );
+              console.log(`✅ WhatsApp sent successfully for booking: ${id}`);
+            } else {
               console.warn(`⚠️ No phone number for booking: ${id}`);
-              continue;
             }
-
-            // Clean and format phone number
-            const cleanPhone = String(phone).replace(/\D/g, '');
-            const formattedPhone = cleanPhone.startsWith('91')
-              ? cleanPhone
-              : `91${cleanPhone}`;
-
-            console.log(`📞 Sending WhatsApp to: ${formattedPhone}`);
-
-            // Get utsav details for the message
-            const utsav = await UtsavDb.findOne({
-              where: { id: booking.utsavid }
-            });
-
-            await sendWhatsAppMessage(
-              formattedPhone,
-              "room_allocation_2025",
-              [
-                card.issuedto || "Mumukshu",
-                booking.roomno || "Not Assigned",
-                utsav?.start_date || "TBD"
-              ]
-            );
-
-            console.log(`✅ WhatsApp sent successfully for booking: ${id}`);
           } catch (err) {
-            console.error(`❌ WhatsApp failed for ${card.mobno}`);
-            console.error("Status:", err.response?.status);
-            console.error("Data:", JSON.stringify(err.response?.data, null, 2));
-            console.error("Message:", err.message);
+            console.error(`❌ WhatsApp failed for cardno=${card.cardno}:`, err.message);
           }
         }
       }
