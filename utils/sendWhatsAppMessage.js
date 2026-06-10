@@ -13,7 +13,7 @@ const DEFAULT_LANG = process.env.WHATSAPP_DEFAULT_LANG || "en_US";
  * @returns {Promise<{ok: true, phone: string, templateName: string, responseData: any}>}
  * @throws {Error}
  */
-export async function sendWhatsAppMessage(phone, templateName, components = []) {
+export async function sendWhatsAppMessage(phone, templateName, components = [], langCode = null) {
   const payload = {
     messaging_product: "whatsapp",
     recipient_type: "individual",
@@ -21,7 +21,7 @@ export async function sendWhatsAppMessage(phone, templateName, components = []) 
     type: "template",
     template: {
       name: templateName,
-      language: { code: DEFAULT_LANG },
+      language: { code: langCode || DEFAULT_LANG },
     },
   };
 
@@ -35,7 +35,7 @@ export async function sendWhatsAppMessage(phone, templateName, components = []) 
         "Content-Type": "application/json",
         Authorization: `Bearer ${TOKEN}`,
       },
-      timeout: 15000,
+      timeout: 30000,
     });
 
     console.log(`✅ WhatsApp sent to ${phone} using template ${templateName}`);

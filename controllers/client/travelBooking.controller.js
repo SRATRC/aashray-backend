@@ -13,6 +13,7 @@ import {
   updateWaitingTravelBooking,
   sendTravelBookingStatusUpdateMail
 } from '../../helpers/travelBooking.helper.js';
+import { sendTravelStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
@@ -124,6 +125,12 @@ export const CancelTravel = async (req, res) => {
   }
   await t.commit();
   req.log.info('cancel_travel_committed', { bookingid });
+
+  try {
+    await sendTravelStatusChangeWhatsApp(booking, bookingStatus);
+  } catch (waErr) {
+    console.error("Error triggering travel status change WhatsApp on cancel:", waErr);
+  }
 
   const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
   sendMail({

@@ -13,6 +13,8 @@ import {
   TYPE_ADHYAYAN,
   TYPE_FOOD,
   TYPE_UTSAV,
+  TYPE_ROOM,
+  TYPE_FLAT,
   TYPE_TRAVEL
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
@@ -32,6 +34,7 @@ import {
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
 import { updateWaitingTravelBooking } from './helpers/travelBooking.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendTomorrowMealsCount, checkAndSendMealsCountUpdate } from './helpers/whatsapp.helper.js';
 const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
@@ -92,6 +95,36 @@ async function runJob(systemUser, t) {
   await cancelTransactions(systemUser, transactions, t, true);
   await cancelMeals(systemUser, transactions, t);
   await t.commit();
+
+  // Trigger WhatsApp notifications for cancelled bookings
+  for (const booking of bookings) {
+    const bookingType = getBookingTypeFromBooking(booking);
+    if (bookingType === TYPE_ADHYAYAN) {
+      try {
+        await sendAdhyayanStatusChangeWhatsApp(booking, null, 'pending');
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Adhyayan: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_ROOM) {
+      try {
+        await sendRoomStatusChangeWhatsApp(booking, 'pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Room: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_UTSAV) {
+      try {
+        await sendUtsavStatusChangeWhatsApp(booking, 'payment pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Utsav: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_FLAT) {
+      try {
+        await sendFlatStatusChangeWhatsApp(booking, 'payment pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Flat: ${waErr.message}`);
+      }
+    }
+  }
 
   for (const cardno in userBookingIds) {
     const bookingIds = userBookingIds[cardno];
@@ -249,6 +282,47 @@ async function getUnpaidPastBookings() {
  * ==============================
  */
 
+// Schedule the new meals count notification cron jobs with Asia/Kolkata timezone
+const mealsCount9PMJob = cron.schedule('0 21 * * *', async () => {
+  logger.info('mealsCount9PMJob cron job started.');
+  try {
+    const recipients = ['0002849952', '0012754172', '0002823407'];
+    await sendTomorrowMealsCount(recipients);
+    logger.info('mealsCount9PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount9PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+const mealsCount10PMJob = cron.schedule('0 22 * * *', async () => {
+  logger.info('mealsCount10PMJob cron job started.');
+  try {
+    await checkAndSendMealsCountUpdate();
+    logger.info('mealsCount10PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount10PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+const mealsCount11PMJob = cron.schedule('0 23 * * *', async () => {
+  logger.info('mealsCount11PMJob cron job started.');
+  try {
+    await checkAndSendMealsCountUpdate();
+    logger.info('mealsCount11PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount11PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
 let isWifiJobRunning = false;
 let isLowWifiAlertSent = false;
 
@@ -285,6 +359,9 @@ const wifiLowAlertJob = cron.schedule('*/30 * * * *', async () => {
 });
 
 job.start();
+mealsCount9PMJob.start();
+mealsCount10PMJob.start();
+mealsCount11PMJob.start();
 wifiLowAlertJob.start();
 
 // Graceful shutdown handler
@@ -293,6 +370,9 @@ const gracefulShutdown = async () => {
 
   // Stop future jobs from being triggered
   job.stop();
+  mealsCount9PMJob.stop();
+  mealsCount10PMJob.stop();
+  mealsCount11PMJob.stop();
   wifiLowAlertJob.stop();
 
   // Wait for the current task to finish if it's running

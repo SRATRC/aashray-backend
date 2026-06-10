@@ -204,16 +204,17 @@ export const CancelShibir = async (req, res) => {
     transaction: t
   });
 
+  const previousStatus = booking.status;
   await userCancelBooking(req.user, booking, t);
   req.log.info('cancel_shibir_cancelled', { bookingid, cardno: req.user.cardno });
   await t.commit();
   req.log.info('cancel_shibir_committed', { bookingid });
 
-  await sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+  await sendAdhyayanBookingUpdateNotification(booking, adhyayan, false, previousStatus);
 
   if (newBooking) {
     //sending notification and email to user who got moved from waiting to pending and cc to the bookedBy user if any.
-    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, false, 'waiting');
   }
 
   req.log.info('cancel_shibir_success', { bookingid, cardno: req.user.cardno });

@@ -12,6 +12,7 @@ import { openUtsavSeat, sendUtsavBookingUpdateEmail, cancelUtsavFoodBookings } f
 import moment from 'moment';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import { sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 import {
   getOtherBookingUser,
@@ -165,6 +166,7 @@ export const CancelUtsavBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const previousStatus = booking.status;
   req.log.info('cancel_utsav_booking_found', {
     bookingid,
     cardno: req.user.cardno,
@@ -210,6 +212,12 @@ export const CancelUtsavBooking = async (req, res) => {
   
 
   await sendUtsavBookingUpdateEmail(booking, utsav);
+
+  try {
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus);
+  } catch (waErr) {
+    console.error("Error sending utsav status change WhatsApp in CancelUtsavBooking:", waErr);
+  }
 
   req.log.info('cancel_utsav_booking_success', { bookingid, cardno: req.user.cardno });
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });

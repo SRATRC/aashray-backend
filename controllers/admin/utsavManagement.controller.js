@@ -46,6 +46,8 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
+import { sendWhatsAppMessage } from "../../utils/sendWhatsAppMessage.js";
+import { sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { issueFoodPlate } from '../../helpers/foodBooking.helper.js';
 
 export const createUtsavBookingByAdmin = async (req, res) => {
@@ -53,6 +55,7 @@ export const createUtsavBookingByAdmin = async (req, res) => {
 
   req.log.info('create_utsav_booking_by_admin_start', { utsavid, mumukshuCount: mumukshus?.length });
 
+  // Validation
   if (!utsavid || !Array.isArray(mumukshus) || mumukshus.length === 0) {
     req.log.warn('create_utsav_booking_by_admin_invalid_input', { utsavid });
     return res
@@ -60,7 +63,6 @@ export const createUtsavBookingByAdmin = async (req, res) => {
       .send({ message: 'utsavid and mumukshus are required' });
   }
 
-  // basic per-item validation
   for (const m of mumukshus) {
     if (!m?.cardno || !m?.packageid) {
       req.log.warn('create_utsav_booking_by_admin_missing_fields', { utsavid });
@@ -70,28 +72,108 @@ export const createUtsavBookingByAdmin = async (req, res) => {
     }
   }
 
+  // Start transaction
   const t = await database.transaction();
   req.transaction = t;
 
   try {
+    // Create bookings
     const result = await bookUtsavForMumukshusAdmin(
       utsavid,
       mumukshus,
       t,
       req.user
     );
+
+    // Commit transaction
     await t.commit();
 
-    // send emails outside transaction
+    console.log("✅ Transaction committed successfully");
+    console.log("📦 Booking result:", result);
+
+    // Send notifications AFTER successful commit (with separate error handling)
     try {
       for (const cardno in result.userBookingIds) {
         const bookingIds = result.userBookingIds[cardno];
+
         for (const id of bookingIds) {
+          console.log(`\n📋 Processing booking: ${id}`);
+
+          // Fetch booking and card details
           const booking = await UtsavBooking.findOne({
             where: { bookingid: id }
           });
-          if (booking) {
+
+          if (!booking) {
+            console.warn(`⚠️ Booking not found: ${id}`);
+            continue;
+          }
+
+          const card = await CardDb.findOne({
+            where: { cardno: booking.cardno }
+          });
+
+          if (!card) {
+            console.warn(`⚠️ Card not found for booking: ${id}`);
+            continue;
+          }
+
+          console.log("📋 Booking details:", {
+            bookingid: booking.bookingid,
+            cardno: card.cardno,
+            name: card.issuedto,
+            mobno: card.mobno,
+            roomno: booking.roomno,
+            status: booking.status
+          });
+
+          // Send Email (with separate error handling)
+          try {
             await sendUtsavBookingUpdateEmail(booking, null);
+            console.log(`✅ Email sent for booking: ${id}`);
+          } catch (emailError) {
+            console.error(`❌ Email failed for booking: ${id}`);
+            console.error("Email error:", emailError.message);
+          }
+
+          // Send WhatsApp (with separate error handling)
+          try {
+            const phone = card.mobno;
+
+            if (!phone) {
+              console.warn(`⚠️ No phone number for booking: ${id}`);
+              continue;
+            }
+
+            // Clean and format phone number
+            const cleanPhone = String(phone).replace(/\D/g, '');
+            const formattedPhone = cleanPhone.startsWith('91')
+              ? cleanPhone
+              : `91${cleanPhone}`;
+
+            console.log(`📞 Sending WhatsApp to: ${formattedPhone}`);
+
+            // Get utsav details for the message
+            const utsav = await UtsavDb.findOne({
+              where: { id: booking.utsavid }
+            });
+
+            await sendWhatsAppMessage(
+              formattedPhone,
+              "room_allocation_2025",
+              [
+                card.issuedto || "Mumukshu",
+                booking.roomno || "Not Assigned",
+                utsav?.start_date || "TBD"
+              ]
+            );
+
+            console.log(`✅ WhatsApp sent successfully for booking: ${id}`);
+          } catch (err) {
+            console.error(`❌ WhatsApp failed for ${card.mobno}`);
+            console.error("Status:", err.response?.status);
+            console.error("Data:", JSON.stringify(err.response?.data, null, 2));
+            console.error("Message:", err.message);
           }
         }
       }
@@ -100,12 +182,16 @@ export const createUtsavBookingByAdmin = async (req, res) => {
     }
 
     req.log.info('create_utsav_booking_by_admin_success', { utsavid, mumukshuCount: mumukshus.length });
+    // Return success response
     return res.status(200).send({
-      message: 'Utsav booking(s) created by admin',
-      data: result
+      message: "Utsav booking(s) created by admin",
+      data: result,
     });
+
   } catch (err) {
+    // Rollback transaction on error
     await t.rollback();
+    console.error("❌ Transaction failed and rolled back:", err);
     throw err;
   }
 };
@@ -747,6 +833,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
   const utsav = await validateUtsav(utsav_id);
   const booking = await validateUtsavBooking(bookingid, utsav_id);
+  const previousStatus = booking.status;
 
   if (status === booking.status) {
     req.log.warn('utsav_status_update_same_status', { bookingid, status });
@@ -763,6 +850,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
   switch (status) {
     case STATUS_CONFIRMED:
+      // Confirmed allowed from payment pending or cancelled
       if (
         booking.status !== STATUS_PAYMENT_PENDING &&
         booking.status !== STATUS_CANCELLED
@@ -942,15 +1030,27 @@ export const utsavStatusUpdate = async (req, res) => {
             req.log.info('utsav_status_update_issuing_credits', { bookingid, amount: transaction.amount });
             await cancelTransaction(req.user, null, transaction, t, true);
           } else {
-            req.log.info('utsav_status_update_admin_cancelled_no_credits', { bookingid });
-            await transaction.update(
-              {
-                status: STATUS_ADMIN_CANCELLED,
-                description: description || 'Admin cancelled without credits',
-                updatedBy: req.user.username
-              },
-              { transaction: t }
-            );
+            const isCompletedStatus = [
+              STATUS_PAYMENT_COMPLETED,
+              STATUS_CASH_COMPLETED,
+              'payment completed',
+              'completed',
+              'cash completed'
+            ].includes(transaction.status);
+
+            if (isCompletedStatus) {
+              req.log.info('utsav_status_update_tx_already_completed_leaving_as_is', { bookingid, transactionStatus: transaction.status });
+            } else {
+              req.log.info('utsav_status_update_admin_cancelled_no_credits', { bookingid });
+              await transaction.update(
+                {
+                  status: STATUS_ADMIN_CANCELLED,
+                  description: description || 'Admin cancelled without credits',
+                  updatedBy: req.user.username
+                },
+                { transaction: t }
+              );
+            }
           }
         } else {
           req.log.info('utsav_status_update_tx_already_cancelled_skipping', { bookingid });
@@ -977,6 +1077,16 @@ export const utsavStatusUpdate = async (req, res) => {
   await t.commit();
 
   await sendUtsavBookingUpdateEmail(booking, utsav);
+
+  try {
+    let waOptions = { updatedBy: req.user.username };
+    if (status === STATUS_ADMIN_CANCELLED && (issueCredits === 'yes' || issueCredits === true) && transaction) {
+      waOptions.credits = (transaction.amount || 0) + (transaction.discount || 0);
+    }
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, waOptions);
+  } catch (waErr) {
+    console.error("Error sending utsav status change WhatsApp in utsavStatusUpdate:", waErr);
+  }
 
   req.log.info('utsav_status_update_transition', { bookingid, utsav_id, fromStatus: booking.status, toStatus: newBookingStatus });
   return res.status(200).send({ message: 'Updated booking status' });
@@ -1168,9 +1278,18 @@ export const utsavCheckin = async (req, res) => {
     });
   }
 
+  const previousStatus = booking.status;
+
   await booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t });
 
   await t.commit();
+
+  try {
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    console.error("Error sending utsav status change WhatsApp in utsavCheckin:", waErr);
+  }
+
   req.log.info('utsav_checkin_success', { cardno, utsavid, bookingid: booking.bookingid });
   return res.status(200).send({
     message: 'Utsav booking status updated to checkedin.'
@@ -1399,6 +1518,7 @@ export const updateRoomNo = async (req, res) => {
     const { bookingid, roomno } = req.body;
     req.log.info('update_utsav_room_no_start', { bookingid, roomno });
 
+    // assuming you're attaching logged-in user info in req.user
     const updatedBy = req.user?.username || req.user?.id || 'system';
 
     if (!bookingid || !roomno) {

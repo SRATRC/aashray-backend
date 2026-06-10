@@ -187,7 +187,10 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
     case STATUS_PAYMENT_FAILED:
-      if ([TYPE_ADHYAYAN].includes(bookingType) || ifMigrated(transaction)) {
+      if (
+        [TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
+        ifMigrated(transaction)
+      ) {
         // for bookings that are not credited, keep txn status as completed for reports
         if (
           [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(

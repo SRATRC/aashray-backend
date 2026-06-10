@@ -41,6 +41,16 @@ import TravelBusPassengers from './travelBusPassengers.model.js';
 import TravelBusStops from './travelBusStops.model.js';
 
 // CardDb
+CardDb.hasOne(AdminUsers, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno'
+});
+AdminUsers.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'card'
+});
+
 CardDb.hasMany(GateRecord, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',

@@ -27,6 +27,9 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
+import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+
 
 export const issuePlate = async (req, res) => {
   const t = await database.transaction();
@@ -141,7 +144,7 @@ export const bookFood = async (req, res) => {
     hightea
   );
 
-  await bookFoodForMumukshus(
+  const result = await bookFoodForMumukshus(
     start_date,
     end_date,
     mumukshuGroup,
@@ -156,6 +159,47 @@ export const bookFood = async (req, res) => {
 
   await t.commit();
   req.log.info('book_food_success', { cardno: card.cardno, start_date, end_date });
+
+  try {
+    const userBookingIds = result?.userBookingIds || {};
+    const bookingIds = userBookingIds[card.cardno] || [];
+    if (bookingIds.length) {
+      const foodBookings = await FoodDb.findAll({
+        where: {
+          id: { [Sequelize.Op.in]: bookingIds }
+        },
+        order: [['date', 'ASC']]
+      });
+
+      const foodBookingDetails = foodBookings.map((fb) => ({
+        id: fb.id,
+        bookingid: fb.id,
+        cardno: fb.cardno,
+        bookedBy: fb.bookedBy,
+        date: fb.date,
+        breakfast: fb.breakfast,
+        lunch: fb.lunch,
+        dinner: fb.dinner,
+        spicy: fb.spicy,
+        hightea: fb.hightea,
+        name: card.issuedto
+      }));
+
+      sendUnifiedWhatsApp(
+        card,
+        [], // adhyan
+        [], // travel
+        [], // flat
+        [], // utsav
+        [], // room
+        null, // bookedForCardno
+        foodBookingDetails
+      ).catch(err => console.error("Error sending admin food booking WhatsApp:", err));
+    }
+  } catch (waErr) {
+    console.error("Error triggering WhatsApp notification for admin food booking:", waErr);
+  }
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
@@ -370,6 +414,60 @@ export const bulkBooking = async (req, res) => {
   });
 
   req.log.info('bulk_food_booking_success', { cardno: finalCardNo, date, guestCount, bookingid: booking.bookingid });
+
+  const phone = cardEntry.mobno;
+  if (phone) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
+
+      const meals = [];
+      if (breakfast) meals.push('Breakfast');
+      if (lunch) meals.push('Lunch');
+      if (dinner) meals.push('Dinner');
+      const mealsStr = meals.join(', ') || 'None';
+
+      const components = [
+        {
+          type: 'header',
+          parameters: [
+            {
+              type: 'text',
+              text: department || ' '
+            }
+          ]
+        },
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: cardEntry.issuedto || 'Mumukshu'
+            },
+            {
+              type: 'text',
+              text: String(guestCount)
+            },
+            {
+              type: 'text',
+              text: moment(date).format('DD-MM-YYYY')
+            },
+            {
+              type: 'text',
+              text: mealsStr
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'bulk_food_booking_confirmed', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in bulkBooking:', err.message || err);
+    }
+  }
+
   return res.status(200).send({ message: MSG_BOOKING_SUCCESSFUL });
 };
 
@@ -460,6 +558,52 @@ export const editBulkBooking = async (req, res) => {
   });
 
   req.log.info('edit_bulk_booking_success', { bookingid, breakfast, lunch, dinner, guestCount: maxCount });
+
+  const cardEntry = await CardDb.findOne({ where: { cardno: booking.cardno } });
+  const phone = cardEntry ? cardEntry.mobno : null;
+  if (phone) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : `91${cleanPhone}`;
+
+      const meals = [];
+      if (breakfast > 0) meals.push(`Breakfast (${breakfast})`);
+      if (lunch > 0) meals.push(`Lunch (${lunch})`);
+      if (dinner > 0) meals.push(`Dinner (${dinner})`);
+      const mealsStr = meals.join(', ') || 'None';
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: cardEntry.issuedto || 'Mumukshu'
+            },
+            {
+              type: 'text',
+              text: moment(booking.date).format('DD-MM-YYYY')
+            },
+            {
+              type: 'text',
+              text: String(maxCount)
+            },
+            {
+              type: 'text',
+              text: mealsStr
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'bulk_food_booking_updated', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in editBulkBooking:', err.message || err);
+    }
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 

@@ -33,6 +33,7 @@ import ApiError from '../utils/ApiError.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import { sendDualUserNotifications } from './notification.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp } from './whatsapp.helper.js';
 import logger from '../config/logger.js';
 
 export async function bookAdhyayanForMumukshus(
@@ -298,7 +299,8 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
 export async function sendAdhyayanBookingUpdateNotification(
   newBooking,
   adhyayan,
-  isfromAdmin
+  isfromAdmin,
+  previousStatus
 ) {
   // Build card numbers array efficiently and fetch all cards in single query
   const cardNumbers = [newBooking.cardno, newBooking.bookedBy].filter(Boolean);
@@ -376,6 +378,9 @@ export async function sendAdhyayanBookingUpdateNotification(
       }
     });
   }
+
+  // Send WhatsApp messages for status transitions
+  await sendAdhyayanStatusChangeWhatsApp(newBooking, adhyayan, previousStatus);
 }
 
 export async function checkAdhyayanAvailabilityForMumukshus(
