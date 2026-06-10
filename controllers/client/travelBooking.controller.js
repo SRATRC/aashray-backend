@@ -39,10 +39,19 @@ export const FetchUpcoming = async (req, res) => {
        t1.admin_comments,
        t1.status,
        t2.amount,
-       t2.status AS transaction_status
+       t2.status AS transaction_status,
+       t5.bus_name,
+       t6.timing AS departure_time,
+       t8.issuedto AS coordinator_name,
+       t8.mobno AS coordinator_contact
     FROM travel_db t1
     LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+    LEFT JOIN travel_bus_passengers t4 ON t1.bookingid = t4.bookingid
+    LEFT JOIN travel_bus_group t5 ON t4.bus_group_id = t5.id
+    LEFT JOIN travel_bus_stops t6 ON t5.id = t6.bus_group_id AND TRIM(LOWER(t6.stop_name)) = TRIM(LOWER(t1.pickup_point))
+    LEFT JOIN travel_db t7 ON t5.coordinator_bookingid = t7.bookingid
+    LEFT JOIN card_db t8 ON t7.cardno = t8.cardno
     WHERE t1.cardno = :cardno
       OR t1.bookedBy = :cardno
     ORDER BY t1.date DESC
