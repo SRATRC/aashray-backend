@@ -29,6 +29,7 @@ import { findCardByMobno, validateCard } from '../../helpers/card.helper.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
 export const issuePlate = async (req, res) => {
@@ -418,10 +419,7 @@ export const bulkBooking = async (req, res) => {
   const phone = cardEntry.mobno;
   if (phone) {
     try {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, cardEntry.country);
 
       const meals = [];
       if (breakfast) meals.push('Breakfast');
@@ -563,10 +561,7 @@ export const editBulkBooking = async (req, res) => {
   const phone = cardEntry ? cardEntry.mobno : null;
   if (phone) {
     try {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, cardEntry.country);
 
       const meals = [];
       if (breakfast > 0) meals.push(`Breakfast (${breakfast})`);

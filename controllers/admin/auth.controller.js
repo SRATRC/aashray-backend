@@ -6,6 +6,7 @@ import bcrypt from 'bcrypt';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 export const login = async (req, res) => {
   const { username } = req.body;
@@ -98,8 +99,7 @@ export const createAdmin = async (req, res) => {
       const cardEntry = await CardDb.findOne({ where: { cardno } });
       const phone = cardEntry ? cardEntry.mobno : null;
       if (phone) {
-        const cleanPhone = String(phone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
+        const formattedPhone = formatWhatsAppPhone(phone, cardEntry ? cardEntry.country : null);
 
         const components = [
           {
@@ -141,7 +141,7 @@ export const resetPassword = async (req, res) => {
         {
           model: CardDb,
           as: 'card',
-          attributes: ['issuedto', 'mobno']
+          attributes: ['issuedto', 'mobno', 'country']
         }
       ]
     });
@@ -164,8 +164,7 @@ export const resetPassword = async (req, res) => {
     if (user.card && user.card.mobno) {
       try {
         const phone = user.card.mobno;
-        const cleanPhone = String(phone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
+        const formattedPhone = formatWhatsAppPhone(phone, user.card ? user.card.country : null);
 
         const components = [
           {

@@ -4,6 +4,7 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { Sequelize } from 'sequelize';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
 export const fetchAllAdmins = async (req, res) => {
@@ -66,7 +67,7 @@ export const deactivateAdmin = async (req, res) => {
       {
         model: CardDb,
         as: 'card',
-        attributes: ['issuedto', 'mobno']
+        attributes: ['issuedto', 'mobno', 'country']
       }
     ]
   });
@@ -84,8 +85,7 @@ export const deactivateAdmin = async (req, res) => {
   if (admin.card && admin.card.mobno) {
     try {
       const phone = admin.card.mobno;
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, admin.card.country);
 
       const components = [
         {
@@ -116,7 +116,7 @@ export const activateAdmin = async (req, res) => {
       {
         model: CardDb,
         as: 'card',
-        attributes: ['issuedto', 'mobno']
+        attributes: ['issuedto', 'mobno', 'country']
       }
     ]
   });
@@ -134,8 +134,7 @@ export const activateAdmin = async (req, res) => {
   if (admin.card && admin.card.mobno) {
     try {
       const phone = admin.card.mobno;
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, admin.card.country);
 
       const components = [
         {

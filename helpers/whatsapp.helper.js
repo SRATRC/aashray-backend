@@ -5,6 +5,7 @@ import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkF
 import moment from "moment";
 import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
+import { formatWhatsAppPhone } from "../utils/phoneFormatter.js";
 import fs from "fs";
 import path from "path";
 
@@ -186,7 +187,7 @@ export async function sendUnifiedWhatsApp(
       // if not found, we fallback later to user.issuedto
     }
 
-    const phone = user?.mobno ? String(user.mobno) : null;
+    const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
     if (!phone) {
       console.warn(`⚠️ No WhatsApp number found for ${user?.issuedto} (cardno=${user.cardno})`);
       return;
@@ -237,7 +238,7 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
     return;
   }
 
-  const phone = user?.mobno ? String(user.mobno) : null;
+  const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno || "unknown"}; skipping adhyayan WA.`);
     return;
@@ -460,7 +461,7 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
 
 export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForUser = null) {
   if (!user) return;
-  const phone = user?.mobno ? String(user.mobno) : null;
+  const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping room WA.`);
     return;
@@ -653,7 +654,7 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
 // TRAVEL
 export async function sendTravelWhatsApp(user, travelBookingDetails = [], bookedForUser = null) {
   if (!user) return;
-  const phone = user?.mobno ? String(user.mobno) : null;
+  const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping travel WA.`);
     return;
@@ -778,7 +779,7 @@ export async function sendTravelWhatsApp(user, travelBookingDetails = [], booked
 // UTSAV
 export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedForUser = null) {
   if (!user) return;
-  const phone = user?.mobno ? String(user.mobno) : null;
+  const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping utsav WA.`);
     return;
@@ -954,7 +955,7 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
 // FLAT / FOOD or other
 export async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForUser = null) {
   if (!user) return;
-  const phone = user?.mobno ? String(user.mobno) : null;
+  const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping flat WA.`);
     return;
@@ -1163,7 +1164,7 @@ export async function sendWifiRequestWhatsApp(cardno, username, status, code = n
       return;
     }
 
-    const phone = user.mobno ? String(user.mobno) : null;
+    const phone = user.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
     if (!phone) {
       console.warn(`⚠️ No WhatsApp number found for ${user.issuedto} (cardno=${cardno}); skipping Wifi request WhatsApp.`);
       return;
@@ -1261,7 +1262,7 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
       const shibirName = adhyayan.name || "";
 
       const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
-      const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+      const attendeePhone = attendeeCard?.mobno ? formatWhatsAppPhone(attendeeCard.mobno, attendeeCard.country) : null;
       const attendeeName = attendeeCard?.issuedto || "";
 
       const hasBooker = booking.bookedBy && booking.bookedBy !== booking.cardno;
@@ -1270,7 +1271,7 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
       let bookerName = "";
       if (hasBooker) {
         bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
-        bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+        bookerPhone = bookerCard?.mobno ? formatWhatsAppPhone(bookerCard.mobno, bookerCard.country) : null;
         bookerName = bookerCard?.issuedto || "";
       }
 
@@ -1456,7 +1457,7 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
 
     // Load attendee details
     const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
-    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeePhone = attendeeCard?.mobno ? formatWhatsAppPhone(attendeeCard.mobno, attendeeCard.country) : null;
     const attendeeName = attendeeCard?.issuedto || "";
 
     // Check if Guest booking
@@ -1466,7 +1467,7 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
     let bookerName = "";
     if (hasBooker) {
       bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
-      bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+      bookerPhone = bookerCard?.mobno ? formatWhatsAppPhone(bookerCard.mobno, bookerCard.country) : null;
       bookerName = bookerCard?.issuedto || "";
     }
 
@@ -1654,13 +1655,13 @@ export async function sendFlatStatusChangeWhatsApp(booking, previousStatus, opti
 
     // Load attendee details
     const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
-    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeePhone = attendeeCard?.mobno ? formatWhatsAppPhone(attendeeCard.mobno, attendeeCard.country) : null;
     const attendeeName = attendeeCard?.issuedto || "";
 
     // Load booker details
     const bookerCardno = booking.bookedBy || booking.cardno;
     const bookerCard = await CardDb.findOne({ where: { cardno: bookerCardno } });
-    const bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+    const bookerPhone = bookerCard?.mobno ? formatWhatsAppPhone(bookerCard.mobno, bookerCard.country) : null;
     const bookerName = bookerCard?.issuedto || "";
 
     const isPendingStatus = (status) => ["pending", "payment pending", "cash pending"].includes(status);
@@ -1820,7 +1821,7 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
 
     // Load Attendee details
     const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
-    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeePhone = attendeeCard?.mobno ? formatWhatsAppPhone(attendeeCard.mobno, attendeeCard.country) : null;
     const attendeeName = attendeeCard?.issuedto || "";
 
     // Check if Guest booking
@@ -1830,7 +1831,7 @@ export async function sendTravelStatusChangeWhatsApp(booking, previousStatus, op
     let bookerName = "";
     if (hasBooker) {
       bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
-      bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+      bookerPhone = bookerCard?.mobno ? formatWhatsAppPhone(bookerCard.mobno, bookerCard.country) : null;
       bookerName = bookerCard?.issuedto || "";
     }
 
@@ -2033,7 +2034,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
 
     // 1. Load attendee details
     const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
-    const attendeePhone = attendeeCard?.mobno ? String(attendeeCard.mobno) : null;
+    const attendeePhone = attendeeCard?.mobno ? formatWhatsAppPhone(attendeeCard.mobno, attendeeCard.country) : null;
     const attendeeName = attendeeCard?.issuedto || "";
 
     // 2. Check if Guest booking
@@ -2043,7 +2044,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
     let bookerName = "";
     if (hasBooker) {
       bookerCard = await CardDb.findOne({ where: { cardno: booking.bookedBy } });
-      bookerPhone = bookerCard?.mobno ? String(bookerCard.mobno) : null;
+      bookerPhone = bookerCard?.mobno ? formatWhatsAppPhone(bookerCard.mobno, bookerCard.country) : null;
       bookerName = bookerCard?.issuedto || "";
     }
 
@@ -2238,7 +2239,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
 
 export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForUser = null) {
   if (!user) return;
-  const phone = user?.mobno ? String(user.mobno) : null;
+  const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping food WA.`);
     return;
@@ -2408,7 +2409,7 @@ export async function sendTomorrowMealsCount(recipients = []) {
     // Retrieve recipient phone numbers
     const cards = await CardDb.findAll({
       where: { cardno: recipients },
-      attributes: ['cardno', 'mobno']
+      attributes: ['cardno', 'mobno', 'country']
     });
 
     const components = [
@@ -2426,8 +2427,7 @@ export async function sendTomorrowMealsCount(recipients = []) {
     for (const card of cards) {
       const phone = card.mobno;
       if (phone) {
-        const cleanPhone = String(phone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
+        const formattedPhone = formatWhatsAppPhone(phone, card.country);
         try {
           await sendWhatsAppMessage(formattedPhone, 'daily_kitchen_meal_count', components);
           console.log(`✅ WhatsApp sent to ${card.cardno} (${formattedPhone}) for tomorrow's meals count`);

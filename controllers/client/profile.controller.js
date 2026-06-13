@@ -11,6 +11,7 @@ import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment-timezone';
 
 export const updateProfile = async (req, res) => {
@@ -104,10 +105,7 @@ export const updateProfile = async (req, res) => {
     const targetPhone = mobno || card.mobno;
     if (targetPhone) {
       try {
-        const cleanPhone = String(targetPhone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91')
-          ? cleanPhone
-          : `91${cleanPhone}`;
+        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
 
         const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
 

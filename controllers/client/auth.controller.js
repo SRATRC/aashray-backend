@@ -5,6 +5,7 @@ import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
 import sendMail from '../../utils/sendMail.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
 export const updatePassword = async (req, res) => {
@@ -42,10 +43,7 @@ export const updatePassword = async (req, res) => {
   const phone = details.mobno;
   if (phone) {
     try {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, details.country);
 
       const components = [
         {
@@ -201,10 +199,7 @@ export async function forgotPassword(req, res) {
   const phone = details.mobno;
   if (phone) {
     try {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, details.country);
 
       const components = [
         {

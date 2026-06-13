@@ -15,6 +15,7 @@ import CatchAsync from '../../utils/CatchAsync.js';
 import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
 export const CreateRequest = CatchAsync(async (req, res) => {
@@ -99,10 +100,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
   const phone = req.user.mobno;
   if (phone) {
     try {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, req.user.country);
 
       const components = [
         {

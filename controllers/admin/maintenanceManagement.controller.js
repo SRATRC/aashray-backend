@@ -14,6 +14,7 @@ import {
   MaintenanceDb
 } from '../../models/associations.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
 
@@ -109,10 +110,7 @@ export const updateMaintenanceRequest = async (req, res) => {
   if (status === STATUS_CLOSED && !wasClosed && maintenance.card) {
     const phone = maintenance.card.mobno;
     if (phone) {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, maintenance.card.country);
 
       const components = [
         {

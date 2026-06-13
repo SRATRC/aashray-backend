@@ -6,6 +6,7 @@ import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import { Op } from 'sequelize';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment-timezone';
 
 
@@ -178,10 +179,7 @@ export const createCard = async (req, res) => {
     const phone = newCard.mobno;
     if (phone) {
       try {
-        const cleanPhone = String(phone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91')
-          ? cleanPhone
-          : `91${cleanPhone}`;
+        const formattedPhone = formatWhatsAppPhone(phone, newCard.country);
 
         const components = [
           {
@@ -363,10 +361,7 @@ export const updateCard = async (req, res) => {
     const targetPhone = mobno || card.mobno;
     if (targetPhone) {
       try {
-        const cleanPhone = String(targetPhone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91')
-          ? cleanPhone
-          : `91${cleanPhone}`;
+        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
 
         const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
 
@@ -477,10 +472,7 @@ export const resetPasswordDefault = async (req, res) => {
   const phone = card.mobno;
   if (phone) {
     try {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, card.country);
 
       const components = [
         {

@@ -16,6 +16,7 @@ import TravelBusStops
 import CoordinatorOtp from '../../models/coordinatorOtp.model.js';
 import CardDb from '../../models/card.model.js';
 import { sendCoordinatorOtp } from '../../helpers/sendCoordinatorOtp.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
 import crypto from 'crypto';
@@ -169,7 +170,7 @@ export async function sendOtp(
   // SEND WHATSAPP
 
   await sendCoordinatorOtp(
-    mobno,
+    formatWhatsAppPhone(mobno, coordinator.country),
     otp
   );
 

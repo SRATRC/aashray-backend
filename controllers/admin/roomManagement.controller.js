@@ -60,6 +60,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Sequelize, { Op } from 'sequelize';
 import logger from '../../config/logger.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment';
 import BlockDates from '../../models/block_dates.model.js';
 import getDates from '../../utils/getDates.js';
@@ -900,7 +901,7 @@ export const updateRoomBooking = async (req, res) => {
     include: [
       {
         model: CardDb,
-        attributes: ['issuedto', 'token', 'cardno', 'mobno']
+        attributes: ['issuedto', 'token', 'cardno', 'mobno', 'country']
       }
     ],
     where: { bookingid }
@@ -938,10 +939,7 @@ export const updateRoomBooking = async (req, res) => {
   const phone = booking.CardDb?.mobno;
   if (phone) {
     try {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('91')
-        ? cleanPhone
-        : `91${cleanPhone}`;
+      const formattedPhone = formatWhatsAppPhone(phone, booking.CardDb?.country);
 
       const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
       const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";

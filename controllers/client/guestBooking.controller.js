@@ -15,6 +15,7 @@ import {
 import { Op } from 'sequelize';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -717,10 +718,7 @@ export const createGuests = async (req, res) => {
     const phone = newGuest.mobno;
     if (phone) {
       try {
-        const cleanPhone = String(phone).replace(/\D/g, '');
-        const formattedPhone = cleanPhone.startsWith('91')
-          ? cleanPhone
-          : `91${cleanPhone}`;
+        const formattedPhone = formatWhatsAppPhone(phone, newGuest.country);
 
         const components = [
           {
