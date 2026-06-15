@@ -310,7 +310,8 @@ export const fetchAdhyayanBookings = async (req, res) => {
       t2.res_status,
       t3.name,
       t4.status AS transaction_status,
-      t4.description as comments 
+      t4.description as comments,
+      sa.id AS attendance_id
    FROM shibir_booking_db AS t1
    LEFT JOIN card_db AS t2 
       ON t1.cardno = t2.cardno 
@@ -318,6 +319,8 @@ export const fetchAdhyayanBookings = async (req, res) => {
       ON t1.shibir_id = t3.id 
    LEFT JOIN transactions AS t4
       ON t1.bookingid = t4.bookingid
+   LEFT JOIN shibir_attendance_db AS sa
+      ON t1.bookingid = sa.bookingid
    WHERE 
       t1.shibir_id = :shibirId 
       AND t1.status IN (:status)
