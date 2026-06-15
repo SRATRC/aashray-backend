@@ -54,7 +54,7 @@ import {
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
-import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp, sendLateCheckoutFeeWaivedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize, { Op } from 'sequelize';
@@ -2225,6 +2225,17 @@ export const revokeLateCheckoutFee = async (req, res) => {
         success: false,
         message: 'Transaction not found or already updated'
       });
+    }
+
+    if (status === 'admin cancelled') {
+      try {
+        const txn = await Transactions.findByPk(transactionId);
+        if (txn) {
+          await sendLateCheckoutFeeWaivedWhatsApp(txn);
+        }
+      } catch (waErr) {
+        req.log.error('Error sending late checkout fee waived WhatsApp:', waErr);
+      }
     }
 
     req.log.info('revoke_late_checkout_fee_success', { transactionId, status });

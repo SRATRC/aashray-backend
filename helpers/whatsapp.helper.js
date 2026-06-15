@@ -2515,6 +2515,55 @@ export async function checkAndSendMealsCountUpdate() {
   }
 }
 
+export async function sendLateCheckoutFeeWaivedWhatsApp(transaction) {
+  try {
+    if (!transaction) return;
+
+    // 1. Get Card details
+    const attendeeCard = await CardDb.findOne({ where: { cardno: transaction.cardno } });
+    if (!attendeeCard) {
+      console.warn(`WA LCF WAIVED SKIP: Card not found for cardno=${transaction.cardno}`);
+      return;
+    }
+
+    const attendeePhone = attendeeCard.mobno ? formatWhatsAppPhone(attendeeCard.mobno, attendeeCard.country) : null;
+    if (!attendeePhone) {
+      console.warn(`WA LCF WAIVED SKIP: No mobile for cardno=${transaction.cardno}`);
+      return;
+    }
+
+    const attendeeName = attendeeCard.issuedto || "";
+    const amount = String(transaction.amount || 0);
+
+    // 2. Parse booking ID from description
+    let bookingId = transaction.bookingid || "";
+    if (transaction.description && transaction.description.includes('booking ')) {
+      const parts = transaction.description.split('booking ');
+      if (parts.length > 1) {
+        bookingId = parts[1].split(' ')[0];
+      }
+    }
+
+    const templateName = "bk_sha_s_f_lcf_waived";
+    const parameters = [attendeeName, amount, bookingId];
+
+    const sanitizedParams = parameters.map(p => sanitizeParamText(p));
+    const components = buildBodyComponents(sanitizedParams);
+
+    console.log(`WA LCF WAIVED: template=${templateName} to phone=${attendeePhone} (Guest cardno=${transaction.cardno})`);
+
+    const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
+    if (!result || !result.ok) {
+      console.error(`Error sending late checkout fee waived WhatsApp notification for template ${templateName}`, result?.error);
+    } else {
+      console.log(`📩 WhatsApp late checkout fee waived notification sent successfully: template=${templateName} to ${attendeePhone}`);
+    }
+  } catch (err) {
+    console.error("Error in sendLateCheckoutFeeWaivedWhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
+
 
 
 
