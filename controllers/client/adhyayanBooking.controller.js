@@ -19,7 +19,7 @@ import {
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
-import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification } from '../../helpers/adhyayanBooking.helper.js';
+import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification, resetShibirAttendance } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   getOtherBookingUser,
@@ -192,28 +192,19 @@ export const CancelShibir = async (req, res) => {
     }
   }
 
-  const resetData = {};
-  for (let i = 1; i <= 9; i++) {
-    resetData[`session_${i}`] = 0;
-  }
-  await ShibirAttendanceDb.update(resetData, {
-    where: {
-      shibir_id: booking.shibir_id,
-      cardno: booking.cardno
-    },
-    transaction: t
-  });
+  await resetShibirAttendance(booking.bookingid, req.user.username, t);
 
+  const previousStatus = booking.status;
   await userCancelBooking(req.user, booking, t);
   req.log.info('cancel_shibir_cancelled', { bookingid, cardno: req.user.cardno });
   await t.commit();
   req.log.info('cancel_shibir_committed', { bookingid });
 
-  await sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+  await sendAdhyayanBookingUpdateNotification(booking, adhyayan, false, previousStatus);
 
   if (newBooking) {
     //sending notification and email to user who got moved from waiting to pending and cc to the bookedBy user if any.
-    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, false, 'waiting');
   }
 
   req.log.info('cancel_shibir_success', { bookingid, cardno: req.user.cardno });

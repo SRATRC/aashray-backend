@@ -8,7 +8,8 @@ import {
   ERR_UTSAV_ALREADY_BOOKED,
   STATUS_AVAILABLE,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  RESEARCH_CENTRE
 } from '../config/constants.js';
 import logger from '../config/logger.js';
 import {
@@ -22,6 +23,7 @@ import {
   usableCredits
 } from './transactions.helper.js';
 import { v4 as uuidv4 } from 'uuid';
+import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import {
@@ -31,6 +33,7 @@ import {
 } from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
+import { bookFoodForAllMeals, cancelAllMeals } from './foodBooking.helper.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
@@ -85,7 +88,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       },
       { transaction: t }
     );
-
+    
     // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
@@ -100,9 +103,15 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
+      
       total_amount += package_info.amount;
+      
+      
     }
-
+    // Only provision food for non-waitlisted bookings
+    if (booking.status !== STATUS_WAITING) {
+      await bookFoodForUtsav(package_info, utsav, mumukshu, t, user.cardno);
+    }
     bookings.push(bookingid);
     userBookingIds[mumukshu.cardno] = bookings;
   }
@@ -113,6 +122,31 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   );
 
   return { amount: total_amount, userBookingIds, waitingBookingCount };
+}
+
+export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
+  
+  if(utsav.location !== RESEARCH_CENTRE) 
+    return;
+
+  const effectiveStartingMeal = moment(package_info.start_date).isSame(utsav.start_date, 'day')
+    ? utsav.starting_meal
+    : null;
+
+  const effectiveEndingMeal = moment(package_info.end_date).isSame(utsav.end_date, 'day')
+    ? utsav.ending_meal
+    : null;
+
+  await bookFoodForAllMeals(
+    package_info.start_date,
+    package_info.end_date,
+    effectiveStartingMeal,
+    effectiveEndingMeal,
+    mumukshu.cardno,
+    t,
+    updatedBy
+  );
+
 }
 
 export async function bookUtsavForMumukshusAdmin(
@@ -546,4 +580,19 @@ export async function findUtsavOnBoundaryDates(checkin, checkout) {
   });
 
   return utsav;
+}
+
+export async function cancelUtsavFoodBookings(booking, updatedBy, t) {
+
+  // Mirror bookFoodForUtsav: food is only auto-created for Research Centre utsavs,
+  // so only cancel it for those (otherwise we'd wipe unrelated food on these dates).
+  const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
+  if (!utsav || utsav.location !== RESEARCH_CENTRE) return;
+
+  const utsavPackage = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
+
+  if (utsavPackage) {
+    await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
+  }
+  
 }

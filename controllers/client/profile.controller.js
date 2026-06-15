@@ -10,6 +10,9 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import moment from 'moment-timezone';
 
 export const updateProfile = async (req, res) => {
   attachUserContext(req);
@@ -30,6 +33,34 @@ export const updateProfile = async (req, res) => {
     pin,
     center
   } = req.body;
+
+  const card = await CardDb.findOne({ where: { cardno: req.user.cardno } });
+  if (!card) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  // --- Compare to find changed fields ---
+  const isChanged = (newVal, oldVal) => {
+    if (newVal === undefined) return false;
+    const normalize = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    return normalize(newVal) !== normalize(oldVal);
+  };
+
+  const changed = [];
+  if (isChanged(issuedto, card.issuedto)) changed.push('Name');
+  if (isChanged(gender, card.gender)) changed.push('Gender');
+  if (isChanged(dob, card.dob)) changed.push('Date of Birth');
+  if (isChanged(mobno, card.mobno)) changed.push('Mobile Number');
+  if (isChanged(idType, card.idType)) changed.push('ID Type');
+  if (isChanged(idNo, card.idNo)) changed.push('ID Number');
+  if (isChanged(email, card.email)) changed.push('Email');
+  if (isChanged(address, card.address)) changed.push('Address');
+  if (isChanged(country, card.country)) changed.push('Country');
+  if (isChanged(state, card.state)) changed.push('State');
+  if (isChanged(city, card.city)) changed.push('City');
+  if (isChanged(pin, card.pin)) changed.push('Pin');
+  if (isChanged(center, card.center)) changed.push('Center');
+
   const updatedProfile = await CardDb.update(
     {
       issuedto,
@@ -52,6 +83,7 @@ export const updateProfile = async (req, res) => {
       }
     }
   );
+
   if (!updatedProfile) {
     req.log.error('update_profile_failed', { cardno: req.user.cardno });
     throw new ApiError(404, 'user not updated');
@@ -67,6 +99,36 @@ export const updateProfile = async (req, res) => {
   });
 
   req.log.info('update_profile_success', { cardno: req.user.cardno });
+
+  // --- Send WhatsApp notification if any details were changed ---
+  if (changed.length > 0) {
+    const targetPhone = mobno || card.mobno;
+    if (targetPhone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
+
+        const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' },
+              { type: 'text', text: card.cardno },
+              { type: 'text', text: formattedTime },
+              { type: 'text', text: changed.join(', ') },
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'profile_updated', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp profile_updated message in updateProfile:', waErr.message || waErr);
+      }
+    }
+  }
+
   return res
     .status(200)
     .send({ message: 'Profile Updated', data: updatedProfileData });

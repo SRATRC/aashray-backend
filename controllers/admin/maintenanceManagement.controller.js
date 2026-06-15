@@ -13,6 +13,9 @@ import {
   CardDb,
   MaintenanceDb
 } from '../../models/associations.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+
 
 
 export const fetchMaintenanceReport = async (req, res) => {
@@ -80,11 +83,21 @@ export const updateMaintenanceRequest = async (req, res) => {
     return res.status(400).json({ message: 'Booking ID is required.' });
   }
 
-  const maintenance = await MaintenanceDb.findOne({ where: { bookingid } });
+  const maintenance = await MaintenanceDb.findOne({
+    where: { bookingid },
+    include: [
+      {
+        model: CardDb,
+        as: 'card'
+      }
+    ]
+  });
 
   if (!maintenance) {
     return res.status(404).json({ message: 'Maintenance request not found.' });
   }
+
+  const wasClosed = maintenance.status === STATUS_CLOSED;
 
   // Update fields if provided
   // maintenance.issuedto = issuedto || maintenance.issuedto;
@@ -94,8 +107,40 @@ export const updateMaintenanceRequest = async (req, res) => {
 
   await maintenance.save();
 
+  if (status === STATUS_CLOSED && !wasClosed && maintenance.card) {
+    const phone = maintenance.card.mobno;
+    if (phone) {
+      const formattedPhone = formatWhatsAppPhone(phone, maintenance.card.country);
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: maintenance.card.issuedto || 'Mumukshu'
+            },
+            {
+              type: 'text',
+              text: maintenance.area_of_work || ' '
+            },
+            {
+              type: 'text',
+              text: maintenance.work_detail || ' '
+            }
+          ]
+        }
+      ];
+
+      sendWhatsAppMessage(formattedPhone, 'maintenance_request_closed', components).catch((err) => {
+        console.error('Error sending WhatsApp message in updateMaintenanceRequest:', err.message || err);
+      });
+    }
+  }
+
   return res.status(200).json({
     message: 'Maintenance request updated successfully.',
     data: maintenance
   });
 }
+

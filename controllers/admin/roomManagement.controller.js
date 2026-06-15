@@ -32,6 +32,7 @@ import {
   AC_ROOM_PRICE,
   STATUS_CREDITED,
   STATUS_PAYMENT_COMPLETED,
+  ERR_TRANSACTION_NOT_FOUND,
   AMT_TYPE_LATE_CHECKOUT_ROOM
 } from '../../config/constants.js';
 import {
@@ -53,17 +54,20 @@ import {
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
+import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp, sendLateCheckoutFeeWaivedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import Sequelize, { Op } from 'sequelize';
 import logger from '../../config/logger.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import moment from 'moment';
 import BlockDates from '../../models/block_dates.model.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { QueryTypes } from 'sequelize';
 import sequelize from '../../config/database.js';
-import moment from 'moment';
 
 const CHECKOUT_DEADLINE = '11:00:00';
 const LATE_CHECKOUT_HALF = '15:00:00';
@@ -288,8 +292,8 @@ export const manualCheckin = async (req, res) => {
     throw new ApiError(
       404,
       `Cannot check-in until ${booking.checkin}. Please ask the guest to create ` +
-        `a new booking on the mobile app or you can create a new booking on admin with the ` +
-        `desired check-in date.`
+      `a new booking on the mobile app or you can create a new booking on admin with the ` +
+      `desired check-in date.`
     );
   }
 
@@ -305,6 +309,7 @@ export const manualCheckin = async (req, res) => {
     throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
+  const previousStatus = booking.status;
   await booking.update(
     {
       status: ROOM_STATUS_CHECKEDIN,
@@ -315,6 +320,13 @@ export const manualCheckin = async (req, res) => {
 
   await t.commit();
   req.log.info('manual_checkin_success', { bookingid: booking.bookingid, cardno: booking.cardno });
+
+  try {
+    await sendRoomStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error("Error sending checkin WhatsApp:", waErr);
+  }
+
   return res
     .status(200)
     .send({ message: 'Successfully checked in', data: booking });
@@ -349,12 +361,25 @@ export const manualCheckout = async (req, res) => {
     where: { bookingid: booking.bookingid }
   });
 
+  const previousStatus = booking.status;
   const today = moment().format('YYYY-MM-DD');
   const checkoutTime = moment().format('HH:mm:ss');
 
   req.log.info('manual_checkout_processing', { bookingid: booking.bookingid, cardno: booking.cardno, plannedCheckout: booking.checkout, today, checkoutTime });
 
+  let checkoutOptions = {
+    updatedBy: req.user.username,
+    checkoutTime: moment().format("hh:mm a"),
+    lateFee: 0
+  };
+
   if (today === booking.checkout) {
+    if (checkoutTime > CHECKOUT_DEADLINE && booking.nights >= 1) {
+      const isHalfDay = checkoutTime <= LATE_CHECKOUT_HALF;
+      const lateFee = calcLateCheckoutFee(booking.roomtype, isHalfDay);
+      checkoutOptions.lateFee = lateFee;
+      checkoutOptions.checkoutTime = moment(checkoutTime, "HH:mm:ss").format("hh:mm a");
+    }
     await handleSameDayCheckout({
       booking,
       checkoutTime,
@@ -387,6 +412,28 @@ export const manualCheckout = async (req, res) => {
 
   await dbTransaction.commit();
   req.log.info('manual_checkout_success', { bookingid: booking.bookingid, cardno: booking.cardno, today });
+
+  try {
+    if (today < booking.checkout) {
+      // Find the new checkout booking created in handleEarlyCheckout
+      const newCheckoutBooking = await RoomBooking.findOne({
+        where: {
+          roomno: booking.roomno,
+          cardno: booking.cardno,
+          checkout: today,
+          status: ROOM_STATUS_CHECKEDOUT
+        }
+      });
+      if (newCheckoutBooking) {
+        await sendRoomStatusChangeWhatsApp(newCheckoutBooking, 'checked_in', checkoutOptions);
+      }
+    } else {
+      await sendRoomStatusChangeWhatsApp(booking, previousStatus, checkoutOptions);
+    }
+  } catch (waErr) {
+    logger.error("Error sending checkout WhatsApp:", waErr);
+  }
+
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
@@ -421,6 +468,7 @@ export const cancelFlatBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const originalStatus = booking.status;
   await booking.update(
     {
       status: STATUS_ADMIN_CANCELLED,
@@ -431,6 +479,12 @@ export const cancelFlatBooking = async (req, res) => {
 
   await t.commit();
   req.log.info('cancel_flat_booking_success', { bookingid: booking.bookingid, cardno: booking.cardno });
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat booking cancellation WhatsApp:', waErr);
+  }
 
   sendDualUserNotifications({
     primary: {
@@ -445,11 +499,10 @@ export const cancelFlatBooking = async (req, res) => {
     bookedBy: booking.bookedBy && {
       cardno: booking.bookedBy,
       title: 'Flat Booking Cancelled by Admin',
-      body: `Flat booking for ${
-        booking.CardDb.issuedto.split(' ')[0]
-      } from ${moment(booking.checkin).format('Do MMM, YYYY')} to ${moment(
-        booking.checkout
-      ).format('Do MMM, YYYY')} has been cancelled by admin.`
+      body: `Flat booking for ${booking.CardDb.issuedto.split(' ')[0]
+        } from ${moment(booking.checkin).format('Do MMM, YYYY')} to ${moment(
+          booking.checkout
+        ).format('Do MMM, YYYY')} has been cancelled by admin.`
     },
     screen: '/bookings'
   });
@@ -484,6 +537,7 @@ export const flatCheckin = async (req, res) => {
     throw new ApiError(404, `Cannot check-in until ${booking.checkin}.`);
   }
 
+  const originalStatus = booking.status;
   await booking.update(
     {
       status: ROOM_STATUS_CHECKEDIN,
@@ -494,6 +548,13 @@ export const flatCheckin = async (req, res) => {
 
   await t.commit();
   req.log.info('flat_checkin_success', { bookingid: booking.bookingid, cardno: booking.cardno });
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat checkin WhatsApp:', waErr);
+  }
+
   return res
     .status(200)
     .send({ message: 'Successfully checked in', data: booking });
@@ -524,11 +585,12 @@ export const flatCheckout = async (req, res) => {
     throw new ApiError(
       404,
       `Original check-out date was ${booking.checkout}. Please create ` +
-        `a new booking for the guest for the remaining days and collect the difference.`
+      `a new booking for the guest for the remaining days and collect the difference.`
     );
   }
 
   const nights = await calculateNights(booking.checkin, today);
+  const originalStatus = booking.status;
 
   await booking.update(
     {
@@ -542,6 +604,13 @@ export const flatCheckout = async (req, res) => {
 
   await t.commit();
   req.log.info('flat_checkout_success', { bookingid: booking.bookingid, cardno: booking.cardno, today });
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat checkout WhatsApp:', waErr);
+  }
+
   return res.status(200).send({ message: 'Successfully checked out' });
 };
 
@@ -600,10 +669,34 @@ export const roomBooking = async (req, res) => {
   }
 
   await t.commit();
-  if (booking.bookingId != null) {
+  const bookingIdToUse = nights === 0 ? booking.bookingid : booking.bookingId;
+  if (bookingIdToUse != null) {
     let bookingIds = {};
-    bookingIds[TYPE_ROOM] = [booking.bookingId];
+    bookingIds[TYPE_ROOM] = [bookingIdToUse];
     sendUnifiedEmail(card.cardno, bookingIds, card);
+  }
+
+  if (bookingIdToUse) {
+    (async () => {
+      try {
+        const freshBooking = await RoomBooking.findOne({
+          where: { bookingid: bookingIdToUse }
+        });
+        if (freshBooking) {
+          await sendUnifiedWhatsApp(
+            card.cardno,
+            [],
+            [],
+            [],
+            [],
+            [freshBooking],
+            null
+          );
+        }
+      } catch (waErr) {
+        logger.error('Error sending room booking WhatsApp notification:', waErr);
+      }
+    })();
   }
 
   sendDualUserNotifications({
@@ -689,6 +782,48 @@ export const flatBooking = async (req, res) => {
     sendUnifiedEmail(card.cardno, bookingIds, card);
   }
 
+  if (booking.bookingId) {
+    (async () => {
+      try {
+        const [freshBooking, flatDetails] = await Promise.all([
+          FlatBooking.findOne({
+            where: { bookingid: booking.bookingId }
+          }),
+          FlatDb.findOne({
+            where: { flatno: req.body.flat_no }
+          })
+        ]);
+        if (freshBooking) {
+          // Notify the attendee
+          await sendUnifiedWhatsApp(
+            card.cardno,
+            [],
+            [],
+            [freshBooking],
+            [],
+            [],
+            null
+          );
+
+          // If flat has an owner and flat owner is different from attendee, notify owner too
+          if (flatDetails && flatDetails.owner && flatDetails.owner !== card.cardno) {
+            await sendUnifiedWhatsApp(
+              flatDetails.owner,
+              [],
+              [],
+              [freshBooking],
+              [],
+              [],
+              card.cardno
+            );
+          }
+        }
+      } catch (waErr) {
+        logger.error('Error sending flat booking WhatsApp notification:', waErr);
+      }
+    })();
+  }
+
   sendDualUserNotifications({
     primary: {
       token: card.token,
@@ -766,7 +901,7 @@ export const updateRoomBooking = async (req, res) => {
     include: [
       {
         model: CardDb,
-        attributes: ['issuedto', 'token']
+        attributes: ['issuedto', 'token', 'cardno', 'mobno', 'country']
       }
     ],
     where: { bookingid }
@@ -799,6 +934,34 @@ export const updateRoomBooking = async (req, res) => {
 
   await t.commit();
   req.log.info('update_room_booking_success', { bookingid, oldRoomno: booking.roomno, newRoomno: roomno });
+
+  // --- Send WhatsApp notification for Room Number change ---
+  const phone = booking.CardDb?.mobno;
+  if (phone) {
+    try {
+      const formattedPhone = formatWhatsAppPhone(phone, booking.CardDb?.country);
+
+      const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
+      const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: booking.CardDb.issuedto || 'Mumukshu' },
+            { type: 'text', text: roomno },
+            { type: 'text', text: checkinFormatted },
+            { type: 'text', text: checkoutFormatted }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
+    } catch (waErr) {
+      console.error('Error sending WhatsApp room_number_updated message:', waErr.message || waErr);
+    }
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -824,6 +987,7 @@ export const updateFlatBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const originalStatus = booking.status;
   await booking.update({
     flatno,
     checkin: checkin_date,
@@ -843,6 +1007,15 @@ export const updateFlatBooking = async (req, res) => {
   });
 
   req.log.info('update_flat_booking_success', { bookingid, flatno, status });
+
+  if (status && status !== originalStatus) {
+    try {
+      await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+    } catch (waErr) {
+      logger.error('Error sending flat booking update status WhatsApp:', waErr);
+    }
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -1139,8 +1312,8 @@ export const flatReservationReport = async (req, res) => {
   const statusArray = Array.isArray(statuses)
     ? statuses
     : statuses
-    ? [statuses]
-    : null;
+      ? [statuses]
+      : null;
 
   const whereClause = {
     [Sequelize.Op.or]: [
@@ -1490,9 +1663,8 @@ export const updateBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Raj Sharan Cancelled',
-          body: `Stay for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been cancelled by admin.`
+          body: `Stay for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been cancelled by admin.`
         },
         screen: '/bookings'
       });
@@ -1508,9 +1680,8 @@ export const updateBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Raj Sharan booking status update',
-          body: `Payment is required for stay of ${
-            booking.CardDb.issuedto.split(' ')[0]
-          }. Please complete payment within 24 hours.`
+          body: `Payment is required for stay of ${booking.CardDb.issuedto.split(' ')[0]
+            }. Please complete payment within 24 hours.`
         },
         screen: '/bookings'
       });
@@ -1526,9 +1697,8 @@ export const updateBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Raj Sharan booking confirmed',
-          body: `Room booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been confirmed by admin.`
+          body: `Room booking for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been confirmed by admin.`
         },
         screen: '/bookings'
       });
@@ -1540,6 +1710,13 @@ export const updateBookingStatus = async (req, res) => {
 
   await t.commit();
   req.log.info('update_room_booking_status_transition', { bookingid, fromStatus: originalStatus, toStatus: newStatus });
+
+  try {
+    await sendRoomStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error("Error sending room status update WhatsApp:", waErr);
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -1838,9 +2015,8 @@ export const updateFlatBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Flat Booking Cancelled by Admin',
-          body: `Flat booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been cancelled by admin.`
+          body: `Flat booking for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been cancelled by admin.`
         },
         screen: '/bookings'
       });
@@ -1856,9 +2032,8 @@ export const updateFlatBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Flat Booking status update',
-          body: `Payment is required for stay of ${
-            booking.CardDb.issuedto.split(' ')[0]
-          }. Please complete payment within 24 hours.`
+          body: `Payment is required for stay of ${booking.CardDb.issuedto.split(' ')[0]
+            }. Please complete payment within 24 hours.`
         },
         screen: '/bookings'
       });
@@ -1874,9 +2049,8 @@ export const updateFlatBookingStatus = async (req, res) => {
         bookedBy: booking.bookedBy && {
           cardno: booking.bookedBy,
           title: 'Flat Booking confirmed',
-          body: `Flat booking for ${
-            booking.CardDb.issuedto.split(' ')[0]
-          } has been confirmed and is ready for check-in.`
+          body: `Flat booking for ${booking.CardDb.issuedto.split(' ')[0]
+            } has been confirmed and is ready for check-in.`
         },
         screen: '/bookings'
       });
@@ -1888,6 +2062,13 @@ export const updateFlatBookingStatus = async (req, res) => {
 
   await t.commit();
   req.log.info('update_flat_booking_status_transition', { bookingid, fromStatus: originalStatus, toStatus: newStatus });
+
+  try {
+    await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
+  } catch (waErr) {
+    logger.error('Error sending flat booking update status WhatsApp:', waErr);
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -2044,6 +2225,17 @@ export const revokeLateCheckoutFee = async (req, res) => {
         success: false,
         message: 'Transaction not found or already updated'
       });
+    }
+
+    if (status === 'admin cancelled') {
+      try {
+        const txn = await Transactions.findByPk(transactionId);
+        if (txn) {
+          await sendLateCheckoutFeeWaivedWhatsApp(txn);
+        }
+      } catch (waErr) {
+        req.log.error('Error sending late checkout fee waived WhatsApp:', waErr);
+      }
     }
 
     req.log.info('revoke_late_checkout_fee_success', { transactionId, status });

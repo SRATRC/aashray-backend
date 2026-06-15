@@ -36,8 +36,21 @@ import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js'
+import TravelBusGroup from './travelBusGroup.model.js';
+import TravelBusPassengers from './travelBusPassengers.model.js';
+import TravelBusStops from './travelBusStops.model.js';
 
 // CardDb
+CardDb.hasOne(AdminUsers, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno'
+});
+AdminUsers.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'card'
+});
+
 CardDb.hasMany(GateRecord, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
@@ -342,6 +355,41 @@ CardDb.hasOne(PermanentWifiCodes, {
   onUpdate: 'CASCADE'
 });
 
+TravelBusGroup.hasMany(TravelBusPassengers, {
+  foreignKey: 'bus_group_id',
+  sourceKey: 'id',
+  as: 'passengers',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+TravelBusPassengers.belongsTo(TravelBusGroup, {
+  foreignKey: 'bus_group_id',
+  targetKey: 'id',
+  as: 'busGroup'
+});
+
+TravelBusPassengers.belongsTo(TravelBusGroup, {
+  foreignKey: 'bus_group_id',
+  targetKey: 'id',
+  as: 'TravelBusGroup',
+});
+
+TravelBusGroup.hasMany(
+  TravelBusStops,
+  {
+    foreignKey: 'bus_group_id',
+    as: 'stops',
+  }
+);
+
+TravelBusStops.belongsTo(
+  TravelBusGroup,
+  {
+    foreignKey: 'bus_group_id',
+  }
+);
+
 // Utsav
 UtsavBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
@@ -562,5 +610,8 @@ export {
   Updates,
   AdhyayanFeedback,
   RazorpaySettlementRecon,
-  ShibirAttendanceDb
+  ShibirAttendanceDb,
+  TravelBusGroup,
+  TravelBusPassengers,
+  TravelBusStops
 };

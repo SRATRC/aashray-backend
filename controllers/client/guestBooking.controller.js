@@ -1,8 +1,21 @@
 import {
   CardDb,
   GuestRelationship,
-  UtsavDb
+  FlatDb,
+  UtsavDb,
+  ShibirBookingDb,
+  TravelDb,
+  RoomBooking,
+  UtsavBooking,
+  FlatBooking,
+  ShibirDb,
+  UtsavPackagesDb,
+  FoodDb
 } from '../../models/associations.js';
+import { Op } from 'sequelize';
+import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -13,6 +26,7 @@ import {
   STATUS_GUEST,
   TYPE_UTSAV,
   TYPE_FLAT,
+  TYPE_TRAVEL,
   MSG_BOOKING_WAITING,
   BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
@@ -53,6 +67,89 @@ import { validateCards } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+
+async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
+  const typeMap = userBookingIdMap[cardno] || {};
+  const adhyanIds = Array.isArray(typeMap[TYPE_ADHYAYAN]) ? typeMap[TYPE_ADHYAYAN].map(String).filter(Boolean) : [];
+  const travelIds = Array.isArray(typeMap[TYPE_TRAVEL]) ? typeMap[TYPE_TRAVEL].map(String).filter(Boolean) : [];
+  const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
+  const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
+  const flatIds   = Array.isArray(typeMap[TYPE_FLAT]) ? typeMap[TYPE_FLAT].map(String).filter(Boolean) : [];
+  const foodIds   = Array.isArray(typeMap[TYPE_FOOD]) ? typeMap[TYPE_FOOD].map(String).filter(Boolean) : [];
+
+  try {
+    const [
+      adhyanBookingDetailsFromDb,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails,
+      foodBookingDetails
+    ] = await Promise.all([
+      adhyanIds.length
+        ? ShibirBookingDb.findAll({
+            where: { bookingid: { [Op.in]: adhyanIds } },
+            include: [{ model: ShibirDb, as: 'ShibirDb' }],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
+        : [],
+      travelIds.length
+        ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })
+        : [],
+      roomIds.length
+        ? RoomBooking.findAll({
+            where: { bookingid: { [Op.in]: roomIds } },
+            order: [['cardno', 'ASC'], ['checkin', 'ASC']]
+          })
+        : [],
+      utsavIds.length
+        ? UtsavBooking.findAll({
+            where: { bookingid: { [Op.in]: utsavIds } },
+            include: [
+              { model: UtsavDb, as: 'UtsavDb' },
+              { model: UtsavPackagesDb, as: 'UtsavPackagesDb' }
+            ],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
+        : [],
+      flatIds.length
+        ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
+        : [],
+      foodIds.length
+        ? FoodDb.findAll({
+            where: { id: { [Op.in]: foodIds } },
+            order: [['cardno', 'ASC'], ['date', 'ASC']]
+          })
+        : []
+    ]);
+
+    // Synthesize missing adhyan entries
+    const requested = adhyanIds.map(String);
+    const foundIds = new Set((adhyanBookingDetailsFromDb || []).map((r) => String(r.bookingid || r.bookingId || r.id)));
+    const missing = requested.filter(id => !foundIds.has(id));
+    const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
+    const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
+
+    return {
+      adhyanBookingDetails,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails,
+      foodBookingDetails
+    };
+  } catch (err) {
+    console.error(`WA DIAG: fetchFreshDetailsForCard(${cardno}) failed:`, err && (err.stack || err.message || err));
+    return {
+      adhyanBookingDetails: [],
+      travelBookingDetails: [],
+      roomBookingDetails: [],
+      utsavBookingDetails: [],
+      flatBookingDetails: [],
+      foodBookingDetails: []
+    };
+  }
+}
 
 export const guestBooking = async (req, res) => {
   attachUserContext(req);
@@ -119,17 +216,72 @@ export const guestBooking = async (req, res) => {
   await t.commit();
   req.log.info('guest_booking_committed', { cardno: req.user.cardno });
 
+  // --- WhatsApp notifications ---
+  try {
+    const bookedByCard = req.user.cardno;
+    const allCardnos = Object.keys(userBookingIdMap || {});
+    const jobs = [];
+
+    for (const cardno of allCardnos) {
+      const details = await fetchFreshDetailsForCard(cardno, userBookingIdMap);
+
+      jobs.push(sendUnifiedWhatsApp(
+        cardno,
+        details.adhyanBookingDetails,
+        details.travelBookingDetails,
+        details.flatBookingDetails,
+        details.utsavBookingDetails,
+        details.roomBookingDetails,
+        null,
+        details.foodBookingDetails
+      ));
+
+      if (cardno !== bookedByCard) {
+        jobs.push(sendUnifiedWhatsApp(
+          bookedByCard,
+          details.adhyanBookingDetails,
+          details.travelBookingDetails,
+          details.flatBookingDetails,
+          details.utsavBookingDetails,
+          details.roomBookingDetails,
+          cardno,
+          details.foodBookingDetails
+        ));
+      }
+    }
+
+    const results = await Promise.allSettled(jobs);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error(`WhatsApp job #${i} failed:`, r.reason);
+      } else {
+        console.log(`WhatsApp job #${i} succeeded`);
+      }
+    });
+  } catch (waErr) {
+    console.error("Unexpected error in WhatsApp notification block:", waErr);
+    // do not rollback here — WhatsApp failures are non-fatal for the booking flow
+  }
+
   // Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(
     userBookingIdMap,
     req.user,
-    BOOKING_STATUS_PENDING
+    BOOKING_STATUS_PENDING,
+    false
   );
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
+      sendUnifiedEmail(
+        cardno,
+        bookings,
+        req.user,
+        BOOKING_STATUS_PENDING,
+        'unifiedBookingEmail',
+        false
+      );
     }
   }
   let message = MSG_BOOKING_SUCCESSFUL;
@@ -164,6 +316,7 @@ export const validateBooking = async (req, res) => {
 
   const response = {
     roomDetails: [],
+    flatDetails: [],
     adhyayanDetails: [],
     foodDetails: {},
     utsavDetails: [],
@@ -218,6 +371,7 @@ async function book(
       const foodResult = await bookFood(body, data, t, user);
       amount += foodResult.amount;
       transactionIds.push(...foodResult.transactionIds);
+      setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
@@ -429,7 +583,66 @@ export const guestBookingFlat = async (req, res) => {
     amount: order?.amount
   });
 
-  sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
+  const userBookingIdMap = {};
+  for (const cardno in userBookingIds) {
+    userBookingIdMap[cardno] = {
+      [TYPE_FLAT]: userBookingIds[cardno]
+    };
+  }
+
+  // --- WhatsApp notifications ---
+  try {
+    const bookedByCard = req.user.cardno;
+    const allCardnos = Object.keys(userBookingIdMap || {});
+    const jobs = [];
+
+    for (const cardno of allCardnos) {
+      const details = await fetchFreshDetailsForCard(cardno, userBookingIdMap);
+
+      jobs.push(sendUnifiedWhatsApp(
+        cardno,
+        details.adhyanBookingDetails,
+        details.travelBookingDetails,
+        details.flatBookingDetails,
+        details.utsavBookingDetails,
+        details.roomBookingDetails,
+        null,
+        details.foodBookingDetails
+      ));
+
+      if (cardno !== bookedByCard) {
+        jobs.push(sendUnifiedWhatsApp(
+          bookedByCard,
+          details.adhyanBookingDetails,
+          details.travelBookingDetails,
+          details.flatBookingDetails,
+          details.utsavBookingDetails,
+          details.roomBookingDetails,
+          cardno,
+          details.foodBookingDetails
+        ));
+      }
+    }
+
+    const results = await Promise.allSettled(jobs);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error(`WhatsApp job #${i} failed:`, r.reason);
+      } else {
+        console.log(`WhatsApp job #${i} succeeded`);
+      }
+    });
+  } catch (waErr) {
+    console.error("Unexpected error in WhatsApp notification block:", waErr);
+    // do not rollback here — WhatsApp failures are non-fatal for the booking flow
+  }
+
+  sendUnifiedEmailForBookedBy(
+    userBookingIdMap,
+    req.user,
+    BOOKING_STATUS_PENDING,
+    false
+  );
 
   Object.entries(userBookingIds)
     .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
@@ -438,7 +651,9 @@ export const guestBookingFlat = async (req, res) => {
         cardno,
         { [TYPE_FLAT]: bookings },
         req.user,
-        BOOKING_STATUS_PENDING
+        BOOKING_STATUS_PENDING,
+        'unifiedBookingEmail',
+        false
       );
     });
 
@@ -492,6 +707,35 @@ export const createGuests = async (req, res) => {
 
   await t.commit();
   req.log.info('create_guests_success', { cardno, createdCount: allGuests?.length });
+
+  // --- Send WhatsApp notification to newly created guests ---
+  const newlyCreatedGuests = allGuests.filter((guest) => {
+    const wasRegistered = guests.some((g) => g.cardno === guest.cardno);
+    return !wasRegistered;
+  });
+
+  for (const newGuest of newlyCreatedGuests) {
+    const phone = newGuest.mobno;
+    if (phone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(phone, newGuest.country);
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: newGuest.issuedto || 'Mumukshu' },
+              { type: 'text', text: newGuest.cardno }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'card_account_created', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp message in createGuests:', waErr.message || waErr);
+      }
+    }
+  }
 
   return res.status(200).send({
     message: MSG_UPDATE_SUCCESSFUL,

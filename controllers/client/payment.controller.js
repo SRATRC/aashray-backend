@@ -10,7 +10,9 @@ import {
   STATUS_PAYMENT_FAILED,
   STATUS_PAYMENT_AUTHORIZED,
   STATUS_PAYMENT_COMPLETED,
-  TYPE_FOOD
+  TYPE_FOOD,
+  TYPE_TRAVEL,
+  TYPE_UTSAV
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -23,6 +25,7 @@ import { validateCard } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
@@ -104,7 +107,7 @@ export const verifyPayment = async (req, res) => {
 
           transactionStatus = STATUS_PAYMENT_COMPLETED;
 
-          // for late-checkout-fee, while a transaction is created, 
+          // for late-checkout-fee, while a transaction is created,
           // a corresponding booking is not created.
           if (booking) {
             bookingStatus =
@@ -112,13 +115,36 @@ export const verifyPayment = async (req, res) => {
                 ? ROOM_STATUS_PENDING_CHECKIN
                 : STATUS_CONFIRMED;
 
-            await booking.update(
-              {
-                status: bookingStatus,
-                updatedBy
-              },
-              { transaction: t }
-            );
+            const previousStatus = booking.status;
+            const updateFields = {
+              updatedBy
+            };
+            if (bookingType !== TYPE_FOOD) {
+              updateFields.status = bookingStatus;
+            }
+            await booking.update(updateFields, { transaction: t });
+
+            if (bookingType === TYPE_ROOM) {
+              if (!userBookingIdMap.roomBookingStatusChanges) {
+                userBookingIdMap.roomBookingStatusChanges = [];
+              }
+              userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
+            } else if (bookingType === TYPE_FLAT) {
+              if (!userBookingIdMap.flatBookingStatusChanges) {
+                userBookingIdMap.flatBookingStatusChanges = [];
+              }
+              userBookingIdMap.flatBookingStatusChanges.push({ booking, previousStatus });
+            } else if (bookingType === TYPE_TRAVEL) {
+              if (!userBookingIdMap.travelBookingStatusChanges) {
+                userBookingIdMap.travelBookingStatusChanges = [];
+              }
+              userBookingIdMap.travelBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
+            } else if (bookingType === TYPE_UTSAV) {
+              if (!userBookingIdMap.utsavBookingStatusChanges) {
+                userBookingIdMap.utsavBookingStatusChanges = [];
+              }
+              userBookingIdMap.utsavBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
+            }
 
             setBookingIdMap(
               userBookingIdMap,
@@ -161,6 +187,60 @@ export const verifyPayment = async (req, res) => {
       orderId: razorpay_order_id,
       transactionCount: transactions.length
     });
+
+    // Trigger Room status change WhatsApp messages
+    if (userBookingIdMap.roomBookingStatusChanges) {
+      for (const { booking, previousStatus } of userBookingIdMap.roomBookingStatusChanges) {
+        try {
+          await sendRoomStatusChangeWhatsApp(booking, previousStatus, { updatedBy: RAZORPAY_CALLBACK });
+        } catch (waErr) {
+          req.log.error("Error sending room status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.roomBookingStatusChanges;
+    }
+
+    // Trigger Flat status change WhatsApp messages
+    if (userBookingIdMap.flatBookingStatusChanges) {
+      for (const { booking, previousStatus } of userBookingIdMap.flatBookingStatusChanges) {
+        try {
+          await sendFlatStatusChangeWhatsApp(booking, previousStatus, { updatedBy: RAZORPAY_CALLBACK });
+        } catch (waErr) {
+          req.log.error("Error sending flat status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.flatBookingStatusChanges;
+    }
+
+    // Trigger Travel status change WhatsApp messages
+    if (userBookingIdMap.travelBookingStatusChanges) {
+      for (const { booking, previousStatus, razorpay_payment_id } of userBookingIdMap.travelBookingStatusChanges) {
+        try {
+          await sendTravelStatusChangeWhatsApp(booking, previousStatus, {
+            updatedBy: RAZORPAY_CALLBACK,
+            razorpay_payment_id
+          });
+        } catch (waErr) {
+          req.log.error("Error sending travel status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.travelBookingStatusChanges;
+    }
+
+    // Trigger Utsav status change WhatsApp messages
+    if (userBookingIdMap.utsavBookingStatusChanges) {
+      for (const { booking, previousStatus, razorpay_payment_id } of userBookingIdMap.utsavBookingStatusChanges) {
+        try {
+          await sendUtsavStatusChangeWhatsApp(booking, previousStatus, {
+            updatedBy: RAZORPAY_CALLBACK,
+            paymentId: razorpay_payment_id
+          });
+        } catch (waErr) {
+          req.log.error("Error sending utsav status change WhatsApp in verifyPayment:", waErr);
+        }
+      }
+      delete userBookingIdMap.utsavBookingStatusChanges;
+    }
 
     for (const cardno in userBookingIdMap) {
       const bookings = userBookingIdMap[cardno];

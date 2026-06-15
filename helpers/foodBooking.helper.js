@@ -457,6 +457,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
   await cancelTransactions(user, transactions, t, admin);
 }
 
+
 async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   start_date,
   end_date,
@@ -553,6 +554,91 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
   return t;
 }
+
+export async function bookFoodForAllMeals(
+  start_date,
+  end_date,
+  starting_meal,
+  ending_meal,
+  cardno,
+  t,
+  updatedBy
+) {
+
+  const allDates = getDates(start_date, end_date);
+
+  const foodBookings = await FoodDb.findAll({
+    where: {
+      cardno: cardno,
+      date: allDates
+    },
+    transaction: t
+  });
+
+  const bookingsToCreate = [], bookingsToUpdate = [];
+
+  const firstDay = allDates[0];
+  const lastDay = allDates.at(-1);
+
+  for (const date of allDates) {
+    const foodBooking = foodBookings.find((item) => item.date === date);
+
+    let breakfast = 1, lunch = 1, dinner = 1;
+
+    if (date === firstDay && starting_meal?.length) {
+      breakfast = starting_meal.includes('breakfast') ? 1 : 0;
+      lunch     = starting_meal.includes('lunch')     ? 1 : 0;
+      dinner    = starting_meal.includes('dinner')    ? 1 : 0;
+    }
+
+    if (date === lastDay && ending_meal?.length) {
+      breakfast = ending_meal.includes('breakfast') ? 1 : 0;
+      lunch     = ending_meal.includes('lunch')     ? 1 : 0;
+      dinner    = ending_meal.includes('dinner')    ? 1 : 0;
+    }
+
+    if (foodBooking) {
+      foodBooking.breakfast = breakfast;
+      foodBooking.lunch = lunch;
+      foodBooking.dinner = dinner;
+      foodBooking.spicy = 1;
+      foodBooking.hightea = 'TEA';
+      foodBooking.updatedBy = updatedBy;
+      bookingsToUpdate.push(foodBooking);
+
+      continue;
+    }
+    bookingsToCreate.push({
+      id: uuidv4(),
+      cardno: cardno,
+      date: date,
+      breakfast,
+      lunch,
+      dinner,
+      spicy: 1,
+      hightea: 'TEA',
+      updatedBy: updatedBy
+    });
+  }
+  if (bookingsToCreate.length > 0) {
+    await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  }
+  if (bookingsToUpdate.length > 0) {
+    await Promise.all(bookingsToUpdate.map(booking => booking.save({ transaction: t })));
+  }
+
+}
+
+export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t) {
+  const allDates = getDates(start_date, end_date);
+
+  await FoodDb.update(
+    { breakfast: 0, lunch: 0, dinner: 0, updatedBy: updatedBy },
+    { where: { cardno: cardno, date: allDates }, transaction: t }
+  );
+}
+
+
 
 export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
   // ✅ Use provided date or fallback to current date

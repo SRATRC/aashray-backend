@@ -21,12 +21,13 @@ import {
   TYPE_FLAT,
   TYPE_UTSAV,
   STATUS_GUEST,
-  STATUS_ACTIVE, 
+  STATUS_ACTIVE,
   RAJ_PRAVAS_EMAIL,
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
-  ROOM_STATUS_CHECKEDOUT
+  ROOM_STATUS_CHECKEDOUT,
+  TYPE_FOOD
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -34,6 +35,8 @@ import moment from 'moment';
 import ApiError from '../utils/ApiError.js';
 import BlockDates from '../models/block_dates.model.js';
 import sendMail from '../utils/sendMail.js';
+import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
+import { sendUnifiedWhatsApp } from '../helpers/whatsapp.helper.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
   // const startDate = new Date(checkin_date);
@@ -285,7 +288,8 @@ export function retrieveBookingIds(userBookingIdMap) {
 export async function sendUnifiedEmailForBookedBy(
   userBookingIdMap,
   bookedBy,
-  bookingStatus
+  bookingStatus,
+  sendWhatsApp = true
 ) {
   const flattenedMap = {};
   let isSelfBooking = true;
@@ -313,7 +317,9 @@ export async function sendUnifiedEmailForBookedBy(
       isSelfBooking ? bookedBy.cardno : null,
       flattenedMap,
       bookedBy,
-      bookingStatus
+      bookingStatus,
+      'unifiedBookingEmail',
+      sendWhatsApp
     );
   }
 }
@@ -333,9 +339,9 @@ export function getWelcomeMessage(bookingStatus, country) {
     const bookingCreate = 'Your bookings were created.';
     return country && country != 'India'
       ? bookingCreate +
-          ' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
+      ' NRIs can make payments for any bookings in pending status at the Research Center upon arrival.'
       : bookingCreate +
-          ' Payment is due within 24 hours to confirm any bookings in pending status.';
+      ' Payment is due within 24 hours to confirm any bookings in pending status.';
   }
 
   if (bookingStatus == STATUS_CANCELLED) {
@@ -349,7 +355,8 @@ export async function sendUnifiedEmail(
   bookingIds,
   bookedBy,
   bookingStatus = STATUS_CONFIRMED,
-  template = 'unifiedBookingEmail'
+  template = 'unifiedBookingEmail',
+  sendWhatsApp = true
 ) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
@@ -357,12 +364,15 @@ export async function sendUnifiedEmail(
   let wasFlatBooked =
     Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
+  let wasFoodBooked =
+    Array.isArray(bookingIds[TYPE_FOOD]) && bookingIds[TYPE_FOOD].length > 0;
 
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
     flatBookingDetails = [],
     utsavBookingDetails = [],
+    foodBookingDetails = [],
     includeProfile = false,
     user;
 
@@ -418,7 +428,9 @@ export async function sendUnifiedEmail(
         ),
         status: utsavBooking.status,
         bookingid: utsavBooking.bookingid,
-        package: utsavBooking.dataValues.UtsavPackagesDb.name
+        package: utsavBooking.dataValues.UtsavPackagesDb.name,
+        bookedBy: utsavBooking.bookedBy,
+        cardno: utsavBooking.cardno
       });
     });
   }
@@ -427,7 +439,7 @@ export async function sendUnifiedEmail(
     let includeOptions = [];
     includeOptions.push({
       model: ShibirDb,
-      attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
+      attributes: ['name', 'speaker', 'month', 'start_date', 'end_date', 'location'],
       where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
     });
     if (includeProfile) {
@@ -440,7 +452,7 @@ export async function sendUnifiedEmail(
     const adhyanBookings = await ShibirBookingDb.findAll({
       include: includeOptions,
       where: {
-        bookingId: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
+        bookingid: { [Sequelize.Op.in]: bookingIds[TYPE_ADHYAYAN] }
       },
       order: [
         ['cardno', 'ASC'],
@@ -460,7 +472,9 @@ export async function sendUnifiedEmail(
         enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
           'Do MMMM, YYYY'
         ),
-        status: adhyanBooking.status
+        status: adhyanBooking.status,
+        bookedBy: adhyanBooking.bookedBy,
+        ShibirDb: adhyanBooking.ShibirDb || adhyanBooking.dataValues.ShibirDb
       });
     });
   }
@@ -491,7 +505,10 @@ export async function sendUnifiedEmail(
         bookingid: travelBooking.bookingid,
         date: moment(travelBooking.date).format('Do MMMM, YYYY'),
         pickuppoint: travelBooking.pickup_point,
-        dropoffpoint: travelBooking.drop_point
+        dropoffpoint: travelBooking.drop_point,
+        bookedBy: travelBooking.bookedBy,
+        total_people: travelBooking.total_people,
+        cardno: travelBooking.cardno
       });
     });
   }
@@ -520,6 +537,7 @@ export async function sendUnifiedEmail(
         name: user ? user.issuedto : roomBooking.dataValues.CardDb.issuedto,
         status: roomBooking.status,
         bookingid: roomBooking.bookingid,
+        roomno: roomBooking.roomno,
         checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
         checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
       });
@@ -558,6 +576,43 @@ export async function sendUnifiedEmail(
     });
   }
 
+  if (wasFoodBooked) {
+    let includeOptions = [];
+    if (includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        where: { cardno: Sequelize.col('FoodDb.cardno') }
+      });
+    }
+    const foodBookings = await FoodDb.findAll({
+      include: includeOptions,
+      where: {
+        id: { [Sequelize.Op.in]: bookingIds[TYPE_FOOD] }
+      },
+      order: [
+        ['cardno', 'ASC'],
+        ['date', 'ASC']
+      ]
+    });
+
+    foodBookings.forEach((foodBooking) => {
+      foodBookingDetails.push({
+        id: foodBooking.id,
+        bookingid: foodBooking.id,
+        cardno: foodBooking.cardno,
+        bookedBy: foodBooking.bookedBy,
+        date: foodBooking.date,
+        breakfast: foodBooking.breakfast,
+        lunch: foodBooking.lunch,
+        dinner: foodBooking.dinner,
+        spicy: foodBooking.spicy,
+        hightea: foodBooking.hightea,
+        name: user ? user.issuedto : (foodBooking.dataValues.CardDb ? foodBooking.dataValues.CardDb.issuedto : '')
+      });
+    });
+  }
+
   const country =
     user && user.country ? user.country : bookedBy && bookedBy.country;
 
@@ -570,7 +625,7 @@ export async function sendUnifiedEmail(
   if (email) {
     sendMail({
       email: email,
-      subject:getSubject(bookingStatus),
+      subject: getSubject(bookingStatus),
       template,
       context: {
         showAdhyanDetail: wasAdhyanBooked,
@@ -597,7 +652,7 @@ export async function sendUnifiedEmail(
   ) {
     sendMail({
       email: RAJ_PRAVAS_EMAIL,
-      subject: getSubject(bookingStatus) +" "+ name,
+      subject: getSubject(bookingStatus) + " " + name,
       template: template,
       context: {
         showTravelDetail: wasRajprvasBooked,
@@ -608,7 +663,23 @@ export async function sendUnifiedEmail(
       }
     });
   }
+  // ✅ Also send WhatsApp messages
+  if (sendWhatsApp) {
+    await sendUnifiedWhatsApp(
+      user || bookedBy,
+      adhyanBookingDetails,
+      travelBookingDetails,
+      flatBookingDetails,
+      utsavBookingDetails,
+      roomBookingDetails,
+      null,
+      foodBookingDetails
+    );
+  }
+
 }
+
+
 
 export async function createGuestsHelper(cardno, guests, t) {
   const registeredGuests = guests.filter((guest) => guest.cardno);
@@ -752,7 +823,7 @@ export function isDateRangeOverlapping(start1, end1, start2, end2, boundaryAllow
   return !noOverlap;
 }
 
-export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {  
+export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) {
   return isDateRangeOverlapping(
     blockedDate.checkin,
     blockedDate.checkout,

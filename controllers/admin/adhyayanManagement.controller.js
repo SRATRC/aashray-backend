@@ -27,10 +27,11 @@ import {
   reserveAdhyayanSeat,
   openAdhyayanSeat,
   validateAdhyayanBooking,
-  validateAdhyayans, 
+  validateAdhyayans,
   sendAdhyayanBookingUpdateNotification,
   bookAdhyayanForMumukshusAdmin,
-  createShibirAttendanceEntry
+  createShibirAttendanceEntry,
+  resetShibirAttendance
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
@@ -278,15 +279,15 @@ export const fetchAdhyayanBookings = async (req, res) => {
   }
   let statusToBeIncluded = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED];
 
-if (status === 'waiting') {
-  statusToBeIncluded = [STATUS_WAITING];
-} else if (status === 'pending') {
-  statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
-} else if (status === 'cancelled') {
-  statusToBeIncluded = [STATUS_CANCELLED];
-} else if (status === 'admin cancelled' || status === 'admin_cancelled') {
-  statusToBeIncluded = [STATUS_ADMIN_CANCELLED];
-}
+  if (status === 'waiting') {
+    statusToBeIncluded = [STATUS_WAITING];
+  } else if (status === 'pending') {
+    statusToBeIncluded = [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING];
+  } else if (status === 'cancelled') {
+    statusToBeIncluded = [STATUS_CANCELLED];
+  } else if (status === 'admin cancelled' || status === 'admin_cancelled') {
+    statusToBeIncluded = [STATUS_ADMIN_CANCELLED];
+  }
 
   const page = parseInt(req.query.page) || req.body.page || 1;
   const pageSize = parseInt(req.query.page_size) || req.body.page_size || 10;
@@ -294,7 +295,7 @@ if (status === 'waiting') {
   await validateAdhyayans(shibir_id);
 
   const adhyayanData = await database.query(
-  `SELECT 
+    `SELECT 
       t1.bookingid, 
       t1.shibir_id, 
       t1.bookedby, 
@@ -309,7 +310,8 @@ if (status === 'waiting') {
       t2.res_status,
       t3.name,
       t4.status AS transaction_status,
-      t4.description as comments 
+      t4.description as comments,
+      sa.id AS attendance_id
    FROM shibir_booking_db AS t1
    LEFT JOIN card_db AS t2 
       ON t1.cardno = t2.cardno 
@@ -317,22 +319,24 @@ if (status === 'waiting') {
       ON t1.shibir_id = t3.id 
    LEFT JOIN transactions AS t4
       ON t1.bookingid = t4.bookingid
+   LEFT JOIN shibir_attendance_db AS sa
+      ON t1.bookingid = sa.bookingid
    WHERE 
       t1.shibir_id = :shibirId 
       AND t1.status IN (:status)
       ORDER BY t1.createdAt ASC
    `,
-  {
-    replacements: {
-      shibirId: shibir_id,
-      status: statusToBeIncluded,
-      pageSize,
-      page: offset
-    },
-    raw: true,
-    type: QueryTypes.SELECT
-  }
-);
+    {
+      replacements: {
+        shibirId: shibir_id,
+        status: statusToBeIncluded,
+        pageSize,
+        page: offset
+      },
+      raw: true,
+      type: QueryTypes.SELECT
+    }
+  );
 
 
   req.log.info('fetch_adhyayan_bookings_success', { shibir_id, status, count: adhyayanData.length });
@@ -460,6 +464,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
   const adhyayan = (await validateAdhyayans(shibir_id))[0];
   const booking = await validateAdhyayanBooking(bookingid, shibir_id);
+  const previousStatus = booking.status;
 
   if (status == booking.status) {
     req.log.warn('adhyayan_status_update_same_status', { bookingid, status });
@@ -558,9 +563,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
             bookedBy: booking.bookedBy && {
               token: bookedByCard.token,
               title: 'Adhyayan Booking Confirmed',
-              body: `Adhyayan booking for ${
-                booking.CardDb.issuedto.split(' ')[0]
-              } has been confirmed.`
+              body: `Adhyayan booking for ${booking.CardDb.issuedto.split(' ')[0]
+                } has been confirmed.`
             },
             screen: '/bookings'
           });
@@ -574,9 +578,11 @@ export const adhyayanStatusUpdate = async (req, res) => {
         booking.status == STATUS_CONFIRMED ||
         booking.status == STATUS_PAYMENT_PENDING
       ) {
-         newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
-       
+        newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
+
       }
+
+      await resetShibirAttendance(booking.bookingid, req.user.username, t);
 
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);
@@ -597,14 +603,14 @@ export const adhyayanStatusUpdate = async (req, res) => {
   );
 
   await t.commit();
-  
+
   // Send notifications and emails after transaction commit
   try {
-   
-    sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+
+    await sendAdhyayanBookingUpdateNotification(booking, adhyayan, true, previousStatus);
     // Send notification and email for new booking if exists
     if (newBooking) {
-      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+      await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, true, 'waiting');
     }
   } catch (error) {
     // Log error but don't fail the response since transaction is already committed

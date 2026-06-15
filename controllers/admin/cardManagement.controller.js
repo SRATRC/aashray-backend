@@ -1,10 +1,14 @@
-import { CardDb,GuestRelationship } from '../../models/associations.js';
+import { CardDb, GuestRelationship } from '../../models/associations.js';
 import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import bcrypt from 'bcryptjs';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import { Op } from 'sequelize';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import moment from 'moment-timezone';
+
 
 // export const createCard = async (req, res) => {
 //   const {
@@ -170,6 +174,29 @@ export const createCard = async (req, res) => {
     await t.commit();
 
     req.log.info('create_card_success', { cardno, issuedto, res_status });
+
+    // --- Send WhatsApp notification if mobno is present ---
+    const phone = newCard.mobno;
+    if (phone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(phone, newCard.country);
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: newCard.issuedto || 'Mumukshu' },
+              { type: 'text', text: newCard.cardno }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'card_account_created', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp message in createCard:', waErr.message || waErr);
+      }
+    }
+
     return res.status(200).json({
       message: 'Card created successfully',
       data: newCard
@@ -260,6 +287,30 @@ export const updateCard = async (req, res) => {
     }
   }
 
+  // --- Compare to find changed fields ---
+  const isChanged = (newVal, oldVal) => {
+    if (newVal === undefined) return false;
+    const normalize = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    return normalize(newVal) !== normalize(oldVal);
+  };
+
+  const changed = [];
+  if (isChanged(issuedto, card.issuedto)) changed.push('Name');
+  if (isChanged(gender, card.gender)) changed.push('Gender');
+  if (isChanged(dob, card.dob)) changed.push('Date of Birth');
+  if (isChanged(mobno, card.mobno)) changed.push('Mobile Number');
+  if (isChanged(idType, card.idType)) changed.push('ID Type');
+  if (isChanged(idNo, card.idNo)) changed.push('ID Number');
+  if (isChanged(email, card.email)) changed.push('Email');
+  if (isChanged(address, card.address)) changed.push('Address');
+  if (isChanged(country, card.country)) changed.push('Country');
+  if (isChanged(city, card.city)) changed.push('City');
+  if (isChanged(state, card.state)) changed.push('State');
+  if (isChanged(pin, card.pin)) changed.push('Pin');
+  if (isChanged(centre, card.center)) changed.push('Center');
+  if (isChanged(status, card.status)) changed.push('Status');
+  if (isChanged(res_status, card.res_status)) changed.push('Resident Status');
+
   await card.update({
     issuedto,
     gender,
@@ -304,6 +355,36 @@ export const updateCard = async (req, res) => {
   }
 
   req.log.info('update_card_success', { cardno, res_status });
+
+  // --- Send WhatsApp notification if any details were changed ---
+  if (changed.length > 0) {
+    const targetPhone = mobno || card.mobno;
+    if (targetPhone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
+
+        const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' },
+              { type: 'text', text: card.cardno },
+              { type: 'text', text: formattedTime },
+              { type: 'text', text: changed.join(', ') },
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'profile_updated', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp profile_updated message in updateCard:', waErr.message || waErr);
+      }
+    }
+  }
+
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -387,10 +468,35 @@ export const resetPasswordDefault = async (req, res) => {
   );
 
   req.log.info('reset_password_default_success', { cardno });
+
+  const phone = card.mobno;
+  if (phone) {
+    try {
+      const formattedPhone = formatWhatsAppPhone(phone, card.country);
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: card.issuedto || 'Mumukshu'
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'password_reset_admin', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in resetPasswordDefault:', err.message || err);
+    }
+  }
+
   return res
     .status(200)
     .json({ message: 'Password reset successfully to default.' });
 };
+
 
 export const getCardByMobile = async (req, res) => {
   const { mobno } = req.params;
