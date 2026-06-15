@@ -30,7 +30,8 @@ import {
   validateAdhyayans,
   sendAdhyayanBookingUpdateNotification,
   bookAdhyayanForMumukshusAdmin,
-  createShibirAttendanceEntry
+  createShibirAttendanceEntry,
+  resetShibirAttendance
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
@@ -577,6 +578,8 @@ export const adhyayanStatusUpdate = async (req, res) => {
         newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
 
       }
+
+      await resetShibirAttendance(booking.bookingid, req.user.username, t);
 
       if (transaction) {
         await adminCancelTransaction(req.user, bookedByCard, transaction, t);

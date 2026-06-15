@@ -283,6 +283,7 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
       cardno: booking.cardno,
       shibir_id: adhyayan.id
     });
+    await createShibirAttendanceEntry(booking, { username: updatedBy }, t);
     return booking;
   } else {
     await adhyayan.update(
@@ -628,8 +629,10 @@ export async function createAdhyayanBookingAdmin(
           { transaction: t }
         );
 
-        // ✅ Attendance entry if confirmed
-        if (booking.status === STATUS_CONFIRMED) {
+        // ✅ Attendance entry if confirmed or payment pending
+        if (
+          [STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)
+        ) {
           await createShibirAttendanceEntry(booking, adminUser, t);
         }
 
@@ -672,22 +675,8 @@ export async function createAdhyayanBookingAdmin(
 }
 
 export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
-  await ShibirAttendanceDb.update(
-    {
-      session_1: 0,
-      session_2: 0,
-      session_3: 0,
-      session_4: 0,
-      session_5: 0,
-      session_6: 0,
-      session_7: 0,
-      session_8: 0,
-      session_9: 0,
-      updatedBy
-    },
-    {
-      where: { bookingid: bookingId },
-      transaction
-    }
-  );
+  await ShibirAttendanceDb.destroy({
+    where: { bookingid: bookingId },
+    transaction
+  });
 }

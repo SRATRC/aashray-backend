@@ -19,7 +19,7 @@ import {
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
-import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification } from '../../helpers/adhyayanBooking.helper.js';
+import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification, resetShibirAttendance } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   getOtherBookingUser,
@@ -192,17 +192,7 @@ export const CancelShibir = async (req, res) => {
     }
   }
 
-  const resetData = {};
-  for (let i = 1; i <= 9; i++) {
-    resetData[`session_${i}`] = 0;
-  }
-  await ShibirAttendanceDb.update(resetData, {
-    where: {
-      shibir_id: booking.shibir_id,
-      cardno: booking.cardno
-    },
-    transaction: t
-  });
+  await resetShibirAttendance(booking.bookingid, req.user.username, t);
 
   const previousStatus = booking.status;
   await userCancelBooking(req.user, booking, t);
