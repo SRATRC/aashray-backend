@@ -4,7 +4,9 @@ import {
   ShibirDb,
   ShibirBookingDb,
   Transactions,
-  ShibirAttendanceDb
+  ShibirAttendanceDb,
+  ShibirSession,
+  ShibirAttendanceRecord
 } from '../../models/associations.js';
 import {
   STATUS_WAITING,
@@ -31,7 +33,8 @@ import {
   sendAdhyayanBookingUpdateNotification,
   bookAdhyayanForMumukshusAdmin,
   createShibirAttendanceEntry,
-  resetShibirAttendance
+  resetShibirAttendance,
+  initializeShibirSessions
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
@@ -774,9 +777,6 @@ export const getAdhyayanFeedback = async (req, res) => {
       stats,
       pagination: {
         page,
-        pageSize,
-        totalCount,
-        totalPages: Math.ceil(totalCount / pageSize)
       }
     }
   });
@@ -790,9 +790,19 @@ export const markAdhyayanAttendance = async (req, res) => {
     const sessionNo = Number(session_no);
     req.log.info('mark_adhyayan_attendance_start', { shibir_id, session_no: sessionNo, cardno });
 
-    if (!sessionNo || sessionNo < 1 || sessionNo > 9) {
-      req.log.warn('mark_adhyayan_attendance_invalid_session', { session_no });
-      throw new ApiError(400, 'Invalid session number');
+    const shibir = await ShibirDb.findByPk(shibir_id, { transaction: t });
+    if (!shibir) {
+      throw new ApiError(404, 'Shibir not found');
+    }
+
+    const session = await ShibirSession.findOne({
+      where: { shibir_id, session_number: sessionNo },
+      transaction: t
+    });
+
+    if (!session) {
+      req.log.warn('mark_adhyayan_attendance_session_not_found', { shibir_id, sessionNo });
+      throw new ApiError(400, `Session ${sessionNo} not found for this Shibir`);
     }
 
     const attendance = await ShibirAttendanceDb.findOne({
@@ -812,33 +822,43 @@ export const markAdhyayanAttendance = async (req, res) => {
       throw new ApiError(404, 'Attendance record not found');
     }
 
-    const sessionField = `session_${sessionNo}`;
-    const attendanceField = `session_${sessionNo}_attendance`;
+    const existingRecord = await ShibirAttendanceRecord.findOne({
+      where: { shibir_id, bookingid: attendance.bookingid, session_number: sessionNo },
+      transaction: t
+    });
 
-    if (!attendance[sessionField]) {
-      req.log.warn('mark_adhyayan_attendance_session_not_applicable', { shibir_id, cardno, sessionNo });
-      throw new ApiError(400, `Session ${sessionNo} not applicable`);
-    }
-
-    if (attendance[attendanceField]) {
+    if (existingRecord && existingRecord.attended) {
       req.log.warn('mark_adhyayan_attendance_already_marked', { shibir_id, cardno, sessionNo });
       throw new ApiError(400, `Attendance already marked for session ${sessionNo}`);
     }
-
-    const shibir = await ShibirDb.findByPk(shibir_id, { transaction: t });
 
     const card = await CardDb.findOne({
       where: { cardno },
       transaction: t
     });
 
-    await attendance.update(
+    await ShibirAttendanceRecord.upsert(
       {
-        [attendanceField]: true,
-        updatedBy: req.user.cardno
+        shibir_id,
+        bookingid: attendance.bookingid,
+        cardno,
+        session_number: sessionNo,
+        attended: true,
+        updatedBy: req.user.cardno || req.user.username
       },
       { transaction: t }
     );
+
+    if (sessionNo <= 9) {
+      const attendanceField = `session_${sessionNo}_attendance`;
+      await attendance.update(
+        {
+          [attendanceField]: true,
+          updatedBy: req.user.cardno || req.user.username
+        },
+        { transaction: t }
+      );
+    }
 
     await t.commit();
 
@@ -862,26 +882,34 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
   const { shibir_id } = req.params;
   req.log.info('fetch_adhyayan_attendance_report_start', { shibir_id });
 
-  const { Op } = Sequelize;
-
   const shibir = await ShibirDb.findByPk(shibir_id);
   if (!shibir) {
     req.log.warn('fetch_adhyayan_attendance_report_not_found', { shibir_id });
     throw new ApiError(404, 'Adhyayan not found');
   }
 
-  // Build dynamic OR condition for active sessions
-  const sessionConditions = [];
-  for (let i = 1; i <= 9; i++) {
-    sessionConditions.push({ [`session_${i}`]: 1 });
+  let sessions = await ShibirSession.findAll({
+    where: { shibir_id },
+    order: [['session_number', 'ASC']]
+  });
+
+  if (sessions.length === 0) {
+    const t = await database.transaction();
+    try {
+      await initializeShibirSessions(shibir, t);
+      await t.commit();
+      sessions = await ShibirSession.findAll({
+        where: { shibir_id },
+        order: [['session_number', 'ASC']]
+      });
+    } catch (err) {
+      await t.rollback();
+      req.log.error('initialize_shibir_sessions_failed', { shibir_id, error: err.message });
+    }
   }
 
   const attendanceRows = await ShibirAttendanceDb.findAll({
-    where: {
-  shibir_id,
-  session_1: 1   // just check one session
-}
-,
+    where: { shibir_id },
     include: [
       {
         model: CardDb,
@@ -890,6 +918,12 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
     ],
     order: [['cardno', 'ASC']]
   });
+
+  const logs = await ShibirAttendanceRecord.findAll({
+    where: { shibir_id, attended: true }
+  });
+
+  const logsMap = new Set(logs.map(l => `${l.bookingid}_${l.session_number}`));
 
   const reportData = attendanceRows.map(row => {
     const data = {
@@ -901,12 +935,10 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
       res_status: row.CardDb?.res_status || ''
     };
 
-    for (let i = 1; i <= 9; i++) {
-      const attended = row[`session_${i}_attendance`];
-
-      data[`session_${i}`] = Number(attended) === 1 ? 'Yes' : 'No';
-
-    }
+    sessions.forEach(s => {
+      const key = `${row.bookingid}_${s.session_number}`;
+      data[`session_${s.session_number}`] = logsMap.has(key) ? 'Yes' : 'No';
+    });
 
     return data;
   });
@@ -917,7 +949,13 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
     speaker: shibir.speaker,
     startDate: shibir.start_date,
     endDate: shibir.end_date,
-    maxSessions: 9,
+    maxSessions: sessions.length,
+    sessions: sessions.map(s => ({
+      session_number: s.session_number,
+      type: s.type,
+      date: s.date,
+      start_time: s.start_time
+    })),
     data: reportData
   });
 };
@@ -932,27 +970,55 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
     return res.status(404).json({ message: 'Shibir not found' });
   }
 
+  let sessions = await ShibirSession.findAll({
+    where: { shibir_id },
+    order: [['session_number', 'ASC']]
+  });
+
+  if (sessions.length === 0) {
+    const t = await database.transaction();
+    try {
+      await initializeShibirSessions(shibir, t);
+      await t.commit();
+      sessions = await ShibirSession.findAll({
+        where: { shibir_id },
+        order: [['session_number', 'ASC']]
+      });
+    } catch (err) {
+      await t.rollback();
+    }
+  }
+
   const attendanceRows = await ShibirAttendanceDb.findAll({
     where: { shibir_id }
   });
 
   const totalRegistrants = attendanceRows.length;
-  const summary = [];
 
-  for (let i = 1; i <= 9; i++) {
-    const attendedCount = attendanceRows.filter(
-      r => r[`session_${i}_attendance`] === true
-    ).length;
+  const attendedCounts = await ShibirAttendanceRecord.findAll({
+    attributes: [
+      'session_number',
+      [Sequelize.fn('COUNT', Sequelize.col('id')), 'count']
+    ],
+    where: { shibir_id, attended: true },
+    group: ['session_number']
+  });
 
+  const countMap = new Map(
+    attendedCounts.map(c => [Number(c.getDataValue('session_number')), Number(c.getDataValue('count'))])
+  );
+
+  const summary = sessions.map(s => {
+    const attendedCount = countMap.get(s.session_number) || 0;
     const absenteesCount = totalRegistrants - attendedCount;
 
-    summary.push({
-      session: `Session ${i}`,
+    return {
+      session: `Session ${s.session_number}`,
       total_registrants: totalRegistrants,
       total_attended: attendedCount,
       total_absentees: absenteesCount
-    });
-  }
+    };
+  });
 
   req.log.info('fetch_adhyayan_attendance_summary_success', { shibir_id, totalRegistrants: attendanceRows.length });
   return res.status(200).json({
@@ -967,7 +1033,6 @@ export const createAdhyayanBookingByAdmin = async (req, res) => {
   const { shibir_ids, mumukshus } = req.body;
   req.log.info('create_adhyayan_booking_by_admin_start', { shibir_ids, mumukshuCount: mumukshus?.length });
 
-  // ✅ STRICT validation
   if (
     !Array.isArray(shibir_ids) ||
     shibir_ids.length === 0 ||
@@ -1015,61 +1080,168 @@ async function ensureAttendanceEntry(booking, user, t) {
   }
 }
 
-
 export const toggleAttendance = async (req, res) => {
+  const t = await database.transaction();
   try {
     const { shibir_id, cardno, sessionNumber, value } = req.body;
     req.log.info('toggle_attendance_start', { shibir_id, cardno, sessionNumber, value });
 
     if (!shibir_id || !cardno || !sessionNumber) {
       req.log.warn('toggle_attendance_missing_params', { shibir_id, cardno, sessionNumber });
-      return res.status(400).json({
-        message: "shibir_id, cardno and sessionNumber required"
-      });
+      throw new ApiError(400, "shibir_id, cardno and sessionNumber required");
     }
 
-    // Validate session number
-    if (sessionNumber < 1 || sessionNumber > 9) {
-      req.log.warn('toggle_attendance_invalid_session', { sessionNumber });
-      return res.status(400).json({
-        message: "Invalid session number"
-      });
-    }
-
-    const columnName = `session_${sessionNumber}_attendance`;
+    const sessionNo = Number(sessionNumber);
 
     const record = await ShibirAttendanceDb.findOne({
-      where: { 
-        cardno,
-        shibir_id  // Add shibir_id to the where clause
-      }
+      where: { cardno, shibir_id },
+      transaction: t
     });
 
     if (!record) {
       req.log.warn('toggle_attendance_record_not_found', { shibir_id, cardno });
-      return res.status(404).json({
-        message: "Attendance record not found"
+      throw new ApiError(404, "Attendance record not found");
+    }
+
+    if (Number(value) === 1) {
+      await ShibirAttendanceRecord.upsert(
+        {
+          shibir_id,
+          bookingid: record.bookingid,
+          cardno,
+          session_number: sessionNo,
+          attended: true,
+          updatedBy: req.user.cardno || req.user.username
+        },
+        { transaction: t }
+      );
+    } else {
+      await ShibirAttendanceRecord.destroy({
+        where: {
+          shibir_id,
+          bookingid: record.bookingid,
+          session_number: sessionNo
+        },
+        transaction: t
       });
     }
 
-    await record.update({
-      [columnName]: value
-    });
+    if (sessionNo <= 9) {
+      const columnName = `session_${sessionNo}_attendance`;
+      await record.update(
+        {
+          [columnName]: Number(value) === 1
+        },
+        { transaction: t }
+      );
+    }
 
-    req.log.info('toggle_attendance_success', { shibir_id, cardno, sessionNumber, value });
+    await t.commit();
+    req.log.info('toggle_attendance_success', { shibir_id, cardno, sessionNo, value });
     return res.json({
       message: "Attendance updated successfully"
     });
 
   } catch (error) {
+    if (t && !t.finished) {
+      await t.rollback();
+    }
     req.log.error('toggle_attendance_error', { error: error.message });
-    return res.status(500).json({
-      message: "Internal server error",
-      error: error.message
-    });
+    throw error;
   }
 };
 
+export const bulkToggleAttendance = async (req, res) => {
+  const t = await database.transaction();
+  try {
+    const { shibir_id, sessionNumber, cardnos, value } = req.body;
+    req.log.info('bulk_toggle_attendance_start', { shibir_id, sessionNumber, cardnosCount: cardnos?.length, value });
+
+    if (!shibir_id || !sessionNumber || !Array.isArray(cardnos) || cardnos.length === 0) {
+      req.log.warn('bulk_toggle_attendance_missing_params');
+      throw new ApiError(400, "shibir_id, sessionNumber and non-empty cardnos array are required");
+    }
+
+    const sessionNo = Number(sessionNumber);
+
+    const session = await ShibirSession.findOne({
+      where: { shibir_id, session_number: sessionNo },
+      transaction: t
+    });
+
+    if (!session) {
+      throw new ApiError(400, `Session ${sessionNo} does not exist for this Shibir`);
+    }
+
+    const records = await ShibirAttendanceDb.findAll({
+      where: {
+        shibir_id,
+        cardno: cardnos
+      },
+      transaction: t
+    });
+
+    if (records.length === 0) {
+      throw new ApiError(404, "No eligible attendance records found for the given card numbers");
+    }
+
+    const updatedBy = req.user.cardno || req.user.username;
+
+    if (Number(value) === 1) {
+      const upsertPromises = records.map(r => 
+        ShibirAttendanceRecord.upsert(
+          {
+            shibir_id,
+            bookingid: r.bookingid,
+            cardno: r.cardno,
+            session_number: sessionNo,
+            attended: true,
+            updatedBy
+          },
+          { transaction: t }
+        )
+      );
+      await Promise.all(upsertPromises);
+    } else {
+      const bookingids = records.map(r => r.bookingid);
+      await ShibirAttendanceRecord.destroy({
+        where: {
+          shibir_id,
+          bookingid: bookingids,
+          session_number: sessionNo
+        },
+        transaction: t
+      });
+    }
+
+    if (sessionNo <= 9) {
+      const columnName = `session_${sessionNo}_attendance`;
+      const updatePromises = records.map(r => 
+        r.update(
+          {
+            [columnName]: Number(value) === 1,
+            updatedBy
+          },
+          { transaction: t }
+        )
+      );
+      await Promise.all(updatePromises);
+    }
+
+    await t.commit();
+    req.log.info('bulk_toggle_attendance_success', { shibir_id, sessionNo, updatedCount: records.length, value });
+    return res.json({
+      message: `Successfully updated attendance for ${records.length} participants`
+    });
+
+  } catch (error) {
+    if (t && !t.finished) {
+      await t.rollback();
+    }
+    req.log.error('bulk_toggle_attendance_error', { error: error.message });
+    throw error;
+  }
+};
 
 export const createAttendanceEntryManually = async (req, res) => {
   const { bookingid } = req.body;
