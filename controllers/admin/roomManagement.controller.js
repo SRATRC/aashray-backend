@@ -33,7 +33,8 @@ import {
   STATUS_CREDITED,
   STATUS_PAYMENT_COMPLETED,
   ERR_TRANSACTION_NOT_FOUND,
-  AMT_TYPE_LATE_CHECKOUT_ROOM
+  AMT_TYPE_LATE_CHECKOUT_ROOM,
+  STATUS_CONFIRMED
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -673,7 +674,7 @@ export const roomBooking = async (req, res) => {
   if (bookingIdToUse != null) {
     let bookingIds = {};
     bookingIds[TYPE_ROOM] = [bookingIdToUse];
-    sendUnifiedEmail(card.cardno, bookingIds, card);
+    sendUnifiedEmail(card.cardno, bookingIds, card, STATUS_CONFIRMED, 'unifiedBookingEmail', false);
   }
 
   if (bookingIdToUse) {
@@ -779,7 +780,7 @@ export const flatBooking = async (req, res) => {
   if (booking.bookingId != null) {
     let bookingIds = {};
     bookingIds[TYPE_FLAT] = [booking.bookingId];
-    sendUnifiedEmail(card.cardno, bookingIds, card);
+    sendUnifiedEmail(card.cardno, bookingIds, card, STATUS_CONFIRMED, 'unifiedBookingEmail', false);
   }
 
   if (booking.bookingId) {

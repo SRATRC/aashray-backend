@@ -244,7 +244,7 @@ export const verifyPayment = async (req, res) => {
 
     for (const cardno in userBookingIdMap) {
       const bookings = userBookingIdMap[cardno];
-      await sendUnifiedEmail(cardno, bookings, bookedBy);
+      await sendUnifiedEmail(cardno, bookings, bookedBy, STATUS_CONFIRMED, 'unifiedBookingEmail', false);
     }
     message = `Payment ${razorpay_status} for order id: ${razorpay_order_id}`;
     req.log.info('razorpay_webhook_processed', { orderId: razorpay_order_id, status: razorpay_status });

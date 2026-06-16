@@ -538,8 +538,20 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
       let bodyParams = [];
       let headerParam = "";
 
-      const checkinFormatted = b.checkin ? moment(b.checkin).format("DD-MM-YYYY") : "";
-      const checkoutFormatted = b.checkout ? moment(b.checkout).format("DD-MM-YYYY") : "";
+      const checkinFormatted = b.checkin
+        ? (moment(b.checkin, "Do MMMM, YYYY", true).isValid()
+          ? moment(b.checkin, "Do MMMM, YYYY").format("DD-MM-YYYY")
+          : (moment(b.checkin, "DD-MM-YYYY", true).isValid()
+            ? moment(b.checkin, "DD-MM-YYYY").format("DD-MM-YYYY")
+            : moment(b.checkin).format("DD-MM-YYYY")))
+        : "";
+      const checkoutFormatted = b.checkout
+        ? (moment(b.checkout, "Do MMMM, YYYY", true).isValid()
+          ? moment(b.checkout, "Do MMMM, YYYY").format("DD-MM-YYYY")
+          : (moment(b.checkout, "DD-MM-YYYY", true).isValid()
+            ? moment(b.checkout, "DD-MM-YYYY").format("DD-MM-YYYY")
+            : moment(b.checkout).format("DD-MM-YYYY")))
+        : "";
       const roomTypeStr = (b.roomtype || "").toLowerCase().includes("nac") ? "non-ac" : "ac";
 
       const bookingId = String(b.bookingid || b.bookingId || b.id || "");
@@ -1027,8 +1039,20 @@ export async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForU
 
       const checkinDate = b.checkin || b.start_date || "";
       const checkoutDate = b.checkout || b.end_date || "";
-      const checkinFormatted = checkinDate ? moment(checkinDate).format("DD-MM-YYYY") : "";
-      const checkoutFormatted = checkoutDate ? moment(checkoutDate).format("DD-MM-YYYY") : "";
+      const checkinFormatted = checkinDate
+        ? (moment(checkinDate, "Do MMMM, YYYY", true).isValid()
+          ? moment(checkinDate, "Do MMMM, YYYY").format("DD-MM-YYYY")
+          : (moment(checkinDate, "DD-MM-YYYY", true).isValid()
+            ? moment(checkinDate, "DD-MM-YYYY").format("DD-MM-YYYY")
+            : moment(checkinDate).format("DD-MM-YYYY")))
+        : "";
+      const checkoutFormatted = checkoutDate
+        ? (moment(checkoutDate, "Do MMMM, YYYY", true).isValid()
+          ? moment(checkoutDate, "Do MMMM, YYYY").format("DD-MM-YYYY")
+          : (moment(checkoutDate, "DD-MM-YYYY", true).isValid()
+            ? moment(checkoutDate, "DD-MM-YYYY").format("DD-MM-YYYY")
+            : moment(checkoutDate).format("DD-MM-YYYY")))
+        : "";
       const flatNoStr = String(b.flatno || b.flat_no || b.flatno || "");
 
       if (isGuestBy) {
