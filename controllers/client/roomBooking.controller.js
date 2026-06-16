@@ -295,7 +295,7 @@ export const FlatBookingMumukshu = async (req, res) => {
     console.error("Unexpected error in WhatsApp notification block:", waErr);
   }
 
-  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user, BOOKING_STATUS_PENDING);
+  sendUnifiedEmailForBookedBy(userBookingIdMap, req.user, BOOKING_STATUS_PENDING, false);
 
   Object.entries(userBookingIds)
     .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
@@ -304,7 +304,9 @@ export const FlatBookingMumukshu = async (req, res) => {
         cardno,
         { [TYPE_FLAT]: bookings },
         req.user,
-        BOOKING_STATUS_PENDING
+        BOOKING_STATUS_PENDING,
+        'unifiedBookingEmail',
+        false
       );
     });
 

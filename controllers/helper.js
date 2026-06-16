@@ -539,7 +539,10 @@ export async function sendUnifiedEmail(
         bookingid: roomBooking.bookingid,
         roomno: roomBooking.roomno,
         checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
-        checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
+        checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY'),
+        roomtype: roomBooking.roomtype,
+        nights: roomBooking.nights,
+        bookedBy: roomBooking.bookedBy
       });
     });
   }
@@ -571,7 +574,8 @@ export async function sendUnifiedEmail(
         bookingid: flatBooking.bookingid,
         flatno: flatBooking.flatno,
         checkin: moment(flatBooking.checkin).format('Do MMMM, YYYY'),
-        checkout: moment(flatBooking.checkout).format('Do MMMM, YYYY')
+        checkout: moment(flatBooking.checkout).format('Do MMMM, YYYY'),
+        bookedBy: flatBooking.bookedBy
       });
     });
   }
