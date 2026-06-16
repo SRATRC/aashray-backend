@@ -573,60 +573,73 @@ export async function initializeShibirSessions(shibir, transaction) {
   const endDate = new Date(shibir.end_date);
   const days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-  const sessionsPerDay = 3;
-  const totalSessions = days * sessionsPerDay;
-
-  // Check if sessions already exist for this shibir
-  const existingCount = await ShibirSession.count({
-    where: { shibir_id: shibir.id },
-    transaction
-  });
-
-  if (existingCount >= totalSessions) return;
-
+  const totalSessions = days * 3;
   const sessionsToCreate = [];
-  const currentDate = new Date(shibir.start_date);
 
+  // Generate regular sessions (1 to 2 * days)
   for (let d = 1; d <= days; d++) {
+    const currentDate = new Date(shibir.start_date);
+    currentDate.setDate(currentDate.getDate() + (d - 1));
     const dateStr = currentDate.toISOString().split('T')[0];
 
-    // 3 Sessions/day: MV (4:30 AM), Morning (10:00 AM), Afternoon (3:45 PM)
+    // Session 1 of day d (Morning regular)
     sessionsToCreate.push({
       shibir_id: shibir.id,
-      session_number: (d - 1) * 3 + 1,
-      type: 'MV',
-      date: dateStr,
-      start_time: '04:30:00',
-      updatedBy: 'system'
-    });
-    sessionsToCreate.push({
-      shibir_id: shibir.id,
-      session_number: (d - 1) * 3 + 2,
+      session_number: (d - 1) * 2 + 1,
       type: 'regular',
       date: dateStr,
       start_time: '10:00:00',
       updatedBy: 'system'
     });
+
+    // Session 2 of day d (Afternoon regular)
     sessionsToCreate.push({
       shibir_id: shibir.id,
-      session_number: (d - 1) * 3 + 3,
+      session_number: (d - 1) * 2 + 2,
       type: 'regular',
       date: dateStr,
       start_time: '15:45:00',
       updatedBy: 'system'
     });
-
-    currentDate.setDate(currentDate.getDate() + 1);
   }
 
-  // Find or create each session to avoid unique index violation
-  for (const session of sessionsToCreate) {
-    await ShibirSession.findOrCreate({
-      where: { shibir_id: session.shibir_id, session_number: session.session_number },
-      defaults: session,
-      transaction
+  // Generate MV sessions (2 * days + 1 to 3 * days)
+  for (let d = 1; d <= days; d++) {
+    const currentDate = new Date(shibir.start_date);
+    currentDate.setDate(currentDate.getDate() + (d - 1));
+    const dateStr = currentDate.toISOString().split('T')[0];
+
+    sessionsToCreate.push({
+      shibir_id: shibir.id,
+      session_number: 2 * days + d,
+      type: 'MV',
+      date: dateStr,
+      start_time: '04:30:00',
+      updatedBy: 'system'
     });
   }
+
+  // Upsert all required sessions to ensure date/type changes are applied
+  for (const session of sessionsToCreate) {
+    await ShibirSession.upsert(session, { transaction });
+  }
+
+  // Delete any orphaned sessions and their attendance records if the duration decreased
+  await ShibirSession.destroy({
+    where: {
+      shibir_id: shibir.id,
+      session_number: { [Sequelize.Op.gt]: totalSessions }
+    },
+    transaction
+  });
+
+  await ShibirAttendanceRecord.destroy({
+    where: {
+      shibir_id: shibir.id,
+      session_number: { [Sequelize.Op.gt]: totalSessions }
+    },
+    transaction
+  });
 }
 
 export async function bookAdhyayanForMumukshusAdmin(

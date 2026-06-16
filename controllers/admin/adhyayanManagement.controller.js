@@ -19,7 +19,8 @@ import {
   STATUS_CASH_PENDING,
   TYPE_ADHYAYAN,
   ERR_BOOKING_ALREADY_CANCELLED,
-  MSG_FETCH_SUCCESSFUL
+  MSG_FETCH_SUCCESSFUL,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
@@ -74,24 +75,38 @@ export const createAdhyayan = async (req, res) => {
   }
 
   const month = moment(start_date).format('MMMM');
+  const t = await database.transaction();
 
-  const adhyayan_details = await ShibirDb.create({
-    name: name,
-    speaker: speaker,
-    month: month,
-    start_date: start_date,
-    end_date: end_date,
-    location: location,
-    total_seats: total_seats,
-    amount: amount,
-    available_seats: total_seats,
-    food_allowed: food_allowed,
-    comments: comments,
-    updatedBy: req.user.username
-  });
+  try {
+    const adhyayan_details = await ShibirDb.create({
+      name: name,
+      speaker: speaker,
+      month: month,
+      start_date: start_date,
+      end_date: end_date,
+      location: location,
+      total_seats: total_seats,
+      amount: amount,
+      available_seats: total_seats,
+      food_allowed: food_allowed,
+      comments: comments,
+      updatedBy: req.user.username
+    }, { transaction: t });
 
-  req.log.info('create_adhyayan_success', { adhyayanId: adhyayan_details.id, name, speaker });
-  res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
+    // Initialize sessions immediately on creation if it's Research Centre
+    if (location === RESEARCH_CENTRE) {
+      await initializeShibirSessions(adhyayan_details, t);
+    }
+
+    await t.commit();
+
+    req.log.info('create_adhyayan_success', { adhyayanId: adhyayan_details.id, name, speaker });
+    res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
+  } catch (error) {
+    await t.rollback();
+    req.log.error('create_adhyayan_failed', { name, speaker, error: error.message });
+    throw error;
+  }
 };
 
 export const fetchALLAdhyayan = async (req, res) => {
@@ -373,33 +388,50 @@ export const updateAdhyayan = async (req, res) => {
   if (total_seats != adhyayan.total_seats) {
     const diff = total_seats - adhyayan.total_seats;
     newAvailableSeats = Math.max(0, adhyayan.available_seats + diff);
-  } 
+  }
   // 🧩 If total_seats is same, allow manual update if provided
   else if (available_seats !== undefined && available_seats !== null) {
     newAvailableSeats = available_seats;
-  } 
+  }
   // 🧩 Otherwise, retain existing available seats
   else {
     newAvailableSeats = adhyayan.available_seats;
   }
 
-  await adhyayan.update({
-    name,
-    speaker,
-    month,
-    start_date,
-    end_date,
-    location,
-    total_seats,
-    amount,
-    available_seats: newAvailableSeats,
-    food_allowed,
-    comments,
-    updatedBy: req.user.username
-  });
+  const t = await database.transaction();
+  try {
+    await adhyayan.update({
+      name,
+      speaker,
+      month,
+      start_date,
+      end_date,
+      location,
+      total_seats,
+      amount,
+      available_seats: newAvailableSeats,
+      food_allowed,
+      comments,
+      updatedBy: req.user.username
+    }, { transaction: t });
 
-  req.log.info('update_adhyayan_success', { adhyayanId, newAvailableSeats });
-  res.status(200).send({ message: 'Updated Adhyayan' });
+    // Sync sessions immediately on date/duration changes
+    if (location === RESEARCH_CENTRE) {
+      await initializeShibirSessions(adhyayan, t);
+    } else {
+      // If changed away from Research Centre, clear sessions and attendance records
+      await ShibirSession.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
+      await ShibirAttendanceRecord.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
+    }
+
+    await t.commit();
+    req.log.info('update_adhyayan_success', { adhyayanId, newAvailableSeats });
+    res.status(200).send({ message: 'Updated Adhyayan' });
+  } catch (error) {
+    await t.rollback();
+    req.log.error('update_adhyayan_failed', { adhyayanId, error: error.message });
+    throw error;
+  }
 };
 
 export const adhyayanWaitlist = async (req, res) => {
@@ -556,7 +588,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
         if (transaction.status == STATUS_PAYMENT_COMPLETED) {
           newBookingStatus = STATUS_CONFIRMED;
           await ensureAttendanceEntry(booking, req.user, t);
-          
+
           sendDualUserNotifications({
             primary: {
               cardno: booking.cardno,
@@ -1188,7 +1220,7 @@ export const bulkToggleAttendance = async (req, res) => {
     const updatedBy = req.user.cardno || req.user.username;
 
     if (Number(value) === 1) {
-      const upsertPromises = records.map(r => 
+      const upsertPromises = records.map(r =>
         ShibirAttendanceRecord.upsert(
           {
             shibir_id,
@@ -1216,7 +1248,7 @@ export const bulkToggleAttendance = async (req, res) => {
 
     if (sessionNo <= 9) {
       const columnName = `session_${sessionNo}_attendance`;
-      const updatePromises = records.map(r => 
+      const updatePromises = records.map(r =>
         r.update(
           {
             [columnName]: Number(value) === 1,
