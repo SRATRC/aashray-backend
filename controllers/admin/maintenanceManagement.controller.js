@@ -18,14 +18,46 @@ import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
 
+const ALLOWED_SORT_COLUMNS = [
+  'priority',
+  'requested_by',
+  'mobno',
+  'createdAt',
+  'closedAt',
+  'department',
+  'area_of_work',
+  'work_detail',
+  'status',
+  'bookingid'
+];
+const ALLOWED_SORT_ORDERS = ['ASC', 'DESC'];
+
 export const fetchMaintenanceReport = async (req, res) => {
   const { department } = req.params;
-  const page = req.query.page ? parseInt(req.query.page, 10) : null;
-  const pageSize = req.query.page_size ? parseInt(req.query.page_size, 10) : 20;
   const search = req.query.search || '';
-  const sortBy = req.query.sort_by || 'priority';
-  const sortOrder = req.query.sort_order || 'ASC';
+  
+  // Validate sort parameters against allow-list and sanitize inputs
+  const rawSortBy = req.query.sort_by;
+  const sortBy = ALLOWED_SORT_COLUMNS.includes(rawSortBy) ? rawSortBy : 'priority';
+  
+  const rawSortOrder = String(req.query.sort_order || '').toUpperCase();
+  const sortOrder = ALLOWED_SORT_ORDERS.includes(rawSortOrder) ? rawSortOrder : 'ASC';
+
   const statusFilter = req.query.status || '';
+
+  // Validate, sanitize, and clamp pagination parameters
+  const isPaged = req.query.page !== undefined;
+  let page = null;
+  let pageSize = 20;
+
+  if (isPaged) {
+    const parsedPage = parseInt(req.query.page, 10);
+    page = (!isNaN(parsedPage) && parsedPage > 0) ? parsedPage : 1;
+
+    const parsedPageSize = parseInt(req.query.page_size, 10);
+    const rawPageSize = !isNaN(parsedPageSize) ? parsedPageSize : 20;
+    pageSize = Math.min(Math.max(1, rawPageSize), 100);
+  }
 
   const whereClause = { 
     department
@@ -62,9 +94,9 @@ export const fetchMaintenanceReport = async (req, res) => {
 
   const statusCounts = {
     all: 0,
-    open: 0,
-    'in progress': 0,
-    closed: 0
+    [STATUS_OPEN]: 0,
+    [STATUS_INPROGRESS]: 0,
+    [STATUS_CLOSED]: 0
   };
 
   let totalCountAll = 0;
@@ -175,8 +207,11 @@ export const fetchMaintenanceReport = async (req, res) => {
 
     return res.status(200).send({
       message: 'Fetched requests for department',
-      data: requests,
-      statusCounts
+      data: {
+        requests,
+        pagination: null,
+        statusCounts
+      }
     });
   }
 };
