@@ -984,11 +984,20 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
   }
 
   const attendanceRows = await ShibirAttendanceDb.findAll({
-    where: { shibir_id },
+    where: {
+      shibir_id,
+      [Sequelize.Op.or]: [
+        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
+      ]
+    },
     include: [
       {
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'center', 'res_status']
+      },
+      {
+        model: ShibirBookingDb,
+        attributes: ['status']
       }
     ],
     order: [['cardno', 'ASC']]
@@ -1067,7 +1076,18 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
   }
 
   const attendanceRows = await ShibirAttendanceDb.findAll({
-    where: { shibir_id }
+    where: {
+      shibir_id,
+      [Sequelize.Op.or]: [
+        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
+      ]
+    },
+    include: [
+      {
+        model: ShibirBookingDb,
+        attributes: ['status']
+      }
+    ]
   });
 
   const totalRegistrants = attendanceRows.length;
@@ -1218,7 +1238,19 @@ export const toggleAttendance = async (req, res) => {
   }
 
   const record = await ShibirAttendanceDb.findOne({
-    where: { cardno, shibir_id },
+    where: {
+      cardno,
+      shibir_id,
+      [Sequelize.Op.or]: [
+        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
+      ]
+    },
+    include: [
+      {
+        model: ShibirBookingDb,
+        attributes: ['status']
+      }
+    ],
     transaction: t
   });
 
@@ -1293,8 +1325,17 @@ export const bulkToggleAttendance = async (req, res) => {
   const records = await ShibirAttendanceDb.findAll({
     where: {
       shibir_id,
-      cardno: cardnos
+      cardno: cardnos,
+      [Sequelize.Op.or]: [
+        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
+      ]
     },
+    include: [
+      {
+        model: ShibirBookingDb,
+        attributes: ['status']
+      }
+    ],
     transaction: t
   });
 
