@@ -219,6 +219,33 @@ export const fetchAdhyayanByLocation = async (req, res) => {
     }
   );
 
+  if (shibirs.length > 0) {
+    const shibirIds = shibirs.map(s => s.id);
+    const sessions = await ShibirSession.findAll({
+      where: { shibir_id: shibirIds },
+      order: [['session_number', 'ASC']]
+    });
+
+    // Group sessions by shibir_id
+    const sessionsByShibir = {};
+    for (const session of sessions) {
+      if (!sessionsByShibir[session.shibir_id]) {
+        sessionsByShibir[session.shibir_id] = [];
+      }
+      sessionsByShibir[session.shibir_id].push({
+        session_number: session.session_number,
+        type: session.type,
+        date: session.date,
+        start_time: session.start_time
+      });
+    }
+
+    // Attach sessions to each shibir
+    for (const shibir of shibirs) {
+      shibir.sessions = sessionsByShibir[shibir.id] || [];
+    }
+  }
+
   req.log.info('fetch_adhyayan_by_location_success', { location, count: shibirs.length });
   return res.status(200).send({ message: 'Fetched Results', data: shibirs });
 };
@@ -1043,6 +1070,8 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
 
     return {
       session: `Session ${s.session_number}`,
+      session_number: s.session_number,
+      type: s.type,
       total_registrants: totalRegistrants,
       total_attended: attendedCount,
       total_absentees: absenteesCount
