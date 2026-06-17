@@ -708,7 +708,17 @@ export async function sendTravelWhatsApp(user, travelBookingDetails = [], booked
         const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
 
         const passengerType = b.total_people ? (parseInt(b.total_people) === 1 ? "single person" : `${b.total_people} people`) : "single person";
-        const dateFormatted = b.date ? moment(b.date, "Do MMMM, YYYY").format("DD-MM-YYYY") : "";
+        let dateFormatted = "";
+        if (b.date) {
+          const dateStr = String(b.date);
+          if (b.date instanceof Date || dateStr.includes("GMT") || dateStr.includes(":") || dateStr.length > 20) {
+            dateFormatted = moment(b.date).format("DD-MM-YYYY");
+          } else if (dateStr.includes("th") || dateStr.includes("st") || dateStr.includes("nd") || dateStr.includes("rd")) {
+            dateFormatted = moment(b.date, "Do MMMM, YYYY").format("DD-MM-YYYY");
+          } else {
+            dateFormatted = moment(b.date).format("DD-MM-YYYY");
+          }
+        }
 
         if (isGuestBy) {
           const attendeeName = bookedForUser.issuedto || "";
