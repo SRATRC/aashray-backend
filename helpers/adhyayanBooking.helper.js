@@ -525,7 +525,7 @@ export async function getFeedbackStats(shibir_id) {
 }
 
 export async function createShibirAttendanceEntry(booking, user, transaction) {
-  // 🔒 Prevent duplicates (CRITICAL)
+  // Prevent duplicates (CRITICAL)
   const existing = await ShibirAttendanceDb.findOne({
     where: { bookingid: booking.bookingid },
     transaction
@@ -546,7 +546,7 @@ export async function createShibirAttendanceEntry(booking, user, transaction) {
 
   const days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-  // ✅ Use integers for TINYINT
+  //  Use integers for TINYINT
   const sessionFlags = {};
   for (let i = 1; i <= 9; i++) {
     sessionFlags[`session_${i}`] = 1;
@@ -564,23 +564,28 @@ export async function createShibirAttendanceEntry(booking, user, transaction) {
     { transaction }
   );
 
-  // Initialize dynamic sessions in shibir_sessions table
-  await initializeShibirSessions(shibir, transaction);
+  // Initialize dynamic sessions in shibir_sessions table if not already initialized
+  const sessionsExist = await ShibirSession.findOne({
+    where: { shibir_id: booking.shibir_id },
+    transaction
+  });
+
+  if (!sessionsExist) {
+    await initializeShibirSessions(shibir, transaction);
+  }
 }
 
 export async function initializeShibirSessions(shibir, transaction) {
-  const startDate = new Date(shibir.start_date);
-  const endDate = new Date(shibir.end_date);
-  const days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  const startDate = moment.tz(shibir.start_date, 'Asia/Kolkata').startOf('day');
+  const endDate = moment.tz(shibir.end_date, 'Asia/Kolkata').startOf('day');
+  const days = endDate.diff(startDate, 'days') + 1;
 
   const totalSessions = days * 3;
   const sessionsToCreate = [];
 
   // Generate regular sessions (1 to 2 * days)
   for (let d = 1; d <= days; d++) {
-    const currentDate = new Date(shibir.start_date);
-    currentDate.setDate(currentDate.getDate() + (d - 1));
-    const dateStr = currentDate.toISOString().split('T')[0];
+    const dateStr = moment.tz(shibir.start_date, 'Asia/Kolkata').add(d - 1, 'days').format('YYYY-MM-DD');
 
     // Session 1 of day d (Morning regular)
     sessionsToCreate.push({
@@ -605,9 +610,7 @@ export async function initializeShibirSessions(shibir, transaction) {
 
   // Generate MV sessions (2 * days + 1 to 3 * days)
   for (let d = 1; d <= days; d++) {
-    const currentDate = new Date(shibir.start_date);
-    currentDate.setDate(currentDate.getDate() + (d - 1));
-    const dateStr = currentDate.toISOString().split('T')[0];
+    const dateStr = moment.tz(shibir.start_date, 'Asia/Kolkata').add(d - 1, 'days').format('YYYY-MM-DD');
 
     sessionsToCreate.push({
       shibir_id: shibir.id,

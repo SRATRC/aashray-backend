@@ -38,6 +38,7 @@ import {
   initializeShibirSessions
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
+import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
 import {
   sendDualUserNotifications,
@@ -417,7 +418,7 @@ export const updateAdhyayan = async (req, res) => {
 
     // Sync sessions immediately on date/duration changes
     if (location === RESEARCH_CENTRE) {
-      await initializeShibirSessions(adhyayan, t);
+      await initializeShibirSessions({ id: adhyayan.id, start_date, end_date }, t);
     } else {
       // If changed away from Research Centre, clear sessions and attendance records
       await ShibirSession.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
@@ -815,99 +816,92 @@ export const getAdhyayanFeedback = async (req, res) => {
 };
 
 export const markAdhyayanAttendance = async (req, res) => {
+  const { shibir_id, session_no, cardno } = req.params;
+  const sessionNo = Number(session_no);
+  req.log.info('mark_adhyayan_attendance_start', { shibir_id, session_no: sessionNo, cardno });
+
   const t = await database.transaction();
+  req.transaction = t;
 
-  try {
-    const { shibir_id, session_no, cardno } = req.params;
-    const sessionNo = Number(session_no);
-    req.log.info('mark_adhyayan_attendance_start', { shibir_id, session_no: sessionNo, cardno });
+  const shibir = await ShibirDb.findByPk(shibir_id, { transaction: t });
+  if (!shibir) {
+    throw new ApiError(404, 'Shibir not found');
+  }
 
-    const shibir = await ShibirDb.findByPk(shibir_id, { transaction: t });
-    if (!shibir) {
-      throw new ApiError(404, 'Shibir not found');
-    }
+  const session = await ShibirSession.findOne({
+    where: { shibir_id, session_number: sessionNo },
+    transaction: t
+  });
 
-    const session = await ShibirSession.findOne({
-      where: { shibir_id, session_number: sessionNo },
-      transaction: t
-    });
+  if (!session) {
+    req.log.warn('mark_adhyayan_attendance_session_not_found', { shibir_id, sessionNo });
+    throw new ApiError(400, `Session ${sessionNo} not found for this Shibir`);
+  }
 
-    if (!session) {
-      req.log.warn('mark_adhyayan_attendance_session_not_found', { shibir_id, sessionNo });
-      throw new ApiError(400, `Session ${sessionNo} not found for this Shibir`);
-    }
-
-    const attendance = await ShibirAttendanceDb.findOne({
-      where: { shibir_id, cardno },
-      include: [
-        {
-          model: ShibirBookingDb,
-          required: true,
-          where: { status: 'confirmed' }
-        }
-      ],
-      transaction: t
-    });
-
-    if (!attendance) {
-      req.log.warn('mark_adhyayan_attendance_record_not_found', { shibir_id, cardno });
-      throw new ApiError(404, 'Attendance record not found');
-    }
-
-    const existingRecord = await ShibirAttendanceRecord.findOne({
-      where: { shibir_id, bookingid: attendance.bookingid, session_number: sessionNo },
-      transaction: t
-    });
-
-    if (existingRecord && existingRecord.attended) {
-      req.log.warn('mark_adhyayan_attendance_already_marked', { shibir_id, cardno, sessionNo });
-      throw new ApiError(400, `Attendance already marked for session ${sessionNo}`);
-    }
-
-    const card = await CardDb.findOne({
-      where: { cardno },
-      transaction: t
-    });
-
-    await ShibirAttendanceRecord.upsert(
+  const attendance = await ShibirAttendanceDb.findOne({
+    where: { shibir_id, cardno },
+    include: [
       {
-        shibir_id,
-        bookingid: attendance.bookingid,
-        cardno,
-        session_number: sessionNo,
-        attended: true,
+        model: ShibirBookingDb,
+        required: true,
+        where: { status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED] }
+      }
+    ],
+    transaction: t
+  });
+
+  if (!attendance) {
+    req.log.warn('mark_adhyayan_attendance_record_not_found', { shibir_id, cardno });
+    throw new ApiError(404, 'Attendance record not found');
+  }
+
+  const existingRecord = await ShibirAttendanceRecord.findOne({
+    where: { shibir_id, bookingid: attendance.bookingid, session_number: sessionNo },
+    transaction: t
+  });
+
+  if (existingRecord && existingRecord.attended) {
+    req.log.warn('mark_adhyayan_attendance_already_marked', { shibir_id, cardno, sessionNo });
+    throw new ApiError(400, `Attendance already marked for session ${sessionNo}`);
+  }
+
+  const card = await CardDb.findOne({
+    where: { cardno },
+    transaction: t
+  });
+
+  await ShibirAttendanceRecord.upsert(
+    {
+      shibir_id,
+      bookingid: attendance.bookingid,
+      cardno,
+      session_number: sessionNo,
+      attended: true,
+      updatedBy: req.user.cardno || req.user.username
+    },
+    { transaction: t }
+  );
+
+  if (sessionNo <= 9) {
+    const attendanceField = `session_${sessionNo}_attendance`;
+    await attendance.update(
+      {
+        [attendanceField]: true,
         updatedBy: req.user.cardno || req.user.username
       },
       { transaction: t }
     );
-
-    if (sessionNo <= 9) {
-      const attendanceField = `session_${sessionNo}_attendance`;
-      await attendance.update(
-        {
-          [attendanceField]: true,
-          updatedBy: req.user.cardno || req.user.username
-        },
-        { transaction: t }
-      );
-    }
-
-    await t.commit();
-
-    req.log.info('mark_adhyayan_attendance_success', { shibir_id, cardno, sessionNo, participantName: card?.issuedto });
-    return res.status(200).send({
-      message: 'Attendance marked successfully',
-      participantName: card?.issuedto || cardno,
-      shibirName: shibir?.name || `Shibir ${shibir_id}`,
-      session: sessionNo
-    });
-
-  } catch (err) {
-    if (t && !t.finished) {
-      await t.rollback();
-    }
-    throw err;
   }
+
+  await t.commit();
+
+  req.log.info('mark_adhyayan_attendance_success', { shibir_id, cardno, sessionNo, participantName: card?.issuedto });
+  return res.status(200).send({
+    message: 'Attendance marked successfully',
+    participantName: card?.issuedto || cardno,
+    shibirName: shibir?.name || `Shibir ${shibir_id}`,
+    session: sessionNo
+  });
 };
 
 export const fetchAdhyayanAttendanceReport = async (req, res) => {
@@ -927,6 +921,7 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
 
   if (sessions.length === 0) {
     const t = await database.transaction();
+    req.transaction = t;
     try {
       await initializeShibirSessions(shibir, t);
       await t.commit();
@@ -935,8 +930,8 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
         order: [['session_number', 'ASC']]
       });
     } catch (err) {
-      await t.rollback();
       req.log.error('initialize_shibir_sessions_failed', { shibir_id, error: err.message });
+      throw err;
     }
   }
 
@@ -1009,6 +1004,7 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
 
   if (sessions.length === 0) {
     const t = await database.transaction();
+    req.transaction = t;
     try {
       await initializeShibirSessions(shibir, t);
       await t.commit();
@@ -1017,7 +1013,8 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
         order: [['session_number', 'ASC']]
       });
     } catch (err) {
-      await t.rollback();
+      req.log.error('initialize_shibir_sessions_failed', { shibir_id, error: err.message });
+      throw err;
     }
   }
 
@@ -1090,6 +1087,40 @@ export const createAdhyayanBookingByAdmin = async (req, res) => {
 
     await t.commit();
 
+    // Send WhatsApp notifications after successful transaction commit
+    try {
+      const allBookingIds = Object.values(result.userBookingIds).flat();
+      if (allBookingIds.length > 0) {
+        const bookings = await ShibirBookingDb.findAll({
+          where: { bookingid: allBookingIds },
+          include: [{ model: ShibirDb, as: 'ShibirDb' }]
+        });
+
+        const bookingsByCard = {};
+        for (const booking of bookings) {
+          if (!bookingsByCard[booking.cardno]) {
+            bookingsByCard[booking.cardno] = [];
+          }
+          bookingsByCard[booking.cardno].push(booking);
+        }
+
+        const jobs = [];
+        for (const cardno of Object.keys(bookingsByCard)) {
+          jobs.push(sendUnifiedWhatsApp(cardno, bookingsByCard[cardno]));
+        }
+        // Run all notification jobs in parallel (non-blocking)
+        Promise.allSettled(jobs).then((results) => {
+          results.forEach((r, i) => {
+            if (r.status === 'rejected') {
+              req.log.error('create_adhyayan_booking_by_admin_whatsapp_failed', { index: i, error: r.reason });
+            }
+          });
+        });
+      }
+    } catch (waErr) {
+      req.log.error('create_adhyayan_booking_by_admin_whatsapp_error', { error: waErr.message });
+    }
+
     req.log.info('create_adhyayan_booking_by_admin_success', { shibir_ids, mumukshuCount: mumukshus.length, result });
     return res.status(200).send({
       message: 'Adhyayan bookings created by admin',
@@ -1113,166 +1144,152 @@ async function ensureAttendanceEntry(booking, user, t) {
 }
 
 export const toggleAttendance = async (req, res) => {
-  const t = await database.transaction();
-  try {
-    const { shibir_id, cardno, sessionNumber, value } = req.body;
-    req.log.info('toggle_attendance_start', { shibir_id, cardno, sessionNumber, value });
+  const { shibir_id, cardno, sessionNumber, value } = req.body;
+  req.log.info('toggle_attendance_start', { shibir_id, cardno, sessionNumber, value });
 
-    if (!shibir_id || !cardno || !sessionNumber) {
-      req.log.warn('toggle_attendance_missing_params', { shibir_id, cardno, sessionNumber });
-      throw new ApiError(400, "shibir_id, cardno and sessionNumber required");
-    }
-
-    const sessionNo = Number(sessionNumber);
-
-    const record = await ShibirAttendanceDb.findOne({
-      where: { cardno, shibir_id },
-      transaction: t
-    });
-
-    if (!record) {
-      req.log.warn('toggle_attendance_record_not_found', { shibir_id, cardno });
-      throw new ApiError(404, "Attendance record not found");
-    }
-
-    if (Number(value) === 1) {
-      await ShibirAttendanceRecord.upsert(
-        {
-          shibir_id,
-          bookingid: record.bookingid,
-          cardno,
-          session_number: sessionNo,
-          attended: true,
-          updatedBy: req.user.cardno || req.user.username
-        },
-        { transaction: t }
-      );
-    } else {
-      await ShibirAttendanceRecord.destroy({
-        where: {
-          shibir_id,
-          bookingid: record.bookingid,
-          session_number: sessionNo
-        },
-        transaction: t
-      });
-    }
-
-    if (sessionNo <= 9) {
-      const columnName = `session_${sessionNo}_attendance`;
-      await record.update(
-        {
-          [columnName]: Number(value) === 1
-        },
-        { transaction: t }
-      );
-    }
-
-    await t.commit();
-    req.log.info('toggle_attendance_success', { shibir_id, cardno, sessionNo, value });
-    return res.json({
-      message: "Attendance updated successfully"
-    });
-
-  } catch (error) {
-    if (t && !t.finished) {
-      await t.rollback();
-    }
-    req.log.error('toggle_attendance_error', { error: error.message });
-    throw error;
+  if (!shibir_id || !cardno || !sessionNumber) {
+    req.log.warn('toggle_attendance_missing_params', { shibir_id, cardno, sessionNumber });
+    throw new ApiError(400, "shibir_id, cardno and sessionNumber required");
   }
-};
 
-export const bulkToggleAttendance = async (req, res) => {
   const t = await database.transaction();
-  try {
-    const { shibir_id, sessionNumber, cardnos, value } = req.body;
-    req.log.info('bulk_toggle_attendance_start', { shibir_id, sessionNumber, cardnosCount: cardnos?.length, value });
+  req.transaction = t;
 
-    if (!shibir_id || !sessionNumber || !Array.isArray(cardnos) || cardnos.length === 0) {
-      req.log.warn('bulk_toggle_attendance_missing_params');
-      throw new ApiError(400, "shibir_id, sessionNumber and non-empty cardnos array are required");
-    }
+  const sessionNo = Number(sessionNumber);
 
-    const sessionNo = Number(sessionNumber);
+  const record = await ShibirAttendanceDb.findOne({
+    where: { cardno, shibir_id },
+    transaction: t
+  });
 
-    const session = await ShibirSession.findOne({
-      where: { shibir_id, session_number: sessionNo },
-      transaction: t
-    });
+  if (!record) {
+    req.log.warn('toggle_attendance_record_not_found', { shibir_id, cardno });
+    throw new ApiError(404, "Attendance record not found");
+  }
 
-    if (!session) {
-      throw new ApiError(400, `Session ${sessionNo} does not exist for this Shibir`);
-    }
-
-    const records = await ShibirAttendanceDb.findAll({
+  if (Number(value) === 1) {
+    await ShibirAttendanceRecord.upsert(
+      {
+        shibir_id,
+        bookingid: record.bookingid,
+        cardno,
+        session_number: sessionNo,
+        attended: true,
+        updatedBy: req.user.cardno || req.user.username
+      },
+      { transaction: t }
+    );
+  } else {
+    await ShibirAttendanceRecord.destroy({
       where: {
         shibir_id,
-        cardno: cardnos
+        bookingid: record.bookingid,
+        session_number: sessionNo
       },
       transaction: t
     });
-
-    if (records.length === 0) {
-      throw new ApiError(404, "No eligible attendance records found for the given card numbers");
-    }
-
-    const updatedBy = req.user.cardno || req.user.username;
-
-    if (Number(value) === 1) {
-      const upsertPromises = records.map(r =>
-        ShibirAttendanceRecord.upsert(
-          {
-            shibir_id,
-            bookingid: r.bookingid,
-            cardno: r.cardno,
-            session_number: sessionNo,
-            attended: true,
-            updatedBy
-          },
-          { transaction: t }
-        )
-      );
-      await Promise.all(upsertPromises);
-    } else {
-      const bookingids = records.map(r => r.bookingid);
-      await ShibirAttendanceRecord.destroy({
-        where: {
-          shibir_id,
-          bookingid: bookingids,
-          session_number: sessionNo
-        },
-        transaction: t
-      });
-    }
-
-    if (sessionNo <= 9) {
-      const columnName = `session_${sessionNo}_attendance`;
-      const updatePromises = records.map(r =>
-        r.update(
-          {
-            [columnName]: Number(value) === 1,
-            updatedBy
-          },
-          { transaction: t }
-        )
-      );
-      await Promise.all(updatePromises);
-    }
-
-    await t.commit();
-    req.log.info('bulk_toggle_attendance_success', { shibir_id, sessionNo, updatedCount: records.length, value });
-    return res.json({
-      message: `Successfully updated attendance for ${records.length} participants`
-    });
-
-  } catch (error) {
-    if (t && !t.finished) {
-      await t.rollback();
-    }
-    req.log.error('bulk_toggle_attendance_error', { error: error.message });
-    throw error;
   }
+
+  if (sessionNo <= 9) {
+    const columnName = `session_${sessionNo}_attendance`;
+    await record.update(
+      {
+        [columnName]: Number(value) === 1
+      },
+      { transaction: t }
+    );
+  }
+
+  await t.commit();
+  req.log.info('toggle_attendance_success', { shibir_id, cardno, sessionNo, value });
+  return res.json({
+    message: "Attendance updated successfully"
+  });
+};
+
+export const bulkToggleAttendance = async (req, res) => {
+  const { shibir_id, sessionNumber, cardnos, value } = req.body;
+  req.log.info('bulk_toggle_attendance_start', { shibir_id, sessionNumber, cardnosCount: cardnos?.length, value });
+
+  if (!shibir_id || !sessionNumber || !Array.isArray(cardnos) || cardnos.length === 0) {
+    req.log.warn('bulk_toggle_attendance_missing_params');
+    throw new ApiError(400, "shibir_id, sessionNumber and non-empty cardnos array are required");
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const sessionNo = Number(sessionNumber);
+
+  const session = await ShibirSession.findOne({
+    where: { shibir_id, session_number: sessionNo },
+    transaction: t
+  });
+
+  if (!session) {
+    throw new ApiError(400, `Session ${sessionNo} does not exist for this Shibir`);
+  }
+
+  const records = await ShibirAttendanceDb.findAll({
+    where: {
+      shibir_id,
+      cardno: cardnos
+    },
+    transaction: t
+  });
+
+  if (records.length === 0) {
+    throw new ApiError(404, "No eligible attendance records found for the given card numbers");
+  }
+
+  const updatedBy = req.user.cardno || req.user.username;
+
+  if (Number(value) === 1) {
+    const upsertPromises = records.map(r =>
+      ShibirAttendanceRecord.upsert(
+        {
+          shibir_id,
+          bookingid: r.bookingid,
+          cardno: r.cardno,
+          session_number: sessionNo,
+          attended: true,
+          updatedBy
+        },
+        { transaction: t }
+      )
+    );
+    await Promise.all(upsertPromises);
+  } else {
+    const bookingids = records.map(r => r.bookingid);
+    await ShibirAttendanceRecord.destroy({
+      where: {
+        shibir_id,
+        bookingid: bookingids,
+        session_number: sessionNo
+      },
+      transaction: t
+    });
+  }
+
+  if (sessionNo <= 9) {
+    const columnName = `session_${sessionNo}_attendance`;
+    const updatePromises = records.map(r =>
+      r.update(
+        {
+          [columnName]: Number(value) === 1,
+          updatedBy
+        },
+        { transaction: t }
+      )
+    );
+    await Promise.all(updatePromises);
+  }
+
+  await t.commit();
+  req.log.info('bulk_toggle_attendance_success', { shibir_id, sessionNo, updatedCount: records.length, value });
+  return res.json({
+    message: `Successfully updated attendance for ${records.length} participants`
+  });
 };
 
 export const createAttendanceEntryManually = async (req, res) => {
@@ -1280,50 +1297,45 @@ export const createAttendanceEntryManually = async (req, res) => {
   req.log.info('create_attendance_entry_manually_start', { bookingid });
 
   const t = await database.transaction();
+  req.transaction = t;
 
-  try {
-    const booking = await ShibirBookingDb.findOne({
-      where: { bookingid },
-      transaction: t
-    });
+  const booking = await ShibirBookingDb.findOne({
+    where: { bookingid },
+    transaction: t
+  });
 
-    if (!booking) {
-      req.log.warn('create_attendance_entry_manually_booking_not_found', { bookingid });
-      throw new ApiError(404, "Booking not found");
-    }
-
-    // Check if already exists
-    const existing = await ShibirAttendanceDb.findOne({
-      where: {
-        shibir_id: booking.shibir_id,
-        cardno: booking.cardno
-      },
-      transaction: t
-    });
-
-    if (existing) {
-      await t.rollback();
-      req.log.warn('create_attendance_entry_manually_already_exists', { bookingid });
-      return res.status(409).json({
-        message: "Attendance record already exists"
-      });
-    }
-
-    await createShibirAttendanceEntry(
-      booking,
-      req.user,
-      t
-    );
-
-    await t.commit();
-
-    req.log.info('create_attendance_entry_manually_success', { bookingid });
-    return res.status(201).json({
-      message: "Attendance record created"
-    });
-
-  } catch (error) {
-    await t.rollback();
-    throw error;
+  if (!booking) {
+    req.log.warn('create_attendance_entry_manually_booking_not_found', { bookingid });
+    throw new ApiError(404, "Booking not found");
   }
+
+  // Check if already exists
+  const existing = await ShibirAttendanceDb.findOne({
+    where: {
+      shibir_id: booking.shibir_id,
+      cardno: booking.cardno
+    },
+    transaction: t
+  });
+
+  if (existing) {
+    await t.rollback();
+    req.log.warn('create_attendance_entry_manually_already_exists', { bookingid });
+    return res.status(409).json({
+      message: "Attendance record already exists"
+    });
+  }
+
+  await createShibirAttendanceEntry(
+    booking,
+    req.user,
+    t
+  );
+
+  await t.commit();
+
+  req.log.info('create_attendance_entry_manually_success', { bookingid });
+  return res.status(201).json({
+    message: "Attendance record created"
+  });
 };

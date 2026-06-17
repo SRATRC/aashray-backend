@@ -11,7 +11,11 @@ const ShibirSession = sequelize.define(
     },
     shibir_id: {
       type: DataTypes.INTEGER,
-      allowNull: false
+      allowNull: false,
+      references: {
+        model: 'shibir_db',
+        key: 'id'
+      }
     },
     session_number: {
       type: DataTypes.INTEGER,

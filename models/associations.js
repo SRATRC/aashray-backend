@@ -557,12 +557,14 @@ ShibirDb.hasMany(ShibirSession, {
   foreignKey: 'shibir_id',
   sourceKey: 'id',
   onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
+  onUpdate: 'CASCADE',
+  as: 'sessions'
 });
 
 ShibirSession.belongsTo(ShibirDb, {
   foreignKey: 'shibir_id',
-  targetKey: 'id'
+  targetKey: 'id',
+  as: 'shibir'
 });
 
 // Shibir → Shibir Attendance Records
@@ -570,12 +572,14 @@ ShibirDb.hasMany(ShibirAttendanceRecord, {
   foreignKey: 'shibir_id',
   sourceKey: 'id',
   onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
 });
 
 ShibirAttendanceRecord.belongsTo(ShibirDb, {
   foreignKey: 'shibir_id',
-  targetKey: 'id'
+  targetKey: 'id',
+  as: 'shibir'
 });
 
 // Card → Shibir Attendance Records
@@ -583,12 +587,14 @@ CardDb.hasMany(ShibirAttendanceRecord, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
 });
 
 ShibirAttendanceRecord.belongsTo(CardDb, {
   foreignKey: 'cardno',
-  targetKey: 'cardno'
+  targetKey: 'cardno',
+  as: 'card'
 });
 
 // Booking → Shibir Attendance Records
@@ -596,12 +602,14 @@ ShibirBookingDb.hasMany(ShibirAttendanceRecord, {
   foreignKey: 'bookingid',
   sourceKey: 'bookingid',
   onDelete: 'CASCADE',
-  onUpdate: 'CASCADE'
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
 });
 
 ShibirAttendanceRecord.belongsTo(ShibirBookingDb, {
   foreignKey: 'bookingid',
-  targetKey: 'bookingid'
+  targetKey: 'bookingid',
+  as: 'booking'
 });
 
 RoomBooking.hasMany(Transactions, {
