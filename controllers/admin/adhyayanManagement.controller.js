@@ -984,12 +984,7 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
   }
 
   const attendanceRows = await ShibirAttendanceDb.findAll({
-    where: {
-      shibir_id,
-      [Sequelize.Op.or]: [
-        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
-      ]
-    },
+    where: { shibir_id },
     include: [
       {
         model: CardDb,
@@ -997,7 +992,9 @@ export const fetchAdhyayanAttendanceReport = async (req, res) => {
       },
       {
         model: ShibirBookingDb,
-        attributes: ['status']
+        required: true,
+        attributes: ['status'],
+        where: { status: STATUS_CONFIRMED }
       }
     ],
     order: [['cardno', 'ASC']]
@@ -1076,16 +1073,13 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
   }
 
   const attendanceRows = await ShibirAttendanceDb.findAll({
-    where: {
-      shibir_id,
-      [Sequelize.Op.or]: [
-        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
-      ]
-    },
+    where: { shibir_id },
     include: [
       {
         model: ShibirBookingDb,
-        attributes: ['status']
+        required: true,
+        attributes: ['status'],
+        where: { status: STATUS_CONFIRMED }
       }
     ]
   });
@@ -1095,9 +1089,18 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
   const attendedCounts = await ShibirAttendanceRecord.findAll({
     attributes: [
       'session_number',
-      [Sequelize.fn('COUNT', Sequelize.col('id')), 'count']
+      [Sequelize.fn('COUNT', Sequelize.col('ShibirAttendanceRecord.id')), 'count']
     ],
     where: { shibir_id, attended: true },
+    include: [
+      {
+        model: ShibirBookingDb,
+        as: 'booking',
+        required: true,
+        where: { status: STATUS_CONFIRMED },
+        attributes: []
+      }
+    ],
     group: ['session_number']
   });
 
@@ -1107,7 +1110,7 @@ export async function fetchAdhyayanAttendanceSummary(req, res) {
 
   const summary = sessions.map(s => {
     const attendedCount = countMap.get(s.session_number) || 0;
-    const absenteesCount = totalRegistrants - attendedCount;
+    const absenteesCount = Math.max(0, totalRegistrants - attendedCount);
 
     return {
       session: `Session ${s.session_number}`,
@@ -1238,17 +1241,13 @@ export const toggleAttendance = async (req, res) => {
   }
 
   const record = await ShibirAttendanceDb.findOne({
-    where: {
-      cardno,
-      shibir_id,
-      [Sequelize.Op.or]: [
-        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
-      ]
-    },
+    where: { cardno, shibir_id },
     include: [
       {
         model: ShibirBookingDb,
-        attributes: ['status']
+        required: true,
+        attributes: ['status'],
+        where: { status: STATUS_CONFIRMED }
       }
     ],
     transaction: t
@@ -1325,15 +1324,14 @@ export const bulkToggleAttendance = async (req, res) => {
   const records = await ShibirAttendanceDb.findAll({
     where: {
       shibir_id,
-      cardno: cardnos,
-      [Sequelize.Op.or]: [
-        { '$ShibirBookingDb.status$': [STATUS_CONFIRMED] }
-      ]
+      cardno: cardnos
     },
     include: [
       {
         model: ShibirBookingDb,
-        attributes: ['status']
+        required: true,
+        attributes: ['status'],
+        where: { status: STATUS_CONFIRMED }
       }
     ],
     transaction: t
