@@ -23,7 +23,9 @@ import {
   ShibirDb,
   UtsavPackagesDb,
   CardDb,
-  ShibirAttendanceDb
+  ShibirAttendanceDb,
+  ShibirSession,
+  ShibirAttendanceRecord
 } from '../models/associations.js';
 import sendMail from '../utils/sendMail.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -523,7 +525,7 @@ export async function getFeedbackStats(shibir_id) {
 }
 
 export async function createShibirAttendanceEntry(booking, user, transaction) {
-  // 🔒 Prevent duplicates (CRITICAL)
+  // Prevent duplicates (CRITICAL)
   const existing = await ShibirAttendanceDb.findOne({
     where: { bookingid: booking.bookingid },
     transaction
@@ -544,7 +546,7 @@ export async function createShibirAttendanceEntry(booking, user, transaction) {
 
   const days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-  // ✅ Use integers for TINYINT
+  //  Use integers for TINYINT
   const sessionFlags = {};
   for (let i = 1; i <= 9; i++) {
     sessionFlags[`session_${i}`] = 1;
@@ -561,6 +563,86 @@ export async function createShibirAttendanceEntry(booking, user, transaction) {
     },
     { transaction }
   );
+
+  // Initialize dynamic sessions in shibir_sessions table if not already initialized
+  const sessionsExist = await ShibirSession.findOne({
+    where: { shibir_id: booking.shibir_id },
+    transaction
+  });
+
+  if (!sessionsExist) {
+    await initializeShibirSessions(shibir, transaction);
+  }
+}
+
+export async function initializeShibirSessions(shibir, transaction) {
+  const startDate = moment.tz(shibir.start_date, 'Asia/Kolkata').startOf('day');
+  const endDate = moment.tz(shibir.end_date, 'Asia/Kolkata').startOf('day');
+  const days = endDate.diff(startDate, 'days') + 1;
+
+  const totalSessions = days * 3;
+  const sessionsToCreate = [];
+
+  // Generate regular sessions (1 to 2 * days)
+  for (let d = 1; d <= days; d++) {
+    const dateStr = moment.tz(shibir.start_date, 'Asia/Kolkata').add(d - 1, 'days').format('YYYY-MM-DD');
+
+    // Session 1 of day d (Morning regular)
+    sessionsToCreate.push({
+      shibir_id: shibir.id,
+      session_number: (d - 1) * 2 + 1,
+      type: 'regular',
+      date: dateStr,
+      start_time: '10:00:00',
+      updatedBy: 'system'
+    });
+
+    // Session 2 of day d (Afternoon regular)
+    sessionsToCreate.push({
+      shibir_id: shibir.id,
+      session_number: (d - 1) * 2 + 2,
+      type: 'regular',
+      date: dateStr,
+      start_time: '15:45:00',
+      updatedBy: 'system'
+    });
+  }
+
+  // Generate MV sessions (2 * days + 1 to 3 * days)
+  for (let d = 1; d <= days; d++) {
+    const dateStr = moment.tz(shibir.start_date, 'Asia/Kolkata').add(d - 1, 'days').format('YYYY-MM-DD');
+
+    sessionsToCreate.push({
+      shibir_id: shibir.id,
+      session_number: 2 * days + d,
+      type: 'MV',
+      date: dateStr,
+      start_time: '04:30:00',
+      updatedBy: 'system'
+    });
+  }
+
+  // Upsert all required sessions to ensure date/type changes are applied
+  for (const session of sessionsToCreate) {
+    await ShibirSession.upsert(session, { transaction });
+  }
+
+  // Delete any orphaned sessions and their attendance records if the duration decreased
+  await ShibirSession.destroy({
+    where: {
+      shibir_id: shibir.id,
+      session_number: { [Sequelize.Op.gt]: totalSessions }
+    },
+    transaction
+  });
+
+  await ShibirAttendanceRecord.destroy({
+    where: {
+      shibir_id: shibir.id,
+      session_number: { [Sequelize.Op.gt]: totalSessions }
+    },
+    transaction
+  });
 }
 
 export async function bookAdhyayanForMumukshusAdmin(
@@ -676,6 +758,11 @@ export async function createAdhyayanBookingAdmin(
 
 export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
   await ShibirAttendanceDb.destroy({
+    where: { bookingid: bookingId },
+    transaction
+  });
+
+  await ShibirAttendanceRecord.destroy({
     where: { bookingid: bookingId },
     transaction
   });
