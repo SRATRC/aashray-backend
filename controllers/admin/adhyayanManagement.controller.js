@@ -426,6 +426,27 @@ export const updateAdhyayan = async (req, res) => {
     newAvailableSeats = adhyayan.available_seats;
   }
 
+  // Guard against changing duration if attendance records already exist
+  const oldStartDate = moment(adhyayan.start_date).startOf('day');
+  const oldEndDate = moment(adhyayan.end_date).startOf('day');
+  const oldDays = oldEndDate.diff(oldStartDate, 'days') + 1;
+
+  const newStartDate = moment(start_date).startOf('day');
+  const newEndDate = moment(end_date).startOf('day');
+  const newDays = newEndDate.diff(newStartDate, 'days') + 1;
+
+  if (oldDays !== newDays) {
+    const attendanceExists = await ShibirAttendanceRecord.findOne({
+      where: { shibir_id: adhyayanId }
+    });
+    if (attendanceExists) {
+      req.log.warn('update_adhyayan_failed_duration_change_attendance_exists', { adhyayanId, oldDays, newDays });
+      return res.status(400).send({
+        message: 'Cannot change shibir duration because attendance records already exist'
+      });
+    }
+  }
+
   const t = await database.transaction();
   try {
     await adhyayan.update({
@@ -1185,6 +1206,16 @@ export const toggleAttendance = async (req, res) => {
   req.transaction = t;
 
   const sessionNo = Number(sessionNumber);
+
+  const session = await ShibirSession.findOne({
+    where: { shibir_id, session_number: sessionNo },
+    transaction: t
+  });
+
+  if (!session) {
+    req.log.warn('toggle_attendance_session_not_found', { shibir_id, sessionNo });
+    throw new ApiError(400, `Session ${sessionNo} does not exist for this Shibir`);
+  }
 
   const record = await ShibirAttendanceDb.findOne({
     where: { cardno, shibir_id },
