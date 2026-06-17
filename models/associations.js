@@ -39,6 +39,8 @@ import ShibirAttendanceDb from './shibir_attendance_db.model.js'
 import TravelBusGroup from './travelBusGroup.model.js';
 import TravelBusPassengers from './travelBusPassengers.model.js';
 import TravelBusStops from './travelBusStops.model.js';
+import ShibirSession from './shibir_sessions.model.js';
+import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -550,6 +552,66 @@ ShibirAttendanceDb.belongsTo(ShibirBookingDb, {
   targetKey: 'bookingid'
 });
 
+// Shibir → Shibir Sessions
+ShibirDb.hasMany(ShibirSession, {
+  foreignKey: 'shibir_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'sessions'
+});
+
+ShibirSession.belongsTo(ShibirDb, {
+  foreignKey: 'shibir_id',
+  targetKey: 'id',
+  as: 'shibir'
+});
+
+// Shibir → Shibir Attendance Records
+ShibirDb.hasMany(ShibirAttendanceRecord, {
+  foreignKey: 'shibir_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
+});
+
+ShibirAttendanceRecord.belongsTo(ShibirDb, {
+  foreignKey: 'shibir_id',
+  targetKey: 'id',
+  as: 'shibir'
+});
+
+// Card → Shibir Attendance Records
+CardDb.hasMany(ShibirAttendanceRecord, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
+});
+
+ShibirAttendanceRecord.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'card'
+});
+
+// Booking → Shibir Attendance Records
+ShibirBookingDb.hasMany(ShibirAttendanceRecord, {
+  foreignKey: 'bookingid',
+  sourceKey: 'bookingid',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
+});
+
+ShibirAttendanceRecord.belongsTo(ShibirBookingDb, {
+  foreignKey: 'bookingid',
+  targetKey: 'bookingid',
+  as: 'booking'
+});
+
 RoomBooking.hasMany(Transactions, {
   foreignKey: 'bookingid',
   sourceKey: 'bookingid',
@@ -613,5 +675,7 @@ export {
   ShibirAttendanceDb,
   TravelBusGroup,
   TravelBusPassengers,
-  TravelBusStops
+  TravelBusStops,
+  ShibirSession,
+  ShibirAttendanceRecord
 };
