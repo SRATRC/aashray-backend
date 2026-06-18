@@ -39,7 +39,7 @@ const fetchResidentsByStatus = async (req, res, resStatus) => {
 
   // Validate sort parameters against allow-list and sanitize inputs
   const rawSortBy = req.query.sort_by;
-  const ALLOWED_SORT_COLUMNS = ['cardno', 'issuedto', 'mobno', 'last_checkin', 'last_checkout', 'createdAt'];
+  const ALLOWED_SORT_COLUMNS = ['cardno', 'issuedto', 'mobno', 'status', 'last_checkin', 'last_checkout', 'createdAt'];
   const sortBy = ALLOWED_SORT_COLUMNS.includes(rawSortBy) ? rawSortBy : 'cardno';
 
   const rawSortOrder = String(req.query.sort_order || '').toUpperCase();
@@ -60,9 +60,15 @@ const fetchResidentsByStatus = async (req, res, resStatus) => {
   }
 
   const whereClause = {
-    status: STATUS_ONPREM,
     res_status: resStatus
   };
+
+  const statusFilter = req.query.status;
+  if (statusFilter === 'onprem') {
+    whereClause.status = STATUS_ONPREM;
+  } else if (statusFilter === 'offprem') {
+    whereClause.status = STATUS_OFFPREM;
+  }
 
   if (search) {
     whereClause[Sequelize.Op.or] = [
