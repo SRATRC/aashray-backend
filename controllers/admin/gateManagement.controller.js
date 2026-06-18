@@ -39,7 +39,7 @@ const fetchResidentsByStatus = async (req, res, resStatus) => {
 
   // Validate sort parameters against allow-list and sanitize inputs
   const rawSortBy = req.query.sort_by;
-  const ALLOWED_SORT_COLUMNS = ['cardno', 'issuedto', 'mobno', 'status', 'last_checkin', 'last_checkout', 'createdAt'];
+  const ALLOWED_SORT_COLUMNS = ['cardno', 'issuedto', 'mobno', 'status', 'last_checkin', 'last_checkout', 'createdAt', 'res_status'];
   const sortBy = ALLOWED_SORT_COLUMNS.includes(rawSortBy) ? rawSortBy : 'cardno';
 
   const rawSortOrder = String(req.query.sort_order || '').toUpperCase();
@@ -59,9 +59,10 @@ const fetchResidentsByStatus = async (req, res, resStatus) => {
     pageSize = Math.min(Math.max(1, rawPageSize), 100);
   }
 
-  const whereClause = {
-    res_status: resStatus
-  };
+  const whereClause = {};
+  if (resStatus && resStatus !== 'all') {
+    whereClause.res_status = resStatus;
+  }
 
   const statusFilter = req.query.status;
   if (statusFilter === 'onprem') {
@@ -177,6 +178,19 @@ export const fetchMumukshu = async (req, res) => {
 
 export const fetchSevaKutir = async (req, res) => {
   return fetchResidentsByStatus(req, res, STATUS_SEVA_KUTIR);
+};
+
+export const fetchResidents = async (req, res) => {
+  const reqStatus = req.query.res_status; // 'pr', 'mumukshu', 'guest', 'seva', or 'all'
+  let resStatus = 'all';
+  if (reqStatus) {
+    const statusUpper = reqStatus.toUpperCase();
+    if (statusUpper === 'PR') resStatus = STATUS_RESIDENT;
+    else if (statusUpper === 'MUMUKSHU') resStatus = STATUS_MUMUKSHU;
+    else if (statusUpper === 'GUEST') resStatus = STATUS_GUEST;
+    else if (statusUpper === 'SEVA' || statusUpper === 'SEVA_KUTIR' || statusUpper === 'SEVA KUTIR') resStatus = STATUS_SEVA_KUTIR;
+  }
+  return fetchResidentsByStatus(req, res, resStatus);
 };
 
 export const gateEntry = async (req, res) => {
