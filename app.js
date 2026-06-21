@@ -50,6 +50,7 @@ import {
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
 import coordinatorAuthRoutes from './routes/admin/coordinatorAuth.routes.js';
+import waManagementRoutes from './routes/admin/waManagement.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -105,6 +106,7 @@ app.use(urlencoded({ extended: true }));
 app.use(json());
 app.use(cors(corsOptions));
 app.use(httpLogger);
+app.use('/public', express.static(path.join(process.cwd(), 'public')));
 
 app.use(
   session({
@@ -191,6 +193,7 @@ app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 app.use('/api/v1/admin/wifi', wifiManagementRoutes);
 app.use('/api/v1/coordinator', coordinatorAuthRoutes);
+app.use('/api/v1/admin/whatsapp', waManagementRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);

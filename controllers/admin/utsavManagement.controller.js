@@ -3,7 +3,8 @@ import {
   UtsavPackagesDb,
   UtsavBooking,
   CardDb,
-  RoomBooking
+  RoomBooking,
+  WaGroupJob
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
@@ -269,6 +270,20 @@ export const createUtsav = async (req, res) => {
   }
 
   await t.commit();
+
+  try {
+    await WaGroupJob.create({
+      action: 'create_group',
+      status: 'pending',
+      payload: {
+        name: `${name} - ${moment(start_date).format('DD MMM YYYY')}`,
+        type: 'utsav',
+        eventId: utsavDetails.id
+      }
+    });
+  } catch (waJobErr) {
+    req.log.error('Failed to queue WhatsApp group creation for Utsav', { error: waJobErr.message });
+  }
 
   req.log.info('create_utsav_success', { utsavId: utsavDetails.id, name, start_date, end_date });
   return res.status(200).send({ message: 'Created Utsav', data: utsavDetails });
@@ -671,6 +686,7 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.location,
       utsav_db.available_seats,
       utsav_db.registration_deadline,
+      utsav_db.whatsapp_group_jid,
       COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN utsav_booking.status = '${ROOM_STATUS_CHECKEDIN}' THEN 1 END) AS checkedin_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
@@ -697,7 +713,8 @@ END) AS volunteer_opted_count
       utsav_db.total_seats,
       utsav_db.location,
       utsav_db.available_seats,
-      utsav_db.registration_deadline
+      utsav_db.registration_deadline,
+      utsav_db.whatsapp_group_jid
      ORDER BY 
       utsav_db.start_date ASC;`,
     {

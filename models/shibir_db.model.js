@@ -70,6 +70,10 @@ const ShibirDb = sequelize.define(
     updatedBy: {
       type: DataTypes.STRING,
       allowNull: false
+    },
+    whatsapp_group_jid: {
+      type: DataTypes.STRING(255),
+      allowNull: true
     }
   },
   {

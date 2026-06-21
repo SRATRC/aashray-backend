@@ -6,7 +6,8 @@ import {
   Transactions,
   ShibirAttendanceDb,
   ShibirSession,
-  ShibirAttendanceRecord
+  ShibirAttendanceRecord,
+  WaGroupJob
 } from '../../models/associations.js';
 import {
   STATUS_WAITING,
@@ -101,6 +102,20 @@ export const createAdhyayan = async (req, res) => {
 
     await t.commit();
 
+    try {
+      await WaGroupJob.create({
+        action: 'create_group',
+        status: 'pending',
+        payload: {
+          name: `${name} - ${moment(start_date).format('DD MMM YYYY')}`,
+          type: 'shibir',
+          eventId: adhyayan_details.id
+        }
+      });
+    } catch (waJobErr) {
+      req.log.error('Failed to queue WhatsApp group creation for Shibir', { error: waJobErr.message });
+    }
+
     req.log.info('create_adhyayan_success', { adhyayanId: adhyayan_details.id, name, speaker });
     res.status(200).send({ message: 'Created Adhyayan', data: adhyayan_details });
   } catch (error) {
@@ -129,7 +144,8 @@ export const fetchALLAdhyayan = async (req, res) => {
       shibir_db.food_allowed,
       shibir_db.comments,
       shibir_db.status,
-      shibir_db.updatedBy
+      shibir_db.updatedBy,
+      shibir_db.whatsapp_group_jid
     FROM 
       shibir_db
     LEFT JOIN 
@@ -149,7 +165,8 @@ export const fetchALLAdhyayan = async (req, res) => {
       shibir_db.food_allowed,
       shibir_db.comments,
       shibir_db.status,
-      shibir_db.updatedBy
+      shibir_db.updatedBy,
+      shibir_db.whatsapp_group_jid
     ORDER BY 
       shibir_db.start_date ASC;`,
     {

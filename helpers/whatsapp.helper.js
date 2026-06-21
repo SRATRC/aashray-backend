@@ -1,7 +1,7 @@
 import Sequelize from "sequelize";
 // at top of both files (whatsapp.helper and mumukshuBooking.controller)
 import { Op } from 'sequelize';
-import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking } from "../models/associations.js";
+import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking, WaGroupJob } from "../models/associations.js";
 import moment from "moment-timezone";
 import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
@@ -1291,6 +1291,37 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
       adhyayan = await ShibirDb.findOne({ where: { id: booking.shibir_id } });
     }
 
+    if (adhyayan && adhyayan.whatsapp_group_jid) {
+      try {
+        const attendeeCard = await CardDb.findOne({ where: { cardno: booking.cardno } });
+        const attendeePhone = attendeeCard?.mobno ? formatWhatsAppPhone(attendeeCard.mobno, attendeeCard.country) : null;
+        if (attendeePhone) {
+          const isConfirmedStatus = (status) => ["confirmed", "completed", "cash completed"].includes(status);
+          const isCancelledStatus = (status) => ["cancelled", "admin cancelled"].includes(status);
+          
+          if (isConfirmedStatus(newStatus)) {
+            await WaGroupJob.create({
+              action: 'add_member',
+              phone: attendeePhone,
+              groupJid: adhyayan.whatsapp_group_jid,
+              status: 'pending'
+            });
+            console.log(`[WA Job Hook] Queued add_member for ${attendeePhone} to group ${adhyayan.whatsapp_group_jid}`);
+          } else if (isCancelledStatus(newStatus)) {
+            await WaGroupJob.create({
+              action: 'remove_member',
+              phone: attendeePhone,
+              groupJid: adhyayan.whatsapp_group_jid,
+              status: 'pending'
+            });
+            console.log(`[WA Job Hook] Queued remove_member for ${attendeePhone} from group ${adhyayan.whatsapp_group_jid}`);
+          }
+        }
+      } catch (waHookErr) {
+        console.error("Failed to queue WhatsApp group job in sendAdhyayanStatusChangeWhatsApp:", waHookErr);
+      }
+    }
+
     // This adhyayan templates are only for adhyayans happening in Research Centre
     if (adhyayan && adhyayan.location === RESEARCH_CENTRE) {
       const shibirName = adhyayan.name || "";
@@ -2084,9 +2115,37 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
 
     // 3. Load utsav details
     let utsavName = "";
+    let utsav = null;
     if (booking.utsavid) {
-      const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
+      utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
       utsavName = utsav?.name || "";
+    }
+
+    if (utsav && utsav.whatsapp_group_jid && attendeePhone) {
+      try {
+        const isConfirmedStatus = (status) => ["confirmed", "completed", "cash completed"].includes(status);
+        const isCancelledStatus = (status) => ["cancelled", "admin cancelled"].includes(status);
+
+        if (isConfirmedStatus(newStatus)) {
+          await WaGroupJob.create({
+            action: 'add_member',
+            phone: attendeePhone,
+            groupJid: utsav.whatsapp_group_jid,
+            status: 'pending'
+          });
+          console.log(`[WA Job Hook] Queued add_member for ${attendeePhone} to group ${utsav.whatsapp_group_jid}`);
+        } else if (isCancelledStatus(newStatus)) {
+          await WaGroupJob.create({
+            action: 'remove_member',
+            phone: attendeePhone,
+            groupJid: utsav.whatsapp_group_jid,
+            status: 'pending'
+          });
+          console.log(`[WA Job Hook] Queued remove_member for ${attendeePhone} from group ${utsav.whatsapp_group_jid}`);
+        }
+      } catch (waHookErr) {
+        console.error("Failed to queue WhatsApp group job in sendUtsavStatusChangeWhatsApp:", waHookErr);
+      }
     }
 
     // 4. Load package details
