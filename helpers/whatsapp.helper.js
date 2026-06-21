@@ -2,7 +2,7 @@ import Sequelize from "sequelize";
 // at top of both files (whatsapp.helper and mumukshuBooking.controller)
 import { Op } from 'sequelize';
 import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking } from "../models/associations.js";
-import moment from "moment";
+import moment from "moment-timezone";
 import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { formatWhatsAppPhone } from "../utils/phoneFormatter.js";
@@ -1590,11 +1590,11 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
           const lateFee = options.lateFee || 0;
           if (lateFee > 0) {
             templateName = "bk_sha_s_b_ci2co_lcf";
-            const checkoutTimeStr = options.checkoutTime || moment().format("hh:mm a");
+            const checkoutTimeStr = options.checkoutTime || moment().tz('Asia/Kolkata').format("hh:mm a");
             parameters = [attendeeName, checkoutTimeStr, String(lateFee)];
           } else {
             templateName = "bk_sha_s_b_ci2co";
-            const checkoutTimeStr = options.checkoutTime || moment().format("hh:mm a");
+            const checkoutTimeStr = options.checkoutTime || moment().tz('Asia/Kolkata').format("hh:mm a");
             parameters = [attendeeName, checkoutTimeStr];
           }
         }
