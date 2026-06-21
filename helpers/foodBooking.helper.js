@@ -37,7 +37,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { cancelTransactions, usableCredits } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import logger from '../config/logger.js';
 
 const mealTypeMapping = {
@@ -396,18 +396,19 @@ export async function cancelMeal(user, bookingId, mealType, t) {
 }
 
 export async function cancelFood(user, cardno, food_data, t, admin = false) {
-  const now = moment();
-  const today = moment().format('YYYY-MM-DD');
-  const validDate = admin ? today : today + 1;
+  const now = moment().tz('Asia/Kolkata');
+  const today = now.format('YYYY-MM-DD');
+  const tomorrow = now.clone().add(1, 'day').format('YYYY-MM-DD');
+  const validDate = admin ? today : tomorrow;
 
   const validFoodData = food_data.filter((item) => {
     if (admin) {
       return item.date >= validDate;
     }
 
-    const mealCutoffTime = moment(item.date)
+    const mealCutoffTime = moment.tz(item.date, 'Asia/Kolkata')
       .subtract(1, 'day')
-      .hour(20) // 8:00 PM
+      .hour(20) // 8:00 PM IST previous day
       .minute(0)
       .second(0);
 
@@ -641,16 +642,16 @@ export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t)
 
 
 export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
-  // ✅ Use provided date or fallback to current date
+  // ✅ Use provided date or fallback to current date in IST
   const targetDate = providedDate
-    ? moment.utc(providedDate).format('YYYY-MM-DD')
-    : moment.utc().format('YYYY-MM-DD');
+    ? moment.tz(providedDate, 'Asia/Kolkata').format('YYYY-MM-DD')
+    : moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
-  const currentTime = moment.utc();
+  const currentTime = moment().tz('Asia/Kolkata');
   const mealTimes = {
-    breakfast: moment.utc().hour(4).minute(30).second(0),
-    lunch: moment.utc().hour(8).minute(30).second(0),
-    dinner: moment.utc().hour(13).minute(30).second(0)
+    breakfast: moment().tz('Asia/Kolkata').hour(10).minute(0).second(0), // Ends at 10:00 AM IST
+    lunch: moment().tz('Asia/Kolkata').hour(14).minute(0).second(0),     // Ends at 2:00 PM IST
+    dinner: moment().tz('Asia/Kolkata').hour(19).minute(0).second(0)     // Ends at 7:00 PM IST
   };
 
   // ✅ Find booking for the TARGET DATE (not always today)
