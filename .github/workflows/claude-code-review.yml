@@ -3,26 +3,18 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
     # Never review a PR while it is a draft. synchronize/reopened can fire on
     # draft PRs, so this guard (not the trigger list) is what enforces it.
-    # ready_for_review in the triggers above means the review runs the moment
-    # a draft is marked ready.
+    # ready_for_review means the review runs the moment a draft is marked ready.
     if: github.event.pull_request.draft == false
 
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
-      issues: write
       id-token: write
 
     steps:
@@ -31,24 +23,33 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code Review
-        id: claude-review
+      - name: Claude PR review (inline comments)
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          # --comment posts findings as inline comments anchored to the changed
-          # lines (without it the review only prints to the hidden action log).
-          # The added line asks for apply-able GitHub suggestion blocks on small fixes.
-          prompt: |
-            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment
-            When a finding has a concrete fix of a few lines or fewer, include a GitHub ```suggestion``` block with the exact replacement code so it can be applied directly from the PR.
-          # track_progress posts/updates a summary comment so the review is always
-          # visible on the PR, even when there are no inline findings.
+
+          # Posts a progress/summary tracking comment as the review runs.
           track_progress: true
-          # Opus 4.8 at maximum thinking effort (adaptive thinking; --effort max
-          # is the highest reasoning budget — Opus 4.8 rejects manual budget_tokens).
-          claude_args: '--model claude-opus-4-8 --effort max'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request for bugs, logic errors, security issues,
+            performance problems, and deviations from the project's conventions
+            (see CLAUDE.md if present).
+
+            Post your findings as INLINE review comments anchored to the exact
+            changed lines, using the
+            mcp__github_inline_comment__create_inline_comment tool. For each finding:
+              - Anchor the comment to the specific file and line(s) it concerns.
+              - When there is a concrete fix of a few lines or fewer, include a
+                GitHub ```suggestion``` block with the exact replacement code so it
+                can be applied directly from the PR.
+            Use a single top-level comment (via `gh pr comment`) only for the
+            overall summary or general praise — put specific issues inline, not in
+            one big comment.
+
+          # --allowedTools must include the inline-comment tool, or the review
+          # falls back to a single summary comment with no line-anchored comments.
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)" --model claude-opus-4-8 --effort max'
