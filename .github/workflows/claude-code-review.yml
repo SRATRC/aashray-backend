@@ -12,11 +12,11 @@ on:
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Never review a PR while it is a draft. synchronize/reopened can fire on
+    # draft PRs, so this guard (not the trigger list) is what enforces it.
+    # ready_for_review in the triggers above means the review runs the moment
+    # a draft is marked ready.
+    if: github.event.pull_request.draft == false
 
     runs-on: ubuntu-latest
     permissions:
@@ -44,7 +44,8 @@ jobs:
           # track_progress posts/updates a summary comment so the review is always
           # visible on the PR, even when there are no inline findings.
           track_progress: true
-          # Use Opus 4.8 as the review model.
-          claude_args: '--model claude-opus-4-8'
+          # Opus 4.8 at maximum thinking effort (adaptive thinking; --effort max
+          # is the highest reasoning budget — Opus 4.8 rejects manual budget_tokens).
+          claude_args: '--model claude-opus-4-8 --effort max'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
