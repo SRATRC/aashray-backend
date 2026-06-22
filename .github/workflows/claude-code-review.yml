@@ -38,9 +38,12 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          # --comment makes the review post its findings as inline PR comments
-          # (without it the review only prints to the hidden action log).
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment'
+          # --comment posts findings as inline comments anchored to the changed
+          # lines (without it the review only prints to the hidden action log).
+          # The added line asks for apply-able GitHub suggestion blocks on small fixes.
+          prompt: |
+            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }} --comment
+            When a finding has a concrete fix of a few lines or fewer, include a GitHub ```suggestion``` block with the exact replacement code so it can be applied directly from the PR.
           # track_progress posts/updates a summary comment so the review is always
           # visible on the PR, even when there are no inline findings.
           track_progress: true
