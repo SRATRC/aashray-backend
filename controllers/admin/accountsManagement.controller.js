@@ -524,20 +524,29 @@ export const fetchTransactionsBySettlementId = async (req, res) => {
   const transactions = await database.query(
     `
       -- 1. Matched transactions + recon
+      -- Pre-aggregate recon by order_id to avoid fan-out multiplication when
+      -- an order has multiple transaction rows (N txns × 1 recon = N recon rows summed)
       SELECT
         t.razorpay_order_id,
         SUM(t.amount) AS totalAmount,
-        SUM(t.discount) AS totalDiscount, -- ✅ Added
+        SUM(t.discount) AS totalDiscount,
         COUNT(t.razorpay_order_id) AS transactionCount,
-        ROUND(SUM(r.fees), 2) AS totalFees,
-        ROUND(SUM(r.tax), 2) AS totalTax,
-        ROUND(SUM(r.credit_amount), 2) AS totalCreditAmount,
+        r_agg.totalFees,
+        r_agg.totalTax,
+        r_agg.totalCreditAmount,
         'Aashray App Transaction' AS source
       FROM transactions t
-      JOIN razorpay_settlement_recon r
-        ON t.razorpay_order_id = r.order_id
-      WHERE r.settlement_id = :settlementId
-      GROUP BY t.razorpay_order_id
+      JOIN (
+        SELECT
+          order_id,
+          ROUND(SUM(fees), 2)          AS totalFees,
+          ROUND(SUM(tax), 2)           AS totalTax,
+          ROUND(SUM(credit_amount), 2) AS totalCreditAmount
+        FROM razorpay_settlement_recon
+        WHERE settlement_id = :settlementId
+        GROUP BY order_id
+      ) r_agg ON t.razorpay_order_id = r_agg.order_id
+      GROUP BY t.razorpay_order_id, r_agg.totalFees, r_agg.totalTax, r_agg.totalCreditAmount
 
       UNION
 
