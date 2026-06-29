@@ -15,7 +15,8 @@ import {
   getGroupReconciliation,
   syncGroupMembers,
   rescheduleJob,
-  cancelJob
+  cancelJob,
+  updateGroupSettings
 } from '../../controllers/admin/waManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN, ROLE_ADHYAYAN_ADMIN } from '../../config/constants.js';
@@ -70,9 +71,10 @@ router.delete('/templates/:id', CatchAsync(deleteTemplate));
 // Media Uploads
 router.post('/upload', upload.single('file'), CatchAsync(uploadMedia));
 
-// Group Reconciliation & Sync
+// Group Reconciliation, Sync & Settings
 router.get('/groups/:groupJid/reconciliation', CatchAsync(getGroupReconciliation));
 router.post('/groups/:groupJid/sync', CatchAsync(syncGroupMembers));
+router.post('/groups/:groupJid/settings', CatchAsync(updateGroupSettings));
 
 // Reschedule & Cancel Jobs
 router.post('/jobs/:id/reschedule', CatchAsync(rescheduleJob));

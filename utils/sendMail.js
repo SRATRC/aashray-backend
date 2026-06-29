@@ -34,6 +34,8 @@ const sendMail = async (options, log = logger) => {
       cc: options.cc || '',
       subject: options.subject,
       template: options.template,
+      html: options.html,
+      text: options.text,
       context: options.context,
       headers: {
         'X-SES-CONFIGURATION-SET': 'aashrayconfigset'

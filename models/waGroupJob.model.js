@@ -11,7 +11,7 @@ const WaGroupJob = sequelize.define(
       allowNull: false
     },
     action: {
-      type: DataTypes.ENUM('create_group', 'add_member', 'remove_member', 'send_message', 'send_poll', 'fetch_members'),
+      type: DataTypes.ENUM('create_group', 'add_member', 'remove_member', 'send_message', 'send_poll', 'fetch_members', 'update_group_settings'),
       allowNull: false
     },
     phone: {
@@ -42,6 +42,29 @@ const WaGroupJob = sequelize.define(
     },
     scheduledAt: {
       type: DataTypes.DATE,
+      allowNull: true
+    },
+    priority: {
+      type: DataTypes.ENUM('high', 'normal', 'low'),
+      defaultValue: 'normal',
+      allowNull: false
+    },
+    msgId: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    deliveredCount: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+      allowNull: false
+    },
+    readCount: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+      allowNull: false
+    },
+    receipts: {
+      type: DataTypes.JSON,
       allowNull: true
     }
   },

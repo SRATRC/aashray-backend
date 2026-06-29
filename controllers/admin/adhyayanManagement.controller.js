@@ -106,6 +106,7 @@ export const createAdhyayan = async (req, res) => {
       await WaGroupJob.create({
         action: 'create_group',
         status: 'pending',
+        priority: 'high',
         payload: {
           name: `${name} - ${moment(start_date).format('DD MMM YYYY')}`,
           type: 'shibir',

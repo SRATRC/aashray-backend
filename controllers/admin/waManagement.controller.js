@@ -85,7 +85,8 @@ export const broadcastMessage = async (req, res) => {
     filename,
     mimetype,
     pollQuestion,
-    pollOptions
+    pollOptions,
+    priority = 'normal'
   } = req.body;
 
   if (!groupJid) {
@@ -123,6 +124,7 @@ export const broadcastMessage = async (req, res) => {
       status: 'pending',
       groupJid,
       payload,
+      priority,
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null
     });
 
@@ -267,6 +269,7 @@ export const triggerGroupCreation = async (req, res) => {
     const job = await WaGroupJob.create({
       action: 'create_group',
       status: 'pending',
+      priority: 'high',
       payload: {
         name: groupName,
         type,
@@ -453,6 +456,7 @@ export const getGroupReconciliation = async (req, res) => {
       action: 'fetch_members',
       status: 'pending',
       groupJid,
+      priority: 'high',
       payload: {}
     });
 
@@ -627,7 +631,8 @@ export const syncGroupMembers = async (req, res) => {
           action: 'add_member',
           status: 'pending',
           groupJid,
-          phone: item.phone
+          phone: item.phone,
+          priority: 'high'
         });
         queuedJobs.push(job.id);
       } else if (item.action === 'remove') {
@@ -635,7 +640,8 @@ export const syncGroupMembers = async (req, res) => {
           action: 'remove_member',
           status: 'pending',
           groupJid,
-          phone: item.phone
+          phone: item.phone,
+          priority: 'high'
         });
         queuedJobs.push(job.id);
       }
@@ -708,5 +714,67 @@ export const cancelJob = async (req, res) => {
   } catch (err) {
     req.log.error(`Failed to cancel WhatsApp job ${id}:`, err.message);
     return res.status(500).send({ message: 'Error cancelling WhatsApp job' });
+  }
+};
+
+/**
+ * Update settings for a WhatsApp group JID (name, description, announcement mode) via RPC pattern.
+ */
+export const updateGroupSettings = async (req, res) => {
+  const { groupJid } = req.params;
+  const { name, description, announcement } = req.body;
+
+  if (!groupJid) {
+    return res.status(400).send({ message: 'groupJid is required' });
+  }
+
+  try {
+    // Queue settings update job
+    const job = await WaGroupJob.create({
+      action: 'update_group_settings',
+      status: 'pending',
+      groupJid,
+      priority: 'high',
+      payload: {
+        groupJid,
+        name: name ? name.trim() : undefined,
+        description: description ? description.trim() : undefined,
+        announcement
+      }
+    });
+
+    req.log.info('update_group_settings_job_queued', { jobId: job.id, groupJid });
+
+    // Poll for completion (timeout 12s)
+    const maxAttempts = 24; // 24 * 500ms = 12s
+    let attempts = 0;
+    let completedJob = null;
+
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      completedJob = await WaGroupJob.findByPk(job.id);
+      if (completedJob.status === 'success') {
+        break;
+      }
+      if (completedJob.status === 'failed') {
+        return res.status(500).send({
+          message: `Failed to update group settings: ${completedJob.error || 'Unknown WhatsApp API error'}`
+        });
+      }
+      attempts++;
+    }
+
+    if (!completedJob || completedJob.status !== 'success') {
+      return res.status(408).send({
+        message: 'Request timed out waiting for WhatsApp background worker to update settings'
+      });
+    }
+
+    return res.status(200).send({
+      message: 'Group settings updated successfully'
+    });
+  } catch (err) {
+    req.log.error(`Failed to update group settings for ${groupJid}:`, err.stack || err.message);
+    return res.status(500).send({ message: 'Error updating group settings' });
   }
 };

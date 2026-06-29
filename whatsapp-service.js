@@ -11,6 +11,7 @@ import { useDatabaseAuthState } from './helpers/waDbAuth.helper.js';
 import qrcodeTerminal from 'qrcode-terminal';
 import { Op } from 'sequelize';
 import moment from 'moment-timezone';
+import cron from 'node-cron';
 
 const STATUS_FILE = path.join(process.cwd(), 'whatsapp_status.json');
 
@@ -31,6 +32,8 @@ function updateStatus(status, qr = null) {
 let isConnOpen = false;
 let isQueueRunning = false;
 let activeSocket = null;
+let disconnectTimer = null;
+let isAlertSent = false;
 
 async function processQueue(sock) {
   if (!isConnOpen) {
@@ -40,7 +43,7 @@ async function processQueue(sock) {
 
   let job = null;
   try {
-    // 1. Fetch one pending job (respect scheduled time if defined)
+    // 1. Fetch one pending job (respect scheduled time if defined) sorted by priority
     job = await WaGroupJob.findOne({
       where: {
         status: 'pending',
@@ -49,7 +52,10 @@ async function processQueue(sock) {
           { scheduledAt: { [Op.lte]: new Date() } }
         ]
       },
-      order: [['createdAt', 'ASC']]
+      order: [
+        ['priority', 'ASC'],
+        ['createdAt', 'ASC']
+      ]
     });
 
     if (!job) {
@@ -210,6 +216,7 @@ async function processQueue(sock) {
       }
 
       // Check if we need to send media or plain text
+      let sentMsg = null;
       if (mediaUrl) {
         const absolutePath = path.join(process.cwd(), mediaUrl.replace(/^\//, ''));
         console.log(`[WA Queue] Sending media broadcast of type ${mediaType} to group ${groupJid}`);
@@ -221,12 +228,12 @@ async function processQueue(sock) {
         
         const mediaBuffer = fs.readFileSync(absolutePath);
         if (mediaType === 'image') {
-          await sock.sendMessage(groupJid, {
+          sentMsg = await sock.sendMessage(groupJid, {
             image: mediaBuffer,
             caption: textToSend
           });
         } else {
-          await sock.sendMessage(groupJid, {
+          sentMsg = await sock.sendMessage(groupJid, {
             document: mediaBuffer,
             mimetype: mimetype || 'application/octet-stream',
             fileName: filename || 'attachment',
@@ -235,10 +242,12 @@ async function processQueue(sock) {
         }
       } else {
         console.log(`[WA Queue] Sending message to group ${groupJid}`);
-        await sock.sendMessage(groupJid, { text: textToSend });
+        sentMsg = await sock.sendMessage(groupJid, { text: textToSend });
       }
-      await job.update({ status: 'success' });
-      console.log(`[WA Queue] Message sent successfully.`);
+      
+      const sentMsgId = sentMsg?.key?.id || null;
+      await job.update({ status: 'success', msgId: sentMsgId });
+      console.log(`[WA Queue] Message sent successfully. Saved msgId: ${sentMsgId}`);
 
     } else if (job.action === 'send_poll') {
       const { groupJid } = job;
@@ -248,16 +257,16 @@ async function processQueue(sock) {
       }
 
       console.log(`[WA Queue] Sending poll to group ${groupJid}: "${name}"`);
-      await sock.sendMessage(groupJid, {
+      const sentPoll = await sock.sendMessage(groupJid, {
         poll: {
           name,
           values: options,
           selectableCount: 1
         }
       });
-      await job.update({ status: 'success' });
-      console.log(`[WA Queue] Poll sent successfully.`);
-
+      const sentMsgId = sentPoll?.key?.id || null;
+      await job.update({ status: 'success', msgId: sentMsgId });
+      console.log(`[WA Queue] Poll sent successfully. Saved msgId: ${sentMsgId}`);
     } else if (job.action === 'fetch_members') {
       const { groupJid } = job;
       if (!groupJid) {
@@ -278,10 +287,40 @@ async function processQueue(sock) {
         console.error(`[WA Queue] Failed to fetch group metadata:`, fetchErr.message);
         await job.update({ status: 'failed', error: `WhatsApp API fetch error: ${fetchErr.message}` });
       }
+    } else if (job.action === 'update_group_settings') {
+      const { groupJid, announcement, name, description } = job.payload || {};
+      if (!groupJid) {
+        throw new Error('Missing groupJid for update_group_settings action');
+      }
+
+      console.log(`[WA Queue] Updating settings for group JID ${groupJid}`);
+      
+      if (announcement !== undefined) {
+        await sock.groupSettingUpdate(groupJid, announcement ? 'announcement' : 'not_announcement');
+        console.log(`[WA Queue] Set posting restriction to announcement=${announcement}`);
+      }
+      
+      if (name) {
+        await sock.groupUpdateSubject(groupJid, name);
+        console.log(`[WA Queue] Set group subject to "${name}"`);
+      }
+      
+      if (description) {
+        await sock.groupUpdateDescription(groupJid, description);
+        console.log(`[WA Queue] Set group description to "${description}"`);
+      }
+      
+      await job.update({ status: 'success' });
+      console.log(`[WA Queue] Group settings updated successfully.`);
     }
 
-    // Process next job after 1 second (rate limiting)
-    setTimeout(() => processQueue(sock), 1000);
+    // Process next job with randomized jitter for broadcasts (rate limiting)
+    let delay = 1000;
+    if (job && (job.action === 'send_message' || job.action === 'send_poll')) {
+      delay = 2000 + Math.floor(Math.random() * 3000); // 2000ms to 5000ms
+      console.log(`[WA Queue] Broadcast delay applied: ${delay}ms`);
+    }
+    setTimeout(() => processQueue(sock), delay);
 
   } catch (err) {
     console.error(`[WA Queue] Error processing job ${job ? job.id : 'unknown'}:`, err);
@@ -340,6 +379,46 @@ async function connectToWhatsApp() {
       console.log(`[WA Service] Connection closed. Status Code: ${statusCode}, Logged Out: ${isLoggedOut}`);
       updateStatus('disconnected', null);
 
+      // Start alert timer if not already running
+      if (!disconnectTimer && !isAlertSent) {
+        disconnectTimer = setTimeout(async () => {
+          try {
+            console.log('[WA Service] Service has been disconnected for 5 minutes. Sending alerts...');
+            const { default: sendMail } = await import('./utils/sendMail.js');
+            const { sendWhatsAppMessage } = await import('./utils/sendWhatsAppMessage.js');
+            
+            const alertEmail = process.env.ADMIN_ALERT_EMAIL || process.env.SMTP_EMAIL || 'admin@example.com';
+            await sendMail({
+              email: alertEmail,
+              subject: '🚨 Aashray WhatsApp Service Offline Alert',
+              html: `
+                <h3>Aashray WhatsApp Automation Offline</h3>
+                <p>The WhatsApp automation service has been offline for more than 5 minutes.</p>
+                <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+                <p><strong>Disconnect Reason:</strong> Code ${statusCode} (${isLoggedOut ? 'Logged Out' : 'Disconnected/Lost Connection'})</p>
+                <p>Please log in to the admin dashboard and scan the QR code to re-link your device if necessary.</p>
+              `
+            });
+
+            // Send WhatsApp Alert to 918274856695 using template fallback
+            const components = [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: 'Aashray WA Service' },
+                  { type: 'text', text: 'Offline Alert' },
+                  { type: 'text', text: `disconnected (offline >5 mins, code ${statusCode || 'unknown'})` }
+                ]
+              }
+            ];
+            await sendWhatsAppMessage('918274856695', 'admin_status_updated', components);
+            isAlertSent = true;
+          } catch (alertErr) {
+            console.error('[WA Service] Failed to send disconnect alerts:', alertErr.message);
+          }
+        }, 5 * 60 * 1000); // 5 minutes
+      }
+
       if (isLoggedOut) {
         console.log('[WA Service] Session was logged out or invalidated. Deleting credentials from DB to start fresh...');
         try {
@@ -360,6 +439,46 @@ async function connectToWhatsApp() {
       updateStatus('connected', null);
       console.log('[WA Service] Connection established successfully! 🚀');
 
+      // Clear disconnect alert timer and reset flag
+      if (disconnectTimer) {
+        clearTimeout(disconnectTimer);
+        disconnectTimer = null;
+      }
+      if (isAlertSent) {
+        // Send a recovery alert
+        try {
+          console.log('[WA Service] Service reconnected. Sending recovery alerts...');
+          const { default: sendMail } = await import('./utils/sendMail.js');
+          const { sendWhatsAppMessage } = await import('./utils/sendWhatsAppMessage.js');
+          
+          const alertEmail = process.env.ADMIN_ALERT_EMAIL || process.env.SMTP_EMAIL || 'admin@example.com';
+          await sendMail({
+            email: alertEmail,
+            subject: '✅ Aashray WhatsApp Service Reconnected',
+            html: `
+              <h3>Aashray WhatsApp Automation Reconnected</h3>
+              <p>The WhatsApp automation service is back online and has successfully re-established its connection.</p>
+              <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+            `
+          });
+
+          const components = [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: 'Aashray WA Service' },
+                { type: 'text', text: 'Online Status' },
+                { type: 'text', text: 'reconnected successfully (back online)' }
+              ]
+            }
+          ];
+          await sendWhatsAppMessage('918274856695', 'admin_status_updated', components);
+        } catch (alertErr) {
+          console.error('[WA Service] Failed to send recovery alerts:', alertErr.message);
+        }
+        isAlertSent = false;
+      }
+
       if (!isQueueRunning) {
         isQueueRunning = true;
         processQueue(sock);
@@ -367,8 +486,80 @@ async function connectToWhatsApp() {
     }
   });
 
+  sock.ev.on('message-receipt.update', async (receipts) => {
+    try {
+      for (const r of receipts) {
+        const { key, receipt } = r;
+        const msgId = key.id;
+        
+        const job = await WaGroupJob.findOne({ where: { msgId } });
+        if (!job) continue;
+        
+        let currentReceipts = job.receipts || {};
+        const participantJid = key.participant || key.remoteJid;
+        
+        let newStatus = 'delivered';
+        if (receipt.readAt || receipt.status === 3 || receipt.status === 'read') {
+          newStatus = 'read';
+        }
+        
+        if (currentReceipts[participantJid] === 'read') {
+          continue;
+        }
+        
+        currentReceipts[participantJid] = newStatus;
+        
+        let deliveredCount = 0;
+        let readCount = 0;
+        for (const jid in currentReceipts) {
+          const status = currentReceipts[jid];
+          if (status === 'read') {
+            readCount++;
+            deliveredCount++;
+          } else if (status === 'delivered') {
+            deliveredCount++;
+          }
+        }
+        
+        await job.update({
+          receipts: currentReceipts,
+          deliveredCount,
+          readCount
+        });
+      }
+    } catch (receiptErr) {
+      console.error('[WA Service] Receipt update handler failed:', receiptErr.message);
+    }
+  });
+
   sock.ev.on('creds.update', saveCreds);
 }
+
+// Schedule daily media cleanup at midnight (00:00)
+cron.schedule('0 0 * * *', () => {
+  console.log('[WA Service] Starting daily media cleanup...');
+  try {
+    const uploadDir = path.join(process.cwd(), 'public/uploads/whatsapp');
+    if (fs.existsSync(uploadDir)) {
+      const files = fs.readdirSync(uploadDir);
+      const now = Date.now();
+      const expirationTime = 30 * 24 * 60 * 60 * 1000; // 30 days
+      
+      let deletedCount = 0;
+      for (const file of files) {
+        const filePath = path.join(uploadDir, file);
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtimeMs > expirationTime) {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        }
+      }
+      console.log(`[WA Service] Media cleanup finished. Deleted ${deletedCount} files.`);
+    }
+  } catch (err) {
+    console.error('[WA Service] Media cleanup failed:', err.message);
+  }
+});
 
 // Graceful shutdown handling
 const handleShutdown = async (signal) => {

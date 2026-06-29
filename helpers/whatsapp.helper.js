@@ -1304,7 +1304,8 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
               action: 'add_member',
               phone: attendeePhone,
               groupJid: adhyayan.whatsapp_group_jid,
-              status: 'pending'
+              status: 'pending',
+              priority: 'high'
             });
             console.log(`[WA Job Hook] Queued add_member for ${attendeePhone} to group ${adhyayan.whatsapp_group_jid}`);
           } else if (isCancelledStatus(newStatus)) {
@@ -1312,7 +1313,8 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
               action: 'remove_member',
               phone: attendeePhone,
               groupJid: adhyayan.whatsapp_group_jid,
-              status: 'pending'
+              status: 'pending',
+              priority: 'high'
             });
             console.log(`[WA Job Hook] Queued remove_member for ${attendeePhone} from group ${adhyayan.whatsapp_group_jid}`);
           }
@@ -2131,7 +2133,8 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
             action: 'add_member',
             phone: attendeePhone,
             groupJid: utsav.whatsapp_group_jid,
-            status: 'pending'
+            status: 'pending',
+            priority: 'high'
           });
           console.log(`[WA Job Hook] Queued add_member for ${attendeePhone} to group ${utsav.whatsapp_group_jid}`);
         } else if (isCancelledStatus(newStatus)) {
@@ -2139,7 +2142,8 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
             action: 'remove_member',
             phone: attendeePhone,
             groupJid: utsav.whatsapp_group_jid,
-            status: 'pending'
+            status: 'pending',
+            priority: 'high'
           });
           console.log(`[WA Job Hook] Queued remove_member for ${attendeePhone} from group ${utsav.whatsapp_group_jid}`);
         }
