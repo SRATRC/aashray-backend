@@ -31,6 +31,18 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN));
 
+// Server-side enforcement for restricted users
+router.use((req, res, next) => {
+  if (req.user && req.user.username === 'bikram.thapa') {
+    const cleanPath = req.path.replace(/\/$/, '');
+    if (cleanPath !== '/physicalPlates') {
+      req.log.warn('restricted_user_access_blocked', { username: req.user.username, path: req.path });
+      return res.status(403).json({ message: 'Access denied: User restricted to K1 Kitchen Count only' });
+    }
+  }
+  next();
+});
+
 router.post('/issue/bulk', CatchAsync(bulkIssuePlate));
 router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));

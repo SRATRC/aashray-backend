@@ -101,9 +101,12 @@ export const physicalPlatesIssued = async (req, res) => {
 };
 
 export const fetchPhysicalPlateIssued = async (req, res) => {
-  req.log.info('fetch_physical_plate_issued_start');
+  const { date } = req.query;
+  req.log.info('fetch_physical_plate_issued_start', { date });
 
+  const where = date ? { date } : {};
   const data = await FoodPhysicalPlate.findAll({
+    where,
     order: [['date', 'ASC']]
   });
 
