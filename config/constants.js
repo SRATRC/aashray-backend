@@ -90,6 +90,8 @@ export const ROLE_RAJ_ADHYAYAN_ADMIN = 'adhyayanAdminRaj';
 export const ROLE_DHU_ADHYAYAN_ADMIN = 'adhyayanAdminDhu';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
+export const ROLE_FOOD_PLATE_ADMIN = 'foodPlateAdmin';
+
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_DRI_TRAVEL_ADMIN = 'travelAdminDri';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';

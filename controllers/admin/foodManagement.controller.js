@@ -75,6 +75,11 @@ export const physicalPlatesIssued = async (req, res) => {
   const { date, type, count } = req.body;
   req.log.info('physical_plates_issued_start', { date, type, count });
 
+  if (!['breakfast', 'lunch', 'dinner'].includes(type)) {
+    req.log.warn('physical_plates_issued_invalid_type', { date, type });
+    return res.status(400).json({ message: 'Invalid plate type' });
+  }
+
   const alreadyExists = await FoodPhysicalPlate.findOne({
     where: {
       date: date,
@@ -118,6 +123,11 @@ export const updatePhysicalPlate = async (req, res) => {
   const { date, type, count } = req.body;
   req.log.info('update_physical_plate_start', { date, type, count });
 
+  if (!['breakfast', 'lunch', 'dinner'].includes(type)) {
+    req.log.warn('update_physical_plate_invalid_type', { date, type });
+    return res.status(400).json({ message: 'Invalid plate type' });
+  }
+
   const record = await FoodPhysicalPlate.findOne({ where: { date, type } });
   if (!record) {
     throw new ApiError(404, `No plate count found for ${type} on ${date}. Use Add instead.`);
@@ -126,7 +136,7 @@ export const updatePhysicalPlate = async (req, res) => {
   await record.update({ count, updatedBy: req.user.username });
 
   req.log.info('update_physical_plate_success', { date, type, count });
-  return res.status(200).send({ message: 'Plate count updated successfully' });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const bookFood = async (req, res) => {
@@ -842,7 +852,7 @@ export const foodReport = async (req, res) => {
 
     // Zero-out excluded meals per row; drop rows where all 3 meals are excluded
     filteredReport = report.map(row => {
-      const dateStr = (row.date || '').substring(0, 10);
+      const dateStr = moment(row.date).format('YYYY-MM-DD');
       const excluded = excludedMeals[dateStr];
       if (!excluded) return row;
 
@@ -1113,6 +1123,11 @@ export const addBulkMenu = async (req, res) => {
 export const getMealCountByMobile = async (req, res) => {
   const { mobno, fromDate, toDate } = req.body;
   req.log.info('get_meal_count_by_mobile_start', { mobno, fromDate, toDate });
+
+  if (!mobno || !fromDate || !toDate) {
+    req.log.warn('get_meal_count_by_mobile_missing_params', { mobno, fromDate, toDate });
+    return res.status(400).json({ message: 'mobno, fromDate and toDate are required' });
+  }
 
   // Find utsavs overlapping the requested date range at Research Centre
   const utsavs = await UtsavDb.findAll({
