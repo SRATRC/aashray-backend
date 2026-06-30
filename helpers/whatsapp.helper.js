@@ -3,7 +3,7 @@ import Sequelize from "sequelize";
 import { Op } from 'sequelize';
 import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking } from "../models/associations.js";
 import moment from "moment-timezone";
-import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD } from "../config/constants.js";
+import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD, STATUS_RESIDENT } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { formatWhatsAppPhone } from "../utils/phoneFormatter.js";
 import fs from "fs";
