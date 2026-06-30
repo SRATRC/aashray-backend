@@ -37,7 +37,7 @@ router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));
 router.get('/physicalPlates', CatchAsync(fetchPhysicalPlateIssued));
 router.put('/physicalPlates', CatchAsync(updatePhysicalPlate));
 router.get('/fetch_food_bookings', CatchAsync(fetchFoodBookings));
-router.post("/meal-count", getMealCountByMobile);
+router.post("/meal-count", CatchAsync(getMealCountByMobile));
 
 router.post('/book', CatchAsync(bookFood));
 router.put('/cancel/:bookingid', CatchAsync(cancelBooking));

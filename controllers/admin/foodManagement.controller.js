@@ -264,6 +264,7 @@ export const cancelBooking = async (req, res) => {
   req.log.info('cancel_food_booking_start', { bookingid, mealType });
 
   const t = await database.transaction();
+  req.transaction = t;
 
   const booking = await FoodDb.findOne({
     where: {
@@ -619,7 +620,7 @@ export const editBulkBooking = async (req, res) => {
 
 export const updatePlateIssued = async (req, res) => {
   const { bookingid } = req.params;
-  const { mealType, plateIssued, updatedBy } = req.body;
+  const { mealType, plateIssued } = req.body;
 
   req.log.info('update_plate_issued_start', { bookingid, mealType, plateIssued });
 
@@ -661,10 +662,9 @@ export const updatePlateIssued = async (req, res) => {
     }
 
     const updateFields = {
-      [`${mealType}_plate_issued`]: plateIssued
+      [`${mealType}_plate_issued`]: plateIssued,
+      updatedBy: req.user.username
     };
-
-    if (updatedBy) updateFields.updatedBy = updatedBy;
 
     await booking.update(updateFields);
 
@@ -871,6 +871,11 @@ export const foodReportDetails = async (req, res) => {
   const { meal, is_issued, date } = req.query;
   req.log.info('food_report_details_start', { meal, is_issued, date });
 
+  if (!['breakfast', 'lunch', 'dinner'].includes(meal)) {
+    req.log.warn('food_report_details_invalid_meal', { meal });
+    return res.status(400).json({ message: 'Invalid meal type' });
+  }
+
   const bookings = await FoodDb.findAll({
     attributes: ['id', 'date'],
     include: [
@@ -899,6 +904,11 @@ export const foodReportDetailsGuests = async (req, res) => {
   if (!meal || !date) {
     req.log.warn('food_report_details_guests_missing_params', { meal, date });
     return res.status(400).json({ message: 'Missing meal or date parameter' });
+  }
+
+  if (!['breakfast', 'lunch', 'dinner'].includes(meal)) {
+    req.log.warn('food_report_details_guests_invalid_meal', { meal });
+    return res.status(400).json({ message: 'Invalid meal type' });
   }
 
   const mealField = Sequelize.col(`BulkFoodBooking.${meal}`);
@@ -1070,7 +1080,7 @@ export const addBulkMenu = async (req, res) => {
         breakfast: item.breakfast || '',
         lunch: item.lunch || '',
         dinner: item.dinner || '',
-        updatedBy: 'admin',
+        updatedBy: req.user.username,
         createdAt: new Date(),
         updatedAt: new Date()
       }));
@@ -1098,89 +1108,70 @@ export const addBulkMenu = async (req, res) => {
 
 
 export const getMealCountByMobile = async (req, res) => {
-  try {
-    const { mobno, fromDate, toDate } = req.body;
-    req.log.info('get_meal_count_by_mobile_start', { mobno, fromDate, toDate });
+  const { mobno, fromDate, toDate } = req.body;
+  req.log.info('get_meal_count_by_mobile_start', { mobno, fromDate, toDate });
 
-    // 🔥 STEP 1 — find overlapping utsavs
-    const utsavs = await UtsavDb.findAll({
-  where: {
-    start_date: { [Op.lte]: toDate },
-    end_date: { [Op.gte]: fromDate },
-    location: "Research Centre", // ⭐ NEW FILTER
-  },
-  attributes: ["id", "name", "start_date", "end_date", "location"],
-  raw: true,
-});
-    // 🔥 STEP 2 — build exclusion conditions
-    const exclusionConditions = [];
+  // Find utsavs overlapping the requested date range at Research Centre
+  const utsavs = await UtsavDb.findAll({
+    where: {
+      start_date: { [Op.lte]: toDate },
+      end_date: { [Op.gte]: fromDate },
+      location: 'Research Centre'
+    },
+    attributes: ['id', 'name', 'start_date', 'end_date', 'location'],
+    raw: true
+  });
 
-    if (utsavs.length > 0) {
-      utsavs.forEach((u) => {
-        exclusionConditions.push({
-          date: {
-            [Op.between]: [
-              u.start_date > fromDate ? u.start_date : fromDate,
-              u.end_date < toDate ? u.end_date : toDate,
-            ],
-          },
-        });
-      });
+  // Build date exclusion conditions for utsav periods
+  const exclusionConditions = utsavs.map((u) => ({
+    date: {
+      [Op.between]: [
+        u.start_date > fromDate ? u.start_date : fromDate,
+        u.end_date < toDate ? u.end_date : toDate
+      ]
     }
+  }));
 
-    // 🔥 STEP 3 — main meal query (excluding utsav dates)
-    const result = await FoodDb.findAll({
-      attributes: [
-        [fn("COALESCE", fn("SUM", col("breakfast")), 0), "breakfastBooked"],
-        [fn("COALESCE", fn("SUM", col("breakfast_plate_issued")), 0), "breakfastIssued"],
-        [fn("COALESCE", fn("SUM", col("lunch")), 0), "lunchBooked"],
-        [fn("COALESCE", fn("SUM", col("lunch_plate_issued")), 0), "lunchIssued"],
-        [fn("COALESCE", fn("SUM", col("dinner")), 0), "dinnerBooked"],
-        [fn("COALESCE", fn("SUM", col("dinner_plate_issued")), 0), "dinnerIssued"],
-      ],
-      include: [
-        {
-          model: CardDb,
-          attributes: [],
-          required: true,
-          where: { mobno },
-        },
-      ],
-      where: {
-        date: {
-          [Op.between]: [fromDate, toDate],
-        },
-        ...(exclusionConditions.length > 0 && {
-          [Op.not]: {
-            [Op.or]: exclusionConditions,
-          },
-        }),
-      },
-      raw: true,
-    });
+  // Aggregate meal counts excluding utsav dates
+  const result = await FoodDb.findAll({
+    attributes: [
+      [fn('COALESCE', fn('SUM', col('breakfast')), 0), 'breakfastBooked'],
+      [fn('COALESCE', fn('SUM', col('breakfast_plate_issued')), 0), 'breakfastIssued'],
+      [fn('COALESCE', fn('SUM', col('lunch')), 0), 'lunchBooked'],
+      [fn('COALESCE', fn('SUM', col('lunch_plate_issued')), 0), 'lunchIssued'],
+      [fn('COALESCE', fn('SUM', col('dinner')), 0), 'dinnerBooked'],
+      [fn('COALESCE', fn('SUM', col('dinner_plate_issued')), 0), 'dinnerIssued']
+    ],
+    include: [
+      {
+        model: CardDb,
+        attributes: [],
+        required: true,
+        where: { mobno }
+      }
+    ],
+    where: {
+      date: { [Op.between]: [fromDate, toDate] },
+      ...(exclusionConditions.length > 0 && {
+        [Op.not]: { [Op.or]: exclusionConditions }
+      })
+    },
+    raw: true
+  });
 
-    const summary = result[0] || {};
+  const data = result[0] || {};
 
-    // 🔥 STEP 4 — person info
-    const person = await CardDb.findOne({
-      where: { mobno },
-      attributes: ["issuedto", "mobno", "cardno"],
-      raw: true,
-    });
+  const person = await CardDb.findOne({
+    where: { mobno },
+    attributes: ['issuedto', 'mobno', 'cardno'],
+    raw: true
+  });
 
-    req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length });
-    return res.json({
-      success: true,
-      data: summary,
-      person,
-      utsavExcluded: utsavs,
-    });
-
-  } catch (error) {
-    req.log.error('get_meal_count_by_mobile_error', { error: error.message });
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
+  req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length });
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    data,
+    person,
+    utsavExcluded: utsavs
+  });
 };
