@@ -2290,7 +2290,7 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
   const firstBookingForPrCheck = Array.isArray(foodBookingDetails) && foodBookingDetails[0];
   const isSelfBookingForPrCheck = !firstBookingForPrCheck?.bookedBy ||
     String(firstBookingForPrCheck.bookedBy) === String(firstBookingForPrCheck.cardno);
-  if (user.res_status === 'PR' && isSelfBookingForPrCheck) {
+  if (user.res_status === STATUS_RESIDENT && isSelfBookingForPrCheck) {
     console.log(`WA FOOD SKIP: PR self-booking for user ${user.cardno} (${user.issuedto}) — skipping food WhatsApp to reduce cost.`);
     return;
   }
