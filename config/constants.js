@@ -165,3 +165,7 @@ export const RAJ_PRAVAS_EMAIL = 'rajpravas7@gmail.com';
 
 export const WHATSAPP_SUPPORT_NUMBER = '+917875432613';
 
+// Housekeeping Deep Cleaning WhatsApp Notification Recipients (Card Numbers)
+export const DEEP_CLEANING_WA_RECIPIENTS = ['0002945690', '0009076440'];
+
+
