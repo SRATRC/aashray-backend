@@ -111,6 +111,21 @@ export const fetchPhysicalPlateIssued = async (req, res) => {
   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: data });
 };
 
+export const updatePhysicalPlate = async (req, res) => {
+  const { date, type, count } = req.body;
+  req.log.info('update_physical_plate_start', { date, type, count });
+
+  const record = await FoodPhysicalPlate.findOne({ where: { date, type } });
+  if (!record) {
+    throw new ApiError(404, `No plate count found for ${type} on ${date}. Use Add instead.`);
+  }
+
+  await record.update({ count, updatedBy: req.user.username });
+
+  req.log.info('update_physical_plate_success', { date, type, count });
+  return res.status(200).send({ message: 'Plate count updated successfully' });
+};
+
 export const bookFood = async (req, res) => {
   const {
     cardno,
@@ -755,8 +770,101 @@ export const foodReport = async (req, res) => {
     }
   );
 
-  req.log.info('food_report_success', { start_date, end_date, count: report.length });
-  return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
+  let filteredReport = report;
+
+  // ── Ignore event dates logic ──────────────────────────────────────────────
+  if (req.query.ignore_events === 'true') {
+    // Fetch all utsav events overlapping the requested date range
+    const events = await UtsavDb.findAll({
+      attributes: ['start_date', 'end_date', 'starting_meal', 'ending_meal'],
+      where: {
+        start_date: { [Op.lte]: end_date },
+        end_date:   { [Op.gte]: start_date }
+      }
+    });
+
+    const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
+
+    // Build a map: dateStr → Set of meals to exclude
+    const excludedMeals = {};
+    const addExclude = (dateStr, meal) => {
+      if (!excludedMeals[dateStr]) excludedMeals[dateStr] = new Set();
+      excludedMeals[dateStr].add(meal);
+    };
+
+    for (const event of events) {
+      const evStart = event.start_date.substring(0, 10);
+      const evEnd   = event.end_date.substring(0, 10);
+
+      // First event meal on start date (fallback: breakfast = whole day from start)
+      const startingMeals = Array.isArray(event.starting_meal) && event.starting_meal.length
+        ? event.starting_meal : MEAL_ORDER;
+      const firstEventMeal    = MEAL_ORDER.find(m => startingMeals.includes(m)) || 'breakfast';
+      const firstEventMealIdx = MEAL_ORDER.indexOf(firstEventMeal);
+
+      // Last event meal on end date (fallback: dinner = whole day until end)
+      const endingMeals = Array.isArray(event.ending_meal) && event.ending_meal.length
+        ? event.ending_meal : MEAL_ORDER;
+      const lastEventMeal    = [...MEAL_ORDER].reverse().find(m => endingMeals.includes(m)) || 'dinner';
+      const lastEventMealIdx = MEAL_ORDER.indexOf(lastEventMeal);
+
+      // Walk every date in event range
+      const cursor = new Date(evStart);
+      const endD   = new Date(evEnd);
+      while (cursor <= endD) {
+        const dateStr    = cursor.toISOString().split('T')[0];
+        const isStartDay = dateStr === evStart;
+        const isEndDay   = dateStr === evEnd;
+
+        if (isStartDay && isEndDay) {
+          // Single-day event
+          for (let i = firstEventMealIdx; i <= lastEventMealIdx; i++)
+            addExclude(dateStr, MEAL_ORDER[i]);
+        } else if (isStartDay) {
+          // Exclude from first event meal to end of day
+          for (let i = firstEventMealIdx; i < MEAL_ORDER.length; i++)
+            addExclude(dateStr, MEAL_ORDER[i]);
+        } else if (isEndDay) {
+          // Exclude from start of day up to last event meal
+          for (let i = 0; i <= lastEventMealIdx; i++)
+            addExclude(dateStr, MEAL_ORDER[i]);
+        } else {
+          // Full middle day: exclude all meals
+          MEAL_ORDER.forEach(m => addExclude(dateStr, m));
+        }
+
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    // Zero-out excluded meals per row; drop rows where all 3 meals are excluded
+    filteredReport = report.map(row => {
+      const dateStr = (row.date || '').substring(0, 10);
+      const excluded = excludedMeals[dateStr];
+      if (!excluded) return row;
+
+      const r = { ...row };
+      for (const meal of MEAL_ORDER) {
+        if (excluded.has(meal)) {
+          r[meal]                      = 0;
+          r[`${meal}_plate_issued`]    = 0;
+          r[`${meal}_noshow`]          = 0;
+          r[`${meal}_physical_plates`] = 0;
+          r[`${meal}_guest_count`]     = 0;
+          r[`${meal}_guest_issued`]    = 0;
+          r[`${meal}_guest_noshow`]    = 0;
+        }
+      }
+
+      // Drop row entirely if all 3 meals are excluded
+      if (MEAL_ORDER.every(m => excluded.has(m))) return null;
+      return r;
+    }).filter(Boolean);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  req.log.info('food_report_success', { start_date, end_date, count: filteredReport.length });
+  return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: filteredReport });
 };
 
 export const foodReportDetails = async (req, res) => {

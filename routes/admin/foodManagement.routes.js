@@ -5,6 +5,7 @@ import {
   issuePlate,
   physicalPlatesIssued,
   fetchPhysicalPlateIssued,
+  updatePhysicalPlate,
   foodReport,
   foodReportDetails,
   fetchMenu,
@@ -34,6 +35,7 @@ router.post('/issue/bulk', CatchAsync(bulkIssuePlate));
 router.post('/issue/:cardno', CatchAsync(issuePlate));
 router.post('/physicalPlates', CatchAsync(physicalPlatesIssued));
 router.get('/physicalPlates', CatchAsync(fetchPhysicalPlateIssued));
+router.put('/physicalPlates', CatchAsync(updatePhysicalPlate));
 router.get('/fetch_food_bookings', CatchAsync(fetchFoodBookings));
 router.post("/meal-count", getMealCountByMobile);
 
