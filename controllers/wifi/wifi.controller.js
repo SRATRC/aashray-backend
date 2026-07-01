@@ -22,7 +22,7 @@ import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import moment from 'moment';
 
-const MAX_WIFI_PASS_LIMIT = 2;
+const MAX_WIFI_PASS_LIMIT = 1;
 
 export const generateTempCode = async (req, res) => {
   const t = await database.transaction();
