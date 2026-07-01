@@ -41,6 +41,9 @@ import TravelBusPassengers from './travelBusPassengers.model.js';
 import TravelBusStops from './travelBusStops.model.js';
 import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
+import WaSession from './waSession.model.js';
+import WaGroupJob from './waGroupJob.model.js';
+import WaTemplate from './waTemplate.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -677,5 +680,8 @@ export {
   TravelBusPassengers,
   TravelBusStops,
   ShibirSession,
-  ShibirAttendanceRecord
+  ShibirAttendanceRecord,
+  WaSession,
+  WaGroupJob,
+  WaTemplate
 };
