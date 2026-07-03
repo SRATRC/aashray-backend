@@ -29,6 +29,7 @@ import {
 } from '../../controllers/admin/shortLink.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
+import ApiError from '../../utils/ApiError.js';
 
 router.use(auth);
 
@@ -50,164 +51,36 @@ router.post(
     CatchAsync(createShortLink)
 );
 
-router.get(
-    '/accounts',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_ACCOUNTS_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'accounts'
-        )
-    )
-);
+const typeRoleMap = {
+    accounts: [ROLE_SUPER_ADMIN, ROLE_ACCOUNTS_ADMIN],
+    room: [ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN],
+    card: [ROLE_SUPER_ADMIN, ROLE_CARD_ADMIN],
+    office: [ROLE_SUPER_ADMIN, ROLE_OFFICE_ADMIN],
+    food: [ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN],
+    adhyayan: [ROLE_SUPER_ADMIN, ROLE_ADHYAYAN_ADMIN],
+    travel: [ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN],
+    utsav: [ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN],
+    avt: [ROLE_SUPER_ADMIN, ROLE_AVT_ADMIN],
+    wifi: [ROLE_SUPER_ADMIN, ROLE_WIFI_ADMIN]
+};
 
 router.get(
-    '/room',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_ROOM_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'room'
-        )
-    )
-);
+    '/:type',
+    CatchAsync(async (req, res, next) => {
+        const { type } = req.params;
+        const allowedRoles = typeRoleMap[type];
+        if (!allowedRoles) {
+            throw new ApiError(404, 'Invalid short link type');
+        }
 
-router.get(
-    '/card',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_CARD_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'card'
-        )
-    )
-);
+        const userRoles = req.roles || [];
+        const isAuthorized = allowedRoles.some((role) => userRoles.includes(role));
+        if (!isAuthorized) {
+            throw new ApiError(401, 'Unauthorized');
+        }
 
-router.get(
-    '/office',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_OFFICE_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'office'
-        )
-    )
-);
-
-router.get(
-    '/food',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_FOOD_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'food'
-        )
-    )
-);
-
-router.get(
-    '/adhyayan',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_ADHYAYAN_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'adhyayan'
-        )
-    )
-);
-
-router.get(
-    '/travel',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_TRAVEL_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'travel'
-        )
-    )
-);
-
-router.get(
-    '/utsav',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_UTSAV_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'utsav'
-        )
-    )
-);
-
-router.get(
-    '/avt',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_AVT_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'avt'
-        )
-    )
-);
-
-router.get(
-    '/wifi',
-    authorizeRoles(
-        ROLE_SUPER_ADMIN,
-        ROLE_WIFI_ADMIN
-    ),
-    CatchAsync((req, res, next) =>
-        getShortLinksByType(
-            req,
-            res,
-            next,
-            'wifi'
-        )
-    )
+        return getShortLinksByType(req, res, next, type);
+    })
 );
 
 router.put(

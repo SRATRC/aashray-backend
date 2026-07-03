@@ -160,9 +160,6 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-app.get('/api', (_req, res) => {
-  res.status(200).send({ data: 'API is up and running... 🚀', status: 200 });
-});
 
 app.use('/api/v1/updates', updateRoutes);
 

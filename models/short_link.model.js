@@ -34,6 +34,8 @@ const ShortLink = sequelize.define(
                 'avt',
                 'wifi'
             ),
+            allowNull: false,
+            defaultValue: 'wifi'
         },
 
         active: {
