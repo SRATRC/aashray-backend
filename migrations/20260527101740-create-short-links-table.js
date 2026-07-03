@@ -67,9 +67,5 @@ module.exports = {
 
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable('short_links');
-
-    await queryInterface.sequelize.query(
-      'DROP TYPE IF EXISTS enum_short_links_type;'
-    );
   }
 };
