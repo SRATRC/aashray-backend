@@ -40,11 +40,13 @@ const ShortLink = sequelize.define(
 
         active: {
             type: DataTypes.BOOLEAN,
+            allowNull: false,
             defaultValue: true
         },
 
         click_count: {
             type: DataTypes.INTEGER,
+            allowNull: false,
             defaultValue: 0
         },
 

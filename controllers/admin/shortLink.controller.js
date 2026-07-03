@@ -60,6 +60,11 @@ export const createShortLink = async (req, res, next) => {
         throw new ApiError(400, 'Invalid target_url. Must be a valid HTTP/HTTPS URL');
     }
 
+    const slugRegex = /^[A-Za-z0-9_-]+$/;
+    if (!slugRegex.test(slug)) {
+        throw new ApiError(400, 'Invalid slug format. Slugs can only contain alphanumeric characters, hyphens, and underscores');
+    }
+
     if (!VALID_TYPES.includes(type)) {
         throw new ApiError(400, `Invalid link type. Must be one of: ${VALID_TYPES.join(', ')}`);
     }
