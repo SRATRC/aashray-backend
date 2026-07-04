@@ -1,5 +1,17 @@
 'use strict';
 
+// Returns true if an index/constraint with the given name already exists on the
+// table. Used to keep this migration idempotent: the schema may already be in
+// place (e.g. applied out of band) while SequelizeMeta has no record of it.
+async function indexExists(queryInterface, tableName, indexName) {
+  const [rows] = await queryInterface.sequelize.query(
+    `SELECT COUNT(*) AS count FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tableName AND INDEX_NAME = :indexName`,
+    { replacements: { tableName, indexName } }
+  );
+  return Number(rows[0].count) > 0;
+}
+
 module.exports = {
   async up(queryInterface, Sequelize) {
     await queryInterface.createTable('utsav_feedback', {
@@ -112,14 +124,31 @@ module.exports = {
       }
     });
 
-    await queryInterface.addConstraint('utsav_feedback', {
-      fields: ['utsav_id', 'cardno'],
-      type: 'unique',
-      name: 'unique_feedback_per_user_per_utsav'
-    });
+    if (
+      !(await indexExists(
+        queryInterface,
+        'utsav_feedback',
+        'unique_feedback_per_user_per_utsav'
+      ))
+    ) {
+      await queryInterface.addConstraint('utsav_feedback', {
+        fields: ['utsav_id', 'cardno'],
+        type: 'unique',
+        name: 'unique_feedback_per_user_per_utsav'
+      });
+    }
 
-    await queryInterface.addIndex('utsav_feedback', ['utsav_id']);
-    await queryInterface.addIndex('utsav_feedback', ['cardno']);
+    if (
+      !(await indexExists(queryInterface, 'utsav_feedback', 'utsav_feedback_utsav_id'))
+    ) {
+      await queryInterface.addIndex('utsav_feedback', ['utsav_id']);
+    }
+
+    if (
+      !(await indexExists(queryInterface, 'utsav_feedback', 'utsav_feedback_cardno'))
+    ) {
+      await queryInterface.addIndex('utsav_feedback', ['cardno']);
+    }
   },
 
   async down(queryInterface) {
