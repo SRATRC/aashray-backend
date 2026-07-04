@@ -5,8 +5,16 @@ import {
   MSG_UPDATE_SUCCESSFUL,
   STATUS_INPROGRESS,
   STATUS_OPEN,
-  STATUS_CLOSED
+  STATUS_CLOSED,
+  STATUS_RESOLVED
 } from '../../config/constants.js';
+
+const ALLOWED_TICKET_STATUSES = [
+  STATUS_OPEN,
+  STATUS_INPROGRESS,
+  STATUS_RESOLVED,
+  STATUS_CLOSED
+];
 import ticketStreamManager from '../../utils/ticketStreamManager.js';
 import ApiError from '../../utils/ApiError.js';
 import { notifyCardno } from '../../helpers/notification.helper.js';
@@ -148,6 +156,10 @@ export const adminAddMessage = async (req, res) => {
 export const updateTicketStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+
+  if (!ALLOWED_TICKET_STATUSES.includes(status)) {
+    throw new ApiError(400, 'Invalid ticket status');
+  }
 
   const ticket = await Ticket.findByPk(id);
   if (!ticket) {

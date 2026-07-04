@@ -22,7 +22,8 @@ export const createTicket = async (req, res) => {
   }
 
   let { metadata } = req.body;
-  if (typeof metadata !== 'object' || metadata === null) metadata = {};
+  if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata))
+    metadata = {};
   if (JSON.stringify(metadata).length > MAX_METADATA_LENGTH) {
     metadata = { truncated: true };
   }
@@ -72,6 +73,7 @@ export const getTicketDetails = async (req, res) => {
       {
         model: TicketMessage,
         as: 'messages',
+        separate: true,
         order: [['createdAt', 'ASC']]
       }
     ]
