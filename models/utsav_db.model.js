@@ -58,6 +58,14 @@ const UtsavDb = sequelize.define(
       allowNull: true,
       comment:
         'Registration deadline date - users can only see and register for utsavs before or on this date'
+    },
+    starting_meal: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
+    ending_meal: {
+      type: DataTypes.JSON,
+      allowNull: true
     }
   },
   {

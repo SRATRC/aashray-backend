@@ -15,10 +15,11 @@ import { validateCards } from './card.helper.js';
 import { checkAdhyayanParamGyanSabhaOrUtsav } from './adhyayanBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
 import { createPendingTransaction } from './transactions.helper.js';
+import logger from '../config/logger.js';
 
 export async function checkTravelAlreadyBooked(
   date,
@@ -64,14 +65,14 @@ export async function updateWaitingTravelBooking(booking, t) {
   conditions.push({
     date: date
   });
-  if(drop_point === RESEARCH_CENTRE) {
+  if (drop_point === RESEARCH_CENTRE) {
     conditions.push({
       drop_point: {
         [Sequelize.Op.eq]: RESEARCH_CENTRE
       }
     });
   }
-  if(pickup_point === RESEARCH_CENTRE) {
+  if (pickup_point === RESEARCH_CENTRE) {
     conditions.push({
       pickup_point: {
         [Sequelize.Op.eq]: RESEARCH_CENTRE
@@ -89,14 +90,15 @@ export async function updateWaitingTravelBooking(booking, t) {
       },
       { transaction: t }
     );
-    
+    logger.info('travel_waiting_booking_promoted', {
+      bookingid: travelBookingFordate.bookingid,
+      date: travelBookingFordate.date
+    });
     return travelBookingFordate;
-    
   }
 }
 
 export async function sendTravelBookingStatusUpdateMail(travelBookingFordate) {
-  
   let bookedBy = travelBookingFordate.bookedBy;
   const user = await CardDb.findOne({
     where: {
@@ -104,14 +106,14 @@ export async function sendTravelBookingStatusUpdateMail(travelBookingFordate) {
     }
   });
 
-  if(bookedBy) {
+  if (bookedBy) {
     bookedBy = await CardDb.findOne({
       where: {
         cardno: bookedBy
       }
     });
   }
-  if(user) {
+  if (user) {
     sendMail({
       email: user.email,
       cc: bookedBy ? bookedBy.email : null,
@@ -128,14 +130,25 @@ export async function sendTravelBookingStatusUpdateMail(travelBookingFordate) {
     });
   }
 }
-  
-export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
-  const today = moment().format('YYYY-MM-DD');
+
+export async function bookTravelForMumukshus(
+  date,
+  mumukshuGroup,
+  t,
+  user,
+  log = logger
+) {
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
   let userBookingIds = {};
   const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
+  log.info('travel_booking_start', {
+    date,
+    mumukshu_count: mumukshus.length,
+    bookedBy: user.cardno
+  });
   await validateCards(mumukshus);
 
   // Check for existing bookings with same pickup/drop points
@@ -146,7 +159,7 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
       drop_point
     });
   }
-  
+
   var bookingsToCreate = [],
     bookingId;
   for (const group of mumukshuGroup) {
@@ -184,5 +197,6 @@ export async function bookTravelForMumukshus(date, mumukshuGroup, t, user) {
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
-  return { userBookingIds, waitingBookingCount:0 };
+  log.info('travel_booking_result', { count: bookingsToCreate.length, date });
+  return { userBookingIds, waitingBookingCount: 0 };
 }

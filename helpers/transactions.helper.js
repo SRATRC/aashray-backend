@@ -1,4 +1,4 @@
-import { CardDb, Transactions } from '../models/associations.js';
+import { CardDb, Transactions, TravelBusPassengers, TravelBusGroup } from '../models/associations.js';
 import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_CASH_COMPLETED,
@@ -49,6 +49,8 @@ export async function createPendingTransaction(
     },
     { transaction: t }
   );
+
+  logger.info('create_pending_transaction', { transactionId: transaction.id, cardno: card.cardno, bookingid: booking.bookingid, category, amount, cashAllowed });
 
   const discountedAmount = await useCredit(
     card,
@@ -113,18 +115,57 @@ export async function cancelTransaction(
   t,
   admin = false
 ) {
-  console.log('>> Cancel Transaction: Current status =', transaction.status);
+  logger.info('cancel_transaction_start', { transactionId: transaction.id, status: transaction.status, admin });
 
   if (!card) {
     card = await validateCard(transaction.cardno);
+  }
+
+  // Remove from bus assignment if assigned
+  const busAssignment = await TravelBusPassengers.findOne({
+    where: {
+      bookingid: transaction.bookingid
+    },
+    transaction: t
+  });
+
+  if (busAssignment) {
+
+    await TravelBusGroup.update(
+      {
+        coordinator_bookingid: null
+      },
+      {
+        where: {
+          id: busAssignment.bus_group_id,
+          coordinator_bookingid: transaction.bookingid
+        },
+        transaction: t
+      }
+    );
+
+    await TravelBusPassengers.destroy({
+      where: {
+        bookingid: transaction.bookingid
+      },
+      transaction: t
+    });
+
+    logger.info(
+      'cancel_travel_removed_from_bus',
+      {
+        bookingid: transaction.bookingid,
+        busGroupId: busAssignment.bus_group_id
+      }
+    );
   }
 
   if (
     !admin &&
     [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction))
   ) {
-    // User cancelling via app → no credits, keep transaction as completed
-    console.log('>> User cancellation: keeping transaction completed');
+    // User cancelling via app — no credits, keep transaction as completed
+    logger.info('cancel_transaction_user_no_credits', { transactionId: transaction.id, bookingType: getBookingType(transaction) });
     return { credits: 0 }; // no credits added
   }
 
@@ -134,7 +175,7 @@ export async function cancelTransaction(
   const totalAmount = transaction.amount + transaction.discount;
   const credits =
     transaction.status == STATUS_PAYMENT_COMPLETED ||
-    transaction.status == STATUS_CASH_COMPLETED
+      transaction.status == STATUS_CASH_COMPLETED
       ? totalAmount
       : transaction.discount;
 
@@ -146,7 +187,10 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
     case STATUS_PAYMENT_FAILED:
-      if ([TYPE_ADHYAYAN].includes(bookingType) || ifMigrated(transaction)) {
+      if (
+        [TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
+        ifMigrated(transaction)
+      ) {
         // for bookings that are not credited, keep txn status as completed for reports
         if (
           [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
@@ -200,6 +244,7 @@ export async function cancelTransaction(
     { transaction: t }
   );
 
+  logger.info('cancel_transaction_success', { transactionId: transaction.id, fromStatus: transaction.status, toStatus: status, credits });
   return { credits };
 }
 
@@ -428,9 +473,7 @@ export async function updateRazorpayTransactions(
     transaction: t
   });
 
-  logger.info(
-    `Updating razorpay order id for ${JSON.stringify(transactionsToUpdate)}`
-  );
+  logger.info('update_razorpay_transactions_start', { razorpay_order_id, count: transactionsToUpdate.length });
 
   await Transactions.update(
     {

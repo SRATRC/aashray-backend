@@ -89,6 +89,8 @@ export const ROLE_RAJ_ADHYAYAN_ADMIN = 'adhyayanAdminRaj';
 export const ROLE_DHU_ADHYAYAN_ADMIN = 'adhyayanAdminDhu';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
+export const ROLE_FOOD_PLATE_ADMIN = 'foodPlateAdmin';
+
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_DRI_TRAVEL_ADMIN = 'travelAdminDri';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
@@ -153,7 +155,7 @@ export const ERR_FEEDBACK_NOT_ALLOWED =
   'You are not eligible to submit feedback for this adhyayan';
 export const ERR_ADHYAYAN_NOT_COMPLETED =
   'Cannot submit feedback for ongoing or future adhyayan';
-
+export const ERR_UTSAV_NO_SEATS_AVAILABLE = 'No seats available for this utsav';
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
@@ -164,3 +166,10 @@ export const SUBJECT_BOOKING = 'Vitraag Vigyaan Aashray: ';
 export const BOOKING_STATUS_PENDING = 'pending';
 
 export const RAJ_PRAVAS_EMAIL = 'rajpravas7@gmail.com';
+
+export const WHATSAPP_SUPPORT_NUMBER = '+917875432613';
+
+// Housekeeping Deep Cleaning WhatsApp Notification Recipients (Card Numbers)
+export const DEEP_CLEANING_WA_RECIPIENTS = ['0002945690', '0009076440'];
+
+

@@ -21,6 +21,7 @@ import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import moment from 'moment';
+import { sendWifiRequestWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 const MAX_WIFI_PASS_LIMIT = 1;
 
@@ -207,11 +208,12 @@ export const requestPermanentCode = async (req, res) => {
   const baseUsername = `${firstName}${lastName}${cardLast4}${deviceSuffix}`;
 
   const similarUsernames = await PermanentWifiCodes.findAll({
-    attributes: ['username'],
+    attributes: ['username', 'status'],
     where: {
       username: {
         [Sequelize.Op.like]: `${baseUsername}%`
-      }
+      },
+      status: [STATUS_APPROVED, STATUS_RESET, STATUS_PENDING] // ✅ ONLY THESE
     },
     transaction: t
   });
@@ -249,6 +251,9 @@ export const requestPermanentCode = async (req, res) => {
   );
 
   await t.commit();
+
+  // Send WhatsApp message asynchronously
+  sendWifiRequestWhatsApp(req.user.cardno, uniqueUsername.toLowerCase(), STATUS_PENDING, null, deviceType);
 
   return res.status(201).send({
     message:
@@ -311,6 +316,9 @@ export const resetPermanentCode = async (req, res) => {
   );
 
   await t.commit();
+
+  // Send WhatsApp message asynchronously
+  sendWifiRequestWhatsApp(req.user.cardno, existingCode.username, STATUS_RESET);
 
   return res.status(200).send({
     message:

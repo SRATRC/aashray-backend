@@ -67,6 +67,7 @@ export const addData = async (req, res) => {
 };
 
 export const getCountries = async (req, res) => {
+  req.log.info('fetch_countries_start');
   const data = await Countries.findAll({
     attributes: [
       ['id', 'key'],
@@ -74,10 +75,12 @@ export const getCountries = async (req, res) => {
     ],
     order: [['name', 'ASC']]
   });
+  req.log.info('fetch_countries_success', { count: data.length });
   return res.status(200).send({ message: 'fetched countries', data: data });
 };
 
 export const getStates = async (req, res) => {
+  req.log.info('fetch_states_start', { country: req.params.country });
   const data = await States.findAll({
     include: [
       {
@@ -92,10 +95,12 @@ export const getStates = async (req, res) => {
     ],
     order: [['name', 'ASC']]
   });
+  req.log.info('fetch_states_success', { country: req.params.country, count: data.length });
   return res.status(200).send({ message: 'fetched states', data: data });
 };
 
 export const getCities = async (req, res) => {
+  req.log.info('fetch_cities_start', { country: req.params.country, state: req.params.state });
   const data = await Cities.findAll({
     include: [
       {
@@ -117,10 +122,12 @@ export const getCities = async (req, res) => {
     ],
     order: [['name', 'ASC']]
   });
+  req.log.info('fetch_cities_success', { country: req.params.country, state: req.params.state, count: data.length });
   return res.status(200).send({ message: 'fetched cities', data: data });
 };
 
 export const getCentres = async (req, res) => {
+  req.log.info('fetch_centres_start');
   const data = await CentreDb.findAll({
     attributes: [
       ['id', 'key'],
@@ -128,5 +135,6 @@ export const getCentres = async (req, res) => {
     ],
     order: [['name', 'ASC']]
   });
+  req.log.info('fetch_centres_success', { count: data.length });
   return res.status(200).send({ message: 'fetched centres', data: data });
 };

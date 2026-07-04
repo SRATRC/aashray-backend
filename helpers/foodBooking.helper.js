@@ -37,7 +37,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { cancelTransactions, usableCredits } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
-import moment from 'moment';
+import moment from 'moment-timezone';
+import logger from '../config/logger.js';
 
 const mealTypeMapping = {
   breakfast: TYPE_GUEST_BREAKFAST,
@@ -87,8 +88,16 @@ export async function bookFoodForMumukshus(
   t,
   updatedBy,
   userRoles = [],
-  cashAllowed = false
+  cashAllowed = false,
+  log = logger
 ) {
+  const mumukshus_peek = mumukshuGroup.flatMap((g) => g.mumukshus || g.guests);
+  log.info('food_booking_start', {
+    start_date,
+    end_date,
+    mumukshu_count: mumukshus_peek.length,
+    bookedBy
+  });
   if (!end_date) {
     end_date = start_date;
   }
@@ -208,6 +217,11 @@ export async function bookFoodForMumukshus(
     transaction: t
   });
   const transactionIds = transactions.map((item) => item.id);
+  log.info('food_booking_result', {
+    created: bookingsToCreate.length,
+    transactions: transactionIds.length,
+    amount
+  });
   return { amount, userBookingIds, transactionIds };
 }
 
@@ -382,18 +396,19 @@ export async function cancelMeal(user, bookingId, mealType, t) {
 }
 
 export async function cancelFood(user, cardno, food_data, t, admin = false) {
-  const now = moment();
-  const today = moment().format('YYYY-MM-DD');
-  const validDate = admin ? today : today + 1;
+  const now = moment().tz('Asia/Kolkata');
+  const today = now.format('YYYY-MM-DD');
+  const tomorrow = now.clone().add(1, 'day').format('YYYY-MM-DD');
+  const validDate = admin ? today : tomorrow;
 
   const validFoodData = food_data.filter((item) => {
     if (admin) {
       return item.date >= validDate;
     }
 
-    const mealCutoffTime = moment(item.date)
+    const mealCutoffTime = moment.tz(item.date, 'Asia/Kolkata')
       .subtract(1, 'day')
-      .hour(20) // 8:00 PM
+      .hour(20) // 8:00 PM IST previous day
       .minute(0)
       .second(0);
 
@@ -442,6 +457,7 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
 
   await cancelTransactions(user, transactions, t, admin);
 }
+
 
 async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   start_date,
@@ -540,18 +556,102 @@ async function bookFoodForMumukshusDuringUtsav_DEPRECATED(
   return t;
 }
 
+export async function bookFoodForAllMeals(
+  start_date,
+  end_date,
+  starting_meal,
+  ending_meal,
+  cardno,
+  t,
+  updatedBy
+) {
+
+  const allDates = getDates(start_date, end_date);
+
+  const foodBookings = await FoodDb.findAll({
+    where: {
+      cardno: cardno,
+      date: allDates
+    },
+    transaction: t
+  });
+
+  const bookingsToCreate = [], bookingsToUpdate = [];
+
+  const firstDay = allDates[0];
+  const lastDay = allDates.at(-1);
+
+  for (const date of allDates) {
+    const foodBooking = foodBookings.find((item) => item.date === date);
+
+    let breakfast = 1, lunch = 1, dinner = 1;
+
+    if (date === firstDay && starting_meal?.length) {
+      breakfast = starting_meal.includes('breakfast') ? 1 : 0;
+      lunch     = starting_meal.includes('lunch')     ? 1 : 0;
+      dinner    = starting_meal.includes('dinner')    ? 1 : 0;
+    }
+
+    if (date === lastDay && ending_meal?.length) {
+      breakfast = ending_meal.includes('breakfast') ? 1 : 0;
+      lunch     = ending_meal.includes('lunch')     ? 1 : 0;
+      dinner    = ending_meal.includes('dinner')    ? 1 : 0;
+    }
+
+    if (foodBooking) {
+      foodBooking.breakfast = breakfast;
+      foodBooking.lunch = lunch;
+      foodBooking.dinner = dinner;
+      foodBooking.spicy = 1;
+      foodBooking.hightea = 'TEA';
+      foodBooking.updatedBy = updatedBy;
+      bookingsToUpdate.push(foodBooking);
+
+      continue;
+    }
+    bookingsToCreate.push({
+      id: uuidv4(),
+      cardno: cardno,
+      date: date,
+      breakfast,
+      lunch,
+      dinner,
+      spicy: 1,
+      hightea: 'TEA',
+      updatedBy: updatedBy
+    });
+  }
+  if (bookingsToCreate.length > 0) {
+    await FoodDb.bulkCreate(bookingsToCreate, { transaction: t });
+  }
+  if (bookingsToUpdate.length > 0) {
+    await Promise.all(bookingsToUpdate.map(booking => booking.save({ transaction: t })));
+  }
+
+}
+
+export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t) {
+  const allDates = getDates(start_date, end_date);
+
+  await FoodDb.update(
+    { breakfast: 0, lunch: 0, dinner: 0, updatedBy: updatedBy },
+    { where: { cardno: cardno, date: allDates }, transaction: t }
+  );
+}
+
+
 
 export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
-  // ✅ Use provided date or fallback to current date
-  const targetDate = providedDate 
-    ? moment.utc(providedDate).format('YYYY-MM-DD')
-    : moment.utc().format('YYYY-MM-DD');
-  
-  const currentTime = moment.utc();
+  // ✅ Use provided date or fallback to current date in IST
+  const targetDate = providedDate
+    ? moment.tz(providedDate, 'Asia/Kolkata').format('YYYY-MM-DD')
+    : moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
+  const currentTime = moment().tz('Asia/Kolkata');
   const mealTimes = {
-    breakfast: moment.utc().hour(4).minute(30).second(0),
-    lunch: moment.utc().hour(8).minute(30).second(0),
-    dinner: moment.utc().hour(13).minute(30).second(0)
+    breakfast: moment().tz('Asia/Kolkata').hour(10).minute(0).second(0), // Ends at 10:00 AM IST
+    lunch: moment().tz('Asia/Kolkata').hour(14).minute(0).second(0),     // Ends at 2:00 PM IST
+    dinner: moment().tz('Asia/Kolkata').hour(19).minute(0).second(0)     // Ends at 7:00 PM IST
   };
 
   // ✅ Find booking for the TARGET DATE (not always today)
@@ -576,7 +676,7 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
   }
 
   let currentMeal = meal;
-  
+
   // Only auto-detect meal if not provided
   if (!currentMeal) {
     for (const mealType of ['breakfast', 'lunch', 'dinner']) {
@@ -598,12 +698,14 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
   }
 
   const plateField = `${currentMeal}_plate_issued`;
-  
+
   if (booking[plateField]) {
     throw new ApiError(400, `Plate for ${currentMeal} already issued`);
   }
 
   await booking.update({ [plateField]: true }, { transaction: t });
+
+  logger.info('food_plate_issued', { cardno, meal: currentMeal, targetDate });
 
   return {
     message: `Plate for ${currentMeal} issued successfully`,

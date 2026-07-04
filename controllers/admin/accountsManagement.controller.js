@@ -17,6 +17,7 @@ const FOOD_CATEGORIES = ['food', 'breakfast', 'lunch', 'dinner'];
 
 export const fetchCompletedTransactions = async (req, res) => {
   const { startDate, endDate, category, adhyayanId, utsavId } = req.query;
+  req.log.info('fetch_completed_transactions_start', { startDate, endDate, category, adhyayanId, utsavId });
 
   let dateFilter = '';
   let categoryFilter = '';
@@ -57,7 +58,7 @@ export const fetchCompletedTransactions = async (req, res) => {
     SELECT
       t.bookingid,
       t.category,
-      CASE 
+      CASE
         WHEN t.category = 'room' THEN rb.nights
         WHEN t.category = 'flat' THEN fb.nights
         WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food', 'breakfast', 'lunch', 'dinner') THEN 1
@@ -120,6 +121,7 @@ export const fetchCompletedTransactions = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_completed_transactions_success', { count: transactions.length });
   return res.status(200).send({
     message: 'Fetched completed transactions',
     data: transactions
@@ -128,6 +130,7 @@ export const fetchCompletedTransactions = async (req, res) => {
 
 export const fetchPendingTransactions = async (req, res) => {
   const { startDate, endDate } = req.query;
+  req.log.info('fetch_pending_transactions_start', { startDate, endDate });
 
   let dateFilter = '';
   let replacements = {
@@ -146,7 +149,7 @@ export const fetchPendingTransactions = async (req, res) => {
     SELECT
       t.bookingid,
       t.category,
-      CASE 
+      CASE
         WHEN t.category = 'room' THEN rb.nights
         WHEN t.category = 'flat' THEN fb.nights
         WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food', 'breakfast', 'lunch', 'dinner') THEN 1
@@ -206,6 +209,7 @@ export const fetchPendingTransactions = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_pending_transactions_success', { count: transactions.length });
   return res.status(200).send({
     message: 'Fetched pending transactions',
     data: transactions
@@ -214,6 +218,7 @@ export const fetchPendingTransactions = async (req, res) => {
 
 export const fetchAllCreditTransactions = async (req, res) => {
   const { startDate, endDate } = req.query;
+  req.log.info('fetch_credit_transactions_start', { startDate, endDate });
 
   let dateFilter = '';
   let replacements = {
@@ -232,7 +237,7 @@ export const fetchAllCreditTransactions = async (req, res) => {
     SELECT
       t.bookingid,
       t.category,
-      CASE 
+      CASE
         WHEN t.category = 'room' THEN rb.nights
         WHEN t.category = 'flat' THEN fb.nights
         WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food', 'breakfast', 'lunch', 'dinner') THEN 1
@@ -294,6 +299,7 @@ export const fetchAllCreditTransactions = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_credit_transactions_success', { count: transactions.length });
   return res.status(200).send({
     message: 'Fetched credits transactions',
     data: transactions
@@ -301,6 +307,8 @@ export const fetchAllCreditTransactions = async (req, res) => {
 };
 
 export const uploadRazorpaySettlementExcel = async (req, res) => {
+  req.log.info('upload_razorpay_settlement_excel_start', { filename: req.file?.originalname });
+
   const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
   const sheet = XLSX.utils.sheet_to_json(
     workbook.Sheets[workbook.SheetNames[0]],
@@ -313,14 +321,14 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
     const rawDate = row.created_at;
 
     if (!rawDate) {
-      console.warn(`Missing 'created_at' in row with ID ${row.id}`);
+      req.log.warn('upload_razorpay_settlement_missing_date', { rowId: row.id });
       continue;
     }
 
     const parsedDate = moment(rawDate, 'DD/MM/YYYY HH:mm:ss', true);
 
     if (!parsedDate.isValid()) {
-      console.warn(`Invalid date format in row with ID ${row.id}: ${rawDate}`);
+      req.log.warn('upload_razorpay_settlement_invalid_date', { rowId: row.id, rawDate });
       continue;
     }
 
@@ -336,6 +344,7 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
   }
 
   if (formattedRows.length === 0) {
+    req.log.warn('upload_razorpay_settlement_no_valid_rows');
     return res
       .status(400)
       .json({ error: 'No valid rows found with correct date format.' });
@@ -350,10 +359,10 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
   });
 
   const existingIds = new Set(existingRecords.map((r) => r.id));
-
   const uniqueRows = formattedRows.filter((row) => !existingIds.has(row.id));
 
   if (uniqueRows.length === 0) {
+    req.log.info('upload_razorpay_settlement_all_duplicates', { totalRows: formattedRows.length });
     return res
       .status(200)
       .json({ message: 'No new rows to insert. All IDs were duplicates.' });
@@ -361,6 +370,10 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
 
   await RazorpaySettlement.bulkCreate(uniqueRows);
 
+  req.log.info('upload_razorpay_settlement_success', {
+    inserted: uniqueRows.length,
+    duplicates: formattedRows.length - uniqueRows.length
+  });
   res.status(200).json({
     message: `${uniqueRows.length} new record(s) inserted. ${
       formattedRows.length - uniqueRows.length
@@ -369,6 +382,8 @@ export const uploadRazorpaySettlementExcel = async (req, res) => {
 };
 
 export const updateSettlementFieldsFromExcel = async (req, res) => {
+  req.log.info('update_settlement_fields_from_excel_start', { filename: req.file?.originalname });
+
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheet = XLSX.utils.sheet_to_json(
@@ -405,7 +420,7 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
       );
 
       if (!settledAt.isValid()) {
-        console.warn(`Invalid date in row with order_id ${orderId}, skipping.`);
+        req.log.warn('update_settlement_invalid_date', { orderId });
         skipped++;
         continue;
       }
@@ -427,11 +442,12 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
       upserted++;
     }
 
+    req.log.info('update_settlement_fields_from_excel_success', { upserted, skipped });
     return res.status(200).json({
       message: `${upserted} record(s) inserted or updated. ${skipped} skipped (invalid or missing fields).`
     });
   } catch (err) {
-    console.error('Error updating settlements from Excel:', err);
+    req.log.error('update_settlement_fields_from_excel_error', { error: err.message });
     res.status(500).json({
       error: 'Failed to process and update Excel data: ' + err.message
     });
@@ -439,9 +455,10 @@ export const updateSettlementFieldsFromExcel = async (req, res) => {
 };
 
 export const fetchAllSettlements = async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
+  const { startDate, endDate } = req.query;
+  req.log.info('fetch_all_settlements_start', { startDate, endDate });
 
+  try {
     const whereClause = {};
     if (startDate && endDate) {
       whereClause.cerated_at = {
@@ -457,6 +474,7 @@ export const fetchAllSettlements = async (req, res) => {
     });
 
     if (!settlements.length) {
+      req.log.info('fetch_all_settlements_empty');
       return res.status(200).json([]);
     }
 
@@ -491,38 +509,49 @@ export const fetchAllSettlements = async (req, res) => {
       tax: reconMap[s.id]?.totalTax || 0
     }));
 
+    req.log.info('fetch_all_settlements_success', { count: enrichedSettlements.length });
     res.status(200).json(enrichedSettlements);
   } catch (err) {
-    console.error('Error fetching settlements:', err);
+    req.log.error('fetch_all_settlements_error', { error: err.message });
     res.status(500).json({ error: 'Failed to fetch settlements' });
   }
 };
 
 export const fetchTransactionsBySettlementId = async (req, res) => {
   const { settlementId } = req.params;
+  req.log.info('fetch_transactions_by_settlement_start', { settlementId });
 
   const transactions = await database.query(
     `
       -- 1. Matched transactions + recon
-      SELECT 
+      -- Pre-aggregate recon by order_id to avoid fan-out multiplication when
+      -- an order has multiple transaction rows (N txns × 1 recon = N recon rows summed)
+      SELECT
         t.razorpay_order_id,
         SUM(t.amount) AS totalAmount,
-        SUM(t.discount) AS totalDiscount, -- ✅ Added
+        SUM(t.discount) AS totalDiscount,
         COUNT(t.razorpay_order_id) AS transactionCount,
-        ROUND(SUM(r.fees), 2) AS totalFees,
-        ROUND(SUM(r.tax), 2) AS totalTax,
-        ROUND(SUM(r.credit_amount), 2) AS totalCreditAmount,
+        r_agg.totalFees,
+        r_agg.totalTax,
+        r_agg.totalCreditAmount,
         'Aashray App Transaction' AS source
       FROM transactions t
-      JOIN razorpay_settlement_recon r 
-        ON t.razorpay_order_id = r.order_id
-      WHERE r.settlement_id = :settlementId
-      GROUP BY t.razorpay_order_id
+      JOIN (
+        SELECT
+          order_id,
+          ROUND(SUM(fees), 2)          AS totalFees,
+          ROUND(SUM(tax), 2)           AS totalTax,
+          ROUND(SUM(credit_amount), 2) AS totalCreditAmount
+        FROM razorpay_settlement_recon
+        WHERE settlement_id = :settlementId
+        GROUP BY order_id
+      ) r_agg ON t.razorpay_order_id = r_agg.order_id
+      GROUP BY t.razorpay_order_id, r_agg.totalFees, r_agg.totalTax, r_agg.totalCreditAmount
 
       UNION
 
       -- 2. Recon-only (not in transactions)
-SELECT 
+SELECT
   r.order_id AS razorpay_order_id,
   MAX(CAST(JSON_UNQUOTE(JSON_EXTRACT(rw.json, '$.payload.payment.entity.amount')) AS UNSIGNED)) / 100 AS totalAmount,
   0 AS totalDiscount,
@@ -533,7 +562,7 @@ SELECT
   'Satshrut Transaction' AS source
 FROM razorpay_settlement_recon r
 
-LEFT JOIN razorpay_webhook rw 
+LEFT JOIN razorpay_webhook rw
   ON rw.order_id = r.order_id AND rw.status = 'captured'
 
 WHERE r.settlement_id = :settlementId
@@ -549,25 +578,27 @@ GROUP BY r.order_id
     }
   );
 
+  req.log.info('fetch_transactions_by_settlement_success', { settlementId, count: transactions.length });
   res.json({ data: transactions || [] });
 };
 
 export const fetchTransactionsByPaymentId = async (req, res) => {
   const { razorpay_order_id } = req.params;
+  req.log.info('fetch_transactions_by_payment_start', { razorpay_order_id });
 
   const results = await database.query(
     `
       -- 1. Regular Transactions
-      SELECT 
+      SELECT
         t.bookingid,
         t.category,
-        
-        CASE 
+
+        CASE
           WHEN t.category = 'utsav' THEN ub.utsavid
-          ELSE '-' 
+          ELSE '-'
         END AS utsav_id,
 
-        CASE 
+        CASE
           WHEN t.category = 'room' THEN rb.nights
           WHEN t.category = 'flat' THEN fb.nights
           WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food', 'breakfast', 'lunch', 'dinner') THEN 1
@@ -579,16 +610,16 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         t.razorpay_order_id,
         t.description,
 
-        CASE 
+        CASE
           WHEN t.category = 'room' THEN rb.checkin
           WHEN t.category = 'flat' THEN fb.checkin
-          ELSE '-' 
+          ELSE '-'
         END AS checkin,
 
-        CASE 
+        CASE
           WHEN t.category = 'room' THEN rb.checkout
           WHEN t.category = 'flat' THEN fb.checkout
-          ELSE '-' 
+          ELSE '-'
         END AS checkout,
 
         CASE WHEN t.category = 'adhyayan' THEN s.comments ELSE '-' END AS shibir_comments,
@@ -649,7 +680,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
       UNION ALL
 
       -- 2. Satshrut Transactions from Webhook (only captured)
-      SELECT 
+      SELECT
         CAST(JSON_UNQUOTE(JSON_EXTRACT(rw.json, '$.account_id')) AS CHAR) COLLATE utf8mb4_general_ci AS bookingid,
          '-' COLLATE utf8mb4_general_ci AS utsav_id,
         'satshrut' COLLATE utf8mb4_general_ci AS category,
@@ -687,7 +718,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
       WHERE rw.order_id = :razorpay_order_id
         AND rw.status = 'captured'
         AND NOT EXISTS (
-          SELECT 1 FROM transactions t2 
+          SELECT 1 FROM transactions t2
           WHERE BINARY TRIM(t2.razorpay_order_id) = BINARY TRIM(rw.order_id)
         )
       `,
@@ -701,13 +732,16 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_transactions_by_payment_success', { razorpay_order_id, count: results.length });
   return res.json({ data: results });
 };
 
 export const fetchCredits = async (req, res) => {
+  req.log.info('fetch_credits_start');
+
   const cardholders = await database.query(
     `
-      SELECT 
+      SELECT
         cardno,
         issuedto,
         address,
@@ -733,7 +767,7 @@ export const fetchCredits = async (req, res) => {
     try {
       creditValues = JSON.parse(card.credits || '{}');
     } catch (e) {
-      console.warn(`Invalid credits JSON for cardno ${card.cardno}`);
+      req.log.warn('fetch_credits_invalid_json', { cardno: card.cardno });
     }
 
     return {
@@ -745,6 +779,7 @@ export const fetchCredits = async (req, res) => {
     };
   });
 
+  req.log.info('fetch_credits_success', { count: formattedData.length });
   return res.status(200).json({
     message: 'Fetched credit details',
     data: formattedData
@@ -753,8 +788,10 @@ export const fetchCredits = async (req, res) => {
 
 export const fetchCreditTransactions = async (req, res) => {
   const { cardno, category } = req.query;
+  req.log.info('fetch_credit_transactions_by_card_start', { cardno, category });
 
   if (!cardno || !category) {
+    req.log.warn('fetch_credit_transactions_by_card_missing_params', { cardno, category });
     return res.status(400).json({
       message: 'cardno and category are required'
     });
@@ -780,21 +817,10 @@ export const fetchCreditTransactions = async (req, res) => {
   const formatted = [];
 
   for (const t of allTransactions) {
-    // Get base category and any flat-specific redirection
     const actualCategory = t.category;
     const isUsed =
       t.status === 'completed' &&
       t.description?.toLowerCase().includes('credits used');
-    console.log({
-      bookingid: t.bookingid,
-      status: t.status,
-      category: t.category,
-      description: t.description,
-      actualCategory
-    });
-
-    // Case 1: Credited entry
-    // const mealCategories = ['breakfast', 'lunch', 'dinner'];
 
     const isMeal = (cat) => ['breakfast', 'lunch', 'dinner'].includes(cat);
 
@@ -804,7 +830,6 @@ export const fetchCreditTransactions = async (req, res) => {
     };
 
     if (t.status === 'credited' && categoryMatch(actualCategory, category)) {
-      console.log('CREDIT MATCH FOUND:', t);
       remainingCredits += t.amount;
 
       formatted.push({
@@ -845,6 +870,7 @@ export const fetchCreditTransactions = async (req, res) => {
     }
   }
 
+  req.log.info('fetch_credit_transactions_by_card_success', { cardno, category, count: formatted.length });
   return res.status(200).json({
     message: 'Fetched credit usage history successfully',
     data: formatted
@@ -853,6 +879,7 @@ export const fetchCreditTransactions = async (req, res) => {
 
 export const fetchAllDebitTransactions = async (req, res) => {
   const { startDate, endDate } = req.query;
+  req.log.info('fetch_debit_transactions_start', { startDate, endDate });
 
   let dateFilter = '';
   let replacements = {
@@ -871,7 +898,7 @@ export const fetchAllDebitTransactions = async (req, res) => {
     SELECT
       t.bookingid,
       t.category,
-      CASE 
+      CASE
         WHEN t.category = 'room' THEN rb.nights
         WHEN t.category = 'flat' THEN fb.nights
         WHEN t.category IN ('travel', 'utsav', 'adhyayan', 'food', 'breakfast', 'lunch', 'dinner') THEN 1
@@ -944,6 +971,7 @@ ${dateFilter}
     }
   );
 
+  req.log.info('fetch_debit_transactions_success', { count: transactions.length });
   return res.status(200).send({
     message: 'Fetched credits transactions',
     data: transactions

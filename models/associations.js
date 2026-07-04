@@ -36,11 +36,25 @@ import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js';
+import TravelBusGroup from './travelBusGroup.model.js';
+import TravelBusPassengers from './travelBusPassengers.model.js';
+import TravelBusStops from './travelBusStops.model.js';
+import ShibirSession from './shibir_sessions.model.js';
+import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
 
-
 // CardDb
+CardDb.hasOne(AdminUsers, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno'
+});
+AdminUsers.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'card'
+});
+
 CardDb.hasMany(GateRecord, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
@@ -351,6 +365,41 @@ CardDb.hasOne(PermanentWifiCodes, {
   onUpdate: 'CASCADE'
 });
 
+TravelBusGroup.hasMany(TravelBusPassengers, {
+  foreignKey: 'bus_group_id',
+  sourceKey: 'id',
+  as: 'passengers',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+TravelBusPassengers.belongsTo(TravelBusGroup, {
+  foreignKey: 'bus_group_id',
+  targetKey: 'id',
+  as: 'busGroup'
+});
+
+TravelBusPassengers.belongsTo(TravelBusGroup, {
+  foreignKey: 'bus_group_id',
+  targetKey: 'id',
+  as: 'TravelBusGroup',
+});
+
+TravelBusGroup.hasMany(
+  TravelBusStops,
+  {
+    foreignKey: 'bus_group_id',
+    as: 'stops',
+  }
+);
+
+TravelBusStops.belongsTo(
+  TravelBusGroup,
+  {
+    foreignKey: 'bus_group_id',
+  }
+);
+
 // Utsav
 UtsavBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
@@ -555,6 +604,88 @@ ShibirAttendanceDb.belongsTo(ShibirBookingDb, {
   targetKey: 'bookingid'
 });
 
+// Shibir → Shibir Sessions
+ShibirDb.hasMany(ShibirSession, {
+  foreignKey: 'shibir_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'sessions'
+});
+
+ShibirSession.belongsTo(ShibirDb, {
+  foreignKey: 'shibir_id',
+  targetKey: 'id',
+  as: 'shibir'
+});
+
+// Shibir → Shibir Attendance Records
+ShibirDb.hasMany(ShibirAttendanceRecord, {
+  foreignKey: 'shibir_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
+});
+
+ShibirAttendanceRecord.belongsTo(ShibirDb, {
+  foreignKey: 'shibir_id',
+  targetKey: 'id',
+  as: 'shibir'
+});
+
+// Card → Shibir Attendance Records
+CardDb.hasMany(ShibirAttendanceRecord, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
+});
+
+ShibirAttendanceRecord.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'card'
+});
+
+// Booking → Shibir Attendance Records
+ShibirBookingDb.hasMany(ShibirAttendanceRecord, {
+  foreignKey: 'bookingid',
+  sourceKey: 'bookingid',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  as: 'attendanceRecords'
+});
+
+ShibirAttendanceRecord.belongsTo(ShibirBookingDb, {
+  foreignKey: 'bookingid',
+  targetKey: 'bookingid',
+  as: 'booking'
+});
+
+RoomBooking.hasMany(Transactions, {
+  foreignKey: 'bookingid',
+  sourceKey: 'bookingid',
+  as: 'transactions'
+});
+
+Transactions.belongsTo(RoomBooking, {
+  foreignKey: 'bookingid',
+  targetKey: 'bookingid'
+});
+
+FlatBooking.hasMany(Transactions, {
+  foreignKey: 'bookingid',
+  sourceKey: 'bookingid',
+  as: 'transactions'
+});
+
+Transactions.belongsTo(FlatBooking, {
+  foreignKey: 'bookingid',
+  targetKey: 'bookingid'
+});
+
 export {
   CardDb,
   Transactions,
@@ -594,6 +725,11 @@ export {
   AdhyayanFeedback,
   RazorpaySettlementRecon,
   ShibirAttendanceDb,
+  TravelBusGroup,
+  TravelBusPassengers,
+  TravelBusStops,
+  ShibirSession,
+  ShibirAttendanceRecord,
   UtsavFeedback,
   UtsavFeedbackAnswer
 };

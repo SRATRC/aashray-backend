@@ -5,12 +5,19 @@ import {
 } from '@aws-sdk/client-s3';
 import { CardDb, FlatDb } from '../../models/associations.js';
 import { sendPushNotifications } from '../../helpers/notification.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import multer from 'multer';
 import path from 'path';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import moment from 'moment-timezone';
 
 export const updateProfile = async (req, res) => {
+  attachUserContext(req);
+  req.log.info('update_profile_start', { cardno: req.user.cardno });
+
   const {
     issuedto,
     gender,
@@ -26,6 +33,34 @@ export const updateProfile = async (req, res) => {
     pin,
     center
   } = req.body;
+
+  const card = await CardDb.findOne({ where: { cardno: req.user.cardno } });
+  if (!card) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  // --- Compare to find changed fields ---
+  const isChanged = (newVal, oldVal) => {
+    if (newVal === undefined) return false;
+    const normalize = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    return normalize(newVal) !== normalize(oldVal);
+  };
+
+  const changed = [];
+  if (isChanged(issuedto, card.issuedto)) changed.push('Name');
+  if (isChanged(gender, card.gender)) changed.push('Gender');
+  if (isChanged(dob, card.dob)) changed.push('Date of Birth');
+  if (isChanged(mobno, card.mobno)) changed.push('Mobile Number');
+  if (isChanged(idType, card.idType)) changed.push('ID Type');
+  if (isChanged(idNo, card.idNo)) changed.push('ID Number');
+  if (isChanged(email, card.email)) changed.push('Email');
+  if (isChanged(address, card.address)) changed.push('Address');
+  if (isChanged(country, card.country)) changed.push('Country');
+  if (isChanged(state, card.state)) changed.push('State');
+  if (isChanged(city, card.city)) changed.push('City');
+  if (isChanged(pin, card.pin)) changed.push('Pin');
+  if (isChanged(center, card.center)) changed.push('Center');
+
   const updatedProfile = await CardDb.update(
     {
       issuedto,
@@ -48,7 +83,9 @@ export const updateProfile = async (req, res) => {
       }
     }
   );
+
   if (!updatedProfile) {
+    req.log.error('update_profile_failed', { cardno: req.user.cardno });
     throw new ApiError(404, 'user not updated');
   }
 
@@ -61,12 +98,45 @@ export const updateProfile = async (req, res) => {
     }
   });
 
+  req.log.info('update_profile_success', { cardno: req.user.cardno });
+
+  // --- Send WhatsApp notification if any details were changed ---
+  if (changed.length > 0) {
+    const targetPhone = mobno || card.mobno;
+    if (targetPhone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
+
+        const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' },
+              { type: 'text', text: card.cardno },
+              { type: 'text', text: formattedTime },
+              { type: 'text', text: changed.join(', ') },
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'profile_updated', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp profile_updated message in updateProfile:', waErr.message || waErr);
+      }
+    }
+  }
+
   return res
     .status(200)
     .send({ message: 'Profile Updated', data: updatedProfileData });
 };
 
 export const upload = async (req, res) => {
+  attachUserContext(req);
+  req.log.info('upload_profile_pic_start', { cardno: req.user.cardno, hasPfp: !!req.user.pfp });
   const doesPfpExist = req.user.pfp;
 
   const s3 = new S3Client({
@@ -94,12 +164,15 @@ export const upload = async (req, res) => {
 
   uploadSingle(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
+      req.log.warn('upload_profile_pic_multer_error', { cardno: req.user.cardno, error: err.message });
       return res.status(400).json({ error: `Multer error: ${err.message}` });
     } else if (err) {
+      req.log.warn('upload_profile_pic_error', { cardno: req.user.cardno, error: err.message });
       return res.status(400).json({ error: err.message });
     }
 
     if (!req.file) {
+      req.log.warn('upload_profile_pic_no_file', { cardno: req.user.cardno });
       return res.status(400).json({ error: 'Please upload an image file' });
     }
 
@@ -115,6 +188,7 @@ export const upload = async (req, res) => {
 
     await s3.send(new PutObjectCommand(uploadParams));
     const fileUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+    req.log.info('upload_profile_pic_s3_uploaded', { cardno: req.user.cardno, fileName });
 
     await CardDb.update(
       {
@@ -135,8 +209,10 @@ export const upload = async (req, res) => {
       };
 
       await s3.send(new DeleteObjectCommand(deleteParams));
+      req.log.info('upload_profile_pic_old_deleted', { cardno: req.user.cardno, oldKey });
     }
 
+    req.log.info('upload_profile_pic_success', { cardno: req.user.cardno, fileUrl });
     return res.status(200).json({
       message: 'File uploaded successfully',
       data: fileUrl
@@ -145,9 +221,17 @@ export const upload = async (req, res) => {
 };
 
 export const transactions = async (req, res) => {
+  attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  req.log.info('fetch_transactions_start', {
+    cardno: req.user.cardno,
+    page,
+    pageSize,
+    status: req.query.status,
+    category: req.query.category
+  });
 
   let status = req.query.status || null;
   if (status) {
@@ -228,6 +312,11 @@ export const transactions = async (req, res) => {
     type: database.QueryTypes.SELECT
   });
 
+  req.log.info('fetch_transactions_success', {
+    cardno: req.user.cardno,
+    count: transactions.length,
+    hasMore: transactions.length === pageSize
+  });
   return res.status(200).json({
     message: 'transactions fetched',
     data: transactions,
@@ -240,9 +329,12 @@ export const transactions = async (req, res) => {
 };
 
 export const sendNotification = async (req, res) => {
+  attachUserContext(req);
   const { tokenData } = req.body;
+  req.log.info('send_notification_start', { cardno: req.user.cardno, tokenCount: tokenData?.length });
 
   if (!tokenData || !Array.isArray(tokenData) || tokenData.length === 0) {
+    req.log.warn('send_notification_invalid_data', { cardno: req.user.cardno });
     throw new ApiError(
       400,
       'Invalid request: tokenData must be a non-empty array'
@@ -250,6 +342,11 @@ export const sendNotification = async (req, res) => {
   }
 
   const result = await sendPushNotifications(tokenData);
+  req.log.info('send_notification_success', {
+    cardno: req.user.cardno,
+    sentCount: result.sentCount,
+    totalRequested: result.totalRequested
+  });
 
   return res.status(200).json({
     message: 'Notifications sent successfully',
@@ -260,7 +357,9 @@ export const sendNotification = async (req, res) => {
 };
 
 export const fetchProfile = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
+  req.log.info('fetch_profile_start', { cardno });
 
   const profile = await CardDb.findOne({
     where: {
@@ -280,6 +379,7 @@ export const fetchProfile = async (req, res) => {
   });
 
   if (!profile) {
+    req.log.warn('fetch_profile_not_found', { cardno });
     throw new ApiError(404, 'user not found');
   }
 
@@ -292,5 +392,6 @@ export const fetchProfile = async (req, res) => {
 
   profile.setDataValue('isFlatOwner', !!isFlatOwner);
 
+  req.log.info('fetch_profile_success', { cardno, isFlatOwner: !!isFlatOwner });
   return res.status(200).json({ message: 'Profile fetched', data: profile });
 };

@@ -1,4 +1,4 @@
-import { TravelDb } from '../../models/associations.js';
+import { TravelDb, TravelBusPassengers, TravelBusGroup } from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
@@ -9,11 +9,16 @@ import {
   ERR_BOOKING_NOT_FOUND
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
+import {
+  updateWaitingTravelBooking,
+  sendTravelBookingStatusUpdateMail
+} from '../../helpers/travelBooking.helper.js';
+import { sendTravelStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
 } from '../../helpers/notification.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
@@ -21,9 +26,11 @@ import Sequelize from 'sequelize';
 import moment from 'moment';
 
 export const FetchUpcoming = async (req, res) => {
+  attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  req.log.info('fetch_travel_bookings_start', { cardno: req.user.cardno, page, pageSize });
 
   const data = await database.query(
     `SELECT t1.bookingid,
@@ -35,6 +42,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.drop_point,
        t1.type,
        t1.luggage,
+       t1.arrival_time,
        t1.comments,
        t1.admin_comments,
        t1.status,
@@ -67,11 +75,15 @@ export const FetchUpcoming = async (req, res) => {
     }
   );
 
+  req.log.info('fetch_travel_bookings_success', { cardno: req.user.cardno, count: data.length });
   return res.status(200).send({ message: 'Fetched data', data: data });
 };
 
 export const CancelTravel = async (req, res) => {
+  attachUserContext(req);
   const { bookingid } = req.body;
+  req.log.info('cancel_travel_start', { bookingid, cardno: req.user.cardno });
+
   let bookingWhichCameOutOfWaiting = null;
   const t = await database.transaction();
   req.transaction = t;
@@ -89,17 +101,45 @@ export const CancelTravel = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('cancel_travel_not_found', { bookingid, cardno: req.user.cardno });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   const bookingStatus = booking.status;
+  req.log.info('cancel_travel_found', {
+    bookingid,
+    cardno: req.user.cardno,
+    currentStatus: bookingStatus,
+    date: booking.date,
+    pickup: booking.pickup_point,
+    drop: booking.drop_point
+  });
 
   await userCancelBooking(req.user, booking, t);
+  req.log.info('cancel_travel_cancelled', {
+    bookingid,
+    cardno: req.user.cardno,
+    previousStatus: bookingStatus,
+    newStatus: 'cancelled'
+  });
+
   // bring people from the waiting to awaiting confirmation.
   if (bookingStatus != STATUS_WAITING) {
-    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking,t);
+    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking, t);
+    if (bookingWhichCameOutOfWaiting) {
+      req.log.info('cancel_travel_waitlist_promoted', {
+        promotedBookingId: bookingWhichCameOutOfWaiting.bookingid
+      });
+    }
   }
   await t.commit();
+  req.log.info('cancel_travel_committed', { bookingid });
+
+  try {
+    await sendTravelStatusChangeWhatsApp(booking, bookingStatus);
+  } catch (waErr) {
+    console.error("Error triggering travel status change WhatsApp on cancel:", waErr);
+  }
 
   const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
   sendMail({
@@ -122,14 +162,12 @@ export const CancelTravel = async (req, res) => {
       const title = 'Raj Pravas Booking Cancelled';
       const body =
         req.user.cardno === booking.cardno
-          ? `Travel on ${moment(booking.date).format('Do MMM, YYYY')} for ${
-              req.user.issuedto
-            } has been cancelled.`
+          ? `Travel on ${moment(booking.date).format('Do MMM, YYYY')} for ${req.user.issuedto
+          } has been cancelled.`
           : `Your travel on ${moment(booking.date).format(
-              'Do MMM, YYYY'
-            )} from ${booking.pickup_point} to ${
-              booking.drop_point
-            } has been cancelled.`;
+            'Do MMM, YYYY'
+          )} from ${booking.pickup_point} to ${booking.drop_point
+          } has been cancelled.`;
       notifyCardno(other, {
         title,
         body,
@@ -141,5 +179,7 @@ export const CancelTravel = async (req, res) => {
   if (bookingWhichCameOutOfWaiting) {
     sendTravelBookingStatusUpdateMail(bookingWhichCameOutOfWaiting);
   }
+
+  req.log.info('cancel_travel_success', { bookingid, cardno: req.user.cardno });
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
