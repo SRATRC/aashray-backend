@@ -54,13 +54,21 @@ class TicketStreamManager {
 
   // Keep idle SSE connections alive behind proxies (e.g. Render) that
   // drop connections with no traffic for a while.
+  //
+  // Sent as a real `data:` frame carrying {type:'ping'} rather than a raw
+  // SSE comment line (`: ping`): some clients (e.g. react-native-sse) never
+  // surface comment lines to application code at all, which means a client
+  // has no way to notice a connection has silently gone stale (a graceful
+  // close produces no error event either). A real data frame lets clients
+  // treat "no ping in N seconds" as a liveness check and reconnect proactively.
   startHeartbeat() {
     if (this._hb) return;
     this._hb = setInterval(() => {
+      const ping = `data: ${JSON.stringify({ type: 'ping' })}\n\n`;
       this.clients.forEach((set, ticketId) => {
         set.forEach((client) => {
           try {
-            client.write(': ping\n\n');
+            client.write(ping);
           } catch (e) {
             this.removeClient(ticketId, client);
           }
