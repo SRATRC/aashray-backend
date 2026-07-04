@@ -42,6 +42,7 @@ export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
 export const STATUS_DELETED = 'deleted';
 export const STATUS_INPROGRESS = 'in progress';
+export const STATUS_RESOLVED = 'resolved';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
 export const STATUS_PROCEED_FOR_PAYMENT = 'proceed for payment';
