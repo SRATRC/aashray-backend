@@ -31,7 +31,8 @@ import {
   ReservationReport,
   issuePlate,
   createUtsavBookingByAdmin,
-  addUtsavPackagesBulk
+  addUtsavPackagesBulk,
+  fetchUtsavFeedbacks
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
@@ -105,6 +106,10 @@ utsavAdminRouter.get(
 utsavAdminRouter.get(
   '/post_event_room_occupancy',
   CatchAsync(ReservationReport)
+);
+utsavAdminRouter.get(
+  '/utsav-feedback',
+  CatchAsync(fetchUtsavFeedbacks)
 );
 
 export { utsavPublicRouter, utsavAdminRouter };
