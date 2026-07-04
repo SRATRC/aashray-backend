@@ -9,12 +9,12 @@ import {
   STATUS_RESOLVED
 } from '../../config/constants.js';
 
-const ALLOWED_TICKET_STATUSES = [
-  STATUS_OPEN,
-  STATUS_INPROGRESS,
-  STATUS_RESOLVED,
-  STATUS_CLOSED
-];
+// Admins can only move a ticket to open/in-progress/resolved. Closing is not
+// an admin action: the ticket owner closes it themselves (client resolve
+// endpoint), or it auto-closes after sitting resolved with no activity
+// (see the ticketAutoCloseJob in cron.js) — matching how Zendesk/Freshdesk
+// separate "solved" (agent) from "closed" (customer or time-based).
+const ALLOWED_TICKET_STATUSES = [STATUS_OPEN, STATUS_INPROGRESS, STATUS_RESOLVED];
 import ticketStreamManager from '../../utils/ticketStreamManager.js';
 import ApiError from '../../utils/ApiError.js';
 import { notifyCardno } from '../../helpers/notification.helper.js';

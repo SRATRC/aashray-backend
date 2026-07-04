@@ -358,11 +358,60 @@ const wifiLowAlertJob = cron.schedule('*/30 * * * *', async () => {
   }
 });
 
+const TICKET_AUTO_CLOSE_GRACE_DAYS = 7;
+
+// A ticket an admin marked "resolved" auto-closes after sitting untouched for
+// TICKET_AUTO_CLOSE_GRACE_DAYS with no further activity — matching how
+// Zendesk (default 4 days) and Freshdesk (default 48h) separate the agent's
+// "solved" action from the final "closed" state. A user reply to a resolved
+// ticket moves it back to "in progress" (see ticket.controller.js), which
+// resets updatedAt and pulls it out of this window; an admin follow-up
+// message on an already-resolved ticket also refreshes updatedAt, restarting
+// the countdown. Runs once daily — a 7-day window doesn't need finer polling.
+const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
+  logger.info('ticketAutoCloseJob cron job started.');
+  try {
+    const { Op } = await import('sequelize');
+    const { Ticket } = await import('./models/associations.js');
+    const { STATUS_RESOLVED, STATUS_CLOSED } = await import('./config/constants.js');
+    const { notifyCardno } = await import('./helpers/notification.helper.js');
+
+    const cutoff = moment().utc().subtract(TICKET_AUTO_CLOSE_GRACE_DAYS, 'days').toDate();
+
+    const staleTickets = await Ticket.findAll({
+      where: { status: STATUS_RESOLVED, updatedAt: { [Op.lt]: cutoff } }
+    });
+
+    for (const ticket of staleTickets) {
+      await ticket.update({ status: STATUS_CLOSED, updatedBy: 'system:auto-close' });
+
+      try {
+        await notifyCardno(ticket.issued_by, {
+          title: 'Support ticket closed',
+          body: `Your ${ticket.service} ticket was automatically closed after ${TICKET_AUTO_CLOSE_GRACE_DAYS} days of inactivity`,
+          screen: `/support/${ticket.id}`,
+          data: { ticketId: ticket.id }
+        });
+      } catch (e) {
+        // notification is best-effort
+      }
+    }
+
+    logger.info(`ticketAutoCloseJob finished: closed ${staleTickets.length} ticket(s).`);
+  } catch (error) {
+    logger.error(`ticketAutoCloseJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
 job.start();
 mealsCount9PMJob.start();
 mealsCount10PMJob.start();
 mealsCount11PMJob.start();
 wifiLowAlertJob.start();
+ticketAutoCloseJob.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
@@ -374,6 +423,7 @@ const gracefulShutdown = async () => {
   mealsCount10PMJob.stop();
   mealsCount11PMJob.stop();
   wifiLowAlertJob.stop();
+  ticketAutoCloseJob.stop();
 
   // Wait for the current task to finish if it's running
   const waitInterval = setInterval(() => {
