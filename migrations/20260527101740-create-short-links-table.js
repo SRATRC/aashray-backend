@@ -23,9 +23,20 @@ module.exports = {
       },
 
       type: {
-        type: Sequelize.ENUM('wifi', 'video', 'external', 'form'),
+        type: Sequelize.ENUM(
+          'accounts',
+          'room',
+          'card',
+          'office',
+          'food',
+          'adhyayan',
+          'travel',
+          'utsav',
+          'avt',
+          'wifi'
+        ),
         allowNull: false,
-        defaultValue: 'external'
+        defaultValue: 'wifi'
       },
 
       active: {

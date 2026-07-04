@@ -25,7 +25,8 @@ import {
     createShortLink,
     getShortLinksByType,
     updateShortLink,
-    deleteShortLink
+    deleteShortLink,
+    TYPE_ROLE_MAP
 } from '../../controllers/admin/shortLink.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -33,6 +34,11 @@ import ApiError from '../../utils/ApiError.js';
 
 router.use(auth);
 
+/* 
+ * NOTE: The route-level authorizeRoles checks below act as a broad gate ensuring 
+ * that the user has at least one valid administrative role in the system. 
+ * Fine-grained, type-specific role authorization is handled inside the controller functions.
+ */
 router.post(
     '/',
     authorizeRoles(
@@ -51,24 +57,11 @@ router.post(
     CatchAsync(createShortLink)
 );
 
-const typeRoleMap = {
-    accounts: [ROLE_SUPER_ADMIN, ROLE_ACCOUNTS_ADMIN],
-    room: [ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN],
-    card: [ROLE_SUPER_ADMIN, ROLE_CARD_ADMIN],
-    office: [ROLE_SUPER_ADMIN, ROLE_OFFICE_ADMIN],
-    food: [ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN],
-    adhyayan: [ROLE_SUPER_ADMIN, ROLE_ADHYAYAN_ADMIN],
-    travel: [ROLE_SUPER_ADMIN, ROLE_TRAVEL_ADMIN],
-    utsav: [ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN],
-    avt: [ROLE_SUPER_ADMIN, ROLE_AVT_ADMIN],
-    wifi: [ROLE_SUPER_ADMIN, ROLE_WIFI_ADMIN]
-};
-
 router.get(
     '/:type',
     CatchAsync(async (req, res, next) => {
         const { type } = req.params;
-        const allowedRoles = typeRoleMap[type];
+        const allowedRoles = TYPE_ROLE_MAP[type];
         if (!allowedRoles) {
             throw new ApiError(404, 'Invalid short link type');
         }
@@ -85,6 +78,7 @@ router.get(
 
 router.put(
     '/:id',
+    /* Redundant route-level role check (controller verifies type-specific access) */
     authorizeRoles(
         ROLE_SUPER_ADMIN,
         ROLE_ACCOUNTS_ADMIN,
@@ -103,6 +97,7 @@ router.put(
 
 router.delete(
     '/:id',
+    /* Redundant route-level role check (controller verifies type-specific access) */
     authorizeRoles(
         ROLE_SUPER_ADMIN,
         ROLE_ACCOUNTS_ADMIN,

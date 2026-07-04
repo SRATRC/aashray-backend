@@ -1,5 +1,6 @@
 import ShortLink from '../../models/short_link.model.js';
 import ApiError from '../../utils/ApiError.js';
+import database from '../../config/database.js';
 import {
     ROLE_SUPER_ADMIN,
     ROLE_ACCOUNTS_ADMIN,
@@ -27,7 +28,7 @@ const VALID_TYPES = [
     'wifi'
 ];
 
-const TYPE_ROLE_MAP = {
+export const TYPE_ROLE_MAP = {
     accounts: [ROLE_SUPER_ADMIN, ROLE_ACCOUNTS_ADMIN],
     room: [ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN],
     card: [ROLE_SUPER_ADMIN, ROLE_CARD_ADMIN],
@@ -76,25 +77,40 @@ export const createShortLink = async (req, res, next) => {
         throw new ApiError(403, 'You are not authorized to create links of this type');
     }
 
-    const existing = await ShortLink.findOne({
-        where: { slug }
-    });
+    const t = await database.transaction();
+    req.transaction = t;
 
-    if (existing) {
-        throw new ApiError(400, 'Slug already exists');
+    try {
+        const existing = await ShortLink.findOne({
+            where: { slug },
+            transaction: t,
+            lock: true
+        });
+
+        if (existing) {
+            throw new ApiError(400, 'Slug already exists');
+        }
+
+        const link = await ShortLink.create({
+            slug,
+            target_url,
+            type,
+            createdBy: req.user?.username
+        }, { transaction: t });
+
+        await t.commit();
+        req.transaction = null;
+
+        res.status(201).json({
+            success: true,
+            data: link
+        });
+    } catch (error) {
+        if (error.name === 'SequelizeUniqueConstraintError') {
+            throw new ApiError(400, 'Slug already exists');
+        }
+        throw error;
     }
-
-    const link = await ShortLink.create({
-        slug,
-        target_url,
-        type,
-        createdBy: req.user?.username
-    });
-
-    res.status(201).json({
-        success: true,
-        data: link
-    });
 };
 
 export const getShortLinksByType = async (req, res, next, type) => {
@@ -144,60 +160,80 @@ export const updateShortLink = async (req, res, next) => {
         throw new ApiError(400, 'Invalid target_url. Must be a valid HTTP/HTTPS URL');
     }
 
-    const link = await ShortLink.findByPk(id);
+    const t = await database.transaction();
+    req.transaction = t;
 
-    if (!link) {
-        throw new ApiError(404, 'Link not found');
-    }
+    try {
+        const link = await ShortLink.findByPk(id, { transaction: t, lock: true });
 
-    const allowedRoles = TYPE_ROLE_MAP[link.type];
-    const userRoles = req.roles || [];
-    const isAuthorized = allowedRoles.some(role => userRoles.includes(role));
-    if (!isAuthorized) {
-        throw new ApiError(403, 'You are not authorized to manage links of this type');
-    }
-
-    if (type && type !== link.type) {
-        const newAllowedRoles = TYPE_ROLE_MAP[type];
-        const isAuthorizedNew = newAllowedRoles.some(role => userRoles.includes(role));
-        if (!isAuthorizedNew) {
-            throw new ApiError(403, 'You are not authorized to change link to this type');
+        if (!link) {
+            throw new ApiError(404, 'Link not found');
         }
+
+        const allowedRoles = TYPE_ROLE_MAP[link.type];
+        const userRoles = req.roles || [];
+        const isAuthorized = allowedRoles.some(role => userRoles.includes(role));
+        if (!isAuthorized) {
+            throw new ApiError(403, 'You are not authorized to manage links of this type');
+        }
+
+        if (type && type !== link.type) {
+            const newAllowedRoles = TYPE_ROLE_MAP[type];
+            const isAuthorizedNew = newAllowedRoles.some(role => userRoles.includes(role));
+            if (!isAuthorizedNew) {
+                throw new ApiError(403, 'You are not authorized to change link to this type');
+            }
+        }
+
+        const updateData = {};
+        if (target_url !== undefined) updateData.target_url = target_url;
+        if (type !== undefined) updateData.type = type;
+        if (active !== undefined) updateData.active = active;
+
+        await link.update(updateData, { transaction: t });
+
+        await t.commit();
+        req.transaction = null;
+
+        res.status(200).json({
+            success: true,
+            data: link
+        });
+    } catch (error) {
+        throw error;
     }
-
-    const updateData = {};
-    if (target_url !== undefined) updateData.target_url = target_url;
-    if (type !== undefined) updateData.type = type;
-    if (active !== undefined) updateData.active = active;
-
-    await link.update(updateData);
-
-    res.status(200).json({
-        success: true,
-        data: link
-    });
 };
 
 export const deleteShortLink = async (req, res, next) => {
     const { id } = req.params;
 
-    const link = await ShortLink.findByPk(id);
+    const t = await database.transaction();
+    req.transaction = t;
 
-    if (!link) {
-        throw new ApiError(404, 'Link not found');
+    try {
+        const link = await ShortLink.findByPk(id, { transaction: t, lock: true });
+
+        if (!link) {
+            throw new ApiError(404, 'Link not found');
+        }
+
+        const allowedRoles = TYPE_ROLE_MAP[link.type];
+        const userRoles = req.roles || [];
+        const isAuthorized = allowedRoles.some(role => userRoles.includes(role));
+        if (!isAuthorized) {
+            throw new ApiError(403, 'You are not authorized to manage links of this type');
+        }
+
+        await link.destroy({ transaction: t });
+
+        await t.commit();
+        req.transaction = null;
+
+        res.status(200).json({
+            success: true,
+            message: 'Link deleted successfully'
+        });
+    } catch (error) {
+        throw error;
     }
-
-    const allowedRoles = TYPE_ROLE_MAP[link.type];
-    const userRoles = req.roles || [];
-    const isAuthorized = allowedRoles.some(role => userRoles.includes(role));
-    if (!isAuthorized) {
-        throw new ApiError(403, 'You are not authorized to manage links of this type');
-    }
-
-    await link.destroy();
-
-    res.status(200).json({
-        success: true,
-        message: 'Link deleted successfully'
-    });
 };
