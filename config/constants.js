@@ -64,7 +64,6 @@ export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
 export const AMT_TYPE_LATE_CHECKOUT_ROOM = 'late_checkout_room';
 
-
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
 export const ROOM_WL = 'WL';
@@ -90,6 +89,8 @@ export const ROLE_RAJ_ADHYAYAN_ADMIN = 'adhyayanAdminRaj';
 export const ROLE_DHU_ADHYAYAN_ADMIN = 'adhyayanAdminDhu';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
+export const ROLE_FOOD_PLATE_ADMIN = 'foodPlateAdmin';
+
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_DRI_TRAVEL_ADMIN = 'travelAdminDri';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
@@ -142,6 +143,11 @@ export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
 export const ERR_FLAT_ALREADY_BOOKED =
   'Flat already booked for one or more mumukshus during selected dates';
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
+export const ERR_UTSAV_NOT_FOUND = 'Utsav not found';
+export const ERR_UTSAV_FEEDBACK_NOT_ALLOWED =
+  'You are not eligible to submit feedback for this utsav';
+export const ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED =
+  'Feedback already submitted for this utsav';
 
 export const ERR_FEEDBACK_ALREADY_SUBMITTED =
   'Feedback already submitted for this adhyayan';
@@ -162,4 +168,8 @@ export const BOOKING_STATUS_PENDING = 'pending';
 export const RAJ_PRAVAS_EMAIL = 'rajpravas7@gmail.com';
 
 export const WHATSAPP_SUPPORT_NUMBER = '+917875432613';
+
+// Housekeeping Deep Cleaning WhatsApp Notification Recipients (Card Numbers)
+export const DEEP_CLEANING_WA_RECIPIENTS = ['0002945690', '0009076440'];
+
 

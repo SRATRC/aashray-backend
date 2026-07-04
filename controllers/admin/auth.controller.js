@@ -39,14 +39,14 @@ export const login = async (req, res) => {
         user: {
           id: admin.dataValues.id,
           username: admin.dataValues.username,
-          password: admin.dataValues.password,
           status: admin.dataValues.status
         }
       },
-      process.env.SECRET
+      process.env.SECRET,
+      { expiresIn: '24h' }
     );
     req.log.info('admin_login_success', { username, roles: admin_roles });
-    return res.status(200).send({ token: token, roles: admin_roles });
+    return res.status(200).send({ token: token, roles: admin_roles, username: admin.dataValues.username });
   } else {
     req.log.warn('admin_login_incorrect_password', { username });
     throw new ApiError(401, 'Incorrect password');

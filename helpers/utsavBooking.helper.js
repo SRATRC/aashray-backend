@@ -9,14 +9,21 @@ import {
   STATUS_AVAILABLE,
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  ERR_UTSAV_NOT_FOUND,
+  FEEDBACK_ELIGIBILITY_HOUR,
+  ERR_UTSAV_FEEDBACK_NOT_ALLOWED,
+  STATUS_CASH_COMPLETED,
+  ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED,
+  ROOM_STATUS_CHECKEDIN
 } from '../config/constants.js';
 import logger from '../config/logger.js';
 import {
   UtsavDb,
   UtsavPackagesDb,
   UtsavBooking,
-  CardDb
+  CardDb,
+  UtsavFeedback
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -594,5 +601,120 @@ export async function cancelUtsavFoodBookings(booking, updatedBy, t) {
   if (utsavPackage) {
     await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
   }
-  
+
+}
+
+export async function validateFeedbackEligibility(
+  cardno,
+  utsav_id
+) {
+
+  const utsav = await UtsavDb.findOne({
+    where: { id: utsav_id }
+  });
+
+  if (!utsav) {
+    throw new ApiError(
+      404,
+      ERR_UTSAV_NOT_FOUND
+    );
+  }
+
+  const now = moment().tz('Asia/Kolkata');
+
+  // Feedback starts from utsav start date
+  const feedbackStartDate = moment(utsav.start_date)
+    .tz('Asia/Kolkata')
+    .hour(FEEDBACK_ELIGIBILITY_HOUR)
+    .minute(0)
+    .second(0);
+
+  // Calculate utsav duration
+  const utsavDuration =
+    moment(utsav.end_date)
+      .diff(
+        moment(utsav.start_date),
+        'days'
+      ) + 1;
+
+  // If utsav is 8+ days long,
+  // keep feedback open for 15 days
+  // otherwise 8 days
+  const feedbackWindowDays =
+    utsavDuration >= 8
+      ? 15
+      : 8;
+
+  const feedbackEndDate = moment(
+    feedbackStartDate
+  ).add(
+    feedbackWindowDays,
+    'days'
+  );
+
+  // Feedback not started yet
+  if (now.isBefore(feedbackStartDate)) {
+
+    throw new ApiError(
+      400,
+      ERR_UTSAV_FEEDBACK_NOT_ALLOWED
+    );
+
+  }
+
+  // Feedback expired
+  if (now.isAfter(feedbackEndDate)) {
+
+    throw new ApiError(
+      400,
+      `Feedback submission is only allowed within ${feedbackWindowDays} days after the utsav starts`
+    );
+
+  }
+
+  // Check if user has valid booking
+  const booking = await UtsavBooking.findOne({
+    where: {
+      cardno,
+      utsavid: utsav_id,
+      status: [
+        STATUS_CONFIRMED,
+        STATUS_CASH_COMPLETED,
+        ROOM_STATUS_CHECKEDIN
+      ]
+    }
+  });
+
+  if (!booking) {
+
+    throw new ApiError(
+      403,
+      ERR_UTSAV_FEEDBACK_NOT_ALLOWED
+    );
+
+  }
+
+  // Prevent duplicate feedback
+  const existingFeedback =
+    await UtsavFeedback.findOne({
+      where: {
+        cardno,
+        utsav_id
+      }
+    });
+
+  if (existingFeedback) {
+
+    throw new ApiError(
+      400,
+      ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED
+    );
+
+  }
+
+  return {
+    utsav,
+    booking
+  };
+
 }
