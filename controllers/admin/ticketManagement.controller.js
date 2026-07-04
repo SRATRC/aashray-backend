@@ -134,6 +134,10 @@ export const adminAddMessage = async (req, res) => {
 
   await ticket.update(updates);
 
+  if (updates.status) {
+    ticketStreamManager.broadcastStatusUpdate(id, updates.status, req.user.username);
+  }
+
   // Best-effort push notification to the ticket owner; never blocks the reply.
   try {
     await notifyCardno(ticket.issued_by, {
@@ -167,6 +171,8 @@ export const updateTicketStatus = async (req, res) => {
   }
 
   await ticket.update({ status, updatedBy: req.user.username });
+
+  ticketStreamManager.broadcastStatusUpdate(id, status, req.user.username);
 
   // Best-effort push notification to the ticket owner; never blocks the reply.
   try {

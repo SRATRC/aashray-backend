@@ -52,6 +52,14 @@ class TicketStreamManager {
     }
   }
 
+  // A status change isn't always paired with a new message (e.g. an admin
+  // picking "Resolved" from the dropdown, or a user tapping "Close Ticket")
+  // — without this, connected clients would have no live way to learn the
+  // ticket moved and would only see it after a manual reload.
+  broadcastStatusUpdate(ticketId, status, updatedBy) {
+    this.broadcastMessage(ticketId, { type: 'status_update', status, updatedBy });
+  }
+
   // Keep idle SSE connections alive behind proxies (e.g. Render) that
   // drop connections with no traffic for a while.
   //

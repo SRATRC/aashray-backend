@@ -151,6 +151,10 @@ export const addMessage = async (req, res) => {
 
   await ticket.update(updates);
 
+  if (updates.status) {
+    ticketStreamManager.broadcastStatusUpdate(ticket_id, updates.status, cardno);
+  }
+
   res.status(201).send({
     message: MSG_UPDATE_SUCCESSFUL,
     data: newMessage
@@ -177,6 +181,8 @@ export const resolveTicket = async (req, res) => {
     status: STATUS_CLOSED,
     updatedBy: cardno
   });
+
+  ticketStreamManager.broadcastStatusUpdate(ticket_id, STATUS_CLOSED, cardno);
 
   res.status(200).send({
     message: MSG_UPDATE_SUCCESSFUL
