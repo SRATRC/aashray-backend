@@ -6,7 +6,9 @@ import {
   STATUS_INPROGRESS,
   STATUS_OPEN,
   STATUS_CLOSED,
-  STATUS_RESOLVED
+  STATUS_RESOLVED,
+  ROLE_SUPER_ADMIN,
+  TICKET_SERVICE_ROLE_MAP
 } from '../../config/constants.js';
 
 // Admins can only move a ticket to open/in-progress/resolved. Closing is not
@@ -19,11 +21,41 @@ import ticketStreamManager from '../../utils/ticketStreamManager.js';
 import ApiError from '../../utils/ApiError.js';
 import { notifyCardno } from '../../helpers/notification.helper.js';
 
+// Returns the list of ticket `service` values a given admin (identified by
+// their roles) may access, or `null` for superAdmin/unrestricted access.
+// Enforced here (not just via the route's authorizeRoles gate) so a
+// department admin can't reach another department's tickets simply by
+// passing a different `service` query param or ticket id.
+function getAllowedServices(roles) {
+  if (roles.includes(ROLE_SUPER_ADMIN)) return null;
+  const allowed = new Set();
+  for (const [service, serviceRoles] of Object.entries(TICKET_SERVICE_ROLE_MAP)) {
+    if (serviceRoles.some((r) => roles.includes(r))) allowed.add(service);
+  }
+  return Array.from(allowed);
+}
+
+function assertCanAccessTicket(roles, ticket) {
+  const allowedServices = getAllowedServices(roles);
+  if (allowedServices !== null && !allowedServices.includes(ticket.service)) {
+    throw new ApiError(403, "You are not authorized to access this ticket's service");
+  }
+}
+
 export const getAllTickets = async (req, res) => {
   const { status, service } = req.query;
+  const allowedServices = getAllowedServices(req.roles);
   const where = {};
   if (status) where.status = status;
-  if (service) where.service = service;
+
+  if (allowedServices !== null) {
+    if (service && !allowedServices.includes(service)) {
+      throw new ApiError(403, "You are not authorized to view this service's tickets");
+    }
+    where.service = service || { [Sequelize.Op.in]: allowedServices };
+  } else if (service) {
+    where.service = service;
+  }
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
@@ -61,6 +93,7 @@ export const getTicketDetails = async (req, res) => {
   if (!ticket) {
     throw new ApiError(404, 'Ticket not found');
   }
+  assertCanAccessTicket(req.roles, ticket);
 
   const messages = await TicketMessage.findAll({
     where: { ticket_id: id },
@@ -81,6 +114,7 @@ export const streamTicketMessages = async (req, res) => {
   if (!ticket) {
     throw new ApiError(404, 'Ticket not found');
   }
+  assertCanAccessTicket(req.roles, ticket);
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -112,6 +146,7 @@ export const adminAddMessage = async (req, res) => {
   if (!ticket) {
     throw new ApiError(404, 'Ticket not found');
   }
+  assertCanAccessTicket(req.roles, ticket);
 
   if (ticket.status === STATUS_CLOSED) {
     throw new ApiError(400, 'ticket is closed');
@@ -169,6 +204,7 @@ export const updateTicketStatus = async (req, res) => {
   if (!ticket) {
     throw new ApiError(404, 'Ticket not found');
   }
+  assertCanAccessTicket(req.roles, ticket);
 
   await ticket.update({ status, updatedBy: req.user.username });
 

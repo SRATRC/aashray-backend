@@ -107,6 +107,18 @@ export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
 export const ROLE_UTSAV_ADMIN_RAJ = 'utsavAdminRaj';
 
+// Which admin role(s) can see tickets filed against each service. superAdmin
+// always sees every service regardless of this map. "IT Support" has no
+// dedicated department role — only superAdmin sees those tickets.
+export const TICKET_SERVICE_ROLE_MAP = {
+  Maintenance: [ROLE_MAINTENANCE_ADMIN],
+  'IT Support': [],
+  Housekeeping: [ROLE_HOUSEKEEPING_ADMIN],
+  Food: [ROLE_FOOD_ADMIN],
+  Travel: [ROLE_TRAVEL_ADMIN],
+  Other: [ROLE_OFFICE_ADMIN]
+};
+
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
 export const ERR_CARD_NOT_FOUND = 'User not found';
