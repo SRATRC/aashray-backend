@@ -371,7 +371,6 @@ const TICKET_AUTO_CLOSE_GRACE_DAYS = 7;
 const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
   logger.info('ticketAutoCloseJob cron job started.');
   try {
-    const { Op } = await import('sequelize');
     const { Ticket } = await import('./models/associations.js');
     const { STATUS_RESOLVED, STATUS_CLOSED } = await import('./config/constants.js');
     const { notifyCardno } = await import('./helpers/notification.helper.js');
@@ -379,7 +378,7 @@ const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
     const cutoff = moment().utc().subtract(TICKET_AUTO_CLOSE_GRACE_DAYS, 'days').toDate();
 
     const staleTickets = await Ticket.findAll({
-      where: { status: STATUS_RESOLVED, updatedAt: { [Op.lt]: cutoff } }
+      where: { status: STATUS_RESOLVED, updatedAt: { [Sequelize.Op.lt]: cutoff } }
     });
 
     if (staleTickets.length > 0) {
@@ -388,7 +387,7 @@ const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
       // ticket, so there's nothing gained from doing it one at a time.
       await Ticket.update(
         { status: STATUS_CLOSED, updatedBy: 'system:auto-close' },
-        { where: { id: { [Op.in]: staleTickets.map((ticket) => ticket.id) } } }
+        { where: { id: { [Sequelize.Op.in]: staleTickets.map((ticket) => ticket.id) } } }
       );
 
       // notifyCardno never throws (it catches internally and resolves with

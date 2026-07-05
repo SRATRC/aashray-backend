@@ -60,4 +60,21 @@ const Ticket = sequelize.define(
   }
 );
 
+// Every write that should count as "activity" on a ticket (a reply, a
+// status change) must go through this instead of a bare .update() call.
+// Sequelize's update()/save() silently skip the entire UPDATE — including
+// the automatic updatedAt bump — when none of the given values actually
+// differ from the current row (verified against this Sequelize version's
+// source: lib/model.js save() computes options.fields from this.changed()
+// and returns early when it's empty; empirically confirmed against a real
+// DB too). That's reachable here: e.g. the same admin replying twice in a
+// row with no status transition sends the same updatedBy value both times.
+// The ticket auto-close cron's "reset the clock on activity" guarantee
+// depends on updatedAt always advancing on activity, so we force `updatedBy`
+// dirty unconditionally before every such update.
+Ticket.prototype.recordActivity = function (updates, options) {
+  this.changed('updatedBy', true);
+  return this.update(updates, options);
+};
+
 export default Ticket;

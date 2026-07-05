@@ -16,9 +16,10 @@ import { attachUserContext } from '../../middleware/Logger.js';
 const MAX_METADATA_LENGTH = 16000;
 const MAX_ID_RETRIES = 5;
 
-async function loadOwnedTicketOrThrow(ticket_id, cardno) {
+async function loadOwnedTicketOrThrow(ticket_id, cardno, options = {}) {
   const ticket = await Ticket.findOne({
-    where: { id: ticket_id, issued_by: cardno }
+    where: { id: ticket_id, issued_by: cardno },
+    ...options
   });
   if (!ticket) {
     throw new ApiError(404, 'Ticket not found');
@@ -109,8 +110,7 @@ export const getTicketDetails = async (req, res) => {
   const { ticket_id } = req.params;
   const { cardno } = req.user;
 
-  const ticket = await Ticket.findOne({
-    where: { id: ticket_id, issued_by: cardno },
+  const ticket = await loadOwnedTicketOrThrow(ticket_id, cardno, {
     include: [
       {
         model: TicketMessage,
@@ -120,10 +120,6 @@ export const getTicketDetails = async (req, res) => {
       }
     ]
   });
-
-  if (!ticket) {
-    throw new ApiError(404, 'Ticket not found');
-  }
 
   res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
@@ -187,17 +183,7 @@ export const addMessage = async (req, res) => {
     updates.status = STATUS_INPROGRESS;
   }
 
-  // Force `updatedBy` to be considered dirty even if its value happens to
-  // already match (e.g. the same user replying twice with no status change):
-  // Sequelize's update()/save() silently skip the entire UPDATE — including
-  // the automatic updatedAt bump — when nothing in the given values actually
-  // differs from the current row. Verified against this Sequelize version's
-  // source (lib/model.js: save() computes options.fields from this.changed()
-  // and returns early when it's empty) and empirically against a real DB.
-  // Without this, the auto-close cron's "reset the clock on activity" guarantee
-  // silently fails to hold.
-  ticket.changed('updatedBy', true);
-  await ticket.update(updates, { transaction: t });
+  await ticket.recordActivity(updates, { transaction: t });
 
   await t.commit();
   req.transaction = null;
@@ -229,10 +215,7 @@ export const resolveTicket = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  // status always genuinely changes here (the closed-already case already
-  // threw above), so this update never hits the no-op-when-nothing-changed
-  // path — no need to force `changed()` the way addMessage does.
-  await ticket.update(
+  await ticket.recordActivity(
     {
       status: STATUS_CLOSED,
       updatedBy: cardno

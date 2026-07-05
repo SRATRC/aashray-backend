@@ -82,10 +82,16 @@ export const getAllTickets = async (req, res) => {
     attributes: {
       include: [
         [
+          // `${Ticket.name}` ("Ticket") rather than the table name ("tickets")
+          // because Sequelize aliases the base table of a query by its model
+          // name by default with no `include`/join present. That default is
+          // an undocumented Sequelize behavior this literal has to assume —
+          // if this query ever gains an `include`, verify the alias still
+          // matches before trusting this subquery's output.
           Sequelize.literal(`(
             SELECT MAX(createdAt)
-            FROM ticket_messages
-            WHERE ticket_messages.ticket_id = Ticket.id
+            FROM ${TicketMessage.getTableName()}
+            WHERE ${TicketMessage.getTableName()}.ticket_id = ${Ticket.name}.id
           )`),
           'last_message_at'
         ]
@@ -178,14 +184,7 @@ export const adminAddMessage = async (req, res) => {
     updates.status = STATUS_INPROGRESS;
   }
 
-  // Force `updatedBy` dirty even if unchanged (e.g. the same admin replying
-  // twice in a row with no status transition) — Sequelize otherwise skips the
-  // whole UPDATE, including the updatedAt bump the auto-close cron relies on.
-  // See controllers/client/ticket.controller.js's addMessage for the same fix
-  // with a fuller explanation (verified against this Sequelize version's
-  // source and empirically against a real DB).
-  ticket.changed('updatedBy', true);
-  await ticket.update(updates, { transaction: t });
+  await ticket.recordActivity(updates, { transaction: t });
 
   await t.commit();
   req.transaction = null;
@@ -195,17 +194,17 @@ export const adminAddMessage = async (req, res) => {
     ticketStreamManager.broadcastStatusUpdate(id, updates.status, req.user.username);
   }
 
-  // Best-effort push notification to the ticket owner; never blocks the reply.
-  try {
-    await notifyCardno(ticket.issued_by, {
-      title: 'Support ticket update',
-      body: `${ticket.service}: you have a new reply`,
-      screen: `/support/${ticket.id}`,
-      data: { ticketId: ticket.id }
-    });
-  } catch (e) {
-    // notification is best-effort
-  }
+  // Best-effort push notification to the ticket owner. notifyCardno never
+  // throws (it catches internally and resolves {success, reason}), so this
+  // is intentionally not awaited — genuinely fire-and-forget, not just
+  // wrapped in a try/catch, so the reply response doesn't wait on a DB
+  // lookup plus an external push API call.
+  notifyCardno(ticket.issued_by, {
+    title: 'Support ticket update',
+    body: `${ticket.service}: you have a new reply`,
+    screen: `/support/${ticket.id}`,
+    data: { ticketId: ticket.id }
+  });
 
   req.log.info('admin_ticket_add_message_success', { admin: req.user.username, ticketId: id });
 
@@ -238,24 +237,27 @@ export const updateTicketStatus = async (req, res) => {
     to: status
   });
 
-  // Force `updatedBy` dirty in case the admin resubmits the same status with
-  // no other change (e.g. a duplicate click) — see adminAddMessage above.
-  ticket.changed('updatedBy', true);
-  await ticket.update({ status, updatedBy: req.user.username });
+  const t = await database.transaction();
+  req.transaction = t;
+
+  await ticket.recordActivity({ status, updatedBy: req.user.username }, { transaction: t });
+
+  await t.commit();
+  req.transaction = null;
 
   ticketStreamManager.broadcastStatusUpdate(id, status, req.user.username);
 
-  // Best-effort push notification to the ticket owner; never blocks the reply.
-  try {
-    await notifyCardno(ticket.issued_by, {
-      title: 'Support ticket update',
-      body: `Your ticket is now ${status}`,
-      screen: `/support/${ticket.id}`,
-      data: { ticketId: ticket.id }
-    });
-  } catch (e) {
-    // notification is best-effort
-  }
+  // Best-effort push notification to the ticket owner. notifyCardno never
+  // throws (it catches internally and resolves {success, reason}), so this
+  // is intentionally not awaited — genuinely fire-and-forget, not just
+  // wrapped in a try/catch, so the response doesn't wait on a DB lookup plus
+  // an external push API call.
+  notifyCardno(ticket.issued_by, {
+    title: 'Support ticket update',
+    body: `Your ticket is now ${status}`,
+    screen: `/support/${ticket.id}`,
+    data: { ticketId: ticket.id }
+  });
 
   req.log.info('admin_ticket_status_update_success', { admin: req.user.username, ticketId: id });
 
