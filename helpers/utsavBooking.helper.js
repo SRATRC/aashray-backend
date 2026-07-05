@@ -65,7 +65,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
   const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
-  await checkUtsavAlreadyBooked(utsavid, mumukshus);
+  await checkUtsavAlreadyBooked(utsavid, mumukshus, t);
 
   let total_amount = 0;
   let available_seats = utsav.available_seats;
@@ -183,7 +183,7 @@ export async function bookUtsavForMumukshusAdmin(
 
   const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
 
-  await checkUtsavAlreadyBooked(utsavid, mumukshus);
+  await checkUtsavAlreadyBooked(utsavid, mumukshus, t);
 
   let total_amount = 0;
   let userBookingIds = {},
@@ -232,8 +232,40 @@ export async function bookUtsavForMumukshusAdmin(
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
-export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
+// Request-level guard: a member may hold only one booking per utsav, so the
+// same utsav must not be selected more than once for the same person across
+// the primary booking and its addons. Runs synchronously at validation time
+// (before the user proceeds to payment). Works for both the mumukshu
+// (`details.mumukshus`) and guest (`details.guests`) booking shapes.
+export function validateNoDuplicateUtsavBooking(primary_booking, addons) {
+  const utsavEntries = [primary_booking, ...(addons || [])].filter(
+    (entry) => entry && entry.booking_type === TYPE_UTSAV
+  );
+
+  const seen = new Set();
+  for (const entry of utsavEntries) {
+    const utsavid = entry.details?.utsavid;
+    const people = entry.details?.mumukshus ?? entry.details?.guests ?? [];
+    for (const person of people) {
+      const key = `${utsavid}:${person.cardno}`;
+      if (seen.has(key)) throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
+      seen.add(key);
+    }
+  }
+}
+
+export async function checkUtsavAlreadyBooked(utsavid, mumukshus, t = null) {
   const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
+
+  // Reject the same card appearing more than once for this utsav in a single
+  // request (e.g. the same person as primary booking + addon) — otherwise each
+  // entry passes the DB check below and creates its own booking.
+  if (new Set(mumukshu_cardnos).size !== mumukshu_cardnos.length)
+    throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
+
+  // Read within the caller's transaction so a booking created earlier in the
+  // same request (e.g. the primary utsav booking) is visible when checking a
+  // later one (its addon), instead of only seeing committed rows.
   const alreadyBooked = await UtsavBooking.findAll({
     where: {
       cardno: mumukshu_cardnos,
@@ -241,16 +273,17 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
       status: {
         [Sequelize.Op.in]: ACTIVE_UTSAV_BOOKING_STATUSES
       }
-    }
+    },
+    transaction: t
   });
 
   if (alreadyBooked.length > 0)
     throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
 
-  await checkOverlapWithSamvatsari(mumukshus);
+  await checkOverlapWithSamvatsari(mumukshus, t);
 }
 
-export async function checkOverlapWithSamvatsari(mumukshus) {
+export async function checkOverlapWithSamvatsari(mumukshus, t = null) {
   const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
   const mumukshu_packages = mumukshus.map((mumukshu) => mumukshu.packageid);
 
@@ -285,7 +318,8 @@ export async function checkOverlapWithSamvatsari(mumukshus) {
           SAMVATSARI_PACKAGE_ID
         )
       },
-      type: Sequelize.QueryTypes.SELECT
+      type: Sequelize.QueryTypes.SELECT,
+      transaction: t
     }
   );
 

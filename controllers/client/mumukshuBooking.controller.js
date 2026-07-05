@@ -38,7 +38,8 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
-  validateUtsavs
+  validateUtsavs,
+  validateNoDuplicateUtsavBooking
 } from '../../helpers/utsavBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
@@ -167,6 +168,12 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
 export const validateBooking = async (req, res) => {
   attachUserContext(req);
   const { primary_booking, addons } = req.body;
+
+  // A member can hold only one booking per utsav — reject if the same utsav is
+  // selected more than once for the same person across primary + addons, so the
+  // user is blocked here before proceeding to payment.
+  validateNoDuplicateUtsavBooking(primary_booking, addons);
+
   req.log.info('validate_mumukshu_booking_start', {
     cardno: req.user.cardno,
     primaryBookingType: primary_booking?.booking_type,
