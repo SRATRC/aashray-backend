@@ -113,7 +113,12 @@ export const verifyPayment = async (req, res) => {
           // a corresponding booking is not created.
           if (booking) {
             if (booking.status === STATUS_CANCELLED || booking.status === STATUS_ADMIN_CANCELLED) {
-              req.log.warn('payment_received_for_cancelled_booking', { bookingid: booking.bookingid });
+              req.log.warn('payment_received_for_cancelled_booking', {
+                bookingid: booking.bookingid,
+                cardno: booking.cardno,
+                amount: transaction.amount,
+                transactionId: transaction.id
+              });
             } else {
               bookingStatus =
                 bookingType == TYPE_ROOM || bookingType == TYPE_FLAT

@@ -15,7 +15,8 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_FAILED,
   TYPE_UTSAV,
-  TYPE_TRAVEL
+  TYPE_TRAVEL,
+  STATUS_PAYMENT_AUTHORIZED
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
@@ -188,6 +189,7 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
     case STATUS_PAYMENT_FAILED:
+    case STATUS_PAYMENT_AUTHORIZED:
       if (
         [TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
         ifMigrated(transaction)
