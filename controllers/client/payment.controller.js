@@ -12,7 +12,9 @@ import {
   STATUS_PAYMENT_COMPLETED,
   TYPE_FOOD,
   TYPE_TRAVEL,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -110,48 +112,52 @@ export const verifyPayment = async (req, res) => {
           // for late-checkout-fee, while a transaction is created,
           // a corresponding booking is not created.
           if (booking) {
-            bookingStatus =
-              bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
-                ? ROOM_STATUS_PENDING_CHECKIN
-                : STATUS_CONFIRMED;
+            if (booking.status === STATUS_CANCELLED || booking.status === STATUS_ADMIN_CANCELLED) {
+              req.log.warn('payment_received_for_cancelled_booking', { bookingid: booking.bookingid });
+            } else {
+              bookingStatus =
+                bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
+                  ? ROOM_STATUS_PENDING_CHECKIN
+                  : STATUS_CONFIRMED;
 
-            const previousStatus = booking.status;
-            const updateFields = {
-              updatedBy
-            };
-            if (bookingType !== TYPE_FOOD) {
-              updateFields.status = bookingStatus;
+              const previousStatus = booking.status;
+              const updateFields = {
+                updatedBy
+              };
+              if (bookingType !== TYPE_FOOD) {
+                updateFields.status = bookingStatus;
+              }
+              await booking.update(updateFields, { transaction: t });
+
+              if (bookingType === TYPE_ROOM) {
+                if (!userBookingIdMap.roomBookingStatusChanges) {
+                  userBookingIdMap.roomBookingStatusChanges = [];
+                }
+                userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
+              } else if (bookingType === TYPE_FLAT) {
+                if (!userBookingIdMap.flatBookingStatusChanges) {
+                  userBookingIdMap.flatBookingStatusChanges = [];
+                }
+                userBookingIdMap.flatBookingStatusChanges.push({ booking, previousStatus });
+              } else if (bookingType === TYPE_TRAVEL) {
+                if (!userBookingIdMap.travelBookingStatusChanges) {
+                  userBookingIdMap.travelBookingStatusChanges = [];
+                }
+                userBookingIdMap.travelBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
+              } else if (bookingType === TYPE_UTSAV) {
+                if (!userBookingIdMap.utsavBookingStatusChanges) {
+                  userBookingIdMap.utsavBookingStatusChanges = [];
+                }
+                userBookingIdMap.utsavBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
+              }
+
+              setBookingIdMap(
+                userBookingIdMap,
+                bookingType,
+                booking.cardno,
+                transaction.bookingid
+              );
             }
-            await booking.update(updateFields, { transaction: t });
-
-            if (bookingType === TYPE_ROOM) {
-              if (!userBookingIdMap.roomBookingStatusChanges) {
-                userBookingIdMap.roomBookingStatusChanges = [];
-              }
-              userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
-            } else if (bookingType === TYPE_FLAT) {
-              if (!userBookingIdMap.flatBookingStatusChanges) {
-                userBookingIdMap.flatBookingStatusChanges = [];
-              }
-              userBookingIdMap.flatBookingStatusChanges.push({ booking, previousStatus });
-            } else if (bookingType === TYPE_TRAVEL) {
-              if (!userBookingIdMap.travelBookingStatusChanges) {
-                userBookingIdMap.travelBookingStatusChanges = [];
-              }
-              userBookingIdMap.travelBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
-            } else if (bookingType === TYPE_UTSAV) {
-              if (!userBookingIdMap.utsavBookingStatusChanges) {
-                userBookingIdMap.utsavBookingStatusChanges = [];
-              }
-              userBookingIdMap.utsavBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
-            }
-
-            setBookingIdMap(
-              userBookingIdMap,
-              bookingType,
-              booking.cardno,
-              transaction.bookingid
-            );
           }
           break;
 

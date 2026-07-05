@@ -162,7 +162,8 @@ export async function cancelTransaction(
 
   if (
     !admin &&
-    [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction))
+    [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction)) &&
+    [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)
   ) {
     // User cancelling via app — no credits, keep transaction as completed
     logger.info('cancel_transaction_user_no_credits', { transactionId: transaction.id, bookingType: getBookingType(transaction) });
