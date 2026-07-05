@@ -112,7 +112,7 @@ export const verifyPayment = async (req, res) => {
           // for late-checkout-fee, while a transaction is created,
           // a corresponding booking is not created.
           if (booking) {
-            if (booking.status === STATUS_CANCELLED || booking.status === STATUS_ADMIN_CANCELLED) {
+            if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(booking.status)) {
               req.log.warn('payment_received_for_cancelled_booking', {
                 bookingid: booking.bookingid,
                 cardno: booking.cardno,
