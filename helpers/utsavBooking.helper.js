@@ -13,6 +13,7 @@ import {
   ERR_UTSAV_NOT_FOUND,
   FEEDBACK_ELIGIBILITY_HOUR,
   ERR_UTSAV_FEEDBACK_NOT_ALLOWED,
+  STATUS_CASH_PENDING,
   STATUS_CASH_COMPLETED,
   ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED,
   ROOM_STATUS_CHECKEDIN
@@ -43,6 +44,21 @@ import sendMail from '../utils/sendMail.js';
 import { bookFoodForAllMeals, cancelAllMeals } from './foodBooking.helper.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
+
+// Utsav booking statuses that represent an existing (non-cancelled) booking.
+// A member holding a booking in any of these is "already booked" for that Utsav
+// and may not book it (or an overlapping package) again. Only 'cancelled' /
+// 'admin cancelled' bookings are ignored. Previously this list omitted
+// checkedin / cash pending / cash completed, which let a member whose first
+// booking had advanced past confirmed book a second package for the same Utsav.
+const ACTIVE_UTSAV_BOOKING_STATUSES = [
+  STATUS_PAYMENT_PENDING,
+  STATUS_CONFIRMED,
+  STATUS_WAITING,
+  STATUS_CASH_PENDING,
+  STATUS_CASH_COMPLETED,
+  ROOM_STATUS_CHECKEDIN
+];
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
@@ -223,11 +239,7 @@ export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
       cardno: mumukshu_cardnos,
       utsavid: utsavid,
       status: {
-        [Sequelize.Op.in]: [
-          STATUS_PAYMENT_PENDING,
-          STATUS_CONFIRMED,
-          STATUS_WAITING
-        ]
+        [Sequelize.Op.in]: ACTIVE_UTSAV_BOOKING_STATUSES
       }
     }
   });
@@ -263,7 +275,7 @@ export async function checkOverlapWithSamvatsari(mumukshus) {
     {
       replacements: {
         cardnos: mumukshu_cardnos,
-        status: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED, STATUS_WAITING],
+        status: ACTIVE_UTSAV_BOOKING_STATUSES,
         samvatsari_package_id: SAMVATSARI_PACKAGE_ID,
         samvatsari_overlapping_packages: SAMVATSARI_OVERLAPPING_PACKAGE_IDS,
         packages_overlap_with_samvatsari: mumukshu_packages.some((packageid) =>
