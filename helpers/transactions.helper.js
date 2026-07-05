@@ -15,7 +15,8 @@ import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_FAILED,
   TYPE_UTSAV,
-  TYPE_TRAVEL
+  TYPE_TRAVEL,
+  STATUS_PAYMENT_AUTHORIZED
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
@@ -162,7 +163,8 @@ export async function cancelTransaction(
 
   if (
     !admin &&
-    [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction))
+    [TYPE_TRAVEL, TYPE_UTSAV].includes(getBookingType(transaction)) &&
+    [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)
   ) {
     // User cancelling via app — no credits, keep transaction as completed
     logger.info('cancel_transaction_user_no_credits', { transactionId: transaction.id, bookingType: getBookingType(transaction) });
@@ -187,6 +189,7 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_PENDING:
     case STATUS_CASH_PENDING:
     case STATUS_PAYMENT_FAILED:
+    case STATUS_PAYMENT_AUTHORIZED:
       if (
         [TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
         ifMigrated(transaction)
