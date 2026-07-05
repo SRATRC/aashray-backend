@@ -71,10 +71,14 @@ const Ticket = sequelize.define(
 // row with no status transition sends the same updatedBy value both times.
 // The ticket auto-close cron's "reset the clock on activity" guarantee
 // depends on updatedAt always advancing on activity, so we force `updatedBy`
-// dirty unconditionally before every such update.
+// dirty unconditionally on every such update. Apply the updates first, then
+// force the flag *last* (right before save) so set() — which .update() calls
+// internally, and which can clear a pre-set dirty flag for an unchanged value
+// — can't undo it. Robust across Sequelize versions, not just v6.
 Ticket.prototype.recordActivity = function (updates, options) {
+  this.set(updates);
   this.changed('updatedBy', true);
-  return this.update(updates, options);
+  return this.save(options);
 };
 
 export default Ticket;

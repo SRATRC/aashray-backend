@@ -15,6 +15,10 @@ import { attachUserContext } from '../../middleware/Logger.js';
 
 const MAX_METADATA_LENGTH = 16000;
 const MAX_ID_RETRIES = 5;
+// Mirror of the `os` ENUM values on the Ticket model. Validated here so an
+// out-of-range value returns a 400 instead of surfacing Sequelize's
+// SequelizeValidationError (which has no statusCode) as a 500.
+const ALLOWED_OS = ['Android', 'iOS', 'Web', 'Other'];
 
 async function loadOwnedTicketOrThrow(ticket_id, cardno, options = {}) {
   const ticket = await Ticket.findOne({
@@ -40,11 +44,21 @@ export const createTicket = async (req, res) => {
     throw new ApiError(400, 'Invalid service');
   }
 
+  if (os !== undefined && os !== null && !ALLOWED_OS.includes(os)) {
+    throw new ApiError(400, 'Invalid os');
+  }
+
   let { metadata } = req.body;
   if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata))
     metadata = {};
-  if (JSON.stringify(metadata).length > MAX_METADATA_LENGTH) {
-    metadata = { truncated: true };
+  // Byte-accurate size check (the JSON column is measured in bytes, and
+  // String#length would undercount multi-byte characters). If oversized,
+  // keep a truncated string preview rather than discarding the whole blob —
+  // an over-large diagnostics blob still has debugging value; an empty one
+  // doesn't, which defeats the point of capturing it.
+  const serializedMetadata = JSON.stringify(metadata);
+  if (Buffer.byteLength(serializedMetadata) > MAX_METADATA_LENGTH) {
+    metadata = { truncated: true, preview: serializedMetadata.slice(0, MAX_METADATA_LENGTH) };
   }
 
   req.log.info('create_ticket_start', { cardno, service });
@@ -89,8 +103,10 @@ export const createTicket = async (req, res) => {
 
 export const getTickets = async (req, res) => {
   const { cardno } = req.user;
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.page_size) || 10;
+  // Clamp so a malformed ?page=-1 can't produce a negative OFFSET (SQL error)
+  // and ?page_size can't request an unbounded result set.
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(req.query.page_size) || 10));
   const offset = (page - 1) * pageSize;
 
   const tickets = await Ticket.findAll({
@@ -137,6 +153,9 @@ export const streamTicketMessages = async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  // Disable proxy buffering (nginx / Render) so SSE frames flush immediately
+  // instead of being held back until a buffer fills.
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   // Add client to manager

@@ -73,8 +73,10 @@ export const getAllTickets = async (req, res) => {
     where.service = service;
   }
 
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.page_size) || 10;
+  // Clamp so a malformed ?page=-1 can't produce a negative OFFSET (SQL error)
+  // and ?page_size can't request an unbounded result set.
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(req.query.page_size) || 10));
   const offset = (page - 1) * pageSize;
 
   const tickets = await Ticket.findAll({
@@ -134,6 +136,9 @@ export const streamTicketMessages = async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  // Disable proxy buffering (nginx / Render) so SSE frames flush immediately
+  // instead of being held back until a buffer fills.
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   // Add admin to manager
@@ -228,6 +233,19 @@ export const updateTicketStatus = async (req, res) => {
 
   if (ticket.status === STATUS_CLOSED) {
     throw new ApiError(400, 'Cannot change the status of a closed ticket');
+  }
+
+  // No-op: the requested status already matches the current one. Skip the
+  // write, the SSE broadcast, and the push notification so we don't spam the
+  // owner with a "your ticket is now <status>" push for a non-change — and,
+  // for `resolved`, so re-selecting it doesn't keep bumping updatedAt and
+  // pushing the auto-close grace window out (it might otherwise never close).
+  if (ticket.status === status) {
+    return res.status(200).json({
+      status: 'success',
+      message: MSG_UPDATE_SUCCESSFUL,
+      data: ticket
+    });
   }
 
   req.log.info('admin_ticket_status_update_start', {
