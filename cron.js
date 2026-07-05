@@ -382,18 +382,36 @@ const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
       where: { status: STATUS_RESOLVED, updatedAt: { [Op.lt]: cutoff } }
     });
 
-    for (const ticket of staleTickets) {
-      await ticket.update({ status: STATUS_CLOSED, updatedBy: 'system:auto-close' });
+    if (staleTickets.length > 0) {
+      // Single bulk UPDATE instead of one query per ticket — the per-row
+      // write here has no row-specific logic that could fail differently per
+      // ticket, so there's nothing gained from doing it one at a time.
+      await Ticket.update(
+        { status: STATUS_CLOSED, updatedBy: 'system:auto-close' },
+        { where: { id: { [Op.in]: staleTickets.map((ticket) => ticket.id) } } }
+      );
 
-      try {
-        await notifyCardno(ticket.issued_by, {
-          title: 'Support ticket closed',
-          body: `Your ${ticket.service} ticket was automatically closed after ${TICKET_AUTO_CLOSE_GRACE_DAYS} days of inactivity`,
-          screen: `/support/${ticket.id}`,
-          data: { ticketId: ticket.id }
-        });
-      } catch (e) {
-        // notification is best-effort
+      // notifyCardno never throws (it catches internally and resolves with
+      // {success, reason}), so Promise.allSettled here is purely to run the
+      // notifications concurrently rather than one after another — a
+      // fulfilled-but-unsuccessful result is inspected below, not a rejection.
+      const notifyResults = await Promise.allSettled(
+        staleTickets.map((ticket) =>
+          notifyCardno(ticket.issued_by, {
+            title: 'Support ticket closed',
+            body: `Your ${ticket.service} ticket was automatically closed after ${TICKET_AUTO_CLOSE_GRACE_DAYS} days of inactivity`,
+            screen: `/support/${ticket.id}`,
+            data: { ticketId: ticket.id }
+          })
+        )
+      );
+      const failedNotifications = notifyResults.filter(
+        (r) => r.status === 'rejected' || r.value?.success === false
+      ).length;
+      if (failedNotifications > 0) {
+        logger.warn(
+          `ticketAutoCloseJob: ${failedNotifications} of ${staleTickets.length} notifications failed (best-effort, non-fatal).`
+        );
       }
     }
 
