@@ -10,6 +10,11 @@ import {
   ROLE_SUPER_ADMIN,
   TICKET_SERVICE_ROLE_MAP
 } from '../../config/constants.js';
+import ticketStreamManager from '../../utils/ticketStreamManager.js';
+import ApiError from '../../utils/ApiError.js';
+import { notifyCardno } from '../../helpers/notification.helper.js';
+import database from '../../config/database.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 
 // Admins can only move a ticket to open/in-progress/resolved. Closing is not
 // an admin action: the ticket owner closes it themselves (client resolve
@@ -17,15 +22,17 @@ import {
 // (see the ticketAutoCloseJob in cron.js) — matching how Zendesk/Freshdesk
 // separate "solved" (agent) from "closed" (customer or time-based).
 const ALLOWED_TICKET_STATUSES = [STATUS_OPEN, STATUS_INPROGRESS, STATUS_RESOLVED];
-import ticketStreamManager from '../../utils/ticketStreamManager.js';
-import ApiError from '../../utils/ApiError.js';
-import { notifyCardno } from '../../helpers/notification.helper.js';
 
 // Returns the list of ticket `service` values a given admin (identified by
 // their roles) may access, or `null` for superAdmin/unrestricted access.
 // Enforced here (not just via the route's authorizeRoles gate) so a
 // department admin can't reach another department's tickets simply by
 // passing a different `service` query param or ticket id.
+//
+// Similar in spirit to shortLink.controller.js's TYPE_ROLE_MAP (a type/category
+// -> allowed-roles map with the same "role intersection" check) — worth
+// consolidating into a shared role-scoping utility if a third feature needs
+// this pattern.
 function getAllowedServices(roles) {
   if (roles.includes(ROLE_SUPER_ADMIN)) return null;
   const allowed = new Set();
@@ -40,6 +47,15 @@ function assertCanAccessTicket(roles, ticket) {
   if (allowedServices !== null && !allowedServices.includes(ticket.service)) {
     throw new ApiError(403, "You are not authorized to access this ticket's service");
   }
+}
+
+async function loadTicketOrThrow(id, roles) {
+  const ticket = await Ticket.findByPk(id);
+  if (!ticket) {
+    throw new ApiError(404, 'Ticket not found');
+  }
+  assertCanAccessTicket(roles, ticket);
+  return ticket;
 }
 
 export const getAllTickets = async (req, res) => {
@@ -89,11 +105,7 @@ export const getAllTickets = async (req, res) => {
 export const getTicketDetails = async (req, res) => {
   const { id } = req.params;
 
-  const ticket = await Ticket.findByPk(id);
-  if (!ticket) {
-    throw new ApiError(404, 'Ticket not found');
-  }
-  assertCanAccessTicket(req.roles, ticket);
+  const ticket = await loadTicketOrThrow(id, req.roles);
 
   const messages = await TicketMessage.findAll({
     where: { ticket_id: id },
@@ -110,11 +122,7 @@ export const getTicketDetails = async (req, res) => {
 export const streamTicketMessages = async (req, res) => {
   const { id } = req.params;
 
-  const ticket = await Ticket.findByPk(id);
-  if (!ticket) {
-    throw new ApiError(404, 'Ticket not found');
-  }
-  assertCanAccessTicket(req.roles, ticket);
+  await loadTicketOrThrow(id, req.roles);
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -137,29 +145,32 @@ export const streamTicketMessages = async (req, res) => {
 export const adminAddMessage = async (req, res) => {
   const { id } = req.params;
   const { message } = req.body;
+  attachUserContext(req);
 
   if (!message) {
     throw new ApiError(400, 'Message is required');
   }
 
-  const ticket = await Ticket.findByPk(id);
-  if (!ticket) {
-    throw new ApiError(404, 'Ticket not found');
-  }
-  assertCanAccessTicket(req.roles, ticket);
+  const ticket = await loadTicketOrThrow(id, req.roles);
 
   if (ticket.status === STATUS_CLOSED) {
     throw new ApiError(400, 'ticket is closed');
   }
 
-  const newMessage = await TicketMessage.create({
-    ticket_id: id,
-    sender_id: req.user.username,
-    sender_type: 'admin',
-    message
-  });
+  req.log.info('admin_ticket_add_message_start', { admin: req.user.username, ticketId: id });
 
-  ticketStreamManager.broadcastMessage(id, newMessage);
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const newMessage = await TicketMessage.create(
+    {
+      ticket_id: id,
+      sender_id: req.user.username,
+      sender_type: 'admin',
+      message
+    },
+    { transaction: t }
+  );
 
   // Update ticket updatedBy and status if needed
   const updates = { updatedBy: req.user.username };
@@ -167,8 +178,19 @@ export const adminAddMessage = async (req, res) => {
     updates.status = STATUS_INPROGRESS;
   }
 
-  await ticket.update(updates);
+  // Force `updatedBy` dirty even if unchanged (e.g. the same admin replying
+  // twice in a row with no status transition) — Sequelize otherwise skips the
+  // whole UPDATE, including the updatedAt bump the auto-close cron relies on.
+  // See controllers/client/ticket.controller.js's addMessage for the same fix
+  // with a fuller explanation (verified against this Sequelize version's
+  // source and empirically against a real DB).
+  ticket.changed('updatedBy', true);
+  await ticket.update(updates, { transaction: t });
 
+  await t.commit();
+  req.transaction = null;
+
+  ticketStreamManager.broadcastMessage(id, newMessage);
   if (updates.status) {
     ticketStreamManager.broadcastStatusUpdate(id, updates.status, req.user.username);
   }
@@ -185,6 +207,8 @@ export const adminAddMessage = async (req, res) => {
     // notification is best-effort
   }
 
+  req.log.info('admin_ticket_add_message_success', { admin: req.user.username, ticketId: id });
+
   res.status(201).json({
     status: 'success',
     message: MSG_UPDATE_SUCCESSFUL,
@@ -195,17 +219,28 @@ export const adminAddMessage = async (req, res) => {
 export const updateTicketStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+  attachUserContext(req);
 
   if (!ALLOWED_TICKET_STATUSES.includes(status)) {
     throw new ApiError(400, 'Invalid ticket status');
   }
 
-  const ticket = await Ticket.findByPk(id);
-  if (!ticket) {
-    throw new ApiError(404, 'Ticket not found');
-  }
-  assertCanAccessTicket(req.roles, ticket);
+  const ticket = await loadTicketOrThrow(id, req.roles);
 
+  if (ticket.status === STATUS_CLOSED) {
+    throw new ApiError(400, 'Cannot change the status of a closed ticket');
+  }
+
+  req.log.info('admin_ticket_status_update_start', {
+    admin: req.user.username,
+    ticketId: id,
+    from: ticket.status,
+    to: status
+  });
+
+  // Force `updatedBy` dirty in case the admin resubmits the same status with
+  // no other change (e.g. a duplicate click) — see adminAddMessage above.
+  ticket.changed('updatedBy', true);
   await ticket.update({ status, updatedBy: req.user.username });
 
   ticketStreamManager.broadcastStatusUpdate(id, status, req.user.username);
@@ -221,6 +256,8 @@ export const updateTicketStatus = async (req, res) => {
   } catch (e) {
     // notification is best-effort
   }
+
+  req.log.info('admin_ticket_status_update_success', { admin: req.user.username, ticketId: id });
 
   res.status(200).json({
     status: 'success',

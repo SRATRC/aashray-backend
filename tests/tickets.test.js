@@ -3,6 +3,7 @@ import { app, sequelize } from '../app.js';
 import CardFactory from './factories/cardFactory.js';
 import Ticket from '../models/ticket.model.js';
 import TicketMessage from '../models/ticket_message.model.js';
+import { STATUS_CLOSED } from '../config/constants.js';
 
 describe('Ticket System', () => {
   let user;
@@ -138,7 +139,7 @@ describe('Ticket System', () => {
         .query({ cardno: user.cardno })
         .expect(200);
 
-      expect(detailResponse.body.data.status).toBe('closed');
+      expect(detailResponse.body.data.status).toBe(STATUS_CLOSED);
     });
 
     it('should reject further messages on a closed ticket', async () => {
