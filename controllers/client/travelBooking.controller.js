@@ -190,8 +190,10 @@ export const CancelTravel = async (req, res) => {
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
-export const checkEventsOnTravelDate = async (req, res) => {
+export const checkUpcomingEvents = async (req, res) => {
+  attachUserContext(req);
   const today = moment().format('YYYY-MM-DD');
+  req.log.info('check_upcoming_events_start', { cardno: req.user.cardno, date: today });
 
   const utsavs = await UtsavDb.findAll({
     where: {
@@ -202,8 +204,13 @@ export const checkEventsOnTravelDate = async (req, res) => {
     }
   });
 
+  req.log.info('check_upcoming_events_success', {
+    cardno: req.user.cardno,
+    count: utsavs.length
+  });
+
   return res.status(200).send({
-    message: 'fetched results',
+    message: 'Fetched results',
     data: utsavs
   });
 };
