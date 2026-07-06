@@ -9,12 +9,23 @@ import {
   STATUS_SEVA_KUTIR
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import APIError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+
 
 export const CreateRequest = CatchAsync(async (req, res) => {
+  attachUserContext(req);
+  req.log.info('create_maintenance_request_start', {
+    cardno: req.user.cardno,
+    department: req.body.department,
+    resStatus: req.user.res_status
+  });
+
   const t = await database.transaction();
   req.transaction = t;
 
@@ -27,6 +38,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
     });
 
     if (!isCheckedin) {
+      req.log.warn('create_maintenance_request_not_checked_in', { cardno: req.user.cardno, resStatus: req.user.res_status });
       throw new APIError(400, 'You are not checked in');
     }
   }
@@ -43,8 +55,15 @@ export const CreateRequest = CatchAsync(async (req, res) => {
     { transaction: t }
   );
   if (!request) {
+    req.log.error('create_maintenance_request_db_failed', { cardno: req.user.cardno });
     throw new APIError(400, 'Unable to create request');
   }
+
+  req.log.info('create_maintenance_request_created', {
+    cardno: req.user.cardno,
+    requestId: request.bookingid,
+    department: req.body.department
+  });
 
   const dept_email = await Departments.findOne({
     attributes: ['dept_email'],
@@ -54,6 +73,7 @@ export const CreateRequest = CatchAsync(async (req, res) => {
     transaction: t
   });
   if (!dept_email) {
+    req.log.error('create_maintenance_request_dept_not_found', { cardno: req.user.cardno, department: req.body.department });
     throw new APIError(400, 'Department not found');
   }
 
@@ -71,17 +91,60 @@ export const CreateRequest = CatchAsync(async (req, res) => {
   });
 
   await t.commit();
+  req.log.info('create_maintenance_request_success', {
+    cardno: req.user.cardno,
+    requestId: request.bookingid,
+    department: req.body.department
+  });
+
+  const phone = req.user.mobno;
+  if (phone) {
+    try {
+      const formattedPhone = formatWhatsAppPhone(phone, req.user.country);
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: req.user.issuedto || 'Mumukshu'
+            },
+            {
+              type: 'text',
+              text: req.body.department || ' '
+            },
+            {
+              type: 'text',
+              text: req.body.area_of_work || ' '
+            },
+            {
+              type: 'text',
+              text: req.body.work_detail || ' '
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'maintenance_request_received', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in CreateRequest:', err.message || err);
+    }
+  }
 
   return res.status(201).send({
     message: 'successfully created request'
   });
 });
 
+
 export const ViewRequest = CatchAsync(async (req, res) => {
+  attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
   const status = req.query.status?.toLowerCase() || 'all';
+  req.log.info('view_maintenance_requests_start', { cardno: req.user.cardno, status, page, pageSize });
 
   const whereClause = {
     requested_by: req.user.cardno
@@ -101,13 +164,16 @@ export const ViewRequest = CatchAsync(async (req, res) => {
     limit: pageSize
   });
 
+  req.log.info('view_maintenance_requests_success', { cardno: req.user.cardno, count: data.length });
   return res
     .status(200)
     .send({ message: 'fetched maintenance data', data: data });
 });
 
 export const FetchDepartments = CatchAsync(async (req, res) => {
+  req.log.info('fetch_departments_start');
   const departments = await Departments.findAll();
+  req.log.info('fetch_departments_success', { count: departments.length });
   return res
     .status(200)
     .send({ message: 'found departments', data: departments });

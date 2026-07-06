@@ -1,3 +1,4 @@
+import { Op } from 'sequelize';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -23,7 +24,6 @@ import {
   bookFlatForMumukshus,
   checkFlatAvailabilityForMumukshus
 } from '../../helpers/roomBooking.helper.js';
-import { CardDb, UtsavDb } from '../../models/associations.js';
 import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
@@ -38,7 +38,8 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
-  validateUtsavs
+  validateUtsavs,
+  validateNoDuplicateUtsavBooking
 } from '../../helpers/utsavBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
@@ -52,93 +53,136 @@ import {
   sendUnifiedEmail,
   setWaitingBookingCountMap
 } from '../helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import moment from 'moment';
+import {
+  ShibirBookingDb,
+  TravelDb,
+  RoomBooking,
+  UtsavBooking,
+  FlatBooking,
+  ShibirDb,
+  UtsavDb,
+  UtsavPackagesDb,
+  Transactions,
+  CardDb,
+  FoodDb
+} from "../../models/associations.js";
+import { sendUnifiedWhatsApp } from "../../helpers/whatsapp.helper.js";
 
-export const mumukshuBooking = async (req, res) => {
-  const { primary_booking, addons } = req.body;
+// top-level helper: accepts the userBookingIdMap explicitly
 
-  validateFlatBookingConstraints(primary_booking, addons);
+async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
+  const typeMap = userBookingIdMap[cardno] || {};
+  const adhyanIds = Array.isArray(typeMap[TYPE_ADHYAYAN]) ? typeMap[TYPE_ADHYAYAN].map(String).filter(Boolean) : [];
+  const travelIds = Array.isArray(typeMap[TYPE_TRAVEL]) ? typeMap[TYPE_TRAVEL].map(String).filter(Boolean) : [];
+  const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
+  const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
+  const flatIds   = Array.isArray(typeMap[TYPE_FLAT]) ? typeMap[TYPE_FLAT].map(String).filter(Boolean) : [];
+  const foodIds   = Array.isArray(typeMap[TYPE_FOOD]) ? typeMap[TYPE_FOOD].map(String).filter(Boolean) : [];
 
-  var t = await database.transaction();
-  req.transaction = t;
+  console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)} foodIds=${JSON.stringify(foodIds)}`);
 
-  const userBookingIdMap = {};
-  const waitingBookingCountMap = {};
+  try {
+    const [
+      adhyanBookingDetailsFromDb,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails,
+      foodBookingDetails
+    ] = await Promise.all([
+      adhyanIds.length
+        ? ShibirBookingDb.findAll({
+            where: { bookingid: { [Op.in]: adhyanIds } },
+            include: [{ model: ShibirDb, as: 'ShibirDb' }],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
+        : [],
+      travelIds.length
+        ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })
+        : [],
+      roomIds.length
+        ? RoomBooking.findAll({
+            where: { bookingid: { [Op.in]: roomIds } },
+            order: [['cardno', 'ASC'], ['checkin', 'ASC']]
+          })
+        : [],
+      utsavIds.length
+        ? UtsavBooking.findAll({
+            where: { bookingid: { [Op.in]: utsavIds } },
+            include: [
+              { model: UtsavDb, as: 'UtsavDb' },
+              { model: UtsavPackagesDb, as: 'UtsavPackagesDb' }
+            ],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
+        : [],
+      flatIds.length
+        ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
+        : [],
+      foodIds.length
+        ? FoodDb.findAll({
+            where: { id: { [Op.in]: foodIds } },
+            order: [['cardno', 'ASC'], ['date', 'ASC']]
+          })
+        : []
+    ]);
 
-
-  let utsav = null;
-  if (primary_booking.booking_type == TYPE_UTSAV) {
-    utsav = await UtsavDb.findOne({
-      where: {
-        id: primary_booking.details.utsavid
-      }
-    });
-  }
-
-  let amount = await book(
-    req.body,
-    primary_booking,
-    t,
-    req.user,
-    utsav,
-    userBookingIdMap,
-    waitingBookingCountMap
-  );
-
-  if (addons) {
-    for (const addon of addons) {
-      amount += await book(
-        req.body,
-        addon,
-        t,
-        req.user,
-        utsav,
-        userBookingIdMap,
-        waitingBookingCountMap
-      );
+    // Synthesize missing adhyan entries
+    const requested = adhyanIds.map(String);
+    const foundIds = new Set((adhyanBookingDetailsFromDb || []).map((r) => String(r.bookingid || r.bookingId || r.id)));
+    const missing = requested.filter(id => !foundIds.has(id));
+    if (missing.length) {
+      console.log(`WA DIAG: synthesize missing adhyan ids for ${cardno}:`, missing);
     }
-  }
+    const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
+    const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
 
-  var order = null;
-  if (req.user.country == 'India' && amount > 0) {
-    order = await generateOrderId(amount);
-    const bookingIds = retrieveBookingIds(userBookingIdMap);
-    await updateRazorpayTransactions(bookingIds, [], order.id, t);
-  }
-  await t.commit();
+    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails||[]).length} utsavCount=${(utsavBookingDetails||[]).length} foodCount=${(foodBookingDetails||[]).length}`);
 
-  //Sending email to logged in user for self or other mumkshus
-  sendUnifiedEmailForBookedBy(
-    userBookingIdMap,
-    req.user,
-    BOOKING_STATUS_PENDING
-  );
-  for (const cardno in userBookingIdMap) {
-    if (cardno != req.user.cardno) {
-      const bookings = userBookingIdMap[cardno];
-      //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
-    }
+    return {
+      adhyanBookingDetails,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails,
+      foodBookingDetails
+    };
+  } catch (err) {
+    console.error(`WA DIAG: fetchFreshDetailsForCard(${cardno}) failed:`, err && (err.stack || err.message || err));
+    return {
+      adhyanBookingDetails: [],
+      travelBookingDetails: [],
+      roomBookingDetails: [],
+      utsavBookingDetails: [],
+      flatBookingDetails: [],
+      foodBookingDetails: []
+    };
   }
-  let message =
-    Object.keys(waitingBookingCountMap).length > 0
-      ? MSG_BOOKING_WAITING
-      : MSG_BOOKING_SUCCESSFUL;
+}
 
-  return res.status(200).send({
-    message: message,
-    order: order ? order : { amount: 0 },
-    waitingBookingCountMap
-  });
-};
 
 export const validateBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+
+  // A member can hold only one booking per utsav — reject if the same utsav is
+  // selected more than once for the same person across primary + addons, so the
+  // user is blocked here before proceeding to payment.
+  validateNoDuplicateUtsavBooking(primary_booking, addons);
+
+  req.log.info('validate_mumukshu_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   const response = {
     roomDetails: [],
+    flatDetails: [],
     adhyayanDetails: [],
     foodDetails: {},
     travelDetails: {},
@@ -163,11 +207,149 @@ export const validateBooking = async (req, res) => {
     }
   }
 
+  req.log.info('validate_mumukshu_booking_success', {
+    cardno: req.user.cardno,
+    totalCharge: response.totalCharge
+  });
   return res.status(200).send({ data: response });
 };
 
+export const mumukshuBooking = async (req, res, next) => {
+  let t;
+  try {
+    const { primary_booking, addons } = req.body;
+    t = await database.transaction();
+    req.transaction = t;
+
+    const userBookingIdMap = {};
+    const waitingBookingCountMap = {};
+    let amount = await book(
+      req.body,
+      primary_booking,
+      t,
+      req.user,
+      null,
+      userBookingIdMap,
+      waitingBookingCountMap
+    );
+
+    if (addons) {
+      for (const addon of addons) {
+        amount += await book(
+          req.body,
+          addon,
+          t,
+          req.user,
+          null,
+          userBookingIdMap,
+          waitingBookingCountMap
+        );
+      }
+    }
+
+    let order = null;
+    if (req.user.country == 'India' && amount > 0) {
+      order = await generateOrderId(amount);
+      const bookingIds = retrieveBookingIds(userBookingIdMap);
+      await updateRazorpayTransactions(bookingIds, [], order.id, t);
+    }
+
+    await t.commit();
+
+    // --- WhatsApp notifications (your existing block) ---
+    try {
+      const bookedByCard = req.user.cardno;
+      const allCardnos = Object.keys(userBookingIdMap || {});
+      const jobs = [];
+
+      for (const cardno of allCardnos) {
+        const details = await fetchFreshDetailsForCard(cardno, userBookingIdMap);
+
+        jobs.push(sendUnifiedWhatsApp(
+          cardno,
+          details.adhyanBookingDetails,
+          details.travelBookingDetails,
+          details.flatBookingDetails,
+          details.utsavBookingDetails,
+          details.roomBookingDetails,
+          null,
+          details.foodBookingDetails
+        ));
+
+        if (cardno !== bookedByCard) {
+          jobs.push(sendUnifiedWhatsApp(
+            bookedByCard,
+            details.adhyanBookingDetails,
+            details.travelBookingDetails,
+            details.flatBookingDetails,
+            details.utsavBookingDetails,
+            details.roomBookingDetails,
+            cardno,
+            details.foodBookingDetails
+          ));
+        }
+      }
+
+      const results = await Promise.allSettled(jobs);
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          console.error(`WhatsApp job #${i} failed:`, r.reason);
+        } else {
+          console.log(`WhatsApp job #${i} succeeded`);
+        }
+      });
+    } catch (waErr) {
+      console.error("Unexpected error in WhatsApp notification block:", waErr);
+      // do not rollback here — WhatsApp failures are non-fatal for the booking flow
+    }
+
+    // Emails (unchanged)
+    sendUnifiedEmailForBookedBy(
+      userBookingIdMap,
+      req.user,
+      BOOKING_STATUS_PENDING,
+      false
+    );
+    for (const cardno in userBookingIdMap) {
+      if (cardno != req.user.cardno) {
+        const bookings = userBookingIdMap[cardno];
+        sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING, 'unifiedBookingEmail', false);
+      }
+    }
+
+    const message =
+      Object.keys(waitingBookingCountMap).length > 0
+        ? MSG_BOOKING_WAITING
+        : MSG_BOOKING_SUCCESSFUL;
+
+    return res.status(200).send({
+      message,
+      order: order ? order : { amount: 0 },
+      waitingBookingCountMap
+    });
+  } catch (err) {
+    console.error("mumukshuBooking failed:", err && (err.stack || err.message || err));
+    // rollback if transaction started
+    if (t && !t.finished) {
+      try {
+        await t.rollback();
+        console.info("Transaction rolled back due to error.");
+      } catch (rbErr) {
+        console.error("Transaction rollback failed:", rbErr);
+      }
+    }
+    // pass to express error middleware
+    if (typeof next === "function") return next(err);
+    // otherwise send generic 500
+    return res.status(500).send({ message: "Internal Server Error", error: String(err && err.message) });
+  }
+};
+
+
 export const checkMumukshuOrGuest = async (req, res) => {
   const { mobno } = req.query;
+  req.log.info('check_mumukshu_or_guest_start', { mobno });
+
   const cardDb = await CardDb.findOne({
     where: {
       mobno: mobno
@@ -176,6 +358,7 @@ export const checkMumukshuOrGuest = async (req, res) => {
   });
 
   if (!cardDb) {
+    req.log.warn('check_mumukshu_or_guest_not_found', { mobno });
     throw new ApiError(404, ERR_CARD_NOT_FOUND);
   }
 
@@ -184,9 +367,15 @@ export const checkMumukshuOrGuest = async (req, res) => {
       cardDb.res_status
     )
   ) {
+    req.log.warn('check_mumukshu_or_guest_not_mumukshu', {
+      mobno,
+      cardno: cardDb.cardno,
+      resStatus: cardDb.res_status
+    });
     throw new ApiError(401, 'User is not a mumukshu');
   }
 
+  req.log.info('check_mumukshu_or_guest_success', { mobno, cardno: cardDb.cardno, resStatus: cardDb.res_status });
   return res.status(200).send({ data: cardDb });
 };
 
@@ -209,7 +398,8 @@ async function book(
       break;
 
     case TYPE_FOOD:
-      await bookFood(body, data, t, user);
+      const foodResult = await bookFood(body, data, t, user);
+      setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
     case TYPE_TRAVEL:
@@ -348,7 +538,7 @@ async function bookRoom(body, data, t, user, utsav) {
 
 async function bookFood(body, data, t, user) {
   let { start_date, end_date, mumukshuGroup } = data.details;
-  await bookFoodForMumukshus(
+  const result = await bookFoodForMumukshus(
     start_date,
     end_date,
     mumukshuGroup,
@@ -359,7 +549,7 @@ async function bookFood(body, data, t, user) {
     user.cardno
   );
 
-  return t;
+  return result;
 }
 
 async function bookAdhyayan(data, t, user) {
@@ -507,3 +697,5 @@ function validateFlatBookingConstraints(primary_booking, addons) {
     }
   }
 }
+
+// (removed unused getBookingDetailsForCard — superseded by fetchFreshDetailsForCard)

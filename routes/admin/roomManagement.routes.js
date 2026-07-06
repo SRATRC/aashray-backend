@@ -28,7 +28,8 @@ import {
   updateBookingStatus,
   guestsByDateAndRoomtype,
   updateFlatBookingStatus,
-  fetchLateCheckoutFees 
+  fetchLateCheckoutFees,
+  revokeLateCheckoutFee
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN } from '../../config/constants.js';
@@ -75,6 +76,6 @@ router.get('/daywise_report', CatchAsync(dayWiseGuestCountReport));
 router.get('/occupancyReport', CatchAsync(occupancyReport));
 router.get('/guestsByDateAndRoomtype', CatchAsync(guestsByDateAndRoomtype));
 router.get('/late-checkout-fees', CatchAsync(fetchLateCheckoutFees));
-
+router.put('/late-checkout-fees/revoke', CatchAsync(revokeLateCheckoutFee));
 
 export default router;

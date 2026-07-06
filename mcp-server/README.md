@@ -1,0 +1,235 @@
+# Aashray MCP Server
+
+A standalone HTTP server that implements the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), giving AI agents (Claude Code, Cursor, etc.) structured, read-only access to the application's logs and database.
+
+## How it fits into the stack
+
+```
+  Claude Code
+       │
+       │  POST /mcp  (Bearer token)
+       ▼
+  MCP Server :4000          (this service, PM2 process: MCPServer)
+   ├── tools/logs.js   ──── reads /home/ubuntu/logs/*.log[.gz]
+   └── tools/database.js ── connects to MySQL (read-only user)
+
+Main Backend              (PM2 process: BackendAPI)
+Cron Job                  (PM2 process: CronJob)
+```
+
+The MCP server runs as a third PM2 process on the same Ubuntu server alongside the backend and cron job. It does not share code or process memory with the main app — it's a fully separate Node.js process.
+
+---
+
+## Connecting to the MCP server
+
+Get your `MCP_BEARER_TOKEN` from the team, then run the one-command installer:
+
+```bash
+# install for every AI agent detected on your machine
+curl -fsSL https://raw.githubusercontent.com/SRATRC/aashray-backend/main/mcp-server/install-mcp.sh \
+  | bash -s -- <MCP_BEARER_TOKEN>
+
+# or clone the repo and run directly
+./mcp-server/install-mcp.sh <MCP_BEARER_TOKEN>
+```
+
+The script auto-detects which agents are installed and patches only those.
+It is idempotent — safe to re-run after updates.
+
+---
+
+### Manual setup per agent
+
+If you prefer to configure an agent by hand, or the installer doesn't cover your setup:
+
+#### Claude Code
+
+```bash
+claude mcp add --transport http aashray https://your-server-domain.com/mcp \
+  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"
+```
+
+#### Claude Desktop
+
+Claude Desktop only supports stdio transport — use `mcp-remote` as a bridge.
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+or `~/.config/Claude/claude_desktop_config.json` (Linux):
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://your-server-domain.com/mcp",
+        "--header",
+        "Authorization: Bearer <MCP_BEARER_TOKEN>"
+      ]
+    }
+  }
+}
+```
+
+Requires Node.js. Restart Claude Desktop after saving.
+
+#### GitHub Copilot (VS Code ≥ 1.99)
+
+GitHub Copilot uses VS Code's native MCP support. Add to VS Code's global `settings.json`
+(`Cmd+Shift+P` → "Open User Settings (JSON)"):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "aashray": {
+        "type": "http",
+        "url": "https://your-server-domain.com/mcp",
+        "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+      }
+    }
+  },
+  "github.copilot.chat.mcp.enabled": true
+}
+```
+
+MCP tools appear in Copilot Chat under the `#` tools menu after reloading VS Code.
+
+#### Cursor
+
+Edit `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "url": "https://your-server-domain.com/mcp",
+      "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+    }
+  }
+}
+```
+
+#### Windsurf
+
+Edit `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "url": "https://your-server-domain.com/mcp",
+      "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+    }
+  }
+}
+```
+
+#### Gemini CLI
+
+Edit `~/.gemini/settings.json` (note: Gemini uses `httpUrl`, not `url`):
+
+```json
+{
+  "mcpServers": {
+    "aashray": {
+      "httpUrl": "https://your-server-domain.com/mcp",
+      "headers": { "Authorization": "Bearer <MCP_BEARER_TOKEN>" }
+    }
+  }
+}
+```
+
+---
+
+## Pairing with Sentry MCP
+
+The MCP server is designed to work alongside the [Sentry MCP server](https://docs.sentry.io/product/sentry-mcp/) — not replace it. A typical debugging workflow:
+
+1. **Sentry MCP** → get the crash details, stack trace, and affected `userId` or request ID
+2. **`search_logs`** → pass the `correlationId` or `userId` from Sentry to get the full request lifecycle from our structured logs
+3. **`query_db`** → look up the booking, room, or user record involved to understand the data state at the time of the crash
+
+Add both via the Claude Code CLI:
+
+```bash
+claude mcp add --transport http aashray https://your-server-domain.com/mcp \
+  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"
+
+npx add-mcp https://mcp.sentry.dev/mcp
+```
+
+---
+
+## Tools
+
+### Log tools (`tools/logs.js`)
+
+Log files are JSON-lines format (one JSON object per line), stored in `LOG_DIR`. The current day's file is uncompressed; older files are gzipped. The tools handle both transparently.
+
+| Tool | What it does |
+|---|---|
+| `get_recent_logs` | Returns the last N entries from **today's** `application-YYYY-MM-DD.log`. Optional `level` filter. |
+| `search_logs` | Searches a single day's application log. Filters: `keyword`, `level`, `userId`, `correlationId`, `date`. Returns the most-recent matching entries. |
+| `get_error_logs` | Returns the last N entries from the `error-YYYY-MM-DD.log` file (errors only, separate file from the main log). |
+
+**Example: trace a crash using `correlationId`**
+
+Every HTTP request in the main app gets a unique `correlationId` (set in `middleware/Logger.js`). If Sentry gives you a request ID, pass it to `search_logs` to get the full lifecycle of that request — what came in, what was called, what failed.
+
+### Database tools (`tools/database.js`)
+
+Connects with a dedicated read-only MySQL user (`mcp_readonly`). Pool is limited to 3 connections with a 5-second query timeout.
+
+| Tool | What it does |
+|---|---|
+| `get_schema` | Returns all tables and their columns (name, type, nullable). Use this first before writing any query. |
+| `query_db` | Executes a `SELECT`, `SHOW`, or `DESCRIBE` statement. Auto-appends `LIMIT 1000` if no `LIMIT` clause is present. Multi-statement queries (`;`) are rejected. |
+| `get_table_sample` | Returns up to 50 rows from any table — useful for understanding data shape without writing a query. |
+
+---
+
+## Security
+
+| Concern | How it's handled |
+|---|---|
+| Authentication | Every request requires `Authorization: Bearer <token>`. Token compared with `crypto.timingSafeEqual` (prevents timing attacks). |
+| DB write protection | Dedicated read-only MySQL user — `GRANT SELECT` only. The MCP server never uses the main app's DB credentials. |
+| SQL injection | `query_db` allowlists statement type (SELECT/SHOW/DESCRIBE). `get_table_sample` validates table names against `/^[a-zA-Z0-9_]+$/`. Queries use prepared statements via `connection.execute()`. |
+| Multi-statement attacks | Any query containing `;` is rejected before execution. |
+| Path traversal | `date` parameters are validated against `^\d{4}-\d{2}-\d{2}$` before being used in file paths. |
+| Query cost | 5-second query timeout. Automatic `LIMIT 1000` on unbounded `SELECT` queries. |
+
+---
+
+## Configuration
+
+All configuration is via environment variables. These must be present in `.env.prod` (added to the `PROD_ENV_FILE` GitHub secret).
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `MCP_BEARER_TOKEN` | **Yes** | — | Static Bearer token. Generate with `openssl rand -hex 32`. Process exits at startup if missing. |
+| `MCP_PORT` | No | `4000` | Port the MCP server listens on. |
+| `LOG_DIR` | No | `/home/ubuntu/logs` | Directory where log files are stored. Shared with the main app. |
+| `MCP_DB_USER` | **Yes** | — | Read-only MySQL username (`mcp_readonly`). |
+| `MCP_DB_PASSWORD` | **Yes** | — | Password for the read-only MySQL user. |
+| `MCP_DB_HOST` | No | Falls back to `DB_HOST` | MySQL host. |
+| `MCP_DB_PORT` | No | Falls back to `DB_PORT` or `3306` | MySQL port. |
+| `MCP_DB_NAME` | No | Falls back to `DB_NAME` | Database name. |
+| `APP_CWD` | No | `/home/ubuntu/actions-runner-api/_work/aashray-backend/aashray-backend` | Override the PM2 working directory (useful for non-standard deployments). |
+
+---
+
+## File structure
+
+```
+mcp-server/
+├── index.js          Entry point. Wires Express + MCP SDK + tools. Handles startup validation and graceful shutdown.
+├── auth.js           Bearer token middleware. Applied to all routes.
+├── config.js         Single source of truth for all env vars.
+├── package.json      Separate package — own dependencies, own node_modules.
+└── tools/
+    ├── logs.js       Log reading tools. Streams files with readline + zlib. Cleans up file descriptors on error.
+    └── database.js   Database tools. Lazy connection pool. All connections released in finally blocks.
+```

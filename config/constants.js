@@ -62,6 +62,7 @@ export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
+export const AMT_TYPE_LATE_CHECKOUT_ROOM = 'late_checkout_room';
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
@@ -88,6 +89,8 @@ export const ROLE_RAJ_ADHYAYAN_ADMIN = 'adhyayanAdminRaj';
 export const ROLE_DHU_ADHYAYAN_ADMIN = 'adhyayanAdminDhu';
 export const ROLE_UTSAV_ADMIN = 'utsavAdmin';
 export const ROLE_FOOD_ADMIN = 'foodAdmin';
+export const ROLE_FOOD_PLATE_ADMIN = 'foodPlateAdmin';
+
 export const ROLE_TRAVEL_ADMIN = 'travelAdmin';
 export const ROLE_DRI_TRAVEL_ADMIN = 'travelAdminDri';
 export const ROLE_ACCOUNTS_ADMIN = 'accountsAdmin';
@@ -140,6 +143,11 @@ export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
 export const ERR_FLAT_ALREADY_BOOKED =
   'Flat already booked for one or more mumukshus during selected dates';
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';
+export const ERR_UTSAV_NOT_FOUND = 'Utsav not found';
+export const ERR_UTSAV_FEEDBACK_NOT_ALLOWED =
+  'You are not eligible to submit feedback for this utsav';
+export const ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED =
+  'Feedback already submitted for this utsav';
 
 export const ERR_FEEDBACK_ALREADY_SUBMITTED =
   'Feedback already submitted for this adhyayan';
@@ -147,7 +155,7 @@ export const ERR_FEEDBACK_NOT_ALLOWED =
   'You are not eligible to submit feedback for this adhyayan';
 export const ERR_ADHYAYAN_NOT_COMPLETED =
   'Cannot submit feedback for ongoing or future adhyayan';
-
+export const ERR_UTSAV_NO_SEATS_AVAILABLE = 'No seats available for this utsav';
 export const MSG_BOOKING_SUCCESSFUL = 'Booking successful';
 export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
@@ -158,3 +166,51 @@ export const SUBJECT_BOOKING = 'Vitraag Vigyaan Aashray: ';
 export const BOOKING_STATUS_PENDING = 'pending';
 
 export const RAJ_PRAVAS_EMAIL = 'rajpravas7@gmail.com';
+
+export const WHATSAPP_SUPPORT_NUMBER = '+917875432613';
+
+// Housekeeping Deep Cleaning WhatsApp Notification Recipients (Card Numbers)
+export const DEEP_CLEANING_WA_RECIPIENTS = [
+  '0002945690',
+  '0009076440',
+  '0002819369',
+  '0012247780',
+  '0000333821',
+  '0005824773',
+  '0001739990',
+  '0005952628',
+  '0002816810',
+  '0002814349',
+  '0012238981',
+  '0002831813',
+  '0009202891',
+  '0012754172',
+  '0000404966',
+  '0011762768',
+  '0005742256',
+  '0012790808',
+  '0002951536',
+  '0015183142',
+  '0007700031',
+  '0012849651',
+  '0002890016',
+  '0002898190',
+  '0000373520',
+  '0015347701',
+  '0012709594',
+  '0008824681',
+  '0004005265',
+  '0003894339',
+  '0001892956',
+  '0012698625',
+  '0005664418',
+  '0012797705',
+  '0009221641',
+  '0001964503',
+  '0003033787',
+  '0007829579',
+  '0008977629',
+  '0002945068'
+];
+
+

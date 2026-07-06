@@ -1,4 +1,5 @@
 import './config/environment.js';
+
 import express, { urlencoded, json } from 'express';
 import { ErrorHandler } from './middleware/Error.js';
 import { httpLogger } from './middleware/Logger.js';
@@ -41,6 +42,8 @@ import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 import accountsManagementRoutes from './routes/admin/accountsManagement.routes.js';
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagement.routes.js';
 import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
+import shortLinkRoutes from './routes/admin/shortLink.routes.js';
+import redirectRoutes from './routes/admin/redirect.routes.js';
 // import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
 import {
   utsavPublicRouter,
@@ -48,6 +51,7 @@ import {
 } from './routes/admin/utsavManagement.routes.js';
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
+import coordinatorAuthRoutes from './routes/admin/coordinatorAuth.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -156,6 +160,7 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+
 app.use('/api/v1/updates', updateRoutes);
 
 app.use('/api/v1/client', clientAuthRoutes);
@@ -188,6 +193,9 @@ app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
 app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 app.use('/api/v1/admin/wifi', wifiManagementRoutes);
+app.use('/api/v1/coordinator', coordinatorAuthRoutes);
+app.use('/api/v1/short-links', shortLinkRoutes);
+app.use('/', redirectRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);

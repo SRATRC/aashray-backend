@@ -1,24 +1,36 @@
 import {
   ERR_BOOKING_NOT_FOUND,
-  MSG_CANCEL_SUCCESSFUL
+  MSG_CANCEL_SUCCESSFUL,
+  STATUS_CONFIRMED,
+  ROOM_STATUS_CHECKEDIN,
+  FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import {
   UtsavBooking,
   UtsavDb,
-  UtsavPackagesDb
+  UtsavFeedback,
+  UtsavFeedbackAnswer
 } from '../../models/associations.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { openUtsavSeat, sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
-import moment from 'moment';
+import {
+  openUtsavSeat,
+  sendUtsavBookingUpdateEmail,
+  cancelUtsavFoodBookings,
+  validateFeedbackEligibility
+} from '../../helpers/utsavBooking.helper.js';
+import moment from 'moment-timezone';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+import { sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 import {
   getOtherBookingUser,
   notifyCardno
 } from '../../helpers/notification.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 
 export const FetchUpcoming = async (req, res) => {
+  req.log.info('fetch_upcoming_utsav_start');
   const today = moment().format('YYYY-MM-DD');
 
   const page = parseInt(req.query.page) || 1;
@@ -80,13 +92,16 @@ export const FetchUpcoming = async (req, res) => {
     }))
   };
 
+  req.log.info('fetch_upcoming_utsav_success', { count: utsavs.length });
   return res.status(200).send(formattedResponse);
 };
 
 export const ViewUtsavBookings = async (req, res) => {
+  attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  req.log.info('fetch_utsav_bookings_start', { cardno: req.user.cardno, page, pageSize });
 
   const utsavs = await database.query(
     `
@@ -131,11 +146,51 @@ export const ViewUtsavBookings = async (req, res) => {
     }
   );
 
-  return res.status(200).send({ data: utsavs });
+  // Feedback eligibility
+
+  const now = moment().tz('Asia/Kolkata');
+
+  const updatedUtsavs = await Promise.all(
+    utsavs.map(async (utsav) => {
+      const feedbackStartDate = moment(utsav.utsav_start_date)
+        .tz('Asia/Kolkata')
+        .hour(FEEDBACK_ELIGIBILITY_HOUR)
+        .minute(0)
+        .second(0);
+
+      const daysSinceStart = now.diff(feedbackStartDate, 'days');
+
+      const normalizedStatus = (utsav.status || '').toLowerCase();
+
+      const existingFeedback = await UtsavFeedback.findOne({
+        where: {
+          utsav_id: utsav.utsavid,
+          cardno: req.user.cardno
+        }
+      });
+
+      return {
+        ...utsav,
+
+        hasSubmittedFeedback: !!existingFeedback,
+
+        showFeedback:
+          !existingFeedback &&
+          !now.isBefore(feedbackStartDate) &&
+          daysSinceStart <= 8 &&
+          ['confirmed', 'checkedin'].includes(normalizedStatus)
+      };
+    })
+  );
+
+  req.log.info('fetch_utsav_bookings_success', { cardno: req.user.cardno, count: updatedUtsavs.length });
+  return res.status(200).send({ data: updatedUtsavs });
 };
 
 export const CancelUtsavBooking = async (req, res) => {
+  attachUserContext(req);
   const { bookingid } = req.body;
+  req.log.info('cancel_utsav_booking_start', { bookingid, cardno: req.user.cardno });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -153,18 +208,37 @@ export const CancelUtsavBooking = async (req, res) => {
   });
 
   if (!booking) {
+    req.log.warn('cancel_utsav_booking_not_found', { bookingid, cardno: req.user.cardno });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  const previousStatus = booking.status;
+  req.log.info('cancel_utsav_booking_found', {
+    bookingid,
+    cardno: req.user.cardno,
+    utsavid: booking.utsavid,
+    packageid: booking.packageid,
+    currentStatus: booking.status
+  });
+
   await userCancelBooking(req.user, booking, t);
+  req.log.info('cancel_utsav_booking_cancelled', {
+    bookingid,
+    cardno: req.user.cardno,
+    previousStatus: booking.status,
+    newStatus: 'cancelled'
+  });
 
   const utsav = await UtsavDb.findOne({
     where: { id: booking.utsavid }
   });
+  await cancelUtsavFoodBookings(booking,req.user.username,t);
   await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
-  
+  req.log.info('cancel_utsav_booking_seat_opened', { bookingid, utsavid: booking.utsavid });
+
   await t.commit();
-  
+  req.log.info('cancel_utsav_booking_committed', { bookingid });
+
 
   if (booking.bookedBy) {
     const other = getOtherBookingUser(booking, req.user.cardno);
@@ -181,15 +255,22 @@ export const CancelUtsavBooking = async (req, res) => {
       });
     }
   }
-  
 
   await sendUtsavBookingUpdateEmail(booking, utsav);
 
+  try {
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus);
+  } catch (waErr) {
+    console.error("Error sending utsav status change WhatsApp in CancelUtsavBooking:", waErr);
+  }
+
+  req.log.info('cancel_utsav_booking_success', { bookingid, cardno: req.user.cardno });
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
 };
 
 export const FetchUtsavById = async (req, res) => {
   const { id } = req.params;
+  req.log.info('fetch_utsav_by_id_start', { utsavId: id });
   const today = moment().format('YYYY-MM-DD');
 
   const utsav = await database.query(
@@ -228,8 +309,207 @@ export const FetchUtsavById = async (req, res) => {
   );
 
   if (!utsav || utsav.length === 0) {
+    req.log.warn('fetch_utsav_by_id_not_found', { utsavId: id });
     throw new ApiError(404, 'Utsav not found');
   }
 
+  req.log.info('fetch_utsav_by_id_success', { utsavId: id });
   return res.status(200).send({ data: utsav[0] });
+};
+
+export const validateUtsavFeedback = async (req, res) => {
+  const { utsav_id } = req.query;
+
+  if (!utsav_id) {
+    throw new ApiError(400, 'Utsav ID is required');
+  }
+
+  const parsedUtsavId = Number(utsav_id);
+
+  if (Number.isNaN(parsedUtsavId)) {
+    throw new ApiError(400, 'Invalid Utsav ID');
+  }
+
+  await validateFeedbackEligibility(
+    req.user.cardno,
+    parsedUtsavId
+  );
+
+  return res.status(200).json({
+    success: true,
+    message: 'Feedback is allowed'
+  });
+};
+
+const ALLOWED_UTSAV_FEEDBACK_QUESTIONS = [
+  {
+    id: 'event_rating',
+    type: 'rating'
+  },
+  {
+    id: 'stay_rating',
+    type: 'rating'
+  },
+  {
+    id: 'food_rating',
+    type: 'rating'
+  },
+  {
+    id: 'program_rating',
+    type: 'rating'
+  },
+  {
+    id: 'loved_most',
+    type: 'text'
+  },
+  {
+    id: 'improvement_suggestions',
+    type: 'text'
+  }
+];
+
+export const submitUtsavFeedback = async (req, res) => {
+
+  const transaction = await database.transaction();
+
+  try {
+
+    const { utsav_id, answers } = req.body;
+
+    if (!utsav_id) {
+      throw new ApiError(400, 'utsav_id is required');
+    }
+
+    if (!Array.isArray(answers) || answers.length === 0) {
+      throw new ApiError(400, 'answers array is required');
+    }
+
+    await validateFeedbackEligibility(
+      req.user.cardno,
+      utsav_id
+    );
+
+    const allowedQuestionMap = new Map(
+      ALLOWED_UTSAV_FEEDBACK_QUESTIONS.map(
+        (q) => [q.id, q.type]
+      )
+    );
+
+    const submittedQuestionIds = [];
+
+    // Validate all answers
+    for (const answerObj of answers) {
+
+      const {
+        question_id,
+        question_text,
+        question_type,
+        answer
+      } = answerObj;
+
+      submittedQuestionIds.push(question_id);
+
+      if (
+        !question_id ||
+        !question_text ||
+        !question_type ||
+        answer === undefined ||
+        answer === null ||
+        answer === ''
+      ) {
+        throw new ApiError(
+          400,
+          'All feedback fields are required'
+        );
+      }
+
+      const expectedType =
+        allowedQuestionMap.get(question_id);
+
+      if (!expectedType) {
+        throw new ApiError(
+          400,
+          `Invalid question_id: ${question_id}`
+        );
+      }
+
+      if (expectedType !== question_type) {
+        throw new ApiError(
+          400,
+          `Invalid question_type for ${question_id}`
+        );
+      }
+
+      // Rating validation
+      if (question_type === 'rating') {
+
+        const rating = Number(answer);
+
+        if (
+          Number.isNaN(rating) ||
+          rating < 1 ||
+          rating > 5
+        ) {
+          throw new ApiError(
+            400,
+            `${question_id} must be between 1 and 5`
+          );
+        }
+
+      }
+
+    }
+
+    // Ensure all required questions are submitted
+    for (const question of ALLOWED_UTSAV_FEEDBACK_QUESTIONS) {
+
+      if (!submittedQuestionIds.includes(question.id)) {
+
+        throw new ApiError(
+          400,
+          `${question.id} is required`
+        );
+
+      }
+
+    }
+
+    // Create main feedback row
+    const feedback = await UtsavFeedback.create(
+      {
+        cardno: req.user.cardno,
+        utsav_id
+      },
+      { transaction }
+    );
+
+    // Create answers
+    const feedbackAnswers = answers.map((item) => ({
+      feedback_id: feedback.id,
+      question_id: item.question_id,
+      question_text: item.question_text,
+      question_type: item.question_type,
+      answer: item.answer
+    }));
+
+    await UtsavFeedbackAnswer.bulkCreate(
+      feedbackAnswers,
+      { transaction }
+    );
+
+    await transaction.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Utsav feedback submitted successfully'
+    });
+
+  } catch (error) {
+
+    await transaction.rollback();
+
+    throw error;
+
+  }
+
 };
