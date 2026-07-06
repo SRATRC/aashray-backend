@@ -201,7 +201,8 @@ export async function findRoom(
   checkout,
   room_type,
   gender,
-  excludeRooms = []
+  excludeRooms = [],
+  t = null
 ) {
   const whereConditions = {
     roomstatus: STATUS_AVAILABLE,
@@ -244,6 +245,8 @@ export async function findRoom(
       excludeStatus1: 'cancelled',           // Statuses that mean the room is actually free
       excludeStatus2: 'admin cancelled'
     },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined,
     limit: 1
   });
 }
@@ -439,7 +442,8 @@ export async function createRoomBooking(
     checkout,
     roomtype,
     gender,
-    excludeRooms
+    excludeRooms,
+    t
   );
 
   if (!roomno) {
