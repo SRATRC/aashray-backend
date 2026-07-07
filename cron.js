@@ -423,12 +423,81 @@ const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
   timezone: "Asia/Kolkata"
 });
 
+const ATTACHMENT_DELETE_CHUNK_SIZE = 1000; // S3 DeleteObjects hard limit per request
+
+// Ticket media is auto-deleted ATTACHMENT_RETENTION_DAYS after upload. This
+// daily job (mirrors ticketAutoCloseJob) selects non-expired attachments past
+// the retention window, batch-deletes their S3 objects (chunked to S3's 1000
+// keys/request limit, run concurrently under Promise.allSettled so one chunk's
+// failure never aborts the rest), then tombstones every selected row by setting
+// expired_at — kept so the UI can explain the gap and we never re-attempt.
+// Rows are tombstoned even if their S3 delete failed; the bucket lifecycle rule
+// is the backstop that reclaims any object that slipped through.
+const ticketAttachmentCleanupJob = cron.schedule('30 2 * * *', async () => {
+  logger.info('ticketAttachmentCleanupJob cron job started.');
+  try {
+    const { TicketAttachment } = await import('./models/associations.js');
+    const { ATTACHMENT_RETENTION_DAYS } = await import('./config/constants.js');
+    const { deleteObjects } = await import('./helpers/ticketAttachment.helper.js');
+
+    const cutoff = moment().utc().subtract(ATTACHMENT_RETENTION_DAYS, 'days').toDate();
+
+    const staleAttachments = await TicketAttachment.findAll({
+      where: { expired_at: null, uploaded_at: { [Sequelize.Op.lt]: cutoff } }
+    });
+
+    if (staleAttachments.length > 0) {
+      const keys = staleAttachments.map((a) => a.s3_key);
+      const chunks = [];
+      for (let i = 0; i < keys.length; i += ATTACHMENT_DELETE_CHUNK_SIZE) {
+        chunks.push(keys.slice(i, i + ATTACHMENT_DELETE_CHUNK_SIZE));
+      }
+
+      const results = await Promise.allSettled(chunks.map((chunk) => deleteObjects(chunk)));
+
+      let deleted = 0;
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          deleted += r.value?.deleted || 0;
+          failed += r.value?.errors?.length || 0;
+        } else {
+          failed += 1;
+        }
+      }
+      if (failed > 0) {
+        logger.warn(
+          `ticketAttachmentCleanupJob: ${failed} S3 delete failure(s) (best-effort; lifecycle rule is the backstop).`
+        );
+      }
+
+      // Tombstone every selected row regardless of per-object S3 outcome.
+      await TicketAttachment.update(
+        { expired_at: new Date() },
+        { where: { id: { [Sequelize.Op.in]: staleAttachments.map((a) => a.id) } } }
+      );
+
+      logger.info(
+        `ticketAttachmentCleanupJob finished: deleted ${deleted} S3 object(s), tombstoned ${staleAttachments.length} attachment(s).`
+      );
+    } else {
+      logger.info('ticketAttachmentCleanupJob finished: no attachments to expire.');
+    }
+  } catch (error) {
+    logger.error(`ticketAttachmentCleanupJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
 job.start();
 mealsCount9PMJob.start();
 mealsCount10PMJob.start();
 mealsCount11PMJob.start();
 wifiLowAlertJob.start();
 ticketAutoCloseJob.start();
+ticketAttachmentCleanupJob.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
@@ -441,6 +510,7 @@ const gracefulShutdown = async () => {
   mealsCount11PMJob.stop();
   wifiLowAlertJob.stop();
   ticketAutoCloseJob.stop();
+  ticketAttachmentCleanupJob.stop();
 
   // Wait for the current task to finish if it's running
   const waitInterval = setInterval(() => {
