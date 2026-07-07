@@ -47,13 +47,29 @@ let _client;
 // network or requires the env to be present until an S3 call is actually made.
 export function getTicketS3Client() {
   if (!_client) {
-    _client = new S3Client({
+    const config = {
       region: process.env.AWS_REGION,
       credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-      }
-    });
+      },
+      // @aws-sdk/client-s3 >= 3.729 bakes a default CRC32 checksum into
+      // presigned PUT URLs (x-amz-checksum-crc32 + x-amz-sdk-checksum-algorithm
+      // in the signed query). Our clients upload with a plain fetch PUT and
+      // don't send that checksum header, so S3 rejects the upload with 400.
+      // WHEN_REQUIRED stops the SDK from adding the checksum unless explicitly
+      // requested, keeping presigned PUTs uploadable by a bare PUT.
+      requestChecksumCalculation: 'WHEN_REQUIRED'
+    };
+    // Optional S3-compatible endpoint override for local dev / tests
+    // (LocalStack, MinIO). Only active when AWS_S3_ENDPOINT is set — production
+    // leaves it unset and talks to real AWS. Path-style addressing is required
+    // by those emulators (they don't do virtual-hosted bucket subdomains).
+    if (process.env.AWS_S3_ENDPOINT) {
+      config.endpoint = process.env.AWS_S3_ENDPOINT;
+      config.forcePathStyle = true;
+    }
+    _client = new S3Client(config);
   }
   return _client;
 }

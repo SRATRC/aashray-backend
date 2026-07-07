@@ -62,13 +62,20 @@ async function main() {
     .map((o) => o.trim())
     .filter(Boolean);
 
-  const s3 = new S3Client({
+  const s3Config = {
     region,
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
     }
-  });
+  };
+  // Optional S3-compatible endpoint override for local dev / tests (LocalStack,
+  // MinIO). Unset in production. Path-style is required by those emulators.
+  if (process.env.AWS_S3_ENDPOINT) {
+    s3Config.endpoint = process.env.AWS_S3_ENDPOINT;
+    s3Config.forcePathStyle = true;
+  }
+  const s3 = new S3Client(s3Config);
 
   // 1. Create the bucket if missing (idempotent).
   let exists = false;
