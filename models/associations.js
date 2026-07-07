@@ -45,6 +45,7 @@ import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
 import Ticket from './ticket.model.js';
 import TicketMessage from './ticket_message.model.js';
+import TicketAttachment from './ticket_attachment.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -590,6 +591,30 @@ TicketMessage.belongsTo(Ticket, {
   targetKey: 'id'
 });
 
+// Ticket media attachments
+Ticket.hasMany(TicketAttachment, {
+  as: 'attachments',
+  foreignKey: 'ticket_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+TicketAttachment.belongsTo(Ticket, {
+  foreignKey: 'ticket_id',
+  targetKey: 'id'
+});
+TicketMessage.hasMany(TicketAttachment, {
+  as: 'attachments',
+  foreignKey: 'message_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+TicketAttachment.belongsTo(TicketMessage, {
+  foreignKey: 'message_id',
+  targetKey: 'id'
+});
+
 // Card → Shibir Attendance
 CardDb.hasMany(ShibirAttendanceDb, {
   foreignKey: 'cardno',
@@ -758,5 +783,6 @@ export {
   UtsavFeedback,
   UtsavFeedbackAnswer,
   Ticket,
-  TicketMessage
+  TicketMessage,
+  TicketAttachment
 };
