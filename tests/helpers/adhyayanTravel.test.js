@@ -31,3 +31,15 @@ test('ignores registrations for other cardnos', () => {
   const regs = [{ cardno: 'C2', name: 'X', start_date: '2026-08-02', end_date: '2026-08-03', status: 'confirmed' }];
   expect(matchAdhyayanForLeg(row, regs)).toBeNull();
 });
+
+test('arrival leg does not match a session that already ended before the travel date', () => {
+  const row = { cardno: 'C1', date: '2026-08-01', pickup_point: 'Mumbai', drop_point: 'Research Centre' };
+  const regs = [reg({ name: 'AlreadyEnded', start_date: '2026-07-30', end_date: '2026-07-31' })];
+  expect(matchAdhyayanForLeg(row, regs)).toBeNull();
+});
+
+test('departure leg does not match a session that has not started yet as of the travel date', () => {
+  const row = { cardno: 'C1', date: '2026-08-01', pickup_point: 'Research Centre', drop_point: 'Pune' };
+  const regs = [reg({ name: 'NotStarted', start_date: '2026-08-02', end_date: '2026-08-03' })];
+  expect(matchAdhyayanForLeg(row, regs)).toBeNull();
+});

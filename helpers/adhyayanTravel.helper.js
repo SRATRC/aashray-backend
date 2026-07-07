@@ -33,6 +33,10 @@ export function matchAdhyayanForLeg(travelRow, registrations) {
   for (const r of mine) {
     const start = moment(r.start_date, 'YYYY-MM-DD');
     const end = moment(r.end_date, 'YYYY-MM-DD');
+    // Directional guard: an arrival must be for a session that hasn't ended yet,
+    // and a departure must be after a session that has already started.
+    if (isArrival && end.isBefore(travel)) continue;
+    if (!isArrival && start.isAfter(travel)) continue;
     let delta;
     if (isArrival) {
       // Arriving for a session that starts on/after the travel date.
