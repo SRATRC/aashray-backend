@@ -4,8 +4,15 @@ import {
   Transactions,
   TravelBusGroup,
   TravelBusPassengers,
-  TravelBusStops
+  TravelBusStops,
+  ShibirBookingDb,
+  ShibirDb
 } from '../../models/associations.js';
+import {
+  matchAdhyayanForLeg,
+  ATTENDING_EXCLUDED_STATUSES
+} from '../../helpers/adhyayanTravel.helper.js';
+import { Op } from 'sequelize';
 import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
@@ -300,7 +307,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   END AS drop_point`;
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date,
+    `SELECT t1.bookingid, t1.cardno, t1.trip_group_id, t1.bookedBy, t1.date,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
 tbp.bus_group_id,
@@ -364,6 +371,32 @@ LEFT JOIN travel_bus_group tbg
           item.bus_group_id
       );
   }
+
+  const cardnos = [...new Set(data.map((r) => r.cardno).filter(Boolean))];
+  let registrations = [];
+  if (cardnos.length > 0) {
+    const rows = await ShibirBookingDb.findAll({
+      where: {
+        cardno: { [Op.in]: cardnos },
+        status: { [Op.notIn]: ATTENDING_EXCLUDED_STATUSES }
+      },
+      include: [{ model: ShibirDb, as: 'ShibirDb', attributes: ['name', 'start_date', 'end_date'] }]
+    });
+    registrations = rows
+      .filter((r) => r.ShibirDb)
+      .map((r) => ({
+        cardno: r.cardno,
+        name: r.ShibirDb.name,
+        start_date: r.ShibirDb.start_date,
+        end_date: r.ShibirDb.end_date,
+        status: r.status
+      }));
+  }
+
+  for (const item of data) {
+    item.adhyayan = matchAdhyayanForLeg(item, registrations);
+  }
+
   req.log.info('travel_fetch_upcoming_bookings_success', { start_date, end_date, count: data.length });
   return res.status(200).send({ message: 'Fetched data', data });
 };
@@ -834,7 +867,6 @@ export async function updateBooking(req, res) {
     drop_point,
     type,
     date,
-    leaving_post_adhyayan,
     bus_group_id,
     is_coordinator
   } = req.body;
@@ -879,9 +911,6 @@ export async function updateBooking(req, res) {
   if (drop_point !== undefined) travelUpdate.drop_point = drop_point;
   if (type !== undefined) travelUpdate.type = type;
   if (date !== undefined) travelUpdate.date = date; // ✅ NEW
-  if (leaving_post_adhyayan !== undefined) {
-    travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
-  }
 
   if (Object.keys(travelUpdate).length > 0) {
     const travelBooking = await TravelDb.findOne({
