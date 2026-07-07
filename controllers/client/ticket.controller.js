@@ -13,17 +13,16 @@ import crypto from 'crypto';
 import database from '../../config/database.js';
 import ticketStreamManager from '../../utils/ticketStreamManager.js';
 import { attachUserContext } from '../../middleware/Logger.js';
+import { createPresignedGetUrl } from '../../helpers/ticketAttachment.helper.js';
 import {
-  buildAttachmentKey,
-  createPresignedPutUrl,
-  createPresignedGetUrl
-} from '../../helpers/ticketAttachment.helper.js';
-import {
-  validateAttachmentBatch,
   normalizeAttachmentRefs,
   verifyAttachmentsOrThrow,
   persistAttachments,
-  countExistingUserVideos
+  countExistingUserVideos,
+  attachmentDto,
+  groupAttachmentsByMessage,
+  presignBatch,
+  resolveAttachmentForServe
 } from '../../helpers/ticketAttachmentOrchestrator.js';
 
 const MAX_METADATA_LENGTH = 16000;
@@ -37,19 +36,8 @@ const ALLOWED_OS = ['Android', 'iOS', 'Web', 'Other'];
 // getTicketDetails returns each attachment's `url` pointing here rather than a
 // raw presigned URL — the URL is minted per request behind an auth check so it
 // can't be shared/leaked and expires ~5 min after issue.
-function serveUrl(ticketId, attachmentId) {
-  return `/api/v1/tickets/${ticketId}/attachments/${attachmentId}`;
-}
-
-function attachmentDto(a, ticketId) {
-  return {
-    id: a.id,
-    kind: a.kind,
-    contentType: a.content_type,
-    url: serveUrl(ticketId, a.id),
-    expired: !!a.expired_at
-  };
-}
+const buildServeUrl = (ticketId, attachmentId) =>
+  `/api/v1/tickets/${ticketId}/attachments/${attachmentId}`;
 
 async function loadOwnedTicketOrThrow(ticket_id, cardno, options = {}) {
   const ticket = await Ticket.findOne({
@@ -198,26 +186,15 @@ export const getTicketDetails = async (req, res) => {
     order: [['createdAt', 'ASC']]
   });
 
-  // Group attachments: message_id === null are ticket-level (filed at
-  // creation); the rest hang off their message.
-  const byMessage = new Map();
-  const ticketLevel = [];
-  for (const a of attachments) {
-    const dto = attachmentDto(a, ticket_id);
-    if (a.message_id === null || a.message_id === undefined) {
-      ticketLevel.push(dto);
-    } else {
-      const list = byMessage.get(a.message_id) || [];
-      list.push(dto);
-      byMessage.set(a.message_id, list);
-    }
-  }
+  const { ticketLevel, byMessageId } = groupAttachmentsByMessage(attachments, (a) =>
+    attachmentDto(a, buildServeUrl)
+  );
 
   const data = ticket.toJSON();
   data.attachments = ticketLevel;
   data.messages = (data.messages || []).map((m) => ({
     ...m,
-    attachments: byMessage.get(m.id) || []
+    attachments: byMessageId.get(m.id) || []
   }));
 
   res.status(200).send({
@@ -378,20 +355,9 @@ export const presignAttachments = async (req, res) => {
   attachUserContext(req);
 
   const files = Array.isArray(req.body) ? req.body : req.body.files;
-  const items = validateAttachmentBatch(files, { allowVideo: true });
+  const data = await presignBatch(files, { owner: cardno, allowVideo: true });
 
-  req.log.info('ticket_presign_start', { cardno, count: items.length });
-
-  const data = [];
-  for (const f of items) {
-    const key = buildAttachmentKey({
-      owner: cardno,
-      contentType: f.contentType,
-      filename: f.filename
-    });
-    const uploadUrl = await createPresignedPutUrl({ key, contentType: f.contentType });
-    data.push({ key, uploadUrl });
-  }
+  req.log.info('ticket_presign_start', { cardno, count: data.length });
 
   res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
@@ -408,18 +374,9 @@ export const serveAttachment = async (req, res) => {
 
   await loadOwnedTicketOrThrow(ticket_id, cardno);
 
-  const attachment = await TicketAttachment.findOne({
-    where: { id: attachmentId, ticket_id }
-  });
-  if (!attachment) {
-    throw new ApiError(404, 'Attachment not found');
-  }
-  if (attachment.expired_at) {
-    throw new ApiError(410, 'This attachment was removed after the retention period');
-  }
+  const attachment = await resolveAttachmentForServe(ticket_id, attachmentId);
 
-  const url = await createPresignedGetUrl({ key: attachment.s3_key });
-  return res.redirect(302, url);
+  return res.redirect(302, await createPresignedGetUrl({ key: attachment.s3_key }));
 };
 
 const generateTicketId = () => {

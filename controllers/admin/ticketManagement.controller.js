@@ -15,16 +15,15 @@ import ApiError from '../../utils/ApiError.js';
 import { notifyCardno } from '../../helpers/notification.helper.js';
 import database from '../../config/database.js';
 import { attachUserContext } from '../../middleware/Logger.js';
+import { createPresignedGetUrl } from '../../helpers/ticketAttachment.helper.js';
 import {
-  buildAttachmentKey,
-  createPresignedPutUrl,
-  createPresignedGetUrl
-} from '../../helpers/ticketAttachment.helper.js';
-import {
-  validateAttachmentBatch,
   normalizeAttachmentRefs,
   verifyAttachmentsOrThrow,
-  persistAttachments
+  persistAttachments,
+  attachmentDto,
+  groupAttachmentsByMessage,
+  presignBatch,
+  resolveAttachmentForServe
 } from '../../helpers/ticketAttachmentOrchestrator.js';
 
 // Admins attach images only — video is user-only in v1. Passed to the shared
@@ -32,19 +31,8 @@ import {
 const ADMIN_ALLOW_VIDEO = false;
 
 // Base path of the admin serve endpoint (see ticketManagement.routes.js).
-function serveUrl(ticketId, attachmentId) {
-  return `/api/v1/admin/tickets/${ticketId}/attachments/${attachmentId}`;
-}
-
-function attachmentDto(a, ticketId) {
-  return {
-    id: a.id,
-    kind: a.kind,
-    contentType: a.content_type,
-    url: serveUrl(ticketId, a.id),
-    expired: !!a.expired_at
-  };
-}
+const buildServeUrl = (ticketId, attachmentId) =>
+  `/api/v1/admin/tickets/${ticketId}/attachments/${attachmentId}`;
 
 // Admins can only move a ticket to open/in-progress/resolved. Closing is not
 // an admin action: the ticket owner closes it themselves (client resolve
@@ -155,24 +143,13 @@ export const getTicketDetails = async (req, res) => {
     order: [['createdAt', 'ASC']]
   });
 
-  // Group attachments: message_id === null are ticket-level (filed at
-  // creation); the rest hang off their message.
-  const byMessage = new Map();
-  const ticketLevel = [];
-  for (const a of attachments) {
-    const dto = attachmentDto(a, id);
-    if (a.message_id === null || a.message_id === undefined) {
-      ticketLevel.push(dto);
-    } else {
-      const list = byMessage.get(a.message_id) || [];
-      list.push(dto);
-      byMessage.set(a.message_id, list);
-    }
-  }
+  const { ticketLevel, byMessageId } = groupAttachmentsByMessage(attachments, (a) =>
+    attachmentDto(a, buildServeUrl)
+  );
 
   const messagesWithAttachments = messages.map((m) => ({
     ...m.toJSON(),
-    attachments: byMessage.get(m.id) || []
+    attachments: byMessageId.get(m.id) || []
   }));
 
   res.status(200).json({
@@ -369,23 +346,15 @@ export const presignAttachments = async (req, res) => {
   attachUserContext(req);
 
   const files = Array.isArray(req.body) ? req.body : req.body.files;
-  const items = validateAttachmentBatch(files, { allowVideo: ADMIN_ALLOW_VIDEO });
+  const data = await presignBatch(files, {
+    owner: req.user.username,
+    allowVideo: ADMIN_ALLOW_VIDEO
+  });
 
   req.log.info('admin_ticket_presign_start', {
     admin: req.user.username,
-    count: items.length
+    count: data.length
   });
-
-  const data = [];
-  for (const f of items) {
-    const key = buildAttachmentKey({
-      owner: req.user.username,
-      contentType: f.contentType,
-      filename: f.filename
-    });
-    const uploadUrl = await createPresignedPutUrl({ key, contentType: f.contentType });
-    data.push({ key, uploadUrl });
-  }
 
   res.status(200).json({
     status: 'success',
@@ -402,16 +371,7 @@ export const serveAttachment = async (req, res) => {
 
   await loadTicketOrThrow(id, req.roles);
 
-  const attachment = await TicketAttachment.findOne({
-    where: { id: attachmentId, ticket_id: id }
-  });
-  if (!attachment) {
-    throw new ApiError(404, 'Attachment not found');
-  }
-  if (attachment.expired_at) {
-    throw new ApiError(410, 'This attachment was removed after the retention period');
-  }
+  const attachment = await resolveAttachmentForServe(id, attachmentId);
 
-  const url = await createPresignedGetUrl({ key: attachment.s3_key });
-  return res.redirect(302, url);
+  return res.redirect(302, await createPresignedGetUrl({ key: attachment.s3_key }));
 };

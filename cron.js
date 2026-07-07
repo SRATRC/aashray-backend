@@ -423,16 +423,15 @@ const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
   timezone: "Asia/Kolkata"
 });
 
-const ATTACHMENT_DELETE_CHUNK_SIZE = 1000; // S3 DeleteObjects hard limit per request
-
 // Ticket media is auto-deleted ATTACHMENT_RETENTION_DAYS after upload. This
 // daily job (mirrors ticketAutoCloseJob) selects non-expired attachments past
-// the retention window, batch-deletes their S3 objects (chunked to S3's 1000
-// keys/request limit, run concurrently under Promise.allSettled so one chunk's
-// failure never aborts the rest), then tombstones every selected row by setting
-// expired_at — kept so the UI can explain the gap and we never re-attempt.
-// Rows are tombstoned even if their S3 delete failed; the bucket lifecycle rule
-// is the backstop that reclaims any object that slipped through.
+// the retention window and batch-deletes their S3 objects via deleteObjects
+// (which chunks internally to S3's 1000-keys/request limit and never throws —
+// returns { deleted, errors } — so one object's failure never aborts the rest),
+// then tombstones every selected row by setting expired_at — kept so the UI can
+// explain the gap and we never re-attempt. Rows are tombstoned even if their S3
+// delete failed; the bucket lifecycle rule is the backstop that reclaims any
+// object that slipped through.
 const ticketAttachmentCleanupJob = cron.schedule('30 2 * * *', async () => {
   logger.info('ticketAttachmentCleanupJob cron job started.');
   try {
@@ -448,26 +447,11 @@ const ticketAttachmentCleanupJob = cron.schedule('30 2 * * *', async () => {
 
     if (staleAttachments.length > 0) {
       const keys = staleAttachments.map((a) => a.s3_key);
-      const chunks = [];
-      for (let i = 0; i < keys.length; i += ATTACHMENT_DELETE_CHUNK_SIZE) {
-        chunks.push(keys.slice(i, i + ATTACHMENT_DELETE_CHUNK_SIZE));
-      }
 
-      const results = await Promise.allSettled(chunks.map((chunk) => deleteObjects(chunk)));
-
-      let deleted = 0;
-      let failed = 0;
-      for (const r of results) {
-        if (r.status === 'fulfilled') {
-          deleted += r.value?.deleted || 0;
-          failed += r.value?.errors?.length || 0;
-        } else {
-          failed += 1;
-        }
-      }
-      if (failed > 0) {
+      const { deleted, errors } = await deleteObjects(keys);
+      if (errors.length > 0) {
         logger.warn(
-          `ticketAttachmentCleanupJob: ${failed} S3 delete failure(s) (best-effort; lifecycle rule is the backstop).`
+          `ticketAttachmentCleanupJob: ${errors.length} S3 delete failure(s) (best-effort; lifecycle rule is the backstop).`
         );
       }
 

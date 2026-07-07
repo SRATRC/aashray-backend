@@ -1,6 +1,11 @@
 import ApiError from '../utils/ApiError.js';
 import { TicketAttachment } from '../models/associations.js';
-import { verifyObject, deleteObjects } from './ticketAttachment.helper.js';
+import {
+  verifyObject,
+  deleteObjects,
+  buildAttachmentKey,
+  createPresignedPutUrl
+} from './ticketAttachment.helper.js';
 import {
   MAX_IMAGES_PER_BATCH,
   MAX_IMAGE_BYTES,
@@ -122,21 +127,34 @@ export async function verifyAttachmentsOrThrow(refs, { allowVideo }) {
     }
   }
 
-  const verified = [];
-  for (const a of refs) {
-    const result = await verifyObject({ key: a.key, kind: a.kind, contentType: a.contentType });
-    if (!result.ok) {
-      await deleteObjects(refs.map((x) => x.key)).catch(() => {});
-      throw new ApiError(400, `Attachment verification failed: ${result.reason}`);
-    }
-    verified.push({
-      key: a.key,
-      kind: a.kind,
-      contentType: result.contentType,
-      size: result.size
-    });
+  // HeadObject-verify every key concurrently. Fail fast: on any failure (a
+  // returned !ok, or a rejection) best-effort delete the whole batch's keys so
+  // partial uploads don't leak, then 400. `results` preserves batch order, so
+  // findIndex reports the first-in-order failure's reason (as the old
+  // sequential loop did).
+  const keys = refs.map((x) => x.key);
+  let results;
+  try {
+    results = await Promise.all(
+      refs.map((a) => verifyObject({ key: a.key, kind: a.kind, contentType: a.contentType }))
+    );
+  } catch (err) {
+    await deleteObjects(keys).catch(() => {});
+    throw new ApiError(400, `Attachment verification failed: ${err.message}`);
   }
-  return verified;
+
+  const failedIndex = results.findIndex((r) => !r.ok);
+  if (failedIndex !== -1) {
+    await deleteObjects(keys).catch(() => {});
+    throw new ApiError(400, `Attachment verification failed: ${results[failedIndex].reason}`);
+  }
+
+  return refs.map((a, i) => ({
+    key: a.key,
+    kind: a.kind,
+    contentType: results[i].contentType,
+    size: results[i].size
+  }));
 }
 
 // Count the user-uploaded, non-expired videos already on a ticket — the base
@@ -167,4 +185,71 @@ export async function persistAttachments(verified, { ticketId, messageId, upload
     })),
     { transaction }
   );
+}
+
+// Serialize a stored attachment row for a getTicketDetails response. The serve
+// URL is minted per request behind an auth check (rather than embedding a raw
+// presigned URL that could be shared/leaked), so `buildServeUrl(ticketId,
+// attachmentId) => path` is supplied by each controller — the client and admin
+// serve endpoints differ only in their path prefix.
+export function attachmentDto(attachment, buildServeUrl) {
+  return {
+    id: attachment.id,
+    kind: attachment.kind,
+    contentType: attachment.content_type,
+    url: buildServeUrl(attachment.ticket_id, attachment.id),
+    expired: !!attachment.expired_at
+  };
+}
+
+// Split a ticket's attachments into ticket-level (message_id null — filed at
+// creation) vs a per-message Map, mapping each row through `dtoFn`. Returns
+// { ticketLevel, byMessageId }.
+export function groupAttachmentsByMessage(attachments, dtoFn) {
+  const byMessageId = new Map();
+  const ticketLevel = [];
+  for (const a of attachments) {
+    const dto = dtoFn(a);
+    if (a.message_id === null || a.message_id === undefined) {
+      ticketLevel.push(dto);
+    } else {
+      const list = byMessageId.get(a.message_id) || [];
+      list.push(dto);
+      byMessageId.set(a.message_id, list);
+    }
+  }
+  return { ticketLevel, byMessageId };
+}
+
+// Validate a presign batch, then mint one presigned PUT URL per file. `owner`
+// scopes the pending upload key (cardno for a user, username for an admin);
+// `allowVideo` is false for admins. Returns [{ key, uploadUrl }] in batch order
+// (per-file key build + presign run concurrently). Throws ApiError(400) on an
+// invalid batch.
+export async function presignBatch(files, { owner, allowVideo }) {
+  const items = validateAttachmentBatch(files, { allowVideo });
+  return Promise.all(
+    items.map(async (f) => {
+      const key = buildAttachmentKey({ owner, contentType: f.contentType, filename: f.filename });
+      const uploadUrl = await createPresignedPutUrl({ key, contentType: f.contentType });
+      return { key, uploadUrl };
+    })
+  );
+}
+
+// Resolve a stored attachment for the serve endpoint: find the row within the
+// ticket, 404 if missing, 410 if tombstoned (expired_at set). The caller does
+// its own ticket authorization first, then redirects to a fresh presigned GET
+// URL for the returned row's key.
+export async function resolveAttachmentForServe(ticketId, attachmentId) {
+  const attachment = await TicketAttachment.findOne({
+    where: { id: attachmentId, ticket_id: ticketId }
+  });
+  if (!attachment) {
+    throw new ApiError(404, 'Attachment not found');
+  }
+  if (attachment.expired_at) {
+    throw new ApiError(410, 'This attachment was removed after the retention period');
+  }
+  return attachment;
 }
