@@ -11,8 +11,10 @@ export const ATTENDING_EXCLUDED_STATUSES = [
   STATUS_ADMIN_CANCELLED
 ];
 
-// Days of slack around the travel date when matching a session.
-const WINDOW_DAYS = 3;
+// Days of slack around the travel date when matching a session. Travelers routinely
+// arrive a few days before a multi-day shibir and leave a few days after, so a tight
+// window hides real matches; 14 days covers realistic early-arrival / late-departure.
+const WINDOW_DAYS = 14;
 
 /**
  * Pick the study session relevant to a single travel leg.
