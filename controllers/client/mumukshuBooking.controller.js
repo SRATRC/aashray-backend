@@ -6,17 +6,14 @@ import {
   ERR_INVALID_BOOKING_TYPE,
   ERR_CARD_NOT_FOUND,
   TYPE_TRAVEL,
-  ERR_INVALID_DATE,
   MSG_BOOKING_SUCCESSFUL,
   MSG_BOOKING_WAITING,
   STATUS_RESIDENT,
   STATUS_MUMUKSHU,
   TYPE_UTSAV,
   TYPE_FLAT,
-  STATUS_AWAITING_CONFIRMATION,
   BOOKING_STATUS_PENDING,
-  STATUS_SEVA_KUTIR,
-  RESEARCH_CENTRE
+  STATUS_SEVA_KUTIR
 } from '../../config/constants.js';
 import {
   bookRoomForMumukshus,
@@ -30,7 +27,8 @@ import {
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
   bookTravelForMumukshus,
-  checkTravelAlreadyBooked
+  bookRoundTripTravel,
+  checkTravelAvailability
 } from '../../helpers/travelBooking.helper.js';
 import {
   bookFoodForMumukshus,
@@ -41,7 +39,6 @@ import {
   validateUtsavs,
   validateNoDuplicateUtsavBooking
 } from '../../helpers/utsavBooking.helper.js';
-import { validateCards } from '../../helpers/card.helper.js';
 import {
   generateOrderId,
   updateRazorpayTransactions
@@ -56,7 +53,6 @@ import {
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import moment from 'moment';
 import {
   ShibirBookingDb,
   TravelDb,
@@ -491,7 +487,7 @@ async function validate(body, user, data, utsav, response) {
       break;
 
     case TYPE_TRAVEL:
-      response.travelDetails = await checkTravelAvailability(data);
+      response.travelDetails = await checkTravelAvailability(data.details);
       totalCharge += response.travelDetails.charge;
       break;
 
@@ -559,9 +555,19 @@ async function bookAdhyayan(data, t, user) {
 }
 
 async function bookTravel(data, t, user) {
-  const { date, mumukshuGroup } = data.details;
-  const result = await bookTravelForMumukshus(date, mumukshuGroup, t, user);
-  return result;
+  const { date, mumukshuGroup, return_date, returnMumukshuGroup } =
+    data.details;
+  if (return_date && returnMumukshuGroup) {
+    return await bookRoundTripTravel(
+      date,
+      mumukshuGroup,
+      return_date,
+      returnMumukshuGroup,
+      t,
+      user
+    );
+  }
+  return await bookTravelForMumukshus(date, mumukshuGroup, t, user);
 }
 
 async function bookUtsav(data, t, user) {
@@ -597,38 +603,6 @@ async function checkFoodAvailability(body, data, user, utsav) {
   );
 
   return result;
-}
-
-async function checkTravelAvailability(data) {
-  const { date, mumukshuGroup } = data.details;
-  const today = moment().format('YYYY-MM-DD');
-  if (date < today) {
-    throw new ApiError(400, ERR_INVALID_DATE);
-  }
-
-  const mumukshus = mumukshuGroup.flatMap((group) => group.mumukshus);
-  await validateCards(mumukshus);
-
-  for (const group of mumukshuGroup) {
-    const { pickup_point, drop_point, mumukshus: groupMumukshus } = group;
-
-    if (pickup_point !== RESEARCH_CENTRE && drop_point !== RESEARCH_CENTRE) {
-      throw new ApiError(
-        400,
-        'Travel must be either to or from Research Centre'
-      );
-    }
-
-    await checkTravelAlreadyBooked(date, {
-      mumukshus: groupMumukshus,
-      drop_point
-    });
-  }
-
-  return {
-    status: STATUS_AWAITING_CONFIRMATION,
-    charge: 0
-  };
 }
 
 async function bookFlat(data, t, user) {
