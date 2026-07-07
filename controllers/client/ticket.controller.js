@@ -315,7 +315,13 @@ export const addMessage = async (req, res) => {
   await t.commit();
   req.transaction = null;
 
-  ticketStreamManager.broadcastMessage(ticket_id, newMessage);
+  // Flag attachments on the frame (not the DTOs themselves — the serve URL is
+  // audience-specific, client vs admin). Subscribers refetch the ticket to
+  // backfill the attachments with their own correct URLs when this is set.
+  ticketStreamManager.broadcastMessage(ticket_id, {
+    ...newMessage.toJSON(),
+    hasAttachments: verifiedAttachments.length > 0
+  });
   if (updates.status) {
     ticketStreamManager.broadcastStatusUpdate(ticket_id, updates.status, cardno);
   }

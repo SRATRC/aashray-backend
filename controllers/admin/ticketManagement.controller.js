@@ -264,7 +264,12 @@ export const adminAddMessage = async (req, res) => {
   await t.commit();
   req.transaction = null;
 
-  ticketStreamManager.broadcastMessage(id, newMessage);
+  // Flag attachments on the frame (the serve URL is audience-specific);
+  // subscribers refetch the ticket to backfill them with their own URLs.
+  ticketStreamManager.broadcastMessage(id, {
+    ...newMessage.toJSON(),
+    hasAttachments: verifiedAttachments.length > 0
+  });
   if (updates.status) {
     ticketStreamManager.broadcastStatusUpdate(id, updates.status, req.user.username);
   }
