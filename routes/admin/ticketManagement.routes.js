@@ -4,7 +4,9 @@ import {
   getTicketDetails,
   adminAddMessage,
   updateTicketStatus,
-  streamTicketMessages
+  streamTicketMessages,
+  presignAttachments,
+  serveAttachment
 } from '../../controllers/admin/ticketManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_SUPER_ADMIN, TICKET_SERVICE_ROLE_MAP } from '../../config/constants.js';
@@ -23,8 +25,14 @@ const TICKET_DEPARTMENT_ROLES = [...new Set(Object.values(TICKET_SERVICE_ROLE_MA
 router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ...TICKET_DEPARTMENT_ROLES));
 
+// Static /attachments/presign must be registered before the /:id param routes
+// so "attachments" isn't captured as a ticket id (same ordering care as the
+// /:id/stream route).
+router.post('/attachments/presign', CatchAsync(presignAttachments));
+
 router.get('/', CatchAsync(getAllTickets));
 router.get('/:id/stream', CatchAsync(streamTicketMessages));
+router.get('/:id/attachments/:attachmentId', CatchAsync(serveAttachment));
 router.get('/:id', CatchAsync(getTicketDetails));
 router.post('/:id/messages', CatchAsync(adminAddMessage));
 router.patch('/:id/status', CatchAsync(updateTicketStatus));

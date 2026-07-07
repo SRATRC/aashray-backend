@@ -1,4 +1,4 @@
-import { Ticket, TicketMessage } from '../../models/associations.js';
+import { Ticket, TicketMessage, TicketAttachment } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import {
   MSG_UPDATE_SUCCESSFUL,
@@ -6,12 +6,25 @@ import {
   STATUS_CLOSED,
   STATUS_INPROGRESS,
   STATUS_RESOLVED,
-  TICKET_SERVICE_ROLE_MAP
+  TICKET_SERVICE_ROLE_MAP,
+  MAX_VIDEOS_PER_TICKET
 } from '../../config/constants.js';
 import crypto from 'crypto';
 import database from '../../config/database.js';
 import ticketStreamManager from '../../utils/ticketStreamManager.js';
 import { attachUserContext } from '../../middleware/Logger.js';
+import {
+  buildAttachmentKey,
+  createPresignedPutUrl,
+  createPresignedGetUrl
+} from '../../helpers/ticketAttachment.helper.js';
+import {
+  validateAttachmentBatch,
+  normalizeAttachmentRefs,
+  verifyAttachmentsOrThrow,
+  persistAttachments,
+  countExistingUserVideos
+} from '../../helpers/ticketAttachmentOrchestrator.js';
 
 const MAX_METADATA_LENGTH = 16000;
 const MAX_ID_RETRIES = 5;
@@ -19,6 +32,24 @@ const MAX_ID_RETRIES = 5;
 // out-of-range value returns a 400 instead of surfacing Sequelize's
 // SequelizeValidationError (which has no statusCode) as a 500.
 const ALLOWED_OS = ['Android', 'iOS', 'Web', 'Other'];
+
+// Base path of the client serve endpoint (see routes/client/ticket.routes.js).
+// getTicketDetails returns each attachment's `url` pointing here rather than a
+// raw presigned URL — the URL is minted per request behind an auth check so it
+// can't be shared/leaked and expires ~5 min after issue.
+function serveUrl(ticketId, attachmentId) {
+  return `/api/v1/tickets/${ticketId}/attachments/${attachmentId}`;
+}
+
+function attachmentDto(a, ticketId) {
+  return {
+    id: a.id,
+    kind: a.kind,
+    contentType: a.content_type,
+    url: serveUrl(ticketId, a.id),
+    expired: !!a.expired_at
+  };
+}
 
 async function loadOwnedTicketOrThrow(ticket_id, cardno, options = {}) {
   const ticket = await Ticket.findOne({
@@ -36,7 +67,11 @@ export const createTicket = async (req, res) => {
   const { cardno } = req.user;
   attachUserContext(req);
 
-  if (!service || !description) {
+  const attachmentRefs = normalizeAttachmentRefs(req.body.attachments);
+
+  // description becomes optional once at least one attachment is present — an
+  // image/video can be the whole request.
+  if (!service || (!description && attachmentRefs.length === 0)) {
     throw new ApiError(400, 'Service and description are required');
   }
 
@@ -46,6 +81,17 @@ export const createTicket = async (req, res) => {
 
   if (os !== undefined && os !== null && !ALLOWED_OS.includes(os)) {
     throw new ApiError(400, 'Invalid os');
+  }
+
+  // Verify referenced S3 objects before opening the transaction. On failure
+  // this 400s and best-effort deletes the orphaned uploads. A fresh ticket has
+  // no existing videos, so the batch itself must be within the per-ticket cap.
+  const verifiedAttachments = await verifyAttachmentsOrThrow(attachmentRefs, {
+    allowVideo: true
+  });
+  const newVideoCount = verifiedAttachments.filter((a) => a.kind === 'video').length;
+  if (newVideoCount > MAX_VIDEOS_PER_TICKET) {
+    throw new ApiError(400, `At most ${MAX_VIDEOS_PER_TICKET} videos per ticket`);
   }
 
   let { metadata } = req.body;
@@ -74,7 +120,7 @@ export const createTicket = async (req, res) => {
           id: generateTicketId(),
           issued_by: cardno,
           service,
-          description,
+          description: description || '',
           os,
           app_version,
           metadata
@@ -90,10 +136,20 @@ export const createTicket = async (req, res) => {
     }
   }
 
+  await persistAttachments(
+    verifiedAttachments,
+    { ticketId: ticket.id, messageId: null, uploadedBy: cardno },
+    t
+  );
+
   await t.commit();
   req.transaction = null;
 
-  req.log.info('create_ticket_success', { cardno, ticketId: ticket.id });
+  req.log.info('create_ticket_success', {
+    cardno,
+    ticketId: ticket.id,
+    attachments: verifiedAttachments.length
+  });
 
   res.status(201).send({
     message: 'Successfully created ticket',
@@ -137,9 +193,36 @@ export const getTicketDetails = async (req, res) => {
     ]
   });
 
+  const attachments = await TicketAttachment.findAll({
+    where: { ticket_id },
+    order: [['createdAt', 'ASC']]
+  });
+
+  // Group attachments: message_id === null are ticket-level (filed at
+  // creation); the rest hang off their message.
+  const byMessage = new Map();
+  const ticketLevel = [];
+  for (const a of attachments) {
+    const dto = attachmentDto(a, ticket_id);
+    if (a.message_id === null || a.message_id === undefined) {
+      ticketLevel.push(dto);
+    } else {
+      const list = byMessage.get(a.message_id) || [];
+      list.push(dto);
+      byMessage.set(a.message_id, list);
+    }
+  }
+
+  const data = ticket.toJSON();
+  data.attachments = ticketLevel;
+  data.messages = (data.messages || []).map((m) => ({
+    ...m,
+    attachments: byMessage.get(m.id) || []
+  }));
+
   res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
-    data: ticket
+    data
   });
 };
 
@@ -171,7 +254,10 @@ export const addMessage = async (req, res) => {
   const { cardno } = req.user;
   attachUserContext(req);
 
-  if (!message) {
+  const attachmentRefs = normalizeAttachmentRefs(req.body.attachments);
+
+  // message text becomes optional once at least one attachment is present.
+  if (!message && attachmentRefs.length === 0) {
     throw new ApiError(400, 'Message is required');
   }
 
@@ -181,19 +267,41 @@ export const addMessage = async (req, res) => {
     throw new ApiError(400, 'Cannot reply to a closed ticket');
   }
 
+  // Verify referenced S3 objects (best-effort cleanup + 400 on failure) before
+  // opening the transaction.
+  const verifiedAttachments = await verifyAttachmentsOrThrow(attachmentRefs, {
+    allowVideo: true
+  });
+
   req.log.info('ticket_add_message_start', { cardno, ticketId: ticket_id });
 
   const t = await database.transaction();
   req.transaction = t;
+
+  // Per-ticket video cap: existing user videos + new videos in this batch
+  // must not exceed MAX_VIDEOS_PER_TICKET. Counted inside the transaction.
+  const newVideoCount = verifiedAttachments.filter((a) => a.kind === 'video').length;
+  if (newVideoCount > 0) {
+    const existingVideos = await countExistingUserVideos(ticket_id, t);
+    if (existingVideos + newVideoCount > MAX_VIDEOS_PER_TICKET) {
+      throw new ApiError(400, `At most ${MAX_VIDEOS_PER_TICKET} videos per ticket`);
+    }
+  }
 
   const newMessage = await TicketMessage.create(
     {
       ticket_id,
       sender_id: cardno,
       sender_type: 'user',
-      message
+      message: message || ''
     },
     { transaction: t }
+  );
+
+  await persistAttachments(
+    verifiedAttachments,
+    { ticketId: ticket_id, messageId: newMessage.id, uploadedBy: cardno },
+    t
   );
 
   // If ticket was resolved, move back to in progress since user is replying.
@@ -252,6 +360,60 @@ export const resolveTicket = async (req, res) => {
   res.status(200).send({
     message: MSG_UPDATE_SUCCESSFUL
   });
+};
+
+// POST /attachments/presign
+// Body: { files: [{ filename, contentType, size, kind, durationSec? }] }
+// (a bare array is also accepted). Validates the batch, then returns one
+// { key, uploadUrl } per file — presigned PUT URLs the client uploads to
+// directly. cardno comes from body/query via validateCard.
+export const presignAttachments = async (req, res) => {
+  const { cardno } = req.user;
+  attachUserContext(req);
+
+  const files = Array.isArray(req.body) ? req.body : req.body.files;
+  const items = validateAttachmentBatch(files, { allowVideo: true });
+
+  req.log.info('ticket_presign_start', { cardno, count: items.length });
+
+  const data = [];
+  for (const f of items) {
+    const key = buildAttachmentKey({
+      owner: cardno,
+      contentType: f.contentType,
+      filename: f.filename
+    });
+    const uploadUrl = await createPresignedPutUrl({ key, contentType: f.contentType });
+    data.push({ key, uploadUrl });
+  }
+
+  res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    data
+  });
+};
+
+// GET /:ticket_id/attachments/:attachmentId
+// Authorizes (ticket owner), then 302-redirects to a fresh presigned GET URL,
+// or 410 if the object has been cleaned up (expired_at set).
+export const serveAttachment = async (req, res) => {
+  const { ticket_id, attachmentId } = req.params;
+  const { cardno } = req.user;
+
+  await loadOwnedTicketOrThrow(ticket_id, cardno);
+
+  const attachment = await TicketAttachment.findOne({
+    where: { id: attachmentId, ticket_id }
+  });
+  if (!attachment) {
+    throw new ApiError(404, 'Attachment not found');
+  }
+  if (attachment.expired_at) {
+    throw new ApiError(410, 'This attachment was removed after the retention period');
+  }
+
+  const url = await createPresignedGetUrl({ key: attachment.s3_key });
+  return res.redirect(302, url);
 };
 
 const generateTicketId = () => {

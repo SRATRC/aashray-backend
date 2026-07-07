@@ -1,4 +1,4 @@
-import { Ticket, TicketMessage } from '../../models/associations.js';
+import { Ticket, TicketMessage, TicketAttachment } from '../../models/associations.js';
 import { Sequelize } from 'sequelize';
 import {
   MSG_FETCH_SUCCESSFUL,
@@ -15,6 +15,36 @@ import ApiError from '../../utils/ApiError.js';
 import { notifyCardno } from '../../helpers/notification.helper.js';
 import database from '../../config/database.js';
 import { attachUserContext } from '../../middleware/Logger.js';
+import {
+  buildAttachmentKey,
+  createPresignedPutUrl,
+  createPresignedGetUrl
+} from '../../helpers/ticketAttachment.helper.js';
+import {
+  validateAttachmentBatch,
+  normalizeAttachmentRefs,
+  verifyAttachmentsOrThrow,
+  persistAttachments
+} from '../../helpers/ticketAttachmentOrchestrator.js';
+
+// Admins attach images only — video is user-only in v1. Passed to the shared
+// validation/verification so a video in an admin batch is rejected with a 400.
+const ADMIN_ALLOW_VIDEO = false;
+
+// Base path of the admin serve endpoint (see ticketManagement.routes.js).
+function serveUrl(ticketId, attachmentId) {
+  return `/api/v1/admin/tickets/${ticketId}/attachments/${attachmentId}`;
+}
+
+function attachmentDto(a, ticketId) {
+  return {
+    id: a.id,
+    kind: a.kind,
+    contentType: a.content_type,
+    url: serveUrl(ticketId, a.id),
+    expired: !!a.expired_at
+  };
+}
 
 // Admins can only move a ticket to open/in-progress/resolved. Closing is not
 // an admin action: the ticket owner closes it themselves (client resolve
@@ -120,10 +150,35 @@ export const getTicketDetails = async (req, res) => {
     order: [['createdAt', 'ASC']]
   });
 
+  const attachments = await TicketAttachment.findAll({
+    where: { ticket_id: id },
+    order: [['createdAt', 'ASC']]
+  });
+
+  // Group attachments: message_id === null are ticket-level (filed at
+  // creation); the rest hang off their message.
+  const byMessage = new Map();
+  const ticketLevel = [];
+  for (const a of attachments) {
+    const dto = attachmentDto(a, id);
+    if (a.message_id === null || a.message_id === undefined) {
+      ticketLevel.push(dto);
+    } else {
+      const list = byMessage.get(a.message_id) || [];
+      list.push(dto);
+      byMessage.set(a.message_id, list);
+    }
+  }
+
+  const messagesWithAttachments = messages.map((m) => ({
+    ...m.toJSON(),
+    attachments: byMessage.get(m.id) || []
+  }));
+
   res.status(200).json({
     status: 'success',
     message: MSG_FETCH_SUCCESSFUL,
-    data: { ...ticket.toJSON(), messages }
+    data: { ...ticket.toJSON(), messages: messagesWithAttachments, attachments: ticketLevel }
   });
 };
 
@@ -158,7 +213,10 @@ export const adminAddMessage = async (req, res) => {
   const { message } = req.body;
   attachUserContext(req);
 
-  if (!message) {
+  const attachmentRefs = normalizeAttachmentRefs(req.body.attachments);
+
+  // message text becomes optional once at least one attachment is present.
+  if (!message && attachmentRefs.length === 0) {
     throw new ApiError(400, 'Message is required');
   }
 
@@ -167,6 +225,12 @@ export const adminAddMessage = async (req, res) => {
   if (ticket.status === STATUS_CLOSED) {
     throw new ApiError(400, 'ticket is closed');
   }
+
+  // Verify referenced S3 objects (images only for admins; a video ref 400s).
+  // Best-effort cleanup + 400 on failure, before opening the transaction.
+  const verifiedAttachments = await verifyAttachmentsOrThrow(attachmentRefs, {
+    allowVideo: ADMIN_ALLOW_VIDEO
+  });
 
   req.log.info('admin_ticket_add_message_start', { admin: req.user.username, ticketId: id });
 
@@ -178,9 +242,15 @@ export const adminAddMessage = async (req, res) => {
       ticket_id: id,
       sender_id: req.user.username,
       sender_type: 'admin',
-      message
+      message: message || ''
     },
     { transaction: t }
+  );
+
+  await persistAttachments(
+    verifiedAttachments,
+    { ticketId: id, messageId: newMessage.id, uploadedBy: req.user.username },
+    t
   );
 
   // Update ticket updatedBy and status if needed
@@ -284,4 +354,59 @@ export const updateTicketStatus = async (req, res) => {
     message: MSG_UPDATE_SUCCESSFUL,
     data: ticket
   });
+};
+
+// POST /attachments/presign
+// Body: { files: [{ filename, contentType, size, kind }] } (bare array also
+// accepted). Images only — a video entry is rejected with a 400. Returns one
+// { key, uploadUrl } per file.
+export const presignAttachments = async (req, res) => {
+  attachUserContext(req);
+
+  const files = Array.isArray(req.body) ? req.body : req.body.files;
+  const items = validateAttachmentBatch(files, { allowVideo: ADMIN_ALLOW_VIDEO });
+
+  req.log.info('admin_ticket_presign_start', {
+    admin: req.user.username,
+    count: items.length
+  });
+
+  const data = [];
+  for (const f of items) {
+    const key = buildAttachmentKey({
+      owner: req.user.username,
+      contentType: f.contentType,
+      filename: f.filename
+    });
+    const uploadUrl = await createPresignedPutUrl({ key, contentType: f.contentType });
+    data.push({ key, uploadUrl });
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: MSG_FETCH_SUCCESSFUL,
+    data
+  });
+};
+
+// GET /:id/attachments/:attachmentId
+// Authorizes via assertCanAccessTicket (department scope), then 302-redirects
+// to a fresh presigned GET URL, or 410 if the object has been cleaned up.
+export const serveAttachment = async (req, res) => {
+  const { id, attachmentId } = req.params;
+
+  await loadTicketOrThrow(id, req.roles);
+
+  const attachment = await TicketAttachment.findOne({
+    where: { id: attachmentId, ticket_id: id }
+  });
+  if (!attachment) {
+    throw new ApiError(404, 'Attachment not found');
+  }
+  if (attachment.expired_at) {
+    throw new ApiError(410, 'This attachment was removed after the retention period');
+  }
+
+  const url = await createPresignedGetUrl({ key: attachment.s3_key });
+  return res.redirect(302, url);
 };
