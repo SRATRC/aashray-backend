@@ -12,13 +12,11 @@ import {
 } from '../config/constants.js';
 import { CardDb, TravelDb } from '../models/associations.js';
 import { validateCards } from './card.helper.js';
-import { checkAdhyayanParamGyanSabhaOrUtsav } from './adhyayanBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
-import { createPendingTransaction } from './transactions.helper.js';
 import logger from '../config/logger.js';
 
 export async function checkTravelAlreadyBooked(
@@ -136,7 +134,8 @@ export async function bookTravelForMumukshus(
   mumukshuGroup,
   t,
   user,
-  log = logger
+  log = logger,
+  tripGroupIdByCardno = null
 ) {
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) {
@@ -171,7 +170,6 @@ export async function bookTravelForMumukshus(
       type,
       mumukshus,
       arrival_time,
-      leaving_post_adhyayan,
       total_people = 1
     } = group;
 
@@ -188,15 +186,93 @@ export async function bookTravelForMumukshus(
         drop_point,
         luggage,
         arrival_time,
-        leaving_post_adhyayan,
         total_people,
         comments,
+        trip_group_id: tripGroupIdByCardno ? tripGroupIdByCardno[mumukshu] : null,
         updatedBy: user.cardno
       });
-      userBookingIds[mumukshu] = [bookingId];
+      userBookingIds[mumukshu]
+        ? userBookingIds[mumukshu].push(bookingId)
+        : (userBookingIds[mumukshu] = [bookingId]);
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   log.info('travel_booking_result', { count: bookingsToCreate.length, date });
   return { userBookingIds, waitingBookingCount: 0 };
+}
+
+export async function bookRoundTripTravel(
+  onwardDate,
+  onwardGroup,
+  returnDate,
+  returnGroup,
+  t,
+  user,
+  log = logger
+) {
+  // One shared trip_group_id per traveler across both legs.
+  const cardnos = [
+    ...new Set(
+      [...onwardGroup, ...returnGroup].flatMap((g) => g.mumukshus)
+    )
+  ];
+  const tripGroupIdByCardno = {};
+  for (const cardno of cardnos) tripGroupIdByCardno[cardno] = uuidv4();
+
+  const onward = await bookTravelForMumukshus(
+    onwardDate,
+    onwardGroup,
+    t,
+    user,
+    log,
+    tripGroupIdByCardno
+  );
+  const ret = await bookTravelForMumukshus(
+    returnDate,
+    returnGroup,
+    t,
+    user,
+    log,
+    tripGroupIdByCardno
+  );
+
+  const userBookingIds = { ...onward.userBookingIds };
+  for (const cardno in ret.userBookingIds) {
+    userBookingIds[cardno] = [
+      ...(userBookingIds[cardno] || []),
+      ...ret.userBookingIds[cardno]
+    ];
+  }
+  return { userBookingIds, waitingBookingCount: 0 };
+}
+
+export async function checkTravelAvailability(details) {
+  const { date, mumukshuGroup, return_date, returnMumukshuGroup } = details;
+  const today = moment().format('YYYY-MM-DD');
+  if (date < today) throw new ApiError(400, ERR_INVALID_DATE);
+
+  const validateLeg = async (legDate, group) => {
+    const mumukshus = group.flatMap((g) => g.mumukshus);
+    await validateCards(mumukshus);
+    for (const g of group) {
+      if (g.pickup_point !== RESEARCH_CENTRE && g.drop_point !== RESEARCH_CENTRE) {
+        throw new ApiError(400, 'Travel must be either to or from Research Centre');
+      }
+      await checkTravelAlreadyBooked(legDate, {
+        mumukshus: g.mumukshus,
+        drop_point: g.drop_point
+      });
+    }
+  };
+
+  await validateLeg(date, mumukshuGroup);
+
+  if (return_date && returnMumukshuGroup) {
+    if (return_date < date) {
+      throw new ApiError(400, 'Return date cannot be before the onward date');
+    }
+    await validateLeg(return_date, returnMumukshuGroup);
+  }
+
+  return { status: STATUS_AWAITING_CONFIRMATION, charge: 0 };
 }
