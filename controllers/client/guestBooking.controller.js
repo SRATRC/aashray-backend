@@ -65,8 +65,7 @@ import {
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
-  bookTravelForMumukshus,
-  bookRoundTripTravel,
+  bookTravelDispatch,
   checkTravelAvailability
 } from '../../helpers/travelBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
@@ -545,17 +544,14 @@ function normalizeGuestTravelDetails(details) {
 
 async function bookTravelGuest(data, t, user) {
   const norm = normalizeGuestTravelDetails(data.details);
-  if (norm.return_date && norm.returnMumukshuGroup) {
-    return await bookRoundTripTravel(
-      norm.date,
-      norm.mumukshuGroup,
-      norm.return_date,
-      norm.returnMumukshuGroup,
-      t,
-      user
-    );
-  }
-  return await bookTravelForMumukshus(norm.date, norm.mumukshuGroup, t, user);
+  return bookTravelDispatch(
+    norm.date,
+    norm.mumukshuGroup,
+    norm.return_date,
+    norm.returnMumukshuGroup,
+    t,
+    user
+  );
 }
 
 async function bookRoom(data, t, user, utsav) {

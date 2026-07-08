@@ -395,8 +395,15 @@ LEFT JOIN travel_bus_group tbg
       }));
   }
 
+  // Index registrations by cardno once so the per-row match is O(rows + registrations).
+  const registrationsByCardno = new Map();
+  for (const reg of registrations) {
+    if (!registrationsByCardno.has(reg.cardno)) registrationsByCardno.set(reg.cardno, []);
+    registrationsByCardno.get(reg.cardno).push(reg);
+  }
+
   for (const item of data) {
-    item.adhyayan = matchAdhyayanForLeg(item, registrations);
+    item.adhyayan = matchAdhyayanForLeg(item, registrationsByCardno.get(item.cardno) || []);
   }
 
   req.log.info('travel_fetch_upcoming_bookings_success', { start_date, end_date, count: data.length });

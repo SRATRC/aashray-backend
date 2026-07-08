@@ -1,6 +1,8 @@
 import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
+  ERR_TRAVEL_INVALID_DIRECTION,
+  ERR_TRAVEL_RETURN_BEFORE_ONWARD,
   RESEARCH_CENTRE,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
@@ -191,9 +193,7 @@ export async function bookTravelForMumukshus(
         trip_group_id: tripGroupIdByCardno ? tripGroupIdByCardno[mumukshu] : null,
         updatedBy: user.cardno
       });
-      userBookingIds[mumukshu]
-        ? userBookingIds[mumukshu].push(bookingId)
-        : (userBookingIds[mumukshu] = [bookingId]);
+      (userBookingIds[mumukshu] ??= []).push(bookingId);
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
@@ -211,7 +211,7 @@ export async function bookRoundTripTravel(
   log = logger
 ) {
   if (returnDate < onwardDate) {
-    throw new ApiError(400, 'Return date cannot be before the onward date');
+    throw new ApiError(400, ERR_TRAVEL_RETURN_BEFORE_ONWARD);
   }
   // Link only travelers present in BOTH legs; a cardno in a single leg is a one-way
   // traveler and must not receive a dangling trip_group_id.
@@ -248,17 +248,40 @@ export async function bookRoundTripTravel(
   return { userBookingIds, waitingBookingCount: 0 };
 }
 
+// Shared one-way vs round-trip dispatch used by both the mumukshu and guest controllers.
+export async function bookTravelDispatch(
+  date,
+  mumukshuGroup,
+  return_date,
+  returnMumukshuGroup,
+  t,
+  user
+) {
+  return return_date && returnMumukshuGroup
+    ? bookRoundTripTravel(date, mumukshuGroup, return_date, returnMumukshuGroup, t, user)
+    : bookTravelForMumukshus(date, mumukshuGroup, t, user);
+}
+
 export async function checkTravelAvailability(details) {
   const { date, mumukshuGroup, return_date, returnMumukshuGroup } = details;
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) throw new ApiError(400, ERR_INVALID_DATE);
+  if (return_date && returnMumukshuGroup && return_date < date) {
+    throw new ApiError(400, ERR_TRAVEL_RETURN_BEFORE_ONWARD);
+  }
+
+  // Validate every traveler across both legs in a single query.
+  const allCardnos = [
+    ...new Set(
+      [...mumukshuGroup, ...(returnMumukshuGroup || [])].flatMap((g) => g.mumukshus)
+    )
+  ];
+  await validateCards(allCardnos);
 
   const validateLeg = async (legDate, group) => {
-    const mumukshus = group.flatMap((g) => g.mumukshus);
-    await validateCards(mumukshus);
     for (const g of group) {
       if (g.pickup_point !== RESEARCH_CENTRE && g.drop_point !== RESEARCH_CENTRE) {
-        throw new ApiError(400, 'Travel must be either to or from Research Centre');
+        throw new ApiError(400, ERR_TRAVEL_INVALID_DIRECTION);
       }
       await checkTravelAlreadyBooked(legDate, {
         mumukshus: g.mumukshus,
@@ -268,11 +291,7 @@ export async function checkTravelAvailability(details) {
   };
 
   await validateLeg(date, mumukshuGroup);
-
   if (return_date && returnMumukshuGroup) {
-    if (return_date < date) {
-      throw new ApiError(400, 'Return date cannot be before the onward date');
-    }
     await validateLeg(return_date, returnMumukshuGroup);
   }
 

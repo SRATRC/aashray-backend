@@ -26,8 +26,7 @@ import {
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
-  bookTravelForMumukshus,
-  bookRoundTripTravel,
+  bookTravelDispatch,
   checkTravelAvailability
 } from '../../helpers/travelBooking.helper.js';
 import {
@@ -555,19 +554,8 @@ async function bookAdhyayan(data, t, user) {
 }
 
 async function bookTravel(data, t, user) {
-  const { date, mumukshuGroup, return_date, returnMumukshuGroup } =
-    data.details;
-  if (return_date && returnMumukshuGroup) {
-    return await bookRoundTripTravel(
-      date,
-      mumukshuGroup,
-      return_date,
-      returnMumukshuGroup,
-      t,
-      user
-    );
-  }
-  return await bookTravelForMumukshus(date, mumukshuGroup, t, user);
+  const { date, mumukshuGroup, return_date, returnMumukshuGroup } = data.details;
+  return bookTravelDispatch(date, mumukshuGroup, return_date, returnMumukshuGroup, t, user);
 }
 
 async function bookUtsav(data, t, user) {
