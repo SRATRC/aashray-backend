@@ -1290,10 +1290,14 @@ export const ReservationReport = async (req, res) => {
   req.log.info('reservation_report_start', { start_date, end_date, statuses });
 
   // Pagination is optional: the admin report UI fetches the full result set,
-  // so we only paginate when the caller explicitly provides page_size.
+  // so we only paginate when the caller explicitly provides a valid page_size.
   const page = parseInt(req.query.page) || req.body.page || 1;
   const rawPageSize = req.query.page_size || req.body.page_size;
-  const pageSize = rawPageSize ? parseInt(rawPageSize) : null;
+  let pageSize = rawPageSize ? parseInt(rawPageSize) : null;
+  if (pageSize !== null && (Number.isNaN(pageSize) || pageSize <= 0)) {
+    req.log.warn('reservation_report_invalid_page_size', { page_size: rawPageSize });
+    pageSize = null;
+  }
 
   const reservations = await roomBookingReport(
     start_date,
@@ -1331,7 +1335,7 @@ export const flatReservationReport = async (req, res) => {
     whereClause.status = { [Sequelize.Op.in]: statusArray };
   }
 
-  const bookings = await FlatBooking.findAll({
+  let bookings = await FlatBooking.findAll({
     include: [
       {
         model: CardDb,
@@ -1351,7 +1355,7 @@ export const flatReservationReport = async (req, res) => {
     order: [['checkin', 'ASC']]
   });
 
-  await attachLatestTransactions(bookings);
+  bookings = await attachLatestTransactions(bookings);
 
   req.log.info('flat_reservation_report_success', { start_date, end_date, count: bookings.length });
   return res
@@ -1464,7 +1468,7 @@ async function attachLatestTransactions(bookings) {
 
   const txns = await Transactions.findAll({
     attributes: ['bookingid', 'status', 'description'],
-    where: { bookingid: { [Sequelize.Op.in]: bookingIds } },
+    where: { bookingid: { [Op.in]: bookingIds } },
     order: [['createdAt', 'DESC']]
   });
 
