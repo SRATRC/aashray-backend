@@ -380,7 +380,9 @@ LEFT JOIN travel_bus_group tbg
         cardno: { [Op.in]: cardnos },
         status: { [Op.notIn]: ATTENDING_EXCLUDED_STATUSES }
       },
-      include: [{ model: ShibirDb, as: 'ShibirDb', attributes: ['name', 'start_date', 'end_date'] }]
+      include: [{ model: ShibirDb, as: 'ShibirDb', attributes: ['name', 'start_date', 'end_date'] }],
+      // Deterministic order so same-delta ties in matchAdhyayanForLeg resolve stably.
+      order: [[{ model: ShibirDb, as: 'ShibirDb' }, 'start_date', 'ASC']]
     });
     registrations = rows
       .filter((r) => r.ShibirDb)

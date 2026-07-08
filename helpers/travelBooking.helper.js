@@ -210,14 +210,16 @@ export async function bookRoundTripTravel(
   user,
   log = logger
 ) {
-  // One shared trip_group_id per traveler across both legs.
-  const cardnos = [
-    ...new Set(
-      [...onwardGroup, ...returnGroup].flatMap((g) => g.mumukshus)
-    )
-  ];
+  if (returnDate < onwardDate) {
+    throw new ApiError(400, 'Return date cannot be before the onward date');
+  }
+  // Link only travelers present in BOTH legs; a cardno in a single leg is a one-way
+  // traveler and must not receive a dangling trip_group_id.
+  const returnCardnos = new Set(returnGroup.flatMap((g) => g.mumukshus));
   const tripGroupIdByCardno = {};
-  for (const cardno of cardnos) tripGroupIdByCardno[cardno] = uuidv4();
+  for (const cardno of new Set(onwardGroup.flatMap((g) => g.mumukshus))) {
+    if (returnCardnos.has(cardno)) tripGroupIdByCardno[cardno] = uuidv4();
+  }
 
   const onward = await bookTravelForMumukshus(
     onwardDate,
@@ -248,7 +250,7 @@ export async function bookRoundTripTravel(
 
 export async function checkTravelAvailability(details) {
   const { date, mumukshuGroup, return_date, returnMumukshuGroup } = details;
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) throw new ApiError(400, ERR_INVALID_DATE);
 
   const validateLeg = async (legDate, group) => {
