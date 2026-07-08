@@ -5,7 +5,10 @@ import {
   RESEARCH_CENTRE
 } from '../config/constants.js';
 
-// Registrations in these statuses are NOT shown (everything else counts).
+// The admin travel list surfaces ANY non-cancelled shibir registration (waiting/pending/
+// confirmed/completed alike) as the traveler's adhyayan — intentionally broader than a
+// "confirmed-only" allow-list, so staff see likely attendance when adjusting travel timings.
+// Only these cancellation statuses are excluded.
 export const ATTENDING_EXCLUDED_STATUSES = [
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED

@@ -3,6 +3,7 @@ import {
   ERR_TRAVEL_ALREADY_BOOKED,
   ERR_TRAVEL_INVALID_DIRECTION,
   ERR_TRAVEL_RETURN_BEFORE_ONWARD,
+  ERR_TRAVEL_PARTIAL_ROUND_TRIP,
   RESEARCH_CENTRE,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
@@ -257,6 +258,9 @@ export async function bookTravelDispatch(
   t,
   user
 ) {
+  if (Boolean(return_date) !== Boolean(returnMumukshuGroup)) {
+    throw new ApiError(400, ERR_TRAVEL_PARTIAL_ROUND_TRIP);
+  }
   return return_date && returnMumukshuGroup
     ? bookRoundTripTravel(date, mumukshuGroup, return_date, returnMumukshuGroup, t, user)
     : bookTravelForMumukshus(date, mumukshuGroup, t, user);
@@ -264,6 +268,9 @@ export async function bookTravelDispatch(
 
 export async function checkTravelAvailability(details) {
   const { date, mumukshuGroup, return_date, returnMumukshuGroup } = details;
+  if (Boolean(return_date) !== Boolean(returnMumukshuGroup)) {
+    throw new ApiError(400, ERR_TRAVEL_PARTIAL_ROUND_TRIP);
+  }
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) throw new ApiError(400, ERR_INVALID_DATE);
   if (return_date && returnMumukshuGroup && return_date < date) {
