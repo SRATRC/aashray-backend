@@ -6,7 +6,7 @@ import {
 } from '../config/constants.js';
 
 // The admin travel list surfaces ANY non-cancelled shibir registration (waiting/pending/
-// confirmed/completed alike) as the traveler's adhyayan — intentionally broader than a
+// confirmed/completed alike) as the traveler's adhyayan. This is intentionally broader than a
 // "confirmed-only" allow-list, so staff see likely attendance when adjusting travel timings.
 // Only these cancellation statuses are excluded.
 export const ATTENDING_EXCLUDED_STATUSES = [
