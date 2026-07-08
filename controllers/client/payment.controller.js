@@ -18,10 +18,7 @@ import {
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
-import {
-  generateOrderId,
-  updateRazorpayTransactions
-} from '../../helpers/transactions.helper.js';
+import { resolveOrderForTransactions } from '../../helpers/transactions.helper.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
@@ -84,7 +81,7 @@ export const verifyPayment = async (req, res) => {
         STATUS_PAYMENT_AUTHORIZED
       ]
     },
-    lock: { update: true },
+    lock: true,
     transaction: t
   });
 
@@ -288,7 +285,9 @@ export const createOrderIdForPendingPayments = async (req, res) => {
         STATUS_CASH_PENDING,
         STATUS_PAYMENT_FAILED
       ]
-    }
+    },
+    lock: true,
+    transaction: t
   });
 
   const hasDisallowedCategory = transactions.some((transaction) => {
@@ -312,9 +311,14 @@ export const createOrderIdForPendingPayments = async (req, res) => {
   req.log.info('create_order_total_amount', { cardno: req.user.cardno, totalAmount, transactionCount: transactions.length });
 
   if (totalAmount > 0) {
-    const order = await generateOrderId(totalAmount);
+    const order = await resolveOrderForTransactions(
+      transactions,
+      totalAmount,
+      bookingids,
+      [],
+      t
+    );
     req.log.info('create_order_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
-    await updateRazorpayTransactions(bookingids, [], order.id, t);
     await t.commit();
     req.log.info('create_order_success', { cardno: req.user.cardno, orderId: order.id });
 
@@ -350,7 +354,9 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
         STATUS_CASH_PENDING,
         STATUS_PAYMENT_FAILED
       ]
-    }
+    },
+    lock: true,
+    transaction: t
   });
 
   req.log.info('create_order_v2_transactions_found', {
@@ -358,7 +364,7 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     transactionCount: transactions.length
   });
 
-  const { totalAmount, validTransactionIds } = transactions.reduce(
+  const { totalAmount, validTransactions } = transactions.reduce(
     (acc, transaction) => {
       const categories = bookingCategoryMap[transaction.bookingid];
       const bookingType = getBookingType(transaction);
@@ -367,12 +373,14 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
         categories.includes(transaction.category)
       ) {
         acc.totalAmount += transaction.amount;
-        acc.validTransactionIds.push(transaction.id);
+        acc.validTransactions.push(transaction);
       }
       return acc;
     },
-    { totalAmount: 0, validTransactionIds: [] }
+    { totalAmount: 0, validTransactions: [] }
   );
+
+  const validTransactionIds = validTransactions.map((txn) => txn.id);
 
   req.log.info('create_order_v2_total_amount', {
     cardno: req.user.cardno,
@@ -381,10 +389,14 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   });
 
   if (totalAmount > 0) {
-    const order = await generateOrderId(totalAmount);
+    const order = await resolveOrderForTransactions(
+      validTransactions,
+      totalAmount,
+      [],
+      validTransactionIds,
+      t
+    );
     req.log.info('create_order_v2_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
-
-    await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();
     req.log.info('create_order_v2_success', { cardno: req.user.cardno, orderId: order.id });
 
