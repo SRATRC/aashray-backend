@@ -1289,8 +1289,11 @@ export const ReservationReport = async (req, res) => {
   const { start_date, end_date, statuses } = req.query;
   req.log.info('reservation_report_start', { start_date, end_date, statuses });
 
+  // Pagination is optional: the admin report UI fetches the full result set,
+  // so we only paginate when the caller explicitly provides page_size.
   const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
+  const rawPageSize = req.query.page_size || req.body.page_size;
+  const pageSize = rawPageSize ? parseInt(rawPageSize) : null;
 
   const reservations = await roomBookingReport(
     start_date,
@@ -1334,15 +1337,6 @@ export const flatReservationReport = async (req, res) => {
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'center'],
         required: true
-      },
-      {
-        model: Transactions,
-        as: 'transactions',
-        attributes: ['status', 'description'],
-        required: false,
-        separate: true,
-        limit: 1,
-        order: [['createdAt', 'DESC']]
       }
     ],
     attributes: [
@@ -1356,6 +1350,8 @@ export const flatReservationReport = async (req, res) => {
     where: whereClause,
     order: [['checkin', 'ASC']]
   });
+
+  await attachLatestTransactions(bookings);
 
   req.log.info('flat_reservation_report_success', { start_date, end_date, count: bookings.length });
   return res
@@ -1419,21 +1415,12 @@ export const dayWiseGuestCountReport = async (req, res) => {
 };
 
 async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
-  const data = await RoomBooking.findAll({
+  const queryOptions = {
     include: [
       {
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'center', 'credits'],
         required: true
-      },
-      {
-        model: Transactions,
-        as: 'transactions',
-        attributes: ['status', 'description'],
-        required: false,
-        separate: true,
-        limit: 1,
-        order: [['createdAt', 'DESC']]
       }
     ],
     attributes: [
@@ -1454,9 +1441,50 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
       ]
     },
     order: [['checkin', 'ASC']]
+  };
+
+  // Only apply limit/offset when the caller explicitly requested pagination.
+  if (pageSize) {
+    queryOptions.limit = pageSize;
+    queryOptions.offset = ((page || 1) - 1) * pageSize;
+  }
+
+  const bookings = await RoomBooking.findAll(queryOptions);
+  return attachLatestTransactions(bookings);
+}
+
+// Attach each booking's most recent transaction as a single-element
+// `transactions` array (or []), matching the shape the admin report UI reads
+// (`booking.transactions[0]`). Uses one batched query instead of Sequelize's
+// per-row `separate: true` + `limit: 1` include, which fires one query per
+// booking — the N+1 that exhausted the DB connection pool on large reports.
+async function attachLatestTransactions(bookings) {
+  const bookingIds = bookings.map((b) => b.bookingid);
+  if (bookingIds.length === 0) return bookings;
+
+  const txns = await Transactions.findAll({
+    attributes: ['bookingid', 'status', 'description'],
+    where: { bookingid: { [Sequelize.Op.in]: bookingIds } },
+    order: [['createdAt', 'DESC']]
   });
-  console.log(JSON.stringify(data[0], null, 2));
-  return data;
+
+  // Rows are newest-first, so the first row seen per booking is its latest.
+  const latestByBooking = new Map();
+  for (const txn of txns) {
+    if (!latestByBooking.has(txn.bookingid)) {
+      latestByBooking.set(txn.bookingid, {
+        status: txn.status,
+        description: txn.description
+      });
+    }
+  }
+
+  for (const booking of bookings) {
+    const latest = latestByBooking.get(booking.bookingid);
+    booking.setDataValue('transactions', latest ? [latest] : []);
+  }
+
+  return bookings;
 }
 
 export const updateBookingStatus = async (req, res) => {
