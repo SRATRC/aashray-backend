@@ -421,6 +421,26 @@ const getRazorpayClient = () =>
 // order ids are local uuid stubs and must not be sent to Razorpay.
 const isRazorpayLiveEnv = () => ['prod', 'qa'].includes(process.env.NODE_ENV);
 
+// Order creation/lookup runs while a FOR UPDATE lock is held on the pending
+// transactions, so a hung Razorpay call would pin a DB connection and block
+// concurrent confirmations. Bound every Razorpay HTTP call so a slow/hung
+// response fails fast and releases the lock instead of holding it indefinitely.
+const RAZORPAY_REQUEST_TIMEOUT_MS = 15000;
+
+const withRazorpayTimeout = async (promise, label) => {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), RAZORPAY_REQUEST_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const generateOrderId = async (amount) => {
   const razorpay = getRazorpayClient();
 
@@ -436,7 +456,10 @@ export const generateOrderId = async (amount) => {
 
   var order;
   if (isRazorpayLiveEnv() && amount > 0) {
-    order = await razorpay.orders.create(options);
+    order = await withRazorpayTimeout(
+      razorpay.orders.create(options),
+      'razorpay_order_create_timeout'
+    );
   } else {
     options['id'] = uuidv4();
     order = options;
@@ -538,7 +561,10 @@ export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
   }
 
   try {
-    const order = await getRazorpayClient().orders.fetch(razorpay_order_id);
+    const order = await withRazorpayTimeout(
+      getRazorpayClient().orders.fetch(razorpay_order_id),
+      'razorpay_order_fetch_timeout'
+    );
     if (!order) return null;
     if (order.status === 'paid') return { paid: true };
     if (
@@ -549,13 +575,26 @@ export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
     }
     return null;
   } catch (err) {
-    // Fail closed: on a transient fetch error, reuse the existing order id
-    // instead of minting a new one, which would overwrite and orphan an
-    // in-flight payment. Razorpay rejects re-paying a paid/expired order,
-    // so this cannot double-charge.
+    // A definitive 4xx (order not found / bad request / auth) means the stored
+    // id is permanently broken — reusing it would leave the customer unable to
+    // ever pay. Fall through to creating a fresh order instead.
+    const statusCode = Number(err?.statusCode ?? err?.error?.statusCode);
+    if (statusCode >= 400 && statusCode < 500) {
+      logger.error('razorpay_order_fetch_invalid_order', {
+        razorpay_order_id,
+        statusCode,
+        error: err?.message ?? err?.error?.description
+      });
+      return null;
+    }
+
+    // Transient (network / 5xx / timeout): fail closed by reusing the existing
+    // order id instead of minting a new one, which would overwrite and orphan
+    // an in-flight payment. Razorpay rejects re-paying a paid/expired order, so
+    // this cannot double-charge.
     logger.warn('razorpay_order_fetch_failed_reusing_existing', {
       razorpay_order_id,
-      error: err?.message
+      error: err?.message ?? err?.error?.description
     });
     return payableStub;
   }
