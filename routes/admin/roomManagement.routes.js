@@ -32,10 +32,14 @@ import {
   revokeLateCheckoutFee
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
-import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN } from '../../config/constants.js';
+import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
 router.use(auth);
+
+// Allowed for housekeepingAdmin, officeAdmin, superAdmin, and roomAdmin
+router.get('/occupancyReport', authorizeRoles(ROLE_HOUSEKEEPING_ADMIN, ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN), CatchAsync(occupancyReport));
+
 router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN));
 
 // room routes
@@ -73,7 +77,6 @@ router.get('/rc_block_list', CatchAsync(rcBlockList));
 router.get('/reservation_report', CatchAsync(ReservationReport));
 router.get('/flat_reservation_report', CatchAsync(flatReservationReport));
 router.get('/daywise_report', CatchAsync(dayWiseGuestCountReport));
-router.get('/occupancyReport', CatchAsync(occupancyReport));
 router.get('/guestsByDateAndRoomtype', CatchAsync(guestsByDateAndRoomtype));
 router.get('/late-checkout-fees', CatchAsync(fetchLateCheckoutFees));
 router.put('/late-checkout-fees/revoke', CatchAsync(revokeLateCheckoutFee));

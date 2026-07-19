@@ -1252,12 +1252,12 @@ export const unblockRC = async (req, res) => {
 };
 
 export const occupancyReport = async (req, res) => {
-  req.log.info('occupancy_report_start');
+  const { date } = req.query;
+  const targetDate = date || moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
-  const today = moment().tz('Asia/Kolkata').startOf('day').toDate(); // today's 00:00 IST
-  const tomorrow = moment().tz('Asia/Kolkata').add(1, 'day').startOf('day').toDate(); // tomorrow 00:00 IST
+  req.log.info('occupancy_report_start', { targetDate });
 
-  const result = await RoomBooking.findAll({
+  const rooms = await RoomBooking.findAll({
     attributes: [
       'bookingid',
       'roomtype',
@@ -1275,14 +1275,35 @@ export const occupancyReport = async (req, res) => {
       }
     ],
     where: {
-      status: ROOM_STATUS_CHECKEDIN,
-      checkin: { [Op.lte]: today },
-      checkout: { [Op.gt]: today }
+      [Op.or]: [
+        {
+          status: ROOM_STATUS_CHECKEDIN,
+          checkin: { [Op.lte]: targetDate },
+          checkout: { [Op.gte]: targetDate }
+        },
+        {
+          status: ROOM_STATUS_CHECKEDOUT,
+          checkout: targetDate
+        },
+        {
+          status: ROOM_STATUS_PENDING_CHECKIN,
+          checkin: targetDate
+        }
+      ]
     }
   });
 
-  req.log.info('occupancy_report_success', { count: result.length });
-  return res.status(200).send({ message: 'Success', data: result });
+  const combined = rooms
+    .filter(r => r.nights > 0 && r.checkin !== r.checkout && r.roomno && String(r.roomno).trim().toUpperCase() !== 'NA')
+    .map(r => ({
+      ...r.toJSON(),
+      type: 'Room'
+    }));
+
+  combined.sort((a, b) => String(a.roomno).localeCompare(String(b.roomno), undefined, { numeric: true }));
+
+  req.log.info('occupancy_report_success', { count: combined.length });
+  return res.status(200).send({ message: 'Success', data: combined });
 };
 
 export const ReservationReport = async (req, res) => {
