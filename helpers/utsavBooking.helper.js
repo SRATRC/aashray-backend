@@ -586,8 +586,24 @@ if (isDayVisit) {
       });
     }
 
-    // validate blockedDates
-    validateBlockedDates(blockedDates, dateRanges);
+    // flag blockedDates so they can be booked in waiting list status
+    for (const range of dateRanges) {
+      range.isBlocked = false;
+      for (const blockedDate of blockedDates) {
+        if (
+          isDateRangeOverlapping(
+            blockedDate.checkin,
+            blockedDate.checkout,
+            range.start,
+            range.end,
+            range.overlappingWithUtsav
+          )
+        ) {
+          range.isBlocked = true;
+          break;
+        }
+      }
+    }
 
     dateRangesByMumukshu[mumukshu] = dateRanges;
   }

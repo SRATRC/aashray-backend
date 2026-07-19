@@ -514,6 +514,9 @@ export async function bookFlatForMumukshus(
   }
 
   const nights = await calculateNights(startDay, endDay);
+  if (nights > 9) {
+    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
+  }
 
   const userBookingIds = {},
     bookingIds = [];
@@ -676,7 +679,9 @@ export async function checkRoomAvailabilityForMumukshus(
         const nights = await calculateNights(range.start, range.end);
         const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
 
-        if (nights == 0) {
+        if (range.isBlocked) {
+          // Keep waiting status, do not assign room or charge
+        } else if (nights == 0) {
           // 1 day visit
           status = STATUS_AVAILABLE;
         } else if (nights > minNights) {
@@ -708,6 +713,7 @@ export async function checkRoomAvailabilityForMumukshus(
           nights,
           roomType,
           gender,
+          isBlocked: range.isBlocked || false,
           ...(assignedRoom && { roomno: assignedRoom })
         });
       }
@@ -742,6 +748,9 @@ export async function checkFlatAvailabilityForMumukshus(
   }
 
   const nights = await calculateNights(checkin_date, checkout_date);
+  if (nights > 9) {
+    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
+  }
   const flatDetails = [];
 
   const flatOwnerData = await FlatDb.findAll({

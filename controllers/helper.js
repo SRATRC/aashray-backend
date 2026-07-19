@@ -39,32 +39,15 @@ import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { sendUnifiedWhatsApp } from '../helpers/whatsapp.helper.js';
 
 export async function getBlockedDates(checkin_date, checkout_date) {
-  // const startDate = new Date(checkin_date);
-  // const endDate = new Date(checkout_date);
-
   const blockedDates = await BlockDates.findAll({
     where: {
       status: STATUS_ACTIVE,
-      [Sequelize.Op.or]: [
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkin_date } },
-            { checkout: { [Sequelize.Op.gte]: checkin_date } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.lte]: checkout_date } },
-            { checkout: { [Sequelize.Op.gte]: checkout_date } }
-          ]
-        },
-        {
-          [Sequelize.Op.and]: [
-            { checkin: { [Sequelize.Op.gte]: checkin_date } },
-            { checkin: { [Sequelize.Op.lte]: checkout_date } }
-          ]
-        }
-      ]
+      checkin: {
+        [Sequelize.Op.lt]: checkout_date
+      },
+      checkout: {
+        [Sequelize.Op.gt]: checkin_date
+      }
     }
   });
 

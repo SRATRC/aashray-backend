@@ -9,7 +9,7 @@ import {
   STATUS_PAYMENT_PENDING,
   BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
-import { sendUnifiedEmail, sendUnifiedEmailForBookedBy } from '../helper.js';
+import { sendUnifiedEmail, sendUnifiedEmailForBookedBy, getBlockedDates } from '../helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatBooking } from '../../models/associations.js';
 import { bookFlatForMumukshus } from '../../helpers/roomBooking.helper.js';
@@ -318,5 +318,25 @@ export const FlatBookingMumukshu = async (req, res) => {
   return res.status(200).send({
     message: MSG_BOOKING_SUCCESSFUL,
     data: order
+  });
+};
+
+export const CheckBlockedDates = async (req, res) => {
+  const { checkin, checkout } = req.body;
+  if (!checkin || !checkout) {
+    throw new ApiError(400, 'Checkin and checkout dates are required');
+  }
+
+  const blockedDates = await getBlockedDates(checkin, checkout);
+  const blockedPeriods = blockedDates.map(
+    (b) =>
+      `${moment(b.checkin).format('Do MMMM, YYYY')} to ${moment(
+        b.checkout
+      ).format('Do MMMM, YYYY')}`
+  );
+
+  return res.status(200).send({
+    isBlocked: blockedDates.length > 0,
+    blockedPeriods
   });
 };

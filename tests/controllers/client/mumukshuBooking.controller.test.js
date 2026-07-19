@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { app, sequelize } from '../../../app.js';
 import { CardDb, RoomBooking, UtsavDb } from '../../../models/associations.js';
+import BlockDates from '../../../models/block_dates.model.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_PAYMENT_PENDING,
@@ -32,6 +33,7 @@ describe('Mumukshu Booking Controller', () => {
         await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
         await RoomBooking.truncate();
         await UtsavDb.truncate();
+        await BlockDates.truncate();
         await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
       });
 
@@ -97,6 +99,40 @@ describe('Mumukshu Booking Controller', () => {
 
         expect(res.status).toBe(400);
         expect(res.body.message).toBe('Invalid booking duration');
+      });
+
+      it('should book room in waiting status if dates are blocked by admin', async () => {
+        const checkin = nDaysFromToday(1);
+        const checkout = nDaysFromToday(3);
+        
+        await BlockDates.create({
+          checkin,
+          checkout,
+          comments: 'Blocked by admin',
+          status: 'active',
+          updatedBy: 'admin'
+        });
+
+        const res = await request(app)
+          .post('/api/v1/mumukshu/booking')
+          .send({
+            cardno: MUMUKSHU_1,
+            primary_booking: createRoomJson(MUMUKSHU_1, checkin, checkout)
+          });
+
+        expect(res.status).toBe(200);
+
+        const booking = await RoomBooking.findOne({
+          where: {
+            cardno: MUMUKSHU_1,
+            status: STATUS_WAITING,
+            checkin: checkin,
+            checkout: checkout,
+            nights: 2
+          }
+        });
+
+        expect(booking).not.toBeNull();
       });
 
       describe('During Utsav', () => {
