@@ -85,6 +85,20 @@ describe('Mumukshu Booking Controller', () => {
         expect(res.status).toBe(200);
       });
 
+      it('should fail to book room for more than 9 days', async () => {
+        const checkin = nDaysFromToday(1);
+        const checkout = nDaysFromToday(11); // 10 nights
+        const res = await request(app)
+          .post('/api/v1/mumukshu/booking')
+          .send({
+            cardno: MUMUKSHU_1,
+            primary_booking: createRoomJson(MUMUKSHU_1, checkin, checkout)
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.message).toBe('Invalid booking duration');
+      });
+
       describe('During Utsav', () => {
 
         describe('if mumukshu has booked utsav or has utsav booking in progress' , () => {

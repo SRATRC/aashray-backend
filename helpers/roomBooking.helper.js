@@ -14,7 +14,8 @@ import {
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
   ERR_FLAT_FAILED_TO_BOOK,
-  ERR_FLAT_ALREADY_BOOKED
+  ERR_FLAT_ALREADY_BOOKED,
+  ERR_ROOM_INVALID_DURATION
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -628,6 +629,11 @@ export async function checkRoomAvailabilityForMumukshus(
   utsav
 ) {
   validateDate(checkin_date, checkout_date);
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  if (nights > 9) {
+    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
+  }
 
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
