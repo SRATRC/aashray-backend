@@ -46,25 +46,29 @@ import ApiError from '../utils/ApiError.js';
 import logger from '../config/logger.js';
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
+  const queryCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   const result = await RoomBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
+            { checkin: { [Sequelize.Op.lt]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
+            { checkout: { [Sequelize.Op.lte]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
+            { checkout: { [Sequelize.Op.gte]: queryCheckout } }
           ]
         }
       ],
@@ -89,12 +93,16 @@ export async function bookDayVisit(
   updatedBy,
   t
 ) {
+  const effectiveCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
       cardno,
       checkin,
-      checkout,
+      checkout: effectiveCheckout,
       roomno: 'NA',
       roomtype: 'NA',
       gender: 'NA',
@@ -124,6 +132,10 @@ async function bookWaitingRoom(
   t
 ) {
   const bookingId = uuidv4();
+  const effectiveCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   await RoomBooking.create(
     {
       bookingid: bookingId,
@@ -132,7 +144,7 @@ async function bookWaitingRoom(
       cardno,
       bookedBy,
       checkin,
-      checkout,
+      checkout: effectiveCheckout,
       nights,
       roomtype,
       gender,
@@ -158,6 +170,10 @@ async function bookAvailableRoom(
 ) {
   const bookingId = uuidv4();
   const updatedBy = user.cardno;
+  const effectiveCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   const booking = await RoomBooking.create(
     {
       bookingid: bookingId,
@@ -166,7 +182,7 @@ async function bookAvailableRoom(
       cardno,
       bookedBy,
       checkin,
-      checkout,
+      checkout: effectiveCheckout,
       nights,
       roomtype,
       gender,

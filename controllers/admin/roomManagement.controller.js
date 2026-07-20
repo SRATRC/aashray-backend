@@ -208,6 +208,10 @@ const handleEarlyCheckout = async ({
 
   // create a new booking with the new booking dates
   let bookingId = uuidv4();
+  const effectiveCheckout = booking.checkin === today
+    ? moment(booking.checkin).add(1, 'day').format('YYYY-MM-DD')
+    : today;
+
   const newBooking = await RoomBooking.create(
     {
       bookingid: bookingId,
@@ -215,7 +219,7 @@ const handleEarlyCheckout = async ({
       cardno: booking.cardno,
       bookedBy: booking.bookedBy,
       checkin: booking.checkin,
-      checkout: today,
+      checkout: effectiveCheckout,
       nights,
       roomtype: booking.roomtype,
       gender: booking.gender,

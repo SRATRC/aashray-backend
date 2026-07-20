@@ -47,7 +47,7 @@ FROM
           t1.bookedBy AS bookedBy,
           t1.roomno,
           t1.checkin,
-          t1.checkout,
+          CASE WHEN t1.nights = 0 THEN t1.checkin ELSE t1.checkout END AS checkout,
           t1.nights,
           t1.roomtype,
           t1.status,
