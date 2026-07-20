@@ -184,15 +184,15 @@ export const CancelBooking = async (req, res) => {
       const body =
         req.user.cardno === booking.cardno
           ? `Room booking for ${req.user.issuedto} from ${moment(
-              booking.checkin
-            ).format('Do MMM, YYYY')} to ${moment(booking.checkout).format(
-              'Do MMM, YYYY'
-            )} has been cancelled.`
+            booking.checkin
+          ).format('Do MMM, YYYY')} to ${moment(booking.checkout).format(
+            'Do MMM, YYYY'
+          )} has been cancelled.`
           : `Your room booking from ${moment(booking.checkin).format(
-              'Do MMM, YYYY'
-            )} to ${moment(booking.checkout).format(
-              'Do MMM, YYYY'
-            )} has been cancelled.`;
+            'Do MMM, YYYY'
+          )} to ${moment(booking.checkout).format(
+            'Do MMM, YYYY'
+          )} has been cancelled.`;
       notifyCardno(other, { title, body, screen: '/bookings' });
     }
   }

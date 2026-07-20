@@ -111,7 +111,7 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       },
       { transaction: t }
     );
-    
+
     // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
@@ -126,10 +126,10 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-      
+
       total_amount += package_info.amount;
-      
-      
+
+
     }
     // Only provision food for non-waitlisted bookings
     if (booking.status !== STATUS_WAITING) {
@@ -147,9 +147,9 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
-export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
-  
-  if(utsav.location !== RESEARCH_CENTRE) 
+export async function bookFoodForUtsav(package_info, utsav, mumukshu, t, updatedBy) {
+
+  if (utsav.location !== RESEARCH_CENTRE)
     return;
 
   const effectiveStartingMeal = moment(package_info.start_date).isSame(utsav.start_date, 'day')
@@ -547,16 +547,16 @@ export async function getDateRangesDuringUtsav(
   for (const mumukshu of mumukshus) {
     const isDayVisit = startDate === endDate;
 
-if (isDayVisit) {
-  dateRangesByMumukshu[mumukshu] = [
-    {
-      start: startDate,
-      end: endDate,
-      overlappingWithUtsav: false
+    if (isDayVisit) {
+      dateRangesByMumukshu[mumukshu] = [
+        {
+          start: startDate,
+          end: endDate,
+          overlappingWithUtsav: false
+        }
+      ];
+      continue;
     }
-  ];
-  continue;
-}
 
     const utsavBooking = inProgressUtsavOverlapping
       ? utsav

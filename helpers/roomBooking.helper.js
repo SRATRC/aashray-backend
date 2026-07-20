@@ -179,7 +179,7 @@ async function bookAvailableRoom(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const amount = nights === 0 ? (roomtype === 'nac' ? 350 : 550) : (roomCharge(roomtype) * nights);
+  const amount = nights === 0 ? (roomCharge(roomtype) / 2) : (roomCharge(roomtype) * nights);
 
   const { transaction, discountedAmount } = await createPendingTransaction(
     user,
@@ -206,12 +206,16 @@ export async function findRoom(
   excludeRooms = [],
   t = null
 ) {
-  // Get admin-blocked rooms overlapping [checkin, checkout)
+  const queryCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
+  // Get admin-blocked rooms overlapping [checkin, queryCheckout)
   const blocks = await RoomBlock.findAll({
     attributes: ['roomno'],
     where: {
       status: 'active',
-      start_date: { [Sequelize.Op.lt]: checkout },
+      start_date: { [Sequelize.Op.lt]: queryCheckout },
       [Sequelize.Op.or]: [
         { end_date: null },
         { end_date: { [Sequelize.Op.gt]: checkin } }
@@ -257,7 +261,7 @@ export async function findRoom(
     ],
     replacements: {
       reqCheckin: checkin,
-      reqCheckout: checkout,
+      reqCheckout: queryCheckout,
       excludeStatus1: 'cancelled',
       excludeStatus2: 'admin cancelled'
     },
@@ -268,12 +272,16 @@ export async function findRoom(
 }
 
 export async function findAllRooms(checkin, checkout, room_type, gender) {
-  // Get admin-blocked rooms overlapping [checkin, checkout)
+  const queryCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
+  // Get admin-blocked rooms overlapping [checkin, queryCheckout)
   const blocks = await RoomBlock.findAll({
     attributes: ['roomno'],
     where: {
       status: 'active',
-      start_date: { [Sequelize.Op.lt]: checkout },
+      start_date: { [Sequelize.Op.lt]: queryCheckout },
       [Sequelize.Op.or]: [
         { end_date: null },
         { end_date: { [Sequelize.Op.gt]: checkin } }
@@ -288,19 +296,19 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
+            { checkin: { [Sequelize.Op.lt]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
+            { checkout: { [Sequelize.Op.lte]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
+            { checkout: { [Sequelize.Op.gte]: queryCheckout } }
           ]
         }
       ],
@@ -757,7 +765,7 @@ export async function checkRoomAvailabilityForMumukshus(
             );
             if (roomno) {
               status = STATUS_AVAILABLE;
-              charge = roomType === 'nac' ? 350 : 550;
+              charge = roomCharge(roomType) / 2;
               availableCredits = usableCredits(tempUser, TYPE_ROOM, charge);
               assignedRoom = roomno.roomno;
               assignedRooms.push(roomno.roomno);

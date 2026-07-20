@@ -1240,9 +1240,9 @@ export const createRoomBlock = async (req, res) => {
     warnings:
       conflictingBookings.length > 0
         ? {
-            message: `${conflictingBookings.length} existing booking(s) overlap this block. Please reassign affected guests.`,
-            bookings: conflictingBookings
-          }
+          message: `${conflictingBookings.length} existing booking(s) overlap this block. Please reassign affected guests.`,
+          bookings: conflictingBookings
+        }
         : null
   });
 };
