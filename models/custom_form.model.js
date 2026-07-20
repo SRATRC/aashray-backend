@@ -67,6 +67,28 @@ const CustomForm = sequelize.define(
             type: DataTypes.BOOLEAN,
             allowNull: false,
             defaultValue: true
+        },
+        section1Action: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: 'next'
+        },
+        themeColor: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: '#204060'
+        },
+        expiresAt: {
+            type: DataTypes.DATE,
+            allowNull: true
+        },
+        closeMessage: {
+            type: DataTypes.TEXT,
+            allowNull: true
+        },
+        maxResponses: {
+            type: DataTypes.INTEGER,
+            allowNull: true
         }
     },
     {

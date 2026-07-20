@@ -95,7 +95,7 @@ function getAccessibleDepts(userRoles) {
  * Create a new form.
  */
 export const createForm = async (req, res) => {
-    const { title, description, dept_name, fields, isPublic, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother } = req.body;
+    const { title, description, dept_name, fields, isPublic, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses } = req.body;
 
     if (!title || !dept_name || !fields) {
         throw new ApiError(400, 'title, dept_name, and fields are required');
@@ -153,6 +153,11 @@ export const createForm = async (req, res) => {
             showProgressBar: showProgressBar !== undefined ? showProgressBar : true,
             confirmationMessage: confirmationMessage || null,
             showSubmitAnother: showSubmitAnother !== undefined ? showSubmitAnother : true,
+            section1Action: section1Action || 'next',
+            themeColor: themeColor || '#204060',
+            expiresAt: expiresAt || null,
+            closeMessage: closeMessage || null,
+            maxResponses: maxResponses ? parseInt(maxResponses) : null,
             createdBy: req.user?.username
         }, { transaction: t });
 
@@ -258,7 +263,7 @@ export const getFormById = async (req, res) => {
  */
 export const updateForm = async (req, res) => {
     const { id } = req.params;
-    const { title, description, fields, status, isPublic, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother } = req.body;
+    const { title, description, fields, status, isPublic, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses } = req.body;
 
     const t = await database.transaction();
     req.transaction = t;
@@ -307,6 +312,11 @@ export const updateForm = async (req, res) => {
         if (showProgressBar !== undefined) updateData.showProgressBar = showProgressBar;
         if (confirmationMessage !== undefined) updateData.confirmationMessage = confirmationMessage;
         if (showSubmitAnother !== undefined) updateData.showSubmitAnother = showSubmitAnother;
+        if (section1Action !== undefined) updateData.section1Action = section1Action;
+        if (themeColor !== undefined) updateData.themeColor = themeColor;
+        if (expiresAt !== undefined) updateData.expiresAt = expiresAt || null;
+        if (closeMessage !== undefined) updateData.closeMessage = closeMessage || null;
+        if (maxResponses !== undefined) updateData.maxResponses = maxResponses ? parseInt(maxResponses) : null;
 
         // If slug is updated
         if (slug !== undefined) {
@@ -429,11 +439,78 @@ export const getFormResponses = async (req, res) => {
             {
                 model: CardDb,
                 as: 'respondent',
-                attributes: ['cardno', 'issuedto', 'mobno', 'email']
+                attributes: ['cardno', 'issuedto', 'mobno', 'email', 'center', 'res_status']
             }
         ],
         order: [['submittedAt', 'DESC']]
     });
+
+    // Identify the mobile field, if any
+    const mobField = (form.fields || []).find(f => {
+        const lbl = (f.label || '').toLowerCase();
+        return lbl.includes('mob') || lbl.includes('phone') || lbl.includes('contact');
+    });
+
+    let enrichedResponses = responses;
+
+    if (mobField) {
+        // Collect indices and 10-digit clean numbers for lookup
+        const mobToResponseMap = {};
+        const mobNumbersToLookup = [];
+
+        responses.forEach((resp, rIdx) => {
+            // Only lookup if the respondent relation is not already loaded
+            if (!resp.respondent) {
+                const val = resp.responses ? resp.responses[mobField.id] : null;
+                if (val) {
+                    const cleaned = String(val).replace(/\D/g, '');
+                    const tenDigits = cleaned.slice(-10);
+                    if (tenDigits.length === 10) {
+                        const parsedNum = parseInt(tenDigits, 10);
+                        if (!isNaN(parsedNum)) {
+                            mobToResponseMap[rIdx] = tenDigits;
+                            mobNumbersToLookup.push(parsedNum);
+                            mobNumbersToLookup.push(parseInt('91' + tenDigits, 10)); // Handle with country code 91
+                        }
+                    }
+                }
+            }
+        });
+
+        if (mobNumbersToLookup.length > 0) {
+            const cards = await CardDb.findAll({
+                where: {
+                    mobno: mobNumbersToLookup
+                },
+                attributes: ['cardno', 'issuedto', 'mobno', 'email', 'center', 'res_status']
+            });
+
+            const cardMapByMob = {};
+            cards.forEach(card => {
+                const cleanMob = String(card.mobno).replace(/\D/g, '').slice(-10);
+                cardMapByMob[cleanMob] = card;
+            });
+
+            enrichedResponses = responses.map((resp, rIdx) => {
+                const respJson = resp.toJSON();
+                if (!respJson.respondent) {
+                    const tenDigits = mobToResponseMap[rIdx];
+                    if (tenDigits && cardMapByMob[tenDigits]) {
+                        const card = cardMapByMob[tenDigits];
+                        respJson.respondent = {
+                            cardno: card.cardno,
+                            issuedto: card.issuedto,
+                            mobno: card.mobno,
+                            email: card.email,
+                            center: card.center,
+                            res_status: card.res_status
+                        };
+                    }
+                }
+                return respJson;
+            });
+        }
+    }
 
     res.status(200).json({
         success: true,
@@ -443,7 +520,7 @@ export const getFormResponses = async (req, res) => {
                 title: form.title,
                 fields: form.fields
             },
-            responses
+            responses: enrichedResponses
         }
     });
 };
@@ -459,16 +536,36 @@ export const getPublicForm = async (req, res) => {
 
     const form = await CustomForm.findOne({
         where: { id, status: 'active' },
-        attributes: ['id', 'title', 'description', 'fields', 'isPublic', 'dept_name', 'slug', 'limitOneResponse', 'allowEdit', 'showProgressBar', 'confirmationMessage', 'showSubmitAnother']
+        attributes: ['id', 'title', 'description', 'fields', 'isPublic', 'dept_name', 'slug', 'limitOneResponse', 'allowEdit', 'showProgressBar', 'confirmationMessage', 'showSubmitAnother', 'section1Action', 'themeColor', 'expiresAt', 'closeMessage', 'maxResponses']
     });
 
     if (!form) {
         throw new ApiError(404, 'Form not found or inactive');
     }
 
+    // Check if form is closed (by expiry date or maximum submissions count)
+    const responseCount = await CustomFormResponse.count({ where: { form_id: form.id } });
+    let isClosed = false;
+    let closeReason = '';
+
+    if (form.expiresAt && new Date() > new Date(form.expiresAt)) {
+        isClosed = true;
+        closeReason = 'expired';
+    } else if (form.maxResponses && responseCount >= form.maxResponses) {
+        isClosed = true;
+        closeReason = 'limit_reached';
+    }
+
+    const responseData = {
+        ...form.toJSON(),
+        isClosed,
+        closeReason,
+        currentResponseCount: responseCount
+    };
+
     res.status(200).json({
         success: true,
-        data: form
+        data: responseData
     });
 };
 
@@ -490,6 +587,15 @@ export const submitFormResponse = async (req, res) => {
 
     if (!form) {
         throw new ApiError(404, 'Form not found or inactive');
+    }
+
+    // Expiry and max limit checks
+    const responseCount = await CustomFormResponse.count({ where: { form_id: parseInt(id) } });
+    if (form.expiresAt && new Date() > new Date(form.expiresAt)) {
+        throw new ApiError(403, form.closeMessage || 'This form has expired and is no longer accepting responses');
+    }
+    if (form.maxResponses && responseCount >= form.maxResponses) {
+        throw new ApiError(403, form.closeMessage || 'This form has reached its response limit and is no longer accepting responses');
     }
 
     // Validate required fields
@@ -593,6 +699,10 @@ export const updatePublicResponse = async (req, res) => {
         throw new ApiError(404, 'Form not found or inactive');
     }
 
+    if (form.expiresAt && new Date() > new Date(form.expiresAt)) {
+        throw new ApiError(403, form.closeMessage || 'This form has expired and is no longer accepting response edits');
+    }
+
     if (!form.allowEdit) {
         throw new ApiError(403, 'Editing responses is not allowed for this form');
     }
@@ -633,4 +743,58 @@ export const updatePublicResponse = async (req, res) => {
         message: 'Response updated successfully',
         data: { id: response.id }
     });
+};
+
+/**
+ * POST /api/v1/admin/forms/:id/clone
+ * Duplicate form configuration and settings.
+ */
+export const cloneForm = async (req, res) => {
+    const { id } = req.params;
+
+    const t = await database.transaction();
+    req.transaction = t;
+
+    try {
+        const sourceForm = await CustomForm.findByPk(id, { transaction: t });
+        if (!sourceForm) {
+            throw new ApiError(404, 'Source form not found');
+        }
+
+        const userRoles = req.roles || [];
+        if (!hasAccessToDept(userRoles, sourceForm.dept_name)) {
+            throw new ApiError(403, 'You do not have access to this form');
+        }
+
+        const duplicatedForm = await CustomForm.create({
+            title: `${sourceForm.title} (Copy)`,
+            description: sourceForm.description,
+            dept_name: sourceForm.dept_name,
+            fields: sourceForm.fields,
+            isPublic: sourceForm.isPublic,
+            status: 'inactive',
+            limitOneResponse: sourceForm.limitOneResponse,
+            allowEdit: sourceForm.allowEdit,
+            showProgressBar: sourceForm.showProgressBar,
+            confirmationMessage: sourceForm.confirmationMessage,
+            showSubmitAnother: sourceForm.showSubmitAnother,
+            section1Action: sourceForm.section1Action,
+            themeColor: sourceForm.themeColor,
+            expiresAt: sourceForm.expiresAt,
+            closeMessage: sourceForm.closeMessage,
+            maxResponses: sourceForm.maxResponses,
+            createdBy: req.user?.username
+        }, { transaction: t });
+
+        await t.commit();
+        req.transaction = null;
+
+        res.status(201).json({
+            success: true,
+            message: 'Form cloned successfully',
+            data: duplicatedForm
+        });
+    } catch (error) {
+        throw error;
+    }
 };

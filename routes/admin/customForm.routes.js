@@ -31,7 +31,8 @@ import {
     getFormById,
     updateForm,
     deleteForm,
-    getFormResponses
+    getFormResponses,
+    cloneForm
 } from '../../controllers/admin/customForm.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -92,6 +93,12 @@ router.get(
     '/:id/responses',
     authorizeRoles(...ALL_FORM_ROLES),
     CatchAsync(getFormResponses)
+);
+
+router.post(
+    '/:id/clone',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(cloneForm)
 );
 
 export default router;
