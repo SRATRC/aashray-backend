@@ -647,7 +647,7 @@ export const roomBooking = async (req, res) => {
   const nights = await calculateNights(checkin_date, checkout_date);
 
   var booking = undefined;
-  if (nights == 0) {
+  if (nights == 0 && room_type === 'NA') {
     booking = await bookDayVisit(
       card.cardno,
       checkin_date,
@@ -2552,7 +2552,7 @@ export const bulkRoomBooking = async (req, res) => {
       }
 
       let bookingResult;
-      if (nights === 0) {
+      if (nights === 0 && room_type === 'NA') {
         bookingResult = await bookDayVisit(
           card.cardno,
           checkin_date,

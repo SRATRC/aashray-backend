@@ -179,7 +179,7 @@ async function bookAvailableRoom(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const amount = roomCharge(roomtype) * nights;
+  const amount = nights === 0 ? (roomtype === 'nac' ? 350 : 550) : (roomCharge(roomtype) * nights);
 
   const { transaction, discountedAmount } = await createPendingTransaction(
     user,
@@ -374,15 +374,47 @@ export async function bookRoomForMumukshus(
     userBookingIds[card.cardno] = userBookingIds[card.cardno] || [];
 
     if (nights == 0) {
-      const result = await bookDayVisit(
-        card.cardno,
-        range.start,
-        range.end,
-        bookedBy,
-        updatedBy,
-        t
-      );
-      userBookingIds[card.cardno].push(result.bookingid);
+      if (roomType === 'NA') {
+        const result = await bookDayVisit(
+          card.cardno,
+          range.start,
+          range.end,
+          bookedBy,
+          updatedBy,
+          t
+        );
+        userBookingIds[card.cardno].push(result.bookingid);
+      } else if (status == STATUS_WAITING) {
+        const result = await bookWaitingRoom(
+          card.cardno,
+          range.start,
+          range.end,
+          nights,
+          roomType,
+          gender,
+          bookedBy,
+          updatedBy,
+          t
+        );
+        userBookingIds[card.cardno].push(result.bookingId);
+      } else if (status == STATUS_AVAILABLE) {
+        const result = await bookAvailableRoom(
+          card.cardno,
+          range.start,
+          range.end,
+          nights,
+          roomno,
+          roomType,
+          gender,
+          bookedBy,
+          user,
+          false,
+          t
+        );
+        amount += result.discountedAmount;
+        userBookingIds[card.cardno].push(result.bookingId);
+        assignedRooms.push(result.bookedRoomNo);
+      }
     } else if (status == STATUS_WAITING) {
       const result = await bookWaitingRoom(
         card.cardno,
@@ -696,7 +728,7 @@ export async function checkRoomAvailabilityForMumukshus(
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
-      const gender = floorType ? floorType + card.gender : card.gender;
+      const gender = floorType === 'SC' ? 'SC' + card.gender : card.gender;
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
       for (const range of dateRanges) {
@@ -712,7 +744,27 @@ export async function checkRoomAvailabilityForMumukshus(
           // Keep waiting status, do not assign room or charge
         } else if (nights == 0) {
           // 1 day visit
-          status = STATUS_AVAILABLE;
+          if (roomType === 'NA') {
+            status = STATUS_AVAILABLE;
+            charge = 0;
+          } else {
+            const roomno = await findRoom(
+              range.start,
+              range.end,
+              roomType,
+              gender,
+              assignedRooms
+            );
+            if (roomno) {
+              status = STATUS_AVAILABLE;
+              charge = roomType === 'nac' ? 350 : 550;
+              availableCredits = usableCredits(tempUser, TYPE_ROOM, charge);
+              assignedRoom = roomno.roomno;
+              assignedRooms.push(roomno.roomno);
+            } else {
+              status = STATUS_WAITING;
+            }
+          }
         } else if (nights > minNights) {
           // when booking around utsav, 2 or more nights are confirmed
           // but 1 night is waitlisted.
