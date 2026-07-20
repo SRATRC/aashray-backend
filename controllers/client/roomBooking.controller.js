@@ -326,6 +326,12 @@ export const CheckBlockedDates = async (req, res) => {
   if (!checkin || !checkout) {
     throw new ApiError(400, 'Checkin and checkout dates are required');
   }
+  if (!moment(checkin, 'YYYY-MM-DD', true).isValid() || !moment(checkout, 'YYYY-MM-DD', true).isValid()) {
+    throw new ApiError(400, 'Invalid checkin or checkout date format, must be YYYY-MM-DD');
+  }
+  if (checkout < checkin) {
+    throw new ApiError(400, 'checkout date cannot be before checkin date');
+  }
 
   const blockedDates = await getBlockedDates(checkin, checkout);
   const blockedPeriods = blockedDates.map(

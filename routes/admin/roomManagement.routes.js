@@ -75,6 +75,7 @@ router.put('/update_room/:roomno', CatchAsync(updateRoom));
 
 // date-range / permanent room block routes
 router.post('/room_block', CatchAsync(createRoomBlock));
+router.post('/room_block/bulk', CatchAsync(createRoomBlock));
 router.get('/room_block', CatchAsync(listRoomBlocks));
 router.delete('/room_block/:id', CatchAsync(cancelRoomBlock));
 router.post('/room_block/bulk_cancel', CatchAsync(bulkCancelRoomBlocks));

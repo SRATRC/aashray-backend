@@ -289,7 +289,7 @@ export const transactions = async (req, res) => {
            COALESCE(rb.cardno, fb.cardno, tb.cardno, sb.cardno, ub.cardno) AS booked_for,
            COALESCE(rb.bookedBy, fb.bookedBy, tb.bookedBy, sb.bookedBy, ub.bookedBy) AS booked_by,
            COALESCE(rb.checkin, fb.checkin, tb.date, sdb.start_date, updb.start_date) AS start_day,
-           COALESCE(rb.checkout, fb.checkout, NULL, sdb.end_date, updb.end_date) AS end_day,
+           COALESCE(CASE WHEN rb.nights = 0 THEN rb.checkin ELSE rb.checkout END, fb.checkout, NULL, sdb.end_date, updb.end_date) AS end_day,
            COALESCE(sdb.name, udb.name) AS name,
            card_db.issuedto AS booked_for_name
     FROM transactions
