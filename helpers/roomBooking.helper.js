@@ -23,6 +23,7 @@ import {
   FlatBooking,
   FlatDb
 } from '../models/associations.js';
+import RoomBlock from '../models/room_block.model.js';
 import {
   createPendingTransaction,
   generateOrderId,
@@ -205,8 +206,22 @@ export async function findRoom(
   excludeRooms = [],
   t = null
 ) {
+  // Get admin-blocked rooms overlapping [checkin, checkout)
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: checkout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gt]: checkin } }
+      ]
+    }
+  });
+  const blockedRooms = blocks.map((b) => b.roomno);
+  const allExcluded = [...new Set([...excludeRooms, ...blockedRooms])];
+
   const whereConditions = {
-    roomstatus: STATUS_AVAILABLE,
     roomtype: room_type,
     gender: gender,
     [Sequelize.Op.and]: [
@@ -225,9 +240,9 @@ export async function findRoom(
     ]
   };
 
-  if (excludeRooms.length > 0) {
+  if (allExcluded.length > 0) {
     whereConditions[Sequelize.Op.and].push({
-      roomno: { [Sequelize.Op.notIn]: excludeRooms }
+      roomno: { [Sequelize.Op.notIn]: allExcluded }
     });
   }
  
@@ -241,9 +256,9 @@ export async function findRoom(
       Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
     ],
     replacements: {
-      reqCheckin: checkin,    // Your variable for the requested check-in
-      reqCheckout: checkout,  // Your variable for the requested check-out
-      excludeStatus1: 'cancelled',           // Statuses that mean the room is actually free
+      reqCheckin: checkin,
+      reqCheckout: checkout,
+      excludeStatus1: 'cancelled',
       excludeStatus2: 'admin cancelled'
     },
     transaction: t,
@@ -253,6 +268,20 @@ export async function findRoom(
 }
 
 export async function findAllRooms(checkin, checkout, room_type, gender) {
+  // Get admin-blocked rooms overlapping [checkin, checkout)
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: checkout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gt]: checkin } }
+      ]
+    }
+  });
+  const adminBlockedRooms = blocks.map((b) => b.roomno);
+
   const bookings = await RoomBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
@@ -281,15 +310,15 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
     }
   });
   const bookedRooms = bookings.map((x) => x.roomno);
+  const allExcluded = [...new Set([...bookedRooms, ...adminBlockedRooms])];
 
   return RoomDb.findAll({
     where: {
       roomno: {
         [Sequelize.Op.notLike]: 'NA%',
         [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: bookedRooms
+        [Sequelize.Op.notIn]: allExcluded.length > 0 ? allExcluded : ['']
       },
-      roomstatus: STATUS_AVAILABLE,
       roomtype: room_type,
       ...(gender && { gender })
     },

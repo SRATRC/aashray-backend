@@ -29,7 +29,11 @@ import {
   guestsByDateAndRoomtype,
   updateFlatBookingStatus,
   fetchLateCheckoutFees,
-  revokeLateCheckoutFee
+  revokeLateCheckoutFee,
+  createRoomBlock,
+  listRoomBlocks,
+  cancelRoomBlock,
+  bulkCancelRoomBlocks
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
@@ -64,9 +68,15 @@ router.put('/update_flat_booking_status', CatchAsync(updateFlatBookingStatus));
 
 
 // room management routes
-router.put('/block_room/:roomno', CatchAsync(blockRoom));
-router.put('/unblock_room/:roomno', CatchAsync(unblockRoom));
+router.put('/block_room/:roomno', CatchAsync(blockRoom));       // legacy — kept for backward compat
+router.put('/unblock_room/:roomno', CatchAsync(unblockRoom));   // legacy — kept for backward compat
 router.put('/update_room/:roomno', CatchAsync(updateRoom));
+
+// date-range / permanent room block routes
+router.post('/room_block', CatchAsync(createRoomBlock));
+router.get('/room_block', CatchAsync(listRoomBlocks));
+router.delete('/room_block/:id', CatchAsync(cancelRoomBlock));
+router.post('/room_block/bulk_cancel', CatchAsync(bulkCancelRoomBlocks));
 
 // RC management routes
 router.post('/block_rc', CatchAsync(blockRC));

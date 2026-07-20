@@ -64,6 +64,7 @@ import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment-timezone';
 import BlockDates from '../../models/block_dates.model.js';
+import RoomBlock from '../../models/room_block.model.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
@@ -1030,7 +1031,16 @@ export const roomList = async (req, res) => {
       roomno: {
         [Sequelize.Op.notIn]: ['NA', 'WL']
       }
-    }
+    },
+    include: [
+      {
+        model: RoomBlock,
+        as: 'blocks',
+        where: { status: 'active' },
+        required: false,
+        attributes: ['id', 'start_date', 'end_date', 'reason']
+      }
+    ]
   });
 
   req.log.info('room_list_success', { count: result.length });
@@ -1152,35 +1162,213 @@ export const unblockRoom = async (req, res) => {
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
+// ─── Room Block (date-range / permanent) ─────────────────────────────────────
+
+export const createRoomBlock = async (req, res) => {
+  const { roomno, start_date, end_date, reason, blockAllBeds = true } = req.body;
+  req.log.info('create_room_block_start', { roomno, start_date, end_date, blockAllBeds });
+
+  if (!roomno || !start_date) {
+    throw new ApiError(400, 'roomno and start_date are required');
+  }
+  if (end_date && end_date <= start_date) {
+    throw new ApiError(400, 'end_date must be after start_date');
+  }
+
+  // Resolve room beds to block
+  let roomsToBlock = [];
+  if (Array.isArray(roomno)) {
+    const rooms = await RoomDb.findAll({
+      attributes: ['roomno'],
+      where: { roomno: { [Op.in]: roomno } }
+    });
+    roomsToBlock = rooms;
+  } else if (blockAllBeds) {
+    const baseRoomNo = roomno.slice(0, -1);
+    const rooms = await RoomDb.findAll({
+      attributes: ['roomno'],
+      where: { roomno: { [Op.like]: `${baseRoomNo}%` } }
+    });
+    roomsToBlock = rooms.filter(r => {
+      const suffix = r.roomno.slice(baseRoomNo.length);
+      return /^[a-zA-Z]$/.test(suffix);
+    });
+  } else {
+    const room = await RoomDb.findOne({
+      attributes: ['roomno'],
+      where: { roomno }
+    });
+    if (room) roomsToBlock = [room];
+  }
+
+  if (roomsToBlock.length === 0) {
+    throw new ApiError(404, ERR_ROOM_NOT_FOUND);
+  }
+
+  const roomNosToBlock = roomsToBlock.map(r => r.roomno);
+
+  // Check for conflicting bookings in the date range and warn
+  const conflictWhere = {
+    roomno: { [Op.in]: roomNosToBlock },
+    status: { [Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] },
+    checkin: { [Op.lt]: end_date || '9999-12-31' },
+    checkout: { [Op.gt]: start_date }
+  };
+  const conflictingBookings = await RoomBooking.findAll({
+    attributes: ['bookingid', 'roomno', 'checkin', 'checkout'],
+    where: conflictWhere
+  });
+
+  const blocks = await Promise.all(
+    roomsToBlock.map((room) =>
+      RoomBlock.create({
+        roomno: room.roomno,
+        start_date,
+        end_date: end_date || null,
+        reason: reason || null,
+        status: 'active',
+        createdBy: req.user.username,
+        updatedBy: req.user.username
+      })
+    )
+  );
+
+  req.log.info('create_room_block_success', { roomno, count: blocks.length });
+  return res.status(201).send({
+    message: 'Room blocked successfully',
+    data: blocks,
+    warnings:
+      conflictingBookings.length > 0
+        ? {
+            message: `${conflictingBookings.length} existing booking(s) overlap this block. Please reassign affected guests.`,
+            bookings: conflictingBookings
+          }
+        : null
+  });
+};
+
+export const listRoomBlocks = async (req, res) => {
+  const { roomno } = req.query;
+  req.log.info('list_room_blocks_start', { roomno });
+
+  const where = { status: 'active' };
+  if (roomno) where.roomno = { [Op.like]: `${roomno}%` };
+
+  const blocks = await RoomBlock.findAll({
+    where,
+    order: [['start_date', 'ASC'], ['roomno', 'ASC']]
+  });
+
+  req.log.info('list_room_blocks_success', { count: blocks.length });
+  return res.status(200).send({ message: 'Success', data: blocks });
+};
+
+export const cancelRoomBlock = async (req, res) => {
+  const { id } = req.params;
+  const { allBeds } = req.query;
+  req.log.info('cancel_room_block_start', { id, allBeds });
+
+  const block = await RoomBlock.findOne({ where: { id, status: 'active' } });
+  if (!block) throw new ApiError(404, 'Room block not found or already cancelled');
+
+  if (allBeds === 'true') {
+    const baseRoomNo = block.roomno.slice(0, -1);
+    // Find all active blocks for rooms starting with baseRoomNo on the same dates
+    const blocks = await RoomBlock.findAll({
+      where: {
+        status: 'active',
+        start_date: block.start_date,
+        end_date: block.end_date,
+        roomno: { [Op.like]: `${baseRoomNo}%` }
+      }
+    });
+
+    // Filter to only match suffix like A, B, C, D (exclude rooms like 11A when baseRoomNo is 1)
+    const filteredBlocks = blocks.filter(b => {
+      const suffix = b.roomno.slice(baseRoomNo.length);
+      return /^[a-zA-Z]$/.test(suffix);
+    });
+
+    await Promise.all(
+      filteredBlocks.map(b =>
+        b.update({ status: 'cancelled', updatedBy: req.user.username })
+      )
+    );
+
+    req.log.info('cancel_room_block_success_all_beds', { baseRoomNo, count: filteredBlocks.length });
+    return res.status(200).send({ message: 'Room blocks cancelled successfully for all beds' });
+  } else {
+    await block.update({ status: 'cancelled', updatedBy: req.user.username });
+    req.log.info('cancel_room_block_success', { id });
+    return res.status(200).send({ message: 'Room block cancelled successfully' });
+  }
+};
+
+export const bulkCancelRoomBlocks = async (req, res) => {
+  const { roomnos } = req.body;
+  req.log.info('bulk_cancel_room_blocks_start', { count: roomnos ? roomnos.length : 0 });
+
+  if (!roomnos || !Array.isArray(roomnos) || roomnos.length === 0) {
+    throw new ApiError(400, 'roomnos array is required');
+  }
+
+  const [affectedCount] = await RoomBlock.update(
+    { status: 'cancelled', updatedBy: req.user.username },
+    {
+      where: {
+        status: 'active',
+        roomno: { [Op.in]: roomnos }
+      }
+    }
+  );
+
+  req.log.info('bulk_cancel_room_blocks_success', { affected: affectedCount });
+  return res.status(200).send({ message: `Successfully cancelled blocks for ${affectedCount} beds` });
+};
+
 export const updateRoom = async (req, res) => {
   const { roomtype, gender } = req.body;
   const roomno = req.params.roomno;
 
   req.log.info('update_room_start', { roomno, roomtype, gender });
 
+  // Get base room number (e.g. "1" from "1A" or "1")
+  const baseRoomNo = /^[0-9]+[a-zA-Z]$/.test(roomno) ? roomno.slice(0, -1) : roomno;
+
   const t = await database.transaction();
   req.transaction = t;
 
-  const room = await RoomDb.findOne({
-    where: { roomno }
+  // Find all beds of this base room (e.g., 1A, 1B, 1C, 1D)
+  const rooms = await RoomDb.findAll({
+    where: {
+      roomno: { [Op.like]: `${baseRoomNo}%` }
+    }
   });
 
-  if (!room) {
+  // Filter to avoid matching rooms like 11A when baseRoomNo is 1
+  const roomsToUpdate = rooms.filter(r => {
+    const suffix = r.roomno.slice(baseRoomNo.length);
+    return /^[a-zA-Z]?$/.test(suffix); // matching suffix like "", "A", "B", etc.
+  });
+
+  if (roomsToUpdate.length === 0) {
     req.log.warn('update_room_not_found', { roomno });
     throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
-  await room.update(
-    {
-      roomtype,
-      gender,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
+  for (const room of roomsToUpdate) {
+    await room.update(
+      {
+        roomtype,
+        gender,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
 
   await t.commit();
-  req.log.info('update_room_success', { roomno, roomtype, gender });
+  req.log.info('update_room_success', { baseRoomNo, count: roomsToUpdate.length, roomtype, gender });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -1796,13 +1984,28 @@ export async function findAllRoomsForDay(date, room_type, gender) {
 
   const bookedRoomNos = bookings.map((b) => b.roomno);
 
-  // Step 2: Get available rooms from roomdb excluding booked ones
+  // Step 2: Determine which roomnos are admin-blocked on this date
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lte]: date },
+      [Sequelize.Op.or]: [
+        { end_date: null },                              // permanent block
+        { end_date: { [Sequelize.Op.gt]: date } }        // date-range block overlapping
+      ]
+    }
+  });
+
+  const blockedRoomNos = blocks.map((b) => b.roomno);
+  const excludedRooms = [...new Set([...bookedRoomNos, ...blockedRoomNos])];
+
+  // Step 3: Get rooms from roomdb excluding booked + blocked ones
   return RoomDb.findAll({
     where: {
       roomtype: room_type,
-      roomstatus: ROOM_STATUS_AVAILABLE,
       roomno: {
-        [Sequelize.Op.notIn]: bookedRoomNos
+        [Sequelize.Op.notIn]: excludedRooms.length > 0 ? excludedRooms : ['']
       },
       ...(gender && { gender })
     },
@@ -1846,13 +2049,23 @@ export const guestsByDateAndRoomtype = async (req, res) => {
 };
 
 export async function findAllRoomsUnfiltered(room_type, gender) {
+  // Get rooms blocked for any date (permanent blocks only affect this unfiltered list)
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      end_date: null  // only permanently blocked rooms are excluded from unfiltered list
+    }
+  });
+  const blockedRoomNos = blocks.map((b) => b.roomno);
+
   return RoomDb.findAll({
     where: {
       roomno: {
         [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%'
+        [Sequelize.Op.notLike]: 'WL%',
+        [Sequelize.Op.notIn]: blockedRoomNos.length > 0 ? blockedRoomNos : ['']
       },
-      roomstatus: ROOM_STATUS_AVAILABLE,
       roomtype: room_type,
       ...(gender && { gender })
     },

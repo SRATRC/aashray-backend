@@ -43,6 +43,11 @@ import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
+import RoomBlock from './room_block.model.js';
+
+// RoomBlock
+RoomDb.hasMany(RoomBlock, { foreignKey: 'roomno', sourceKey: 'roomno', as: 'blocks' });
+RoomBlock.belongsTo(RoomDb, { foreignKey: 'roomno', targetKey: 'roomno' });
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
