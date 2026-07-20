@@ -1,0 +1,97 @@
+import express from 'express';
+
+const router = express.Router();
+
+import {
+    auth,
+    authorizeRoles
+} from '../../middleware/AdminAuth.js';
+
+import {
+    ROLE_SUPER_ADMIN,
+    ROLE_ROOM_ADMIN,
+    ROLE_CARD_ADMIN,
+    ROLE_OFFICE_ADMIN,
+    ROLE_FOOD_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_TRAVEL_ADMIN,
+    ROLE_UTSAV_ADMIN,
+    ROLE_AVT_ADMIN,
+    ROLE_WIFI_ADMIN,
+    ROLE_GATE_ADMIN,
+    ROLE_MAINTENANCE_ADMIN,
+    ROLE_HOUSEKEEPING_ADMIN,
+    ROLE_ELECTRICAL_ADMIN,
+    ROLE_ACCOUNTS_ADMIN
+} from '../../config/constants.js';
+
+import {
+    createForm,
+    getForms,
+    getFormById,
+    updateForm,
+    deleteForm,
+    getFormResponses
+} from '../../controllers/admin/customForm.controller.js';
+
+import CatchAsync from '../../utils/CatchAsync.js';
+
+// All routes require authentication
+router.use(auth);
+
+// All form admin roles (department-level auth is done inside the controller)
+const ALL_FORM_ROLES = [
+    ROLE_SUPER_ADMIN,
+    ROLE_ROOM_ADMIN,
+    ROLE_CARD_ADMIN,
+    ROLE_OFFICE_ADMIN,
+    ROLE_FOOD_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_TRAVEL_ADMIN,
+    ROLE_UTSAV_ADMIN,
+    ROLE_AVT_ADMIN,
+    ROLE_WIFI_ADMIN,
+    ROLE_GATE_ADMIN,
+    ROLE_MAINTENANCE_ADMIN,
+    ROLE_HOUSEKEEPING_ADMIN,
+    ROLE_ELECTRICAL_ADMIN,
+    ROLE_ACCOUNTS_ADMIN
+];
+
+router.get(
+    '/',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(getForms)
+);
+
+router.post(
+    '/',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(createForm)
+);
+
+router.get(
+    '/:id',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(getFormById)
+);
+
+router.put(
+    '/:id',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(updateForm)
+);
+
+router.delete(
+    '/:id',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(deleteForm)
+);
+
+router.get(
+    '/:id/responses',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(getFormResponses)
+);
+
+export default router;

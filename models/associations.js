@@ -43,6 +43,8 @@ import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
+import CustomForm from './custom_form.model.js';
+import CustomFormResponse from './custom_form_response.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -686,6 +688,27 @@ Transactions.belongsTo(FlatBooking, {
   targetKey: 'bookingid'
 });
 
+// CustomForm
+CustomForm.belongsTo(Departments, {
+  foreignKey: 'dept_name',
+  targetKey: 'dept_name',
+  as: 'department'
+});
+CustomForm.hasMany(CustomFormResponse, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'responses'
+});
+CustomFormResponse.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
+CustomFormResponse.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'respondent'
+});
+
 export {
   CardDb,
   Transactions,
@@ -731,5 +754,7 @@ export {
   ShibirSession,
   ShibirAttendanceRecord,
   UtsavFeedback,
-  UtsavFeedbackAnswer
+  UtsavFeedbackAnswer,
+  CustomForm,
+  CustomFormResponse
 };
