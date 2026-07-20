@@ -33,7 +33,8 @@ import {
   createRoomBlock,
   listRoomBlocks,
   cancelRoomBlock,
-  bulkCancelRoomBlocks
+  bulkCancelRoomBlocks,
+  bulkRoomBooking
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
@@ -77,6 +78,7 @@ router.post('/room_block', CatchAsync(createRoomBlock));
 router.get('/room_block', CatchAsync(listRoomBlocks));
 router.delete('/room_block/:id', CatchAsync(cancelRoomBlock));
 router.post('/room_block/bulk_cancel', CatchAsync(bulkCancelRoomBlocks));
+router.post('/bulk_book', CatchAsync(bulkRoomBooking));
 
 // RC management routes
 router.post('/block_rc', CatchAsync(blockRC));

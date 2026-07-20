@@ -2514,3 +2514,87 @@ export const revokeLateCheckoutFee = async (req, res) => {
   }
 };
 
+export const bulkRoomBooking = async (req, res) => {
+  const { checkin_date, checkout_date, floor_pref, bookings } = req.body;
+  req.log.info('bulk_room_booking_start', { checkin_date, checkout_date, floor_pref, count: bookings ? bookings.length : 0 });
+
+  if (!checkin_date || !checkout_date) {
+    throw new ApiError(400, 'Check-in and Check-out dates are required');
+  }
+  if (checkin_date > checkout_date) {
+    throw new ApiError(400, ERR_INVALID_DATE);
+  }
+  if (!bookings || !Array.isArray(bookings) || bookings.length === 0) {
+    throw new ApiError(400, 'Bookings array is required and cannot be empty');
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const t = await database.transaction();
+  req.transaction = t;
+
+  try {
+    const excludeRooms = [];
+    const results = [];
+
+    for (const b of bookings) {
+      const { cardno, room_type } = b;
+      if (!cardno) {
+        throw new ApiError(400, 'Card number is required for each booking row');
+      }
+
+      const card = await CardDb.findOne({ where: { cardno } });
+      if (!card) {
+        throw new ApiError(400, `Card not found for card number: ${cardno}`);
+      }
+
+      if (await checkRoomAlreadyBooked(checkin_date, checkout_date, card.cardno)) {
+        throw new ApiError(400, `Guest ${card.issuedto} (${card.cardno}) already has an active booking for these dates.`);
+      }
+
+      let bookingResult;
+      if (nights === 0) {
+        bookingResult = await bookDayVisit(
+          card.cardno,
+          checkin_date,
+          checkout_date,
+          null,
+          card.cardno,
+          t
+        );
+      } else {
+        bookingResult = await createRoomBooking(
+          card.cardno,
+          checkin_date,
+          checkout_date,
+          nights,
+          room_type || 'nac',
+          card.gender,
+          floor_pref || null,
+          card,
+          t,
+          false,
+          excludeRooms
+        );
+      }
+
+      results.push({
+        cardno: card.cardno,
+        name: card.issuedto,
+        roomno: bookingResult.roomno || 'NA'
+      });
+    }
+
+    await t.commit();
+    req.log.info('bulk_room_booking_success', { count: results.length });
+    return res.status(201).send({
+      message: `Successfully booked rooms for ${results.length} guests`,
+      data: results
+    });
+
+  } catch (err) {
+    await t.rollback();
+    req.log.error('bulk_room_booking_failed', err);
+    throw err;
+  }
+};
+
