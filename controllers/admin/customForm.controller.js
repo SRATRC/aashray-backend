@@ -2,6 +2,12 @@ import { CustomForm, CustomFormResponse, CardDb, Departments } from '../../model
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import ShortLink from '../../models/short_link.model.js';
+import { handleFormSubmissionActions } from '../../utils/customFormActions.js';
+import CoordinatorOtp from '../../models/coordinatorOtp.model.js';
+import { sendCoordinatorOtp } from '../../helpers/sendCoordinatorOtp.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import crypto from 'crypto';
+import Sequelize from 'sequelize';
 
 const mapDeptToShortLinkType = (deptName) => {
     const validTypes = [
@@ -95,7 +101,7 @@ function getAccessibleDepts(userRoles) {
  * Create a new form.
  */
 export const createForm = async (req, res) => {
-    const { title, description, dept_name, fields, isPublic, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses } = req.body;
+    const { title, description, dept_name, fields, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp } = req.body;
 
     if (!title || !dept_name || !fields) {
         throw new ApiError(400, 'title, dept_name, and fields are required');
@@ -147,6 +153,7 @@ export const createForm = async (req, res) => {
             dept_name,
             fields,
             isPublic: isPublic !== undefined ? isPublic : true,
+            authType: authType || 'cardno',
             slug: slugVal,
             limitOneResponse: limitOneResponse !== undefined ? limitOneResponse : false,
             allowEdit: allowEdit !== undefined ? allowEdit : false,
@@ -158,6 +165,7 @@ export const createForm = async (req, res) => {
             expiresAt: expiresAt || null,
             closeMessage: closeMessage || null,
             maxResponses: maxResponses ? parseInt(maxResponses) : null,
+            requireOtp: requireOtp !== undefined ? requireOtp : false,
             createdBy: req.user?.username
         }, { transaction: t });
 
@@ -263,7 +271,7 @@ export const getFormById = async (req, res) => {
  */
 export const updateForm = async (req, res) => {
     const { id } = req.params;
-    const { title, description, fields, status, isPublic, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses } = req.body;
+    const { title, description, fields, status, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp } = req.body;
 
     const t = await database.transaction();
     req.transaction = t;
@@ -307,6 +315,7 @@ export const updateForm = async (req, res) => {
         if (fields !== undefined) updateData.fields = fields;
         if (status !== undefined) updateData.status = status;
         if (isPublic !== undefined) updateData.isPublic = isPublic;
+        if (authType !== undefined) updateData.authType = authType;
         if (limitOneResponse !== undefined) updateData.limitOneResponse = limitOneResponse;
         if (allowEdit !== undefined) updateData.allowEdit = allowEdit;
         if (showProgressBar !== undefined) updateData.showProgressBar = showProgressBar;
@@ -317,6 +326,7 @@ export const updateForm = async (req, res) => {
         if (expiresAt !== undefined) updateData.expiresAt = expiresAt || null;
         if (closeMessage !== undefined) updateData.closeMessage = closeMessage || null;
         if (maxResponses !== undefined) updateData.maxResponses = maxResponses ? parseInt(maxResponses) : null;
+        if (requireOtp !== undefined) updateData.requireOtp = requireOtp;
 
         // If slug is updated
         if (slug !== undefined) {
@@ -536,7 +546,7 @@ export const getPublicForm = async (req, res) => {
 
     const form = await CustomForm.findOne({
         where: { id, status: 'active' },
-        attributes: ['id', 'title', 'description', 'fields', 'isPublic', 'dept_name', 'slug', 'limitOneResponse', 'allowEdit', 'showProgressBar', 'confirmationMessage', 'showSubmitAnother', 'section1Action', 'themeColor', 'expiresAt', 'closeMessage', 'maxResponses']
+        attributes: ['id', 'title', 'description', 'fields', 'isPublic', 'authType', 'dept_name', 'slug', 'limitOneResponse', 'allowEdit', 'showProgressBar', 'confirmationMessage', 'showSubmitAnother', 'section1Action', 'themeColor', 'expiresAt', 'closeMessage', 'maxResponses', 'requireOtp']
     });
 
     if (!form) {
@@ -575,7 +585,7 @@ export const getPublicForm = async (req, res) => {
  */
 export const submitFormResponse = async (req, res) => {
     const { id } = req.params;
-    const { responses, cardno } = req.body;
+    const { responses, cardno, mobno } = req.body;
 
     if (!responses || typeof responses !== 'object') {
         throw new ApiError(400, 'responses object is required');
@@ -609,23 +619,68 @@ export const submitFormResponse = async (req, res) => {
         }
     }
 
-    // If the form is not public, a cardno should be provided
-    if (!form.isPublic && !cardno) {
-        throw new ApiError(400, 'cardno is required for this form');
+    validateDateConstraints(form.fields, responses);
+
+    let resolvedCardNo = null;
+
+    // Authenticate user if not public
+    if (!form.isPublic) {
+        if (form.authType === 'mobno') {
+            if (!mobno) {
+                throw new ApiError(400, 'Mobile number is required for this form');
+            }
+            const cleanMob = String(mobno).replace(/\D/g, '').slice(-10);
+            if (cleanMob.length !== 10) {
+                throw new ApiError(400, 'Invalid mobile number format. Please enter a 10-digit number.');
+            }
+            const parsedMob = parseInt(cleanMob, 10);
+            const card = await CardDb.findOne({ where: { mobno: parsedMob } });
+            if (!card) {
+                throw new ApiError(404, 'Mobile number is not registered');
+            }
+            resolvedCardNo = card.cardno;
+
+            // OTP gate — must come AFTER mobno is validated
+            if (form.requireOtp) {
+                await assertOtpVerified(String(cleanMob));
+            }
+        } else {
+            // Default cardno auth
+            if (!cardno) {
+                throw new ApiError(400, 'Card number is required for this form');
+            }
+            const card = await CardDb.findOne({ where: { cardno } });
+            if (!card) {
+                throw new ApiError(404, 'Invalid card number');
+            }
+            resolvedCardNo = card.cardno;
+        }
     }
 
-    // If cardno is provided, verify it exists
-    if (cardno) {
-        const card = await CardDb.findOne({ where: { cardno } });
-        if (!card) {
-            throw new ApiError(404, 'Invalid card number');
+    // Stop user from submitting multiple entries for the same date if a date field exists
+    const dateField = form.fields.find(f => f.type === 'date');
+    if (dateField && resolvedCardNo) {
+        const submittedDate = responses[dateField.id];
+        if (submittedDate) {
+            const existingResponses = await CustomFormResponse.findAll({
+                where: {
+                    form_id: parseInt(id),
+                    cardno: resolvedCardNo
+                }
+            });
+            for (const exist of existingResponses) {
+                const existAnswers = exist.responses || {};
+                if (existAnswers[dateField.id] === submittedDate) {
+                    throw new ApiError(400, `You have already submitted a response for the date ${submittedDate}`);
+                }
+            }
         }
     }
 
     // Check limit to 1 response for authenticated users
-    if (form.limitOneResponse && cardno) {
+    if (form.limitOneResponse && resolvedCardNo) {
         const existing = await CustomFormResponse.findOne({
-            where: { form_id: parseInt(id), cardno }
+            where: { form_id: parseInt(id), cardno: resolvedCardNo }
         });
         if (existing) {
             throw new ApiError(400, 'You have already submitted a response to this form');
@@ -634,10 +689,13 @@ export const submitFormResponse = async (req, res) => {
 
     const submission = await CustomFormResponse.create({
         form_id: parseInt(id),
-        cardno: cardno || null,
+        cardno: resolvedCardNo || null,
         responses,
         submittedAt: new Date()
     });
+
+    // Run any registered action hooks (non-blocking — errors are caught inside)
+    await handleFormSubmissionActions(form, responses, resolvedCardNo);
 
     res.status(201).json({
         success: true,
@@ -666,7 +724,14 @@ export const getPublicResponse = async (req, res) => {
     }
 
     const response = await CustomFormResponse.findOne({
-        where: { id: responseId, form_id: id }
+        where: { id: responseId, form_id: id },
+        include: [
+            {
+                model: CardDb,
+                as: 'respondent',
+                attributes: ['cardno', 'issuedto', 'mobno', 'email', 'center', 'res_status']
+            }
+        ]
     });
 
     if (!response) {
@@ -685,7 +750,7 @@ export const getPublicResponse = async (req, res) => {
  */
 export const updatePublicResponse = async (req, res) => {
     const { id, responseId } = req.params;
-    const { responses, cardno } = req.body;
+    const { responses, cardno, mobno } = req.body;
 
     if (!responses || typeof responses !== 'object') {
         throw new ApiError(400, 'responses object is required');
@@ -715,10 +780,58 @@ export const updatePublicResponse = async (req, res) => {
         throw new ApiError(404, 'Response not found');
     }
 
-    // Verify card number matches original submission if authenticated
+    let resolvedCardNo = null;
+
+    // Verify authentication matches original submission
     if (!form.isPublic) {
-        if (response.cardno !== cardno) {
-            throw new ApiError(403, 'Card number does not match original submission');
+        if (form.authType === 'mobno') {
+            if (!mobno) {
+                throw new ApiError(400, 'Mobile number is required for this form');
+            }
+            const cleanMob = String(mobno).replace(/\D/g, '').slice(-10);
+            if (cleanMob.length !== 10) {
+                throw new ApiError(400, 'Invalid mobile number format. Please enter a 10-digit number.');
+            }
+            const parsedMob = parseInt(cleanMob, 10);
+            const card = await CardDb.findOne({ where: { mobno: parsedMob } });
+            if (!card) {
+                throw new ApiError(404, 'Mobile number is not registered');
+            }
+            resolvedCardNo = card.cardno;
+        } else {
+            if (!cardno) {
+                throw new ApiError(400, 'Card number is required for this form');
+            }
+            const card = await CardDb.findOne({ where: { cardno } });
+            if (!card) {
+                throw new ApiError(404, 'Invalid card number');
+            }
+            resolvedCardNo = card.cardno;
+        }
+
+        if (response.cardno !== resolvedCardNo) {
+            throw new ApiError(403, 'Identity does not match original submission');
+        }
+    }
+
+    // Stop user from submitting multiple entries for the same date if a date field exists
+    const dateField = form.fields.find(f => f.type === 'date');
+    if (dateField && resolvedCardNo) {
+        const submittedDate = responses[dateField.id];
+        if (submittedDate) {
+            const existingResponses = await CustomFormResponse.findAll({
+                where: {
+                    form_id: parseInt(id),
+                    cardno: resolvedCardNo
+                }
+            });
+            for (const exist of existingResponses) {
+                if (exist.id === parseInt(responseId)) continue;
+                const existAnswers = exist.responses || {};
+                if (existAnswers[dateField.id] === submittedDate) {
+                    throw new ApiError(400, `You have already submitted a response for the date ${submittedDate}`);
+                }
+            }
         }
     }
 
@@ -733,10 +846,15 @@ export const updatePublicResponse = async (req, res) => {
         }
     }
 
+    validateDateConstraints(form.fields, responses);
+
     await response.update({
         responses,
         updatedAt: new Date()
     });
+
+    // Re-run action hooks on edit (e.g. tapp choice changed)
+    await handleFormSubmissionActions(form, responses, resolvedCardNo);
 
     res.status(200).json({
         success: true,
@@ -772,6 +890,7 @@ export const cloneForm = async (req, res) => {
             dept_name: sourceForm.dept_name,
             fields: sourceForm.fields,
             isPublic: sourceForm.isPublic,
+            authType: sourceForm.authType || 'cardno',
             status: 'inactive',
             limitOneResponse: sourceForm.limitOneResponse,
             allowEdit: sourceForm.allowEdit,
@@ -783,6 +902,7 @@ export const cloneForm = async (req, res) => {
             expiresAt: sourceForm.expiresAt,
             closeMessage: sourceForm.closeMessage,
             maxResponses: sourceForm.maxResponses,
+            requireOtp: sourceForm.requireOtp,
             createdBy: req.user?.username
         }, { transaction: t });
 
@@ -797,4 +917,235 @@ export const cloneForm = async (req, res) => {
     } catch (error) {
         throw error;
     }
+};
+
+/**
+ * GET /api/v1/forms/resolve-identity
+ * Resolve card/mobile number to user details (publicly accessible).
+ */
+export const resolveIdentity = async (req, res) => {
+    const { type, value } = req.query;
+    if (!type || !value) {
+        throw new ApiError(400, 'type and value are required');
+    }
+
+    let card = null;
+    if (type === 'mobno') {
+        const cleanMob = String(value).replace(/\D/g, '').slice(-10);
+        if (cleanMob.length === 10) {
+            const parsedMob = parseInt(cleanMob, 10);
+            card = await CardDb.findOne({
+                where: { mobno: parsedMob },
+                attributes: ['cardno', 'issuedto', 'center']
+            });
+        }
+    } else {
+        card = await CardDb.findOne({
+            where: { cardno: value },
+            attributes: ['cardno', 'issuedto', 'center']
+        });
+    }
+
+    if (!card) {
+        return res.status(200).json({
+            success: false,
+            message: type === 'mobno' ? 'Mobile number is not registered' : 'Card number is not registered'
+        });
+    }
+
+    res.status(200).json({
+        success: true,
+        data: {
+            cardno: card.cardno,
+            name: card.issuedto,
+            center: card.center
+        }
+    });
+};
+
+/**
+ * Internal helper to validate date fields against min, max, and cutoff hour constraints.
+ */
+function validateDateConstraints(fields, responses) {
+    for (const field of fields) {
+        if (field.type === 'date') {
+            const answer = responses[field.id];
+            if (answer && field.dateConstraints) {
+                const dateConstraints = field.dateConstraints;
+                const chosenDate = new Date(answer);
+                if (isNaN(chosenDate.getTime())) {
+                    throw new ApiError(400, `"${field.label}" must be a valid date`);
+                }
+
+                const getISTDateString = (d) => {
+                    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+                    return formatter.format(d);
+                };
+
+                const getISTHour = (d) => {
+                    const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false });
+                    return parseInt(formatter.format(d), 10);
+                };
+
+                const chosenStr = getISTDateString(chosenDate);
+                const now = new Date();
+                const nowStr = getISTDateString(now);
+
+                let minDateStr = null;
+                if (dateConstraints.minType === 'today') {
+                    minDateStr = nowStr;
+                } else if (dateConstraints.minType === 'tomorrow') {
+                    const tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    minDateStr = getISTDateString(tomorrow);
+                } else if (dateConstraints.minType === 'fixed' && dateConstraints.minFixed) {
+                    minDateStr = dateConstraints.minFixed;
+                }
+
+                if (minDateStr && chosenStr < minDateStr) {
+                    throw new ApiError(400, `"${field.label}" must be on or after ${minDateStr}`);
+                }
+
+                let maxDateStr = null;
+                if (dateConstraints.maxType === 'today') {
+                    maxDateStr = nowStr;
+                } else if (dateConstraints.maxType === 'fixed' && dateConstraints.maxFixed) {
+                    maxDateStr = dateConstraints.maxFixed;
+                }
+
+                if (maxDateStr && chosenStr > maxDateStr) {
+                    throw new ApiError(400, `"${field.label}" must be on or before ${maxDateStr}`);
+                }
+
+                if (dateConstraints.cutoffHour !== null && dateConstraints.cutoffHour !== undefined) {
+                    const cutoffDay = new Date(chosenStr);
+                    cutoffDay.setUTCDate(cutoffDay.getUTCDate() - 1);
+                    const cutoffDayStr = cutoffDay.toISOString().split('T')[0];
+
+                    const currentHour = getISTHour(now);
+                    if (nowStr > cutoffDayStr || (nowStr === cutoffDayStr && currentHour >= dateConstraints.cutoffHour)) {
+                        throw new ApiError(400, `Booking/Selection for ${chosenStr} has closed (Cutoff was ${dateConstraints.cutoffHour}:00 of previous day)`);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Internal helper — throws ApiError if there is no recent verified OTP for this mobile.
+ * Called inside submitFormResponse when form.requireOtp === true.
+ */
+async function assertOtpVerified(mobno) {
+    // Look for a verified OTP created in the last 10 minutes
+    const record = await CoordinatorOtp.findOne({
+        where: {
+            mobno,
+            verified: true,
+            createdAt: {
+                [Sequelize.Op.gte]: new Date(Date.now() - 10 * 60 * 1000)
+            }
+        },
+        order: [['createdAt', 'DESC']]
+    });
+
+    if (!record) {
+        throw new ApiError(403, 'OTP verification required. Please verify your mobile number before submitting.');
+    }
+}
+
+/**
+ * POST /api/v1/admin/forms/public/otp/send
+ * Send OTP to a registered mobile number for form auth.
+ */
+export const sendFormOtp = async (req, res) => {
+    const { mobno } = req.body;
+
+    if (!mobno) {
+        throw new ApiError(400, 'Mobile number is required');
+    }
+
+    const cleanMob = String(mobno).replace(/\D/g, '').slice(-10);
+    if (cleanMob.length !== 10) {
+        throw new ApiError(400, 'Invalid mobile number format. Please enter a 10-digit number.');
+    }
+    const parsedMob = parseInt(cleanMob, 10);
+
+    const card = await CardDb.findOne({ where: { mobno: parsedMob } });
+    if (!card) {
+        throw new ApiError(404, 'Mobile number is not registered');
+    }
+
+    // Rate limit: max 5 OTPs per 10 minutes
+    const recentCount = await CoordinatorOtp.count({
+        where: {
+            mobno: cleanMob,
+            createdAt: { [Sequelize.Op.gte]: new Date(Date.now() - 10 * 60 * 1000) }
+        }
+    });
+    if (recentCount >= 5) {
+        throw new ApiError(429, 'Too many OTP requests. Please try again later.');
+    }
+
+    const otp = crypto.randomInt(100000, 1000000);
+
+    await CoordinatorOtp.create({
+        mobno: cleanMob,
+        otp: String(otp),
+        expires_at: new Date(Date.now() + 5 * 60 * 1000)
+    });
+
+    await sendCoordinatorOtp(
+        formatWhatsAppPhone(cleanMob, card.country),
+        otp
+    );
+
+    return res.status(200).json({ success: true, message: 'OTP sent successfully' });
+};
+
+/**
+ * POST /api/v1/admin/forms/public/otp/verify
+ * Verify OTP entered by the user.
+ */
+export const verifyFormOtp = async (req, res) => {
+    const { mobno, otp } = req.body;
+
+    if (!mobno || !otp) {
+        throw new ApiError(400, 'Mobile number and OTP are required');
+    }
+
+    const cleanMob = String(mobno).replace(/\D/g, '').slice(-10);
+
+    const record = await CoordinatorOtp.findOne({
+        where: { mobno: cleanMob, otp, verified: false },
+        order: [['createdAt', 'DESC']]
+    });
+
+    if (!record) {
+        // Increment attempts on the latest unverified record
+        const latest = await CoordinatorOtp.findOne({
+            where: { mobno: cleanMob, verified: false },
+            order: [['createdAt', 'DESC']]
+        });
+        if (latest) {
+            await latest.increment('attempts');
+            if (latest.attempts + 1 >= 5) {
+                await latest.update({ verified: true });
+                throw new ApiError(429, 'Too many invalid attempts. OTP blocked.');
+            }
+        }
+        throw new ApiError(400, 'Invalid OTP');
+    }
+
+    if (record.attempts >= 5) {
+        throw new ApiError(429, 'Too many invalid attempts');
+    }
+
+    if (new Date() > new Date(record.expires_at)) {
+        throw new ApiError(400, 'OTP has expired. Please request a new one.');
+    }
+
+    await record.update({ verified: true, attempts: 0 });
+
+    return res.status(200).json({ success: true, message: 'OTP verified successfully' });
 };

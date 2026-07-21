@@ -53,7 +53,6 @@ import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
 import coordinatorAuthRoutes from './routes/admin/coordinatorAuth.routes.js';
 import adminFormRoutes from './routes/admin/customForm.routes.js';
-import clientFormRoutes from './routes/client/customForm.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -71,7 +70,7 @@ if (process.env.NODE_ENV != 'test') {
       logger.info('Connected to Database 🚀');
 
       // Synchronize the models with the database (create tables if they don't exist)
-      await sequelize.sync();
+      await sequelize.sync({ alter: true });
 
       // Pre-warm the connection pool to minimum size
       const minConnections = sequelize.options.pool.min || 2;
@@ -198,7 +197,6 @@ app.use('/api/v1/admin/wifi', wifiManagementRoutes);
 app.use('/api/v1/coordinator', coordinatorAuthRoutes);
 app.use('/api/v1/short-links', shortLinkRoutes);
 app.use('/api/v1/admin/forms', adminFormRoutes);
-app.use('/api/v1/forms', clientFormRoutes);
 app.use('/', redirectRoutes);
 
 // Unified Routes

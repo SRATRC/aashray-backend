@@ -32,10 +32,29 @@ import {
     updateForm,
     deleteForm,
     getFormResponses,
-    cloneForm
+    cloneForm,
+    // Public (no auth)
+    getPublicForm,
+    submitFormResponse,
+    getPublicResponse,
+    updatePublicResponse,
+    resolveIdentity,
+    sendFormOtp,
+    verifyFormOtp
 } from '../../controllers/admin/customForm.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
+
+// ── PUBLIC routes (no auth required) ─────────────────────────────────────────
+// Must be declared BEFORE router.use(auth) so they are not protected.
+router.post('/public/otp/send', CatchAsync(sendFormOtp));
+router.post('/public/otp/verify', CatchAsync(verifyFormOtp));
+router.get('/public/resolve-identity', CatchAsync(resolveIdentity));
+router.get('/public/:id', CatchAsync(getPublicForm));
+router.post('/public/:id/submit', CatchAsync(submitFormResponse));
+router.get('/public/:id/responses/:responseId', CatchAsync(getPublicResponse));
+router.post('/public/:id/responses/:responseId', CatchAsync(updatePublicResponse));
+
 
 // All routes require authentication
 router.use(auth);

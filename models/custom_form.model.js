@@ -44,6 +44,11 @@ const CustomForm = sequelize.define(
             allowNull: false,
             defaultValue: true
         },
+        authType: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: 'cardno'
+        },
         limitOneResponse: {
             type: DataTypes.BOOLEAN,
             allowNull: false,
@@ -89,6 +94,11 @@ const CustomForm = sequelize.define(
         maxResponses: {
             type: DataTypes.INTEGER,
             allowNull: true
+        },
+        requireOtp: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false
         }
     },
     {
