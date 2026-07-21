@@ -61,6 +61,10 @@ const ShibirDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
+    whatsapp_link: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     status: {
       type: DataTypes.ENUM,
       allowNull: true,
