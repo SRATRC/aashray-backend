@@ -32,7 +32,8 @@ import {
   issuePlate,
   createUtsavBookingByAdmin,
   addUtsavPackagesBulk,
-  fetchUtsavFeedbacks
+  fetchUtsavFeedbacks,
+  utsavParticipantHistoryReport
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
@@ -89,6 +90,10 @@ utsavAdminRouter.put('/:id/:activate', CatchAsync(activateUtsav));
 utsavAdminRouter.put('/status', CatchAsync(utsavStatusUpdate));
 utsavAdminRouter.get('/fetchList', CatchAsync(fetchAllUtsavList));
 utsavAdminRouter.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
+utsavAdminRouter.get(
+  '/participantHistoryReport',
+  CatchAsync(utsavParticipantHistoryReport)
+);
 utsavAdminRouter.post(
   '/uploadRoomNo',
   upload.single('file'),
