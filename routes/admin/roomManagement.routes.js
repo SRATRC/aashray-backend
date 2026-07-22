@@ -34,7 +34,8 @@ import {
   listRoomBlocks,
   cancelRoomBlock,
   bulkCancelRoomBlocks,
-  bulkRoomBooking
+  bulkRoomBooking,
+  checkRoomConflict
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
@@ -52,6 +53,7 @@ router.post('/bookForMumukshu', CatchAsync(roomBooking));
 router.put('/checkin/:bookingid', CatchAsync(manualCheckin));
 router.put('/checkout/:bookingid', CatchAsync(manualCheckout));
 router.put('/update_room_booking', CatchAsync(updateRoomBooking));
+router.post('/check_room_conflict', CatchAsync(checkRoomConflict));
 router.put('/update_booking_status', CatchAsync(updateBookingStatus));
 router.get('/room_list', CatchAsync(roomList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));

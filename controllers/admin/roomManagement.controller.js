@@ -900,10 +900,24 @@ export const fetchFlatBookingsByCard = async (req, res) => {
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
-export const updateRoomBooking = async (req, res) => {
-  const { bookingid, roomno } = req.body;
+const isBookingOverlap = (b1, b2) => {
+  const b1_checkin = moment(b1.checkin).format('YYYY-MM-DD');
+  const b1_checkout = b1.checkin === b1.checkout || moment(b1.checkin).isSame(moment(b1.checkout), 'day')
+    ? moment(b1.checkin).add(1, 'day').format('YYYY-MM-DD')
+    : moment(b1.checkout).format('YYYY-MM-DD');
 
-  req.log.info('update_room_booking_start', { bookingid, roomno });
+  const b2_checkin = moment(b2.checkin).format('YYYY-MM-DD');
+  const b2_checkout = b2.checkin === b2.checkout || moment(b2.checkin).isSame(moment(b2.checkout), 'day')
+    ? moment(b2.checkin).add(1, 'day').format('YYYY-MM-DD')
+    : moment(b2.checkout).format('YYYY-MM-DD');
+
+  return b1_checkin < b2_checkout && b1_checkout > b2_checkin;
+};
+
+export const updateRoomBooking = async (req, res) => {
+  const { bookingid, roomno, conflictingBookingId, conflictingNewRoomNo } = req.body;
+
+  req.log.info('update_room_booking_start', { bookingid, roomno, conflictingBookingId, conflictingNewRoomNo });
 
   const booking = await RoomBooking.findOne({
     include: [
@@ -923,54 +937,170 @@ export const updateRoomBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  await booking.update(
-    {
-      roomno,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
+  try {
+    if (conflictingBookingId && conflictingNewRoomNo) {
+      const conflict = await RoomBooking.findOne({
+        include: [
+          {
+            model: CardDb,
+            attributes: ['cardno', 'issuedto', 'token', 'mobno', 'country']
+          }
+        ],
+        where: { bookingid: conflictingBookingId }
+      });
 
-  sendDualUserNotifications({
-    primary: {
-      token: booking.CardDb.token,
-      title: 'Room number changed',
-      body: `Your room number has been changed to ${roomno}`
-    },
-    screen: '/bookings'
-  });
+      if (!conflict) {
+        throw new ApiError(404, 'Conflicting booking not found');
+      }
 
-  await t.commit();
-  req.log.info('update_room_booking_success', { bookingid, oldRoomno: booking.roomno, newRoomno: roomno });
-
-  // --- Send WhatsApp notification for Room Number change ---
-  const phone = booking.CardDb?.mobno;
-  if (phone) {
-    try {
-      const formattedPhone = formatWhatsAppPhone(phone, booking.CardDb?.country);
-
-      const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
-      const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";
-
-      const components = [
+      await conflict.update(
         {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: booking.CardDb.issuedto || 'Mumukshu' },
-            { type: 'text', text: roomno },
-            { type: 'text', text: checkinFormatted },
-            { type: 'text', text: checkoutFormatted }
-          ]
-        }
-      ];
+          roomno: conflictingNewRoomNo,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
 
-      await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
-    } catch (waErr) {
-      console.error('Error sending WhatsApp room_number_updated message:', waErr.message || waErr);
+      // Notify the conflicting guest
+      sendDualUserNotifications({
+        primary: {
+          token: conflict.CardDb?.token,
+          title: 'Room number changed',
+          body: `Your room number has been changed to ${conflictingNewRoomNo} due to administrative adjustment.`
+        },
+        screen: '/bookings'
+      });
+
+      // WhatsApp notification for Conflicting Guest Room Number change
+      const conflictPhone = conflict.CardDb?.mobno;
+      if (conflictPhone) {
+        try {
+          const formattedPhone = formatWhatsAppPhone(conflictPhone, conflict.CardDb?.country);
+          const checkinFormatted = conflict.checkin ? moment(conflict.checkin).format("DD-MM-YYYY") : "";
+          const checkoutFormatted = conflict.checkout ? moment(conflict.checkout).format("DD-MM-YYYY") : "";
+
+          const components = [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: conflict.CardDb?.issuedto || 'Mumukshu' },
+                { type: 'text', text: conflictingNewRoomNo },
+                { type: 'text', text: checkinFormatted },
+                { type: 'text', text: checkoutFormatted }
+              ]
+            }
+          ];
+
+          await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
+        } catch (waErr) {
+          console.error('Error sending WhatsApp conflict room_number_updated message:', waErr.message || waErr);
+        }
+      }
     }
+
+    await booking.update(
+      {
+        roomno,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+
+    sendDualUserNotifications({
+      primary: {
+        token: booking.CardDb.token,
+        title: 'Room number changed',
+        body: `Your room number has been changed to ${roomno}`
+      },
+      screen: '/bookings'
+    });
+
+    await t.commit();
+    req.log.info('update_room_booking_success', { bookingid, oldRoomno: booking.roomno, newRoomno: roomno });
+
+    // --- Send WhatsApp notification for Room Number change ---
+    const phone = booking.CardDb?.mobno;
+    if (phone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(phone, booking.CardDb?.country);
+
+        const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
+        const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: booking.CardDb.issuedto || 'Mumukshu' },
+              { type: 'text', text: roomno },
+              { type: 'text', text: checkinFormatted },
+              { type: 'text', text: checkoutFormatted }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp room_number_updated message:', waErr.message || waErr);
+      }
+    }
+
+    return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+  } catch (error) {
+    await t.rollback();
+    throw error;
+  }
+};
+
+export const checkRoomConflict = async (req, res) => {
+  const { bookingid, roomno } = req.body;
+  req.log.info('check_room_conflict_start', { bookingid, roomno });
+
+  if (!bookingid || !roomno) {
+    throw new ApiError(400, 'bookingid and roomno are required');
   }
 
-  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+  if (roomno === 'NA') {
+    return res.status(200).send({ hasConflict: false });
+  }
+
+  const booking = await RoomBooking.findOne({
+    where: { bookingid }
+  });
+
+  if (!booking) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+
+  const activeBookings = await RoomBooking.findAll({
+    where: {
+      roomno,
+      bookingid: { [Op.ne]: bookingid },
+      status: { [Op.in]: [ROOM_STATUS_PENDING_CHECKIN, ROOM_STATUS_CHECKEDIN, STATUS_PAYMENT_PENDING] }
+    },
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto']
+      }
+    ]
+  });
+
+  const conflict = activeBookings.find(b => isBookingOverlap(booking, b));
+
+  if (conflict) {
+    return res.status(200).send({
+      hasConflict: true,
+      conflict: {
+        bookingid: conflict.bookingid,
+        guestName: conflict.CardDb?.issuedto || 'Guest',
+        checkin: conflict.checkin,
+        checkout: conflict.checkout
+      }
+    });
+  }
+
+  return res.status(200).send({ hasConflict: false });
 };
 
 export const updateFlatBooking = async (req, res) => {
