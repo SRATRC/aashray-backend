@@ -298,10 +298,14 @@ export async function register(req, res) {
     res_status,
     department,
     ref_mobno,
-    guest_type
+    guest_type,
+    dob,
+    center
   } = req.body;
 
-  req.log.info('register_start', { mobno, res_status });
+  const resStatusToUse = res_status || STATUS_MUMUKSHU;
+
+  req.log.info('register_start', { mobno, res_status: resStatusToUse });
 
   // ── Basic required field validation ──────────────────────────────────────
   if (!issuedto || !issuedto.trim()) {
@@ -316,20 +320,26 @@ export async function register(req, res) {
   if (!password || !password.trim()) {
     throw new ApiError(400, 'Password is required');
   }
+  if (!dob) {
+    throw new ApiError(400, 'Date of birth is required');
+  }
+  if (!center || !center.trim()) {
+    throw new ApiError(400, 'Centre is required');
+  }
   const validStatuses = [
     STATUS_MUMUKSHU,
     'PR',
     STATUS_SEVA_KUTIR,
     STATUS_GUEST
   ];
-  if (!res_status || !validStatuses.includes(res_status)) {
+  if (!resStatusToUse || !validStatuses.includes(resStatusToUse)) {
     throw new ApiError(400, 'Invalid residential status');
   }
 
   // ── Conditional validation ────────────────────────────────────────────────
   let refMumukshuCardno = null;
 
-  if (res_status === STATUS_SEVA_KUTIR) {
+  if (resStatusToUse === STATUS_SEVA_KUTIR) {
     if (!department || !department.trim()) {
       throw new ApiError(
         400,
@@ -344,7 +354,7 @@ export async function register(req, res) {
     }
   }
 
-  if (res_status === STATUS_GUEST) {
+  if (resStatusToUse === STATUS_GUEST) {
     if (!ref_mobno || String(ref_mobno).trim().length !== 10) {
       throw new ApiError(
         400,
@@ -398,18 +408,20 @@ export async function register(req, res) {
         cardno,
         issuedto: issuedto.trim(),
         gender,
+        dob,
         mobno,
-        res_status,
+        center: center.trim(),
+        res_status: resStatusToUse,
         status: 'offprem',
         active: true,
         password: hashedPassword,
         updatedBy: 'USER',
-        ...(res_status === STATUS_SEVA_KUTIR && { department })
+        ...(resStatusToUse === STATUS_SEVA_KUTIR && { department })
       },
       { transaction: t }
     );
 
-    if (res_status === STATUS_GUEST) {
+    if (resStatusToUse === STATUS_GUEST) {
       await GuestRelationship.create(
         {
           cardno: refMumukshuCardno,
@@ -423,7 +435,7 @@ export async function register(req, res) {
 
     await t.commit();
 
-    req.log.info('register_success', { cardno, res_status });
+    req.log.info('register_success', { cardno, res_status: resStatusToUse });
 
     // Return same shape as verifyAndLogin so setUser() works on the app
     newCard.setDataValue('password', '');
