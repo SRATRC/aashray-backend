@@ -39,7 +39,9 @@ import {
   getRollingWindowUsage,
   getExemptions,
   createExemption,
-  deleteExemption
+  deleteExemption,
+  getAllocationPriorities,
+  updateAllocationPriority
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
@@ -69,6 +71,10 @@ router.get('/rolling_window/:cardno', CatchAsync(getRollingWindowUsage));
 router.get('/exemptions', CatchAsync(getExemptions));
 router.post('/exemptions', CatchAsync(createExemption));
 router.delete('/exemptions/:id', CatchAsync(deleteExemption));
+
+// room allocation priority routes
+router.get('/allocation_priority', CatchAsync(getAllocationPriorities));
+router.put('/allocation_priority', CatchAsync(updateAllocationPriority));
 
 // flat routes
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));

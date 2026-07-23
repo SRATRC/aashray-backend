@@ -33,6 +33,7 @@ import {
 } from '../models/associations.js';
 import RoomBlock from '../models/room_block.model.js';
 import RoomBookingExemption from '../models/room_booking_exemption.model.js';
+import RoomAllocationPriority from '../models/room_allocation_priority.model.js';
 import {
   createPendingTransaction,
   generateOrderId,
@@ -439,6 +440,43 @@ async function bookAvailableRoom(
   return { t, discountedAmount, bookingId, bookedRoomNo: roomno };
 }
 
+export async function getPriorityOrderForMonth(checkinDate) {
+  const defaultList = ['OAG_1st', 'OAG_2nd', 'NAG_1st', 'NAG_2nd'];
+  const monthNum = checkinDate ? moment(checkinDate).month() + 1 : null;
+  let rec = null;
+  if (monthNum) {
+    rec = await RoomAllocationPriority.findOne({ where: { month: monthNum } });
+  }
+  if (!rec) {
+    rec = await RoomAllocationPriority.findOne({ where: { month: null } });
+  }
+  if (!rec || !rec.priority_order) {
+    return defaultList;
+  }
+  return rec.priority_order.split(',').map((s) => s.trim());
+}
+
+function buildPriorityOrderClause(priorityList) {
+  const oag1Index = priorityList.indexOf('OAG_1st') !== -1 ? priorityList.indexOf('OAG_1st') + 1 : 99;
+  const oag2Index = priorityList.indexOf('OAG_2nd') !== -1 ? priorityList.indexOf('OAG_2nd') + 1 : 99;
+  const nag1Index = priorityList.indexOf('NAG_1st') !== -1 ? priorityList.indexOf('NAG_1st') + 1 : 99;
+  const nag2Index = priorityList.indexOf('NAG_2nd') !== -1 ? priorityList.indexOf('NAG_2nd') + 1 : 99;
+
+  return [
+    Sequelize.literal(`
+      CASE 
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 1 AND 18 THEN ${oag1Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 19 AND 36 THEN ${oag2Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 37 AND 48 THEN ${nag1Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 49 AND 60 THEN ${nag2Index}
+        ELSE 99
+      END ASC
+    `),
+    Sequelize.literal(`CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) ASC`),
+    Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno)) ASC`)
+  ];
+}
+
 export async function findRoom(
   checkin,
   checkout,
@@ -490,16 +528,14 @@ export async function findRoom(
       roomno: { [Sequelize.Op.notIn]: allExcluded }
     });
   }
- 
+
+  const priorityList = await getPriorityOrderForMonth(checkin);
+  const orderClause = buildPriorityOrderClause(priorityList);
+
   return RoomDb.findOne({
     attributes: ['roomno'],
     where: whereConditions,
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ],
+    order: orderClause,
     replacements: {
       reqCheckin: checkin,
       reqCheckout: queryCheckout,
@@ -561,6 +597,9 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
   const bookedRooms = bookings.map((x) => x.roomno);
   const allExcluded = [...new Set([...bookedRooms, ...adminBlockedRooms])];
 
+  const priorityList = await getPriorityOrderForMonth(checkin);
+  const orderClause = buildPriorityOrderClause(priorityList);
+
   return RoomDb.findAll({
     where: {
       roomno: {
@@ -571,12 +610,7 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
       roomtype: room_type,
       ...(gender && { gender })
     },
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ]
+    order: orderClause
   });
 }
 

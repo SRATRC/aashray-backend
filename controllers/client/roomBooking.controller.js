@@ -338,7 +338,7 @@ export const CheckBlockedDates = async (req, res) => {
     (b) =>
       `${moment(b.checkin).format('Do MMMM, YYYY')} to ${moment(
         b.checkout
-      ).format('Do MMMM, YYYY')}`
+      ).format('Do MMMM, YYYY')}${b.comments ? ` (Reason: ${b.comments})` : ''}`
   );
 
   return res.status(200).send({

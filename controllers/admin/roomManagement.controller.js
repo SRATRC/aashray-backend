@@ -53,6 +53,7 @@ import {
   validateBookingLimits
 } from '../../helpers/roomBooking.helper.js';
 import RoomBookingExemption from '../../models/room_booking_exemption.model.js';
+import RoomAllocationPriority from '../../models/room_allocation_priority.model.js';
 import {
   adminCancelTransaction,
   createPendingTransaction
@@ -2848,5 +2849,45 @@ export const deleteExemption = async (req, res) => {
   await exemption.destroy();
   return res.status(200).send({ message: 'Exemption removed successfully' });
 };
+
+export const getAllocationPriorities = async (req, res) => {
+  const priorities = await RoomAllocationPriority.findAll({
+    order: [
+      Sequelize.literal(`CASE WHEN month IS NULL THEN 0 ELSE month END ASC`)
+    ]
+  });
+  return res.status(200).send({ data: priorities });
+};
+
+export const updateAllocationPriority = async (req, res) => {
+  const { month, priority_order } = req.body;
+  const monthVal = (month === null || month === undefined || month === '' || month === 'default' || month === 'null') ? null : Number(month);
+
+  if (!priority_order) {
+    throw new ApiError(400, 'priority_order string is required');
+  }
+
+  let record = await RoomAllocationPriority.findOne({
+    where: { month: monthVal }
+  });
+
+  const updatedBy = req.user?.username || 'ADMIN';
+
+  if (record) {
+    await record.update({ priority_order, updatedBy });
+  } else {
+    record = await RoomAllocationPriority.create({
+      month: monthVal,
+      priority_order,
+      updatedBy
+    });
+  }
+
+  return res.status(200).send({
+    message: `Allocation priority for ${monthVal === null ? 'Global Default' : 'Month ' + monthVal} updated successfully`,
+    data: record
+  });
+};
+
 
 
