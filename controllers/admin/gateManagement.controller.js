@@ -195,38 +195,6 @@ export const gateEntry = async (req, res) => {
     { transaction: t }
   );
 
-  res.on('finish', async () => {
-    try {
-      const flatBooking = await FlatBooking.findOne({
-        where: {
-          cardno,
-          status: ROOM_STATUS_PENDING_CHECKIN,
-          checkin: { [Sequelize.Op.eq]: moment().format('YYYY-MM-DD') }
-        }
-      });
-
-      if (flatBooking) {
-        flatBooking.status = ROOM_STATUS_CHECKEDIN;
-        await flatBooking.save();
-      }
-
-      const roomBooking = await RoomBooking.findOne({
-        where: {
-          cardno,
-          status: ROOM_STATUS_PENDING_CHECKIN,
-          checkin: { [Sequelize.Op.eq]: moment().format('YYYY-MM-DD') }
-        }
-      });
-
-      if (roomBooking) {
-        roomBooking.status = ROOM_STATUS_CHECKEDIN;
-        await roomBooking.save();
-      }
-    } catch (error) {
-      logger.error(error);
-    }
-  });
-
   await t.commit();
   return res.status(200).send({
     message: 'Success',
