@@ -32,10 +32,13 @@ import {
   revokeLateCheckoutFee,
   createRoomBlock,
   listRoomBlocks,
-  cancelRoomBlock,
   bulkCancelRoomBlocks,
   bulkRoomBooking,
-  checkRoomConflict
+  checkRoomConflict,
+  getRollingWindowUsage,
+  getExemptions,
+  createExemption,
+  deleteExemption
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
@@ -59,6 +62,12 @@ router.get('/room_list', CatchAsync(roomList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));
 router.get('/available_rooms_for_day', CatchAsync(availableRoomsForDay))
 router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
+router.get('/rolling_window/:cardno', CatchAsync(getRollingWindowUsage));
+
+// booking exemption routes
+router.get('/exemptions', CatchAsync(getExemptions));
+router.post('/exemptions', CatchAsync(createExemption));
+router.delete('/exemptions/:id', CatchAsync(deleteExemption));
 
 // flat routes
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));

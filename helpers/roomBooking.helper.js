@@ -15,15 +15,24 @@ import {
   STATUS_PAYMENT_PENDING,
   ERR_FLAT_FAILED_TO_BOOK,
   ERR_FLAT_ALREADY_BOOKED,
-  ERR_ROOM_INVALID_DURATION
+  ERR_ROOM_INVALID_DURATION,
+  STATUS_AWAITING_CONFIRMATION,
+  ROLLING_WINDOW_DAYS,
+  ROLLING_WINDOW_NIGHT_LIMIT,
+  ROLLING_WINDOW_GO_LIVE_DATE,
+  ERR_EXTRA_STAY_REASON_REQUIRED,
+  STATUS_RESIDENT,
+  STATUS_SEVA_KUTIR
 } from '../config/constants.js';
 import {
   RoomBooking,
   RoomDb,
   FlatBooking,
-  FlatDb
+  FlatDb,
+  CardDb
 } from '../models/associations.js';
 import RoomBlock from '../models/room_block.model.js';
+import RoomBookingExemption from '../models/room_booking_exemption.model.js';
 import {
   createPendingTransaction,
   generateOrderId,
@@ -154,6 +163,221 @@ async function bookWaitingRoom(
     { transaction: t }
   );
   return { t, discountedAmount: 0, bookingId, bookedRoomNo: 'NA' };
+}
+
+export async function bookAwaitingConfirmationRoom(
+  cardno,
+  checkin,
+  checkout,
+  nights,
+  roomtype,
+  gender,
+  extra_stay_reason,
+  bookedBy,
+  updatedBy,
+  t
+) {
+  const bookingId = uuidv4();
+  const effectiveCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
+  await RoomBooking.create(
+    {
+      bookingid: bookingId,
+      roomno: 'NA',
+      status: STATUS_AWAITING_CONFIRMATION,
+      extra_stay_reason,
+      cardno,
+      bookedBy,
+      checkin,
+      checkout: effectiveCheckout,
+      nights,
+      roomtype,
+      gender,
+      updatedBy
+    },
+    { transaction: t }
+  );
+  return { t, discountedAmount: 0, bookingId, bookedRoomNo: 'NA' };
+}
+
+export function getEffectiveNights(booking) {
+  const nights = Number(booking.nights || 0);
+  const roomtype = booking.roomtype || 'NA';
+  if (nights === 0 && roomtype === 'NA') return 0;
+  if (nights === 0 && roomtype !== 'NA') return 1;
+  return nights;
+}
+
+export function expandToNightDates(checkinDate, effectiveNights) {
+  const dates = [];
+  if (effectiveNights <= 0 || !checkinDate) return dates;
+  const start = moment(checkinDate);
+  for (let i = 0; i < effectiveNights; i++) {
+    dates.push(start.clone().add(i, 'days').format('YYYY-MM-DD'));
+  }
+  return dates;
+}
+
+export async function validateBookingLimits(
+  cardno,
+  newCheckin,
+  newCheckout,
+  newRoomtype = 'nac',
+  t = null
+) {
+  // 1. Check if cardno is Resident / Staff
+  const card = await CardDb.findOne({
+    where: { cardno },
+    attributes: ['cardno', 'res_status'],
+    transaction: t
+  });
+  if (card && [STATUS_RESIDENT, STATUS_SEVA_KUTIR, 'Resident', 'Staff'].includes(card.res_status)) {
+    return { passed: true };
+  }
+
+  // 2. Check room_booking_exemptions for an active bypass record
+  const today = moment().format('YYYY-MM-DD');
+  const exemption = await RoomBookingExemption.findOne({
+    where: {
+      cardno,
+      [Sequelize.Op.or]: [
+        { is_permanent: true },
+        {
+          [Sequelize.Op.and]: [
+            { valid_from: { [Sequelize.Op.lte]: today } },
+            { valid_to: { [Sequelize.Op.gte]: today } }
+          ]
+        }
+      ]
+    },
+    transaction: t
+  });
+  if (exemption) {
+    return { passed: true, isExempt: true };
+  }
+
+  // 3. Phase 1: Check single stay duration
+  const singleStayNights = getEffectiveNights({
+    nights: calculateNightsSingleStay(newCheckin, newCheckout),
+    roomtype: newRoomtype
+  });
+  if (singleStayNights > ROLLING_WINDOW_NIGHT_LIMIT) {
+    return {
+      passed: false,
+      reasonType: 'single_stay_exceeded',
+      limit: ROLLING_WINDOW_NIGHT_LIMIT,
+      requestedNights: singleStayNights,
+      message: `Single stay of ${singleStayNights} nights exceeds the 9-night limit.`
+    };
+  }
+
+  // 4. Phase 2: Rolling 30-day window check
+  const goLiveDate = ROLLING_WINDOW_GO_LIVE_DATE;
+  const whereCondition = {
+    cardno,
+    status: {
+      [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_WAITING]
+    }
+  };
+  if (goLiveDate) {
+    whereCondition.checkout = { [Sequelize.Op.gte]: goLiveDate };
+  }
+
+  const roomBookings = await RoomBooking.findAll({
+    where: whereCondition,
+    attributes: ['checkin', 'checkout', 'nights', 'roomtype'],
+    transaction: t
+  });
+
+  const flatBookings = await FlatBooking.findAll({
+    where: whereCondition,
+    attributes: ['checkin', 'checkout', 'nights'],
+    transaction: t
+  });
+
+  // Expand existing bookings into individual night dates
+  const existingNightDatesSet = new Set();
+  for (const b of roomBookings) {
+    const effNights = getEffectiveNights(b);
+    const dates = expandToNightDates(b.checkin, effNights);
+    dates.forEach((d) => existingNightDatesSet.add(d));
+  }
+  for (const fb of flatBookings) {
+    const effNights = fb.nights || 0;
+    const dates = expandToNightDates(fb.checkin, effNights);
+    dates.forEach((d) => existingNightDatesSet.add(d));
+  }
+
+  // Expand proposed new booking into night dates
+  const proposedNightDates = expandToNightDates(newCheckin, singleStayNights);
+
+  // Combine into single set of unique dates
+  const combinedSet = new Set([...existingNightDatesSet, ...proposedNightDates]);
+
+  // Determine window scanning range
+  const windowStartRangeBegin = moment(newCheckin).subtract(ROLLING_WINDOW_DAYS - 1, 'days');
+  const windowStartRangeEnd = moment(
+    newCheckout > newCheckin ? moment(newCheckout).subtract(1, 'day') : newCheckin
+  );
+
+  let limitExceeded = false;
+  let violatingWindowStart = null;
+  let violatingWindowEnd = null;
+
+  const currentMoment = windowStartRangeBegin.clone();
+  while (currentMoment.isSameOrBefore(windowStartRangeEnd)) {
+    const wStartStr = currentMoment.format('YYYY-MM-DD');
+    const wEndStr = currentMoment
+      .clone()
+      .add(ROLLING_WINDOW_DAYS - 1, 'days')
+      .format('YYYY-MM-DD');
+
+    let countInWindow = 0;
+    combinedSet.forEach((dateStr) => {
+      if (dateStr >= wStartStr && dateStr <= wEndStr) {
+        countInWindow++;
+      }
+    });
+
+    if (countInWindow > ROLLING_WINDOW_NIGHT_LIMIT && !limitExceeded) {
+      limitExceeded = true;
+      violatingWindowStart = wStartStr;
+      violatingWindowEnd = wEndStr;
+    }
+
+    currentMoment.add(1, 'day');
+  }
+
+  const existingNightsUsed = existingNightDatesSet.size;
+  const nightsRemaining = Math.max(0, ROLLING_WINDOW_NIGHT_LIMIT - existingNightsUsed);
+
+  if (limitExceeded) {
+    return {
+      passed: false,
+      reasonType: 'rolling_limit_exceeded',
+      limit: ROLLING_WINDOW_NIGHT_LIMIT,
+      nightsUsed: existingNightsUsed,
+      nightsRemaining,
+      windowStart: violatingWindowStart,
+      windowEnd: violatingWindowEnd,
+      message: `Stay exceeds 9 nights in rolling window (${violatingWindowStart} to ${violatingWindowEnd}).`
+    };
+  }
+
+  return {
+    passed: true,
+    nightsUsed: existingNightsUsed,
+    nightsRemaining
+  };
+}
+
+function calculateNightsSingleStay(checkin, checkout) {
+  if (!checkin || !checkout) return 0;
+  if (checkin === checkout) return 0;
+  const diff = moment(checkout).diff(moment(checkin), 'days');
+  return Math.max(0, diff);
 }
 
 async function bookAvailableRoom(
@@ -363,7 +587,8 @@ export async function bookRoomForMumukshus(
   t,
   user,
   utsav,
-  log = logger
+  log = logger,
+  extra_stay_reason = null
 ) {
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
@@ -398,7 +623,24 @@ export async function bookRoomForMumukshus(
 
     userBookingIds[card.cardno] = userBookingIds[card.cardno] || [];
 
-    if (nights == 0) {
+    if (status === STATUS_AWAITING_CONFIRMATION) {
+      if (!extra_stay_reason || !extra_stay_reason.trim()) {
+        throw new ApiError(400, ERR_EXTRA_STAY_REASON_REQUIRED);
+      }
+      const result = await bookAwaitingConfirmationRoom(
+        card.cardno,
+        range.start,
+        range.end,
+        nights,
+        roomType,
+        gender,
+        extra_stay_reason,
+        bookedBy,
+        updatedBy,
+        t
+      );
+      userBookingIds[card.cardno].push(result.bookingId);
+    } else if (nights == 0) {
       if (roomType === 'NA') {
         const result = await bookDayVisit(
           card.cardno,
@@ -492,10 +734,30 @@ export async function createRoomBooking(
   user,
   t,
   cashAllowed = false,
-  excludeRooms = []
+  excludeRooms = [],
+  extra_stay_reason = null
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
+
+  const limitCheck = await validateBookingLimits(cardno, checkin, checkout, roomtype, t);
+  if (!limitCheck.passed) {
+    if (!extra_stay_reason || !extra_stay_reason.trim()) {
+      throw new ApiError(400, ERR_EXTRA_STAY_REASON_REQUIRED);
+    }
+    return bookAwaitingConfirmationRoom(
+      cardno,
+      checkin,
+      checkout,
+      nights,
+      roomtype,
+      gender,
+      extra_stay_reason,
+      bookedBy,
+      user.cardno,
+      t
+    );
+  }
 
   // If this is a single-night booking that begins on the Utsav end date
   // OR ends on the Utsav start date,
@@ -573,7 +835,8 @@ export async function bookFlatForMumukshus(
   user,
   t,
   createOrder = true,
-  log = logger
+  log = logger,
+  extra_stay_reason = null
 ) {
   log.info('flat_booking_start', {
     startDay,
@@ -600,14 +863,24 @@ export async function bookFlatForMumukshus(
   }
 
   const nights = await calculateNights(startDay, endDay);
-  if (nights > 9) {
-    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
-  }
-
   const userBookingIds = {},
     bookingIds = [];
   let amount = 0;
+
   for (var mumukshu of mumukshus) {
+    const isOwner = await isMumukshuFlatOwner(mumukshu, flat.flatno);
+    let overrideStatus = null;
+
+    if (!isOwner) {
+      const limitCheck = await validateBookingLimits(mumukshu, startDay, endDay, 'nac', t);
+      if (!limitCheck.passed) {
+        if (!extra_stay_reason || !extra_stay_reason.trim()) {
+          throw new ApiError(400, ERR_EXTRA_STAY_REASON_REQUIRED);
+        }
+        overrideStatus = STATUS_AWAITING_CONFIRMATION;
+      }
+    }
+
     const booking = await createFlatBooking(
       mumukshu,
       startDay,
@@ -616,7 +889,10 @@ export async function bookFlatForMumukshus(
       flat.flatno,
       user,
       user.cardno,
-      t
+      t,
+      false,
+      overrideStatus,
+      extra_stay_reason
     );
     amount += booking.discountedAmount;
     userBookingIds[mumukshu] = [booking.bookingId];
@@ -647,14 +923,16 @@ export async function createFlatBooking(
   bookedBy,
   updatedBy,
   t,
-  cashAllowed = false
+  cashAllowed = false,
+  overrideStatus = null,
+  extra_stay_reason = null
 ) {
   let bookingId = uuidv4();
 
-  let status = STATUS_PAYMENT_PENDING;
+  let status = overrideStatus || STATUS_PAYMENT_PENDING;
 
   const mumukshuIsFlatOwner = await isMumukshuFlatOwner(cardno, flatno);
-  if (mumukshuIsFlatOwner) {
+  if (!overrideStatus && mumukshuIsFlatOwner) {
     status = ROOM_STATUS_PENDING_CHECKIN;
   }
 
@@ -668,7 +946,8 @@ export async function createFlatBooking(
       nights,
       updatedBy,
       bookedBy: bookedBy.cardno == cardno ? null : bookedBy.cardno,
-      status
+      status,
+      extra_stay_reason
     },
     { transaction: t }
   );
@@ -678,7 +957,7 @@ export async function createFlatBooking(
   }
 
   let discountedAmount = 0;
-  if (!mumukshuIsFlatOwner) {
+  if (!mumukshuIsFlatOwner && status !== STATUS_AWAITING_CONFIRMATION) {
     // Check if flat is AC or NAC
     let amount = roomCharge('nac') * nights;
 
@@ -719,11 +998,6 @@ export async function checkRoomAvailabilityForMumukshus(
 ) {
   validateDate(checkin_date, checkout_date);
 
-  const nights = await calculateNights(checkin_date, checkout_date);
-  if (nights > 9) {
-    throw new ApiError(400, ERR_ROOM_INVALID_DURATION);
-  }
-
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
   );
@@ -754,6 +1028,7 @@ export async function checkRoomAvailabilityForMumukshus(
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
       const gender = floorType === 'SC' ? 'SC' + card.gender : card.gender;
+      const limitCheck = await validateBookingLimits(mumukshu, checkin_date, checkout_date, roomType);
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
       for (const range of dateRanges) {
@@ -765,7 +1040,9 @@ export async function checkRoomAvailabilityForMumukshus(
         const nights = await calculateNights(range.start, range.end);
         const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
 
-        if (range.isBlocked) {
+        if (!limitCheck.passed) {
+          status = STATUS_AWAITING_CONFIRMATION;
+        } else if (range.isBlocked) {
           // Keep waiting status, do not assign room or charge
         } else if (nights == 0) {
           // 1 day visit
@@ -820,6 +1097,8 @@ export async function checkRoomAvailabilityForMumukshus(
           roomType,
           gender,
           isBlocked: range.isBlocked || false,
+          requiresExtraStayReason: !limitCheck.passed,
+          limitCheckInfo: limitCheck,
           ...(assignedRoom && { roomno: assignedRoom })
         });
       }

@@ -5,6 +5,7 @@ import {
   ROOM_STATUS_CHECKEDOUT,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_ADMIN_CANCELLED,
+  STATUS_AWAITING_CONFIRMATION,
   STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING
@@ -78,8 +79,13 @@ const RoomBooking = sequelize.define(
         ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_CHECKEDOUT,
         STATUS_CANCELLED,
-        STATUS_ADMIN_CANCELLED
+        STATUS_ADMIN_CANCELLED,
+        STATUS_AWAITING_CONFIRMATION
       ]
+    },
+    extra_stay_reason: {
+      type: DataTypes.TEXT,
+      allowNull: true
     },
     gender: {
       type: DataTypes.ENUM,

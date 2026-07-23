@@ -369,7 +369,7 @@ async function book(
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(data, t, user, utsav);
+      const roomResult = await bookRoom(body, data, t, user, utsav);
       amount += roomResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
@@ -502,15 +502,18 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function bookRoom(data, t, user, utsav) {
+async function bookRoom(body, data, t, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
+  const extra_stay_reason = body?.extra_stay_reason || data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     guestGroup,
     t,
     user,
-    utsav
+    utsav,
+    logger,
+    extra_stay_reason
   );
   return result;
 }

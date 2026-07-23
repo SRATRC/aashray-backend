@@ -525,15 +525,43 @@ async function validate(body, user, data, utsav, response) {
 
 async function bookRoom(body, data, t, user, utsav) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
+  const extra_stay_reason = body?.extra_stay_reason || data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     mumukshuGroup,
     t,
     user,
-    utsav
+    utsav,
+    logger,
+    extra_stay_reason
   );
   return result;
+}
+
+async function bookFlat(data, t, user) {
+  const { checkin_date, checkout_date, mumukshus } = data.details;
+
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout date is required for flat booking');
+  }
+
+  const extra_stay_reason = data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
+
+  const result = await bookFlatForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshus,
+    user,
+    t,
+    false,
+    logger,
+    extra_stay_reason
+  );
+  return {
+    amount: result.amount,
+    userBookingIds: result.userBookingIds
+  };
 }
 
 async function bookFood(body, data, t, user) {

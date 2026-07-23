@@ -49,8 +49,10 @@ import {
   checkRoomAlreadyBooked,
   createFlatBooking,
   createRoomBooking,
-  roomCharge
+  roomCharge,
+  validateBookingLimits
 } from '../../helpers/roomBooking.helper.js';
+import RoomBookingExemption from '../../models/room_booking_exemption.model.js';
 import {
   adminCancelTransaction,
   createPendingTransaction
@@ -1932,8 +1934,8 @@ export const updateBookingStatus = async (req, res) => {
 
   switch (status) {
     case STATUS_PAYMENT_PENDING: {
-      if (originalStatus !== STATUS_WAITING) {
-        throw new ApiError(400, 'Pending can only be set from waiting status');
+      if (originalStatus !== STATUS_WAITING && originalStatus !== STATUS_AWAITING_CONFIRMATION) {
+        throw new ApiError(400, 'Pending can only be set from waiting or awaiting confirmation status');
       }
 
       const cardno = booking.bookedBy || booking.cardno;
@@ -2785,4 +2787,66 @@ export const bulkRoomBooking = async (req, res) => {
     data: results
   });
 };
+
+export const getRollingWindowUsage = async (req, res) => {
+  const { cardno } = req.params;
+  const today = moment().format('YYYY-MM-DD');
+  const usage = await validateBookingLimits(cardno, today, today);
+  return res.status(200).send({
+    cardno,
+    data: usage
+  });
+};
+
+export const getExemptions = async (req, res) => {
+  const exemptions = await RoomBookingExemption.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'center']
+      }
+    ],
+    order: [['createdAt', 'DESC']]
+  });
+  return res.status(200).send({ data: exemptions });
+};
+
+export const createExemption = async (req, res) => {
+  const { cardno, is_permanent, valid_from, valid_to, reason } = req.body;
+
+  if (!cardno) {
+    throw new ApiError(400, 'Card number is required');
+  }
+
+  const card = await CardDb.findOne({ where: { cardno } });
+  if (!card) {
+    throw new ApiError(404, ERR_CARD_NOT_FOUND);
+  }
+
+  const exemption = await RoomBookingExemption.create({
+    cardno,
+    is_permanent: !!is_permanent,
+    valid_from: is_permanent ? null : valid_from,
+    valid_to: is_permanent ? null : valid_to,
+    reason: reason || 'Admin granted bypass',
+    updatedBy: req.user?.username || 'ADMIN'
+  });
+
+  return res.status(201).send({
+    message: 'Booking limit bypass exemption created successfully',
+    data: exemption
+  });
+};
+
+export const deleteExemption = async (req, res) => {
+  const { id } = req.params;
+  const exemption = await RoomBookingExemption.findByPk(id);
+  if (!exemption) {
+    throw new ApiError(404, 'Exemption record not found');
+  }
+
+  await exemption.destroy();
+  return res.status(200).send({ message: 'Exemption removed successfully' });
+};
+
 
