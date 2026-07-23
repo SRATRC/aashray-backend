@@ -32,6 +32,7 @@ import {
   revokeLateCheckoutFee,
   createRoomBlock,
   listRoomBlocks,
+  cancelRoomBlock,
   bulkCancelRoomBlocks,
   bulkRoomBooking,
   checkRoomConflict,

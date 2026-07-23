@@ -447,7 +447,7 @@ async function book(
       break;
 
     case TYPE_FLAT:
-      const flatResult = await bookFlat(data, t, user);
+      const flatResult = await bookFlat(body, data, t, user);
       amount += flatResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
       break;
@@ -539,14 +539,14 @@ async function bookRoom(body, data, t, user, utsav) {
   return result;
 }
 
-async function bookFlat(data, t, user) {
+async function bookFlat(body, data, t, user) {
   const { checkin_date, checkout_date, mumukshus } = data.details;
 
   if (!checkout_date) {
     throw new ApiError(400, 'checkout date is required for flat booking');
   }
 
-  const extra_stay_reason = data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
+  const extra_stay_reason = body?.extra_stay_reason || data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
 
   const result = await bookFlatForMumukshus(
     checkin_date,
@@ -656,27 +656,6 @@ async function checkTravelAvailability(data) {
   return {
     status: STATUS_AWAITING_CONFIRMATION,
     charge: 0
-  };
-}
-
-async function bookFlat(data, t, user) {
-  const { checkin_date, checkout_date, mumukshus } = data.details;
-
-  if (!checkout_date) {
-    throw new ApiError(400, 'checkout date is required for flat booking');
-  }
-
-  const result = await bookFlatForMumukshus(
-    checkin_date,
-    checkout_date,
-    mumukshus,
-    user,
-    t,
-    false
-  );
-  return {
-    amount: result.amount,
-    userBookingIds: result.userBookingIds
   };
 }
 
