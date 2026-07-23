@@ -18,6 +18,7 @@ import bcrypt from 'bcrypt';
 import sendMail from '../../utils/sendMail.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import moment from 'moment';
 
 export const updatePassword = async (req, res) => {
   attachUserContext(req);
@@ -322,6 +323,16 @@ export async function register(req, res) {
   }
   if (!dob) {
     throw new ApiError(400, 'Date of birth is required');
+  }
+  const dobMoment = moment(dob, 'YYYY-MM-DD', true);
+  if (!dobMoment.isValid()) {
+    throw new ApiError(400, 'Invalid date of birth format');
+  }
+  if (dobMoment.isAfter(moment(), 'day')) {
+    throw new ApiError(400, 'Date of birth cannot be in the future');
+  }
+  if (dobMoment.isBefore('1900-01-01')) {
+    throw new ApiError(400, 'Please select a valid date of birth');
   }
   if (!center || !center.trim()) {
     throw new ApiError(400, 'Centre is required');
