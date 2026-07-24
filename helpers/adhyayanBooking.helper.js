@@ -244,12 +244,6 @@ export async function reserveAdhyayanSeat(adhyayan, t, log = logger) {
 
 export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
   const booking = await ShibirBookingDb.findOne({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['token', 'issuedto']
-      }
-    ],
     where: {
       shibir_id: adhyayan.id,
       status: STATUS_WAITING
@@ -257,13 +251,12 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
     order: [['createdAt', 'ASC']],
     // Run the lookup inside the caller's transaction so sequential promotions
     // in the same run (e.g. cron cancelling several bookings for one shibir)
-    // see each other's uncommitted WAITING -> PAYMENT_PENDING update. Lock only
-    // the shibir_booking_db row (not the LEFT JOINed card_db) so any concurrent
-    // promotion for the same shibir blocks until this transaction commits.
-    // Without this, the same waiting booking gets promoted twice, creating
-    // duplicate transactions for one bookingid.
+    // see each other's uncommitted WAITING -> PAYMENT_PENDING update, and take
+    // a row lock so any concurrent promotion for the same shibir blocks until
+    // this transaction commits. Without this, the same waiting booking gets
+    // promoted twice, creating duplicate transactions for one bookingid.
     transaction: t,
-    lock: { level: t.LOCK.UPDATE, of: ShibirBookingDb }
+    lock: t.LOCK.UPDATE
   });
 
   if (booking) {
