@@ -62,7 +62,7 @@ import Sequelize, { Op } from 'sequelize';
 import logger from '../../config/logger.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import BlockDates from '../../models/block_dates.model.js';
 import getDates from '../../utils/getDates.js';
 import database from '../../config/database.js';
@@ -274,7 +274,7 @@ export const manualCheckin = async (req, res) => {
 
   req.log.info('manual_checkin_start', { bookingid: req.params.bookingid });
 
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
   const booking = await RoomBooking.findOne({
     where: {
@@ -363,14 +363,15 @@ export const manualCheckout = async (req, res) => {
   });
 
   const previousStatus = booking.status;
-  const today = moment().format('YYYY-MM-DD');
-  const checkoutTime = moment().format('HH:mm:ss');
+  const nowIST = moment().tz('Asia/Kolkata');
+  const today = nowIST.format('YYYY-MM-DD');
+  const checkoutTime = nowIST.format('HH:mm:ss');
 
   req.log.info('manual_checkout_processing', { bookingid: booking.bookingid, cardno: booking.cardno, plannedCheckout: booking.checkout, today, checkoutTime });
 
   let checkoutOptions = {
     updatedBy: req.user.username,
-    checkoutTime: moment().format("hh:mm a"),
+    checkoutTime: nowIST.format("hh:mm a"),
     lateFee: 0
   };
 
@@ -379,7 +380,7 @@ export const manualCheckout = async (req, res) => {
       const isHalfDay = checkoutTime <= LATE_CHECKOUT_HALF;
       const lateFee = calcLateCheckoutFee(booking.roomtype, isHalfDay);
       checkoutOptions.lateFee = lateFee;
-      checkoutOptions.checkoutTime = moment(checkoutTime, "HH:mm:ss").format("hh:mm a");
+      checkoutOptions.checkoutTime = nowIST.format("hh:mm a");
     }
     await handleSameDayCheckout({
       booking,
@@ -519,7 +520,7 @@ export const flatCheckin = async (req, res) => {
 
   req.log.info('flat_checkin_start', { bookingid: req.params.bookingid });
 
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
   const booking = await FlatBooking.findOne({
     where: {
@@ -579,7 +580,7 @@ export const flatCheckout = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
   if (today > booking.checkout) {
     req.log.warn('flat_checkout_overstay', { bookingid: booking.bookingid, plannedCheckout: booking.checkout, today });
@@ -1186,7 +1187,7 @@ export const updateRoom = async (req, res) => {
 export const rcBlockList = async (req, res) => {
   req.log.info('rc_block_list_start');
 
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const blocked = await BlockDates.findAll({
     attributes: ['id', 'checkin', 'checkout', 'comments', 'status'],
     where: {
@@ -1253,8 +1254,8 @@ export const unblockRC = async (req, res) => {
 export const occupancyReport = async (req, res) => {
   req.log.info('occupancy_report_start');
 
-  const today = moment().startOf('day').toDate(); // today's 00:00
-  const tomorrow = moment().add(1, 'day').startOf('day').toDate(); // tomorrow 00:00
+  const today = moment().tz('Asia/Kolkata').startOf('day').toDate(); // today's 00:00 IST
+  const tomorrow = moment().tz('Asia/Kolkata').add(1, 'day').startOf('day').toDate(); // tomorrow 00:00 IST
 
   const result = await RoomBooking.findAll({
     attributes: [
@@ -1288,8 +1289,15 @@ export const ReservationReport = async (req, res) => {
   const { start_date, end_date, statuses } = req.query;
   req.log.info('reservation_report_start', { start_date, end_date, statuses });
 
+  // Pagination is optional: the admin report UI fetches the full result set,
+  // so we only paginate when the caller explicitly provides a valid page_size.
   const page = parseInt(req.query.page) || req.body.page || 1;
-  const pageSize = parseInt(req.query.page_size) || req.body.page_size || 1000;
+  const rawPageSize = req.query.page_size || req.body.page_size;
+  let pageSize = rawPageSize ? parseInt(rawPageSize) : null;
+  if (pageSize !== null && (Number.isNaN(pageSize) || pageSize <= 0)) {
+    req.log.warn('reservation_report_invalid_page_size', { page_size: rawPageSize });
+    pageSize = null;
+  }
 
   const reservations = await roomBookingReport(
     start_date,
@@ -1327,34 +1335,27 @@ export const flatReservationReport = async (req, res) => {
     whereClause.status = { [Sequelize.Op.in]: statusArray };
   }
 
-  const bookings = await FlatBooking.findAll({
-  include: [
-    {
-      model: CardDb,
-      attributes: ['cardno', 'issuedto', 'mobno', 'center'],
-      required: true
-    },
-    {
-      model: Transactions,
-      as: 'transactions',
-      attributes: ['status', 'description'],
-      required: false,
-      separate: true,
-      limit: 1,
-      order: [['createdAt', 'DESC']]
-    }
-  ],
-  attributes: [
-    'bookingid',
-    'flatno',
-    'checkin',
-    'checkout',
-    'status',
-    'nights'
-  ],
-  where: whereClause,
-  order: [['checkin', 'ASC']]
-});
+  let bookings = await FlatBooking.findAll({
+    include: [
+      {
+        model: CardDb,
+        attributes: ['cardno', 'issuedto', 'mobno', 'center'],
+        required: true
+      }
+    ],
+    attributes: [
+      'bookingid',
+      'flatno',
+      'checkin',
+      'checkout',
+      'status',
+      'nights'
+    ],
+    where: whereClause,
+    order: [['checkin', 'ASC']]
+  });
+
+  bookings = await attachLatestTransactions(bookings);
 
   req.log.info('flat_reservation_report_success', { start_date, end_date, count: bookings.length });
   return res
@@ -1418,22 +1419,13 @@ export const dayWiseGuestCountReport = async (req, res) => {
 };
 
 async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
-  const data = await RoomBooking.findAll({
+  const queryOptions = {
     include: [
       {
         model: CardDb,
         attributes: ['cardno', 'issuedto', 'mobno', 'center', 'credits'],
         required: true
-      },
-        {
-          model: Transactions,
-          as: 'transactions',
-          attributes: ['status', 'description'],
-          required: false,
-          separate: true,
-          limit: 1,
-          order: [['createdAt', 'DESC']]
-        }
+      }
     ],
     attributes: [
       'bookingid',
@@ -1453,9 +1445,50 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
       ]
     },
     order: [['checkin', 'ASC']]
+  };
+
+  // Only apply limit/offset when the caller explicitly requested pagination.
+  if (pageSize) {
+    queryOptions.limit = pageSize;
+    queryOptions.offset = ((page || 1) - 1) * pageSize;
+  }
+
+  const bookings = await RoomBooking.findAll(queryOptions);
+  return attachLatestTransactions(bookings);
+}
+
+// Attach each booking's most recent transaction as a single-element
+// `transactions` array (or []), matching the shape the admin report UI reads
+// (`booking.transactions[0]`). Uses one batched query instead of Sequelize's
+// per-row `separate: true` + `limit: 1` include, which fires one query per
+// booking — the N+1 that exhausted the DB connection pool on large reports.
+async function attachLatestTransactions(bookings) {
+  const bookingIds = bookings.map((b) => b.bookingid);
+  if (bookingIds.length === 0) return bookings;
+
+  const txns = await Transactions.findAll({
+    attributes: ['bookingid', 'status', 'description'],
+    where: { bookingid: { [Op.in]: bookingIds } },
+    order: [['createdAt', 'DESC']]
   });
-  console.log(JSON.stringify(data[0], null, 2));
-  return data;
+
+  // Rows are newest-first, so the first row seen per booking is its latest.
+  const latestByBooking = new Map();
+  for (const txn of txns) {
+    if (!latestByBooking.has(txn.bookingid)) {
+      latestByBooking.set(txn.bookingid, {
+        status: txn.status,
+        description: txn.description
+      });
+    }
+  }
+
+  for (const booking of bookings) {
+    const latest = latestByBooking.get(booking.bookingid);
+    booking.setDataValue('transactions', latest ? [latest] : []);
+  }
+
+  return bookings;
 }
 
 export const updateBookingStatus = async (req, res) => {

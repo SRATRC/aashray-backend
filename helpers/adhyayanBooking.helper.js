@@ -106,7 +106,7 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
 }
 
 export async function validateAdhyayans(...shibirIds) {
-  const sevenDaysAgo = moment().subtract(15, 'days').format('YYYY-MM-DD');
+  const sevenDaysAgo = moment().tz('Asia/Kolkata').subtract(15, 'days').format('YYYY-MM-DD');
 
   const shibirs = await ShibirDb.findAll({
     where: {
@@ -244,17 +244,19 @@ export async function reserveAdhyayanSeat(adhyayan, t, log = logger) {
 
 export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
   const booking = await ShibirBookingDb.findOne({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['token', 'issuedto']
-      }
-    ],
     where: {
       shibir_id: adhyayan.id,
       status: STATUS_WAITING
     },
-    order: [['createdAt', 'ASC']]
+    order: [['createdAt', 'ASC']],
+    // Run the lookup inside the caller's transaction so sequential promotions
+    // in the same run (e.g. cron cancelling several bookings for one shibir)
+    // see each other's uncommitted WAITING -> PAYMENT_PENDING update, and take
+    // a row lock so any concurrent promotion for the same shibir blocks until
+    // this transaction commits. Without this, the same waiting booking gets
+    // promoted twice, creating duplicate transactions for one bookingid.
+    transaction: t,
+    lock: t.LOCK.UPDATE
   });
 
   if (booking) {

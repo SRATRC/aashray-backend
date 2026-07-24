@@ -1,4 +1,9 @@
-import { TravelDb, TravelBusPassengers, TravelBusGroup } from '../../models/associations.js';
+import {
+  TravelDb,
+  TravelBusPassengers,
+  TravelBusGroup,
+  UtsavDb
+} from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
@@ -6,7 +11,8 @@ import {
   RAJ_PRAVAS_EMAIL,
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_AWAITING_CONFIRMATION,
-  ERR_BOOKING_NOT_FOUND
+  ERR_BOOKING_NOT_FOUND,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
@@ -182,4 +188,29 @@ export const CancelTravel = async (req, res) => {
 
   req.log.info('cancel_travel_success', { bookingid, cardno: req.user.cardno });
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
+};
+
+export const checkUpcomingEvents = async (req, res) => {
+  attachUserContext(req);
+  const today = moment().format('YYYY-MM-DD');
+  req.log.info('check_upcoming_events_start', { cardno: req.user.cardno, date: today });
+
+  const utsavs = await UtsavDb.findAll({
+    where: {
+      end_date: {
+        [Sequelize.Op.gte]: today
+      },
+      location: RESEARCH_CENTRE
+    }
+  });
+
+  req.log.info('check_upcoming_events_success', {
+    cardno: req.user.cardno,
+    count: utsavs.length
+  });
+
+  return res.status(200).send({
+    message: 'Fetched results',
+    data: utsavs
+  });
 };

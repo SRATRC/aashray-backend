@@ -2,8 +2,8 @@ import Sequelize from "sequelize";
 // at top of both files (whatsapp.helper and mumukshuBooking.controller)
 import { Op } from 'sequelize';
 import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking } from "../models/associations.js";
-import moment from "moment";
-import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD } from "../config/constants.js";
+import moment from "moment-timezone";
+import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD, STATUS_RESIDENT } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { formatWhatsAppPhone } from "../utils/phoneFormatter.js";
 import fs from "fs";
@@ -287,6 +287,12 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
 
       const shibir = b.ShibirDb || {};
       const bookingId = b.bookingid || b.bookingId || (b.id ? String(b.id) : "");
+
+      // Skip WhatsApp for Param Gyaan Sabha (any topic variant) — high-volume recurring event, not cost-effective to message
+      if (shibir.name && String(shibir.name).trim().toLowerCase().startsWith("param gyaan sabha")) {
+        console.log(`WA ADHYAYAN SKIP: Param Gyaan Sabha — skipping WhatsApp for bookingId=${bookingId}`);
+        continue;
+      }
 
       const isResearchCentre = shibir && shibir.location === RESEARCH_CENTRE;
 
@@ -1590,11 +1596,11 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
           const lateFee = options.lateFee || 0;
           if (lateFee > 0) {
             templateName = "bk_sha_s_b_ci2co_lcf";
-            const checkoutTimeStr = options.checkoutTime || moment().format("hh:mm a");
+            const checkoutTimeStr = options.checkoutTime || moment().tz('Asia/Kolkata').format("hh:mm a");
             parameters = [attendeeName, checkoutTimeStr, String(lateFee)];
           } else {
             templateName = "bk_sha_s_b_ci2co";
-            const checkoutTimeStr = options.checkoutTime || moment().format("hh:mm a");
+            const checkoutTimeStr = options.checkoutTime || moment().tz('Asia/Kolkata').format("hh:mm a");
             parameters = [attendeeName, checkoutTimeStr];
           }
         }
@@ -2276,6 +2282,16 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
   const phone = user?.mobno ? formatWhatsAppPhone(user.mobno, user.country) : null;
   if (!phone) {
     console.warn(`No mobile for cardno=${user.cardno}; skipping food WA.`);
+    return;
+  }
+
+  // Skip WhatsApp for PR (Permanent Residents) self food bookings — they book daily, high volume, low value
+  // NOTE: still send if PR is booking food FOR a guest (isGuest check happens below)
+  const firstBookingForPrCheck = Array.isArray(foodBookingDetails) && foodBookingDetails[0];
+  const isSelfBookingForPrCheck = !firstBookingForPrCheck?.bookedBy ||
+    String(firstBookingForPrCheck.bookedBy) === String(firstBookingForPrCheck.cardno);
+  if (user.res_status === STATUS_RESIDENT && isSelfBookingForPrCheck) {
+    console.log(`WA FOOD SKIP: PR self-booking for user ${user.cardno} (${user.issuedto}) — skipping food WhatsApp to reduce cost.`);
     return;
   }
 

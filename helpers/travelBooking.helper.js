@@ -15,7 +15,7 @@ import { validateCards } from './card.helper.js';
 import { checkAdhyayanParamGyanSabhaOrUtsav } from './adhyayanBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
 import { createPendingTransaction } from './transactions.helper.js';
@@ -138,7 +138,7 @@ export async function bookTravelForMumukshus(
   user,
   log = logger
 ) {
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }

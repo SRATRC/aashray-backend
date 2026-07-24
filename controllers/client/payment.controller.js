@@ -12,14 +12,13 @@ import {
   STATUS_PAYMENT_COMPLETED,
   TYPE_FOOD,
   TYPE_TRAVEL,
-  TYPE_UTSAV
+  TYPE_UTSAV,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
-import {
-  generateOrderId,
-  updateRazorpayTransactions
-} from '../../helpers/transactions.helper.js';
+import { resolveOrderForTransactions } from '../../helpers/transactions.helper.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
@@ -82,7 +81,7 @@ export const verifyPayment = async (req, res) => {
         STATUS_PAYMENT_AUTHORIZED
       ]
     },
-    lock: { update: true },
+    lock: true,
     transaction: t
   });
 
@@ -110,53 +109,68 @@ export const verifyPayment = async (req, res) => {
           // for late-checkout-fee, while a transaction is created,
           // a corresponding booking is not created.
           if (booking) {
-            bookingStatus =
-              bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
-                ? ROOM_STATUS_PENDING_CHECKIN
-                : STATUS_CONFIRMED;
+            if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(booking.status)) {
+              req.log.warn('payment_received_for_cancelled_booking', {
+                bookingid: booking.bookingid,
+                cardno: booking.cardno,
+                amount: transaction.amount,
+                transactionId: transaction.id
+              });
+            } else {
+              bookingStatus =
+                bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
+                  ? ROOM_STATUS_PENDING_CHECKIN
+                  : STATUS_CONFIRMED;
 
-            const previousStatus = booking.status;
-            const updateFields = {
-              updatedBy
-            };
-            if (bookingType !== TYPE_FOOD) {
-              updateFields.status = bookingStatus;
+              const previousStatus = booking.status;
+              const updateFields = {
+                updatedBy
+              };
+              if (bookingType !== TYPE_FOOD) {
+                updateFields.status = bookingStatus;
+              }
+              await booking.update(updateFields, { transaction: t });
+
+              if (bookingType === TYPE_ROOM) {
+                if (!userBookingIdMap.roomBookingStatusChanges) {
+                  userBookingIdMap.roomBookingStatusChanges = [];
+                }
+                userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
+              } else if (bookingType === TYPE_FLAT) {
+                if (!userBookingIdMap.flatBookingStatusChanges) {
+                  userBookingIdMap.flatBookingStatusChanges = [];
+                }
+                userBookingIdMap.flatBookingStatusChanges.push({ booking, previousStatus });
+              } else if (bookingType === TYPE_TRAVEL) {
+                if (!userBookingIdMap.travelBookingStatusChanges) {
+                  userBookingIdMap.travelBookingStatusChanges = [];
+                }
+                userBookingIdMap.travelBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
+              } else if (bookingType === TYPE_UTSAV) {
+                if (!userBookingIdMap.utsavBookingStatusChanges) {
+                  userBookingIdMap.utsavBookingStatusChanges = [];
+                }
+                userBookingIdMap.utsavBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
+              }
+
+              setBookingIdMap(
+                userBookingIdMap,
+                bookingType,
+                booking.cardno,
+                transaction.bookingid
+              );
             }
-            await booking.update(updateFields, { transaction: t });
-
-            if (bookingType === TYPE_ROOM) {
-              if (!userBookingIdMap.roomBookingStatusChanges) {
-                userBookingIdMap.roomBookingStatusChanges = [];
-              }
-              userBookingIdMap.roomBookingStatusChanges.push({ booking, previousStatus });
-            } else if (bookingType === TYPE_FLAT) {
-              if (!userBookingIdMap.flatBookingStatusChanges) {
-                userBookingIdMap.flatBookingStatusChanges = [];
-              }
-              userBookingIdMap.flatBookingStatusChanges.push({ booking, previousStatus });
-            } else if (bookingType === TYPE_TRAVEL) {
-              if (!userBookingIdMap.travelBookingStatusChanges) {
-                userBookingIdMap.travelBookingStatusChanges = [];
-              }
-              userBookingIdMap.travelBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
-            } else if (bookingType === TYPE_UTSAV) {
-              if (!userBookingIdMap.utsavBookingStatusChanges) {
-                userBookingIdMap.utsavBookingStatusChanges = [];
-              }
-              userBookingIdMap.utsavBookingStatusChanges.push({ booking, previousStatus, razorpay_payment_id });
-            }
-
-            setBookingIdMap(
-              userBookingIdMap,
-              bookingType,
-              booking.cardno,
-              transaction.bookingid
-            );
           }
           break;
 
         case STATUS_PAYMENT_FAILED:
-          transactionStatus = STATUS_PAYMENT_FAILED;
+          // Preserve cash pending status: international users' transactions are
+          // created as cash pending (no 24h expiry). A failed online retry must
+          // not strip that status, otherwise the booking instantly "expires".
+          transactionStatus =
+            transaction.status === STATUS_CASH_PENDING
+              ? STATUS_CASH_PENDING
+              : STATUS_PAYMENT_FAILED;
           break;
 
         default:
@@ -277,7 +291,9 @@ export const createOrderIdForPendingPayments = async (req, res) => {
         STATUS_CASH_PENDING,
         STATUS_PAYMENT_FAILED
       ]
-    }
+    },
+    lock: true,
+    transaction: t
   });
 
   const hasDisallowedCategory = transactions.some((transaction) => {
@@ -301,9 +317,14 @@ export const createOrderIdForPendingPayments = async (req, res) => {
   req.log.info('create_order_total_amount', { cardno: req.user.cardno, totalAmount, transactionCount: transactions.length });
 
   if (totalAmount > 0) {
-    const order = await generateOrderId(totalAmount);
+    const order = await resolveOrderForTransactions(
+      transactions,
+      totalAmount,
+      bookingids,
+      [],
+      t
+    );
     req.log.info('create_order_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
-    await updateRazorpayTransactions(bookingids, [], order.id, t);
     await t.commit();
     req.log.info('create_order_success', { cardno: req.user.cardno, orderId: order.id });
 
@@ -339,7 +360,9 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
         STATUS_CASH_PENDING,
         STATUS_PAYMENT_FAILED
       ]
-    }
+    },
+    lock: true,
+    transaction: t
   });
 
   req.log.info('create_order_v2_transactions_found', {
@@ -347,7 +370,7 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     transactionCount: transactions.length
   });
 
-  const { totalAmount, validTransactionIds } = transactions.reduce(
+  const { totalAmount, validTransactions } = transactions.reduce(
     (acc, transaction) => {
       const categories = bookingCategoryMap[transaction.bookingid];
       const bookingType = getBookingType(transaction);
@@ -356,12 +379,14 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
         categories.includes(transaction.category)
       ) {
         acc.totalAmount += transaction.amount;
-        acc.validTransactionIds.push(transaction.id);
+        acc.validTransactions.push(transaction);
       }
       return acc;
     },
-    { totalAmount: 0, validTransactionIds: [] }
+    { totalAmount: 0, validTransactions: [] }
   );
+
+  const validTransactionIds = validTransactions.map((txn) => txn.id);
 
   req.log.info('create_order_v2_total_amount', {
     cardno: req.user.cardno,
@@ -370,10 +395,14 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   });
 
   if (totalAmount > 0) {
-    const order = await generateOrderId(totalAmount);
+    const order = await resolveOrderForTransactions(
+      validTransactions,
+      totalAmount,
+      [],
+      validTransactionIds,
+      t
+    );
     req.log.info('create_order_v2_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
-
-    await updateRazorpayTransactions([], validTransactionIds, order.id, t);
     await t.commit();
     req.log.info('create_order_v2_success', { cardno: req.user.cardno, orderId: order.id });
 

@@ -35,12 +35,14 @@ import PermanentWifiCodes from './permanent_wifi_codes.model.js';
 import Updates from './updates.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
-import ShibirAttendanceDb from './shibir_attendance_db.model.js'
+import ShibirAttendanceDb from './shibir_attendance_db.model.js';
 import TravelBusGroup from './travelBusGroup.model.js';
 import TravelBusPassengers from './travelBusPassengers.model.js';
 import TravelBusStops from './travelBusStops.model.js';
 import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
+import UtsavFeedback from './utsav_feedback.model.js';
+import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -129,6 +131,12 @@ CardDb.hasMany(MaintenanceDb, {
   onUpdate: 'CASCADE'
 });
 CardDb.hasOne(UtsavBooking, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(UtsavFeedback, {
   foreignKey: 'cardno',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
@@ -412,6 +420,12 @@ UtsavDb.hasMany(UtsavBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+UtsavDb.hasMany(UtsavFeedback, {
+  foreignKey: 'utsav_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
 UtsavBooking.belongsTo(UtsavDb, {
   foreignKey: 'utsavid',
   targetKey: 'id'
@@ -436,6 +450,44 @@ UtsavPackagesDb.hasMany(UtsavBooking, {
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
 });
+UtsavDb.hasMany(UtsavFeedback, {
+  foreignKey: 'utsav_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+UtsavFeedback.belongsTo(UtsavDb, {
+  foreignKey: 'utsav_id',
+  targetKey: 'id'
+});
+
+CardDb.hasMany(UtsavFeedback, {
+  foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+UtsavFeedback.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno'
+});
+
+UtsavFeedback.hasMany(UtsavFeedbackAnswer, {
+  foreignKey: 'feedback_id',
+  sourceKey: 'id',
+  as: 'answers',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+UtsavFeedbackAnswer.belongsTo(UtsavFeedback, {
+  foreignKey: 'feedback_id',
+  targetKey: 'id',
+  as: 'feedback'
+});
+
 
 // Admin Roles
 AdminUsers.hasMany(AdminRoles, {
@@ -677,5 +729,7 @@ export {
   TravelBusPassengers,
   TravelBusStops,
   ShibirSession,
-  ShibirAttendanceRecord
+  ShibirAttendanceRecord,
+  UtsavFeedback,
+  UtsavFeedbackAnswer
 };

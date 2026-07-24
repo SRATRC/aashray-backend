@@ -9,14 +9,22 @@ import {
   STATUS_AVAILABLE,
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  ERR_UTSAV_NOT_FOUND,
+  FEEDBACK_ELIGIBILITY_HOUR,
+  ERR_UTSAV_FEEDBACK_NOT_ALLOWED,
+  STATUS_CASH_PENDING,
+  STATUS_CASH_COMPLETED,
+  ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED,
+  ROOM_STATUS_CHECKEDIN
 } from '../config/constants.js';
 import logger from '../config/logger.js';
 import {
   UtsavDb,
   UtsavPackagesDb,
   UtsavBooking,
-  CardDb
+  CardDb,
+  UtsavFeedback
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -37,12 +45,27 @@ import { bookFoodForAllMeals, cancelAllMeals } from './foodBooking.helper.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 
+// Utsav booking statuses that represent an existing (non-cancelled) booking.
+// A member holding a booking in any of these is "already booked" for that Utsav
+// and may not book it (or an overlapping package) again. Only 'cancelled' /
+// 'admin cancelled' bookings are ignored. Previously this list omitted
+// checkedin / cash pending / cash completed, which let a member whose first
+// booking had advanced past confirmed book a second package for the same Utsav.
+const ACTIVE_UTSAV_BOOKING_STATUSES = [
+  STATUS_PAYMENT_PENDING,
+  STATUS_CONFIRMED,
+  STATUS_WAITING,
+  STATUS_CASH_PENDING,
+  STATUS_CASH_COMPLETED,
+  ROOM_STATUS_CHECKEDIN
+];
+
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
   const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
-  await checkUtsavAlreadyBooked(utsavid, mumukshus);
+  await checkUtsavAlreadyBooked(utsavid, mumukshus, t);
 
   let total_amount = 0;
   let available_seats = utsav.available_seats;
@@ -160,7 +183,7 @@ export async function bookUtsavForMumukshusAdmin(
 
   const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
 
-  await checkUtsavAlreadyBooked(utsavid, mumukshus);
+  await checkUtsavAlreadyBooked(utsavid, mumukshus, t);
 
   let total_amount = 0;
   let userBookingIds = {},
@@ -209,29 +232,58 @@ export async function bookUtsavForMumukshusAdmin(
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
-export async function checkUtsavAlreadyBooked(utsavid, mumukshus) {
+// Request-level guard: a member may hold only one booking per utsav, so the
+// same utsav must not be selected more than once for the same person across
+// the primary booking and its addons. Runs synchronously at validation time
+// (before the user proceeds to payment). Works for both the mumukshu
+// (`details.mumukshus`) and guest (`details.guests`) booking shapes.
+export function validateNoDuplicateUtsavBooking(primary_booking, addons) {
+  const utsavEntries = [primary_booking, ...(addons || [])].filter(
+    (entry) => entry && entry.booking_type === TYPE_UTSAV
+  );
+
+  const seen = new Set();
+  for (const entry of utsavEntries) {
+    const utsavid = entry.details?.utsavid;
+    const people = entry.details?.mumukshus ?? entry.details?.guests ?? [];
+    for (const person of people) {
+      const key = `${utsavid}:${person.cardno}`;
+      if (seen.has(key)) throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
+      seen.add(key);
+    }
+  }
+}
+
+export async function checkUtsavAlreadyBooked(utsavid, mumukshus, t = null) {
   const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
+
+  // Reject the same card appearing more than once for this utsav in a single
+  // request (e.g. the same person as primary booking + addon) — otherwise each
+  // entry passes the DB check below and creates its own booking.
+  if (new Set(mumukshu_cardnos).size !== mumukshu_cardnos.length)
+    throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
+
+  // Read within the caller's transaction so a booking created earlier in the
+  // same request (e.g. the primary utsav booking) is visible when checking a
+  // later one (its addon), instead of only seeing committed rows.
   const alreadyBooked = await UtsavBooking.findAll({
     where: {
       cardno: mumukshu_cardnos,
       utsavid: utsavid,
       status: {
-        [Sequelize.Op.in]: [
-          STATUS_PAYMENT_PENDING,
-          STATUS_CONFIRMED,
-          STATUS_WAITING
-        ]
+        [Sequelize.Op.in]: ACTIVE_UTSAV_BOOKING_STATUSES
       }
-    }
+    },
+    transaction: t
   });
 
   if (alreadyBooked.length > 0)
     throw new ApiError(400, ERR_UTSAV_ALREADY_BOOKED);
 
-  await checkOverlapWithSamvatsari(mumukshus);
+  await checkOverlapWithSamvatsari(mumukshus, t);
 }
 
-export async function checkOverlapWithSamvatsari(mumukshus) {
+export async function checkOverlapWithSamvatsari(mumukshus, t = null) {
   const mumukshu_cardnos = mumukshus.map((mumukshu) => mumukshu.cardno);
   const mumukshu_packages = mumukshus.map((mumukshu) => mumukshu.packageid);
 
@@ -256,7 +308,7 @@ export async function checkOverlapWithSamvatsari(mumukshus) {
     {
       replacements: {
         cardnos: mumukshu_cardnos,
-        status: [STATUS_PAYMENT_PENDING, STATUS_CONFIRMED, STATUS_WAITING],
+        status: ACTIVE_UTSAV_BOOKING_STATUSES,
         samvatsari_package_id: SAMVATSARI_PACKAGE_ID,
         samvatsari_overlapping_packages: SAMVATSARI_OVERLAPPING_PACKAGE_IDS,
         packages_overlap_with_samvatsari: mumukshu_packages.some((packageid) =>
@@ -266,7 +318,8 @@ export async function checkOverlapWithSamvatsari(mumukshus) {
           SAMVATSARI_PACKAGE_ID
         )
       },
-      type: Sequelize.QueryTypes.SELECT
+      type: Sequelize.QueryTypes.SELECT,
+      transaction: t
     }
   );
 
@@ -594,5 +647,120 @@ export async function cancelUtsavFoodBookings(booking, updatedBy, t) {
   if (utsavPackage) {
     await cancelAllMeals(utsavPackage.start_date, utsavPackage.end_date, booking.cardno, updatedBy, t);
   }
-  
+
+}
+
+export async function validateFeedbackEligibility(
+  cardno,
+  utsav_id
+) {
+
+  const utsav = await UtsavDb.findOne({
+    where: { id: utsav_id }
+  });
+
+  if (!utsav) {
+    throw new ApiError(
+      404,
+      ERR_UTSAV_NOT_FOUND
+    );
+  }
+
+  const now = moment().tz('Asia/Kolkata');
+
+  // Feedback starts from utsav start date
+  const feedbackStartDate = moment(utsav.start_date)
+    .tz('Asia/Kolkata')
+    .hour(FEEDBACK_ELIGIBILITY_HOUR)
+    .minute(0)
+    .second(0);
+
+  // Calculate utsav duration
+  const utsavDuration =
+    moment(utsav.end_date)
+      .diff(
+        moment(utsav.start_date),
+        'days'
+      ) + 1;
+
+  // If utsav is 8+ days long,
+  // keep feedback open for 15 days
+  // otherwise 8 days
+  const feedbackWindowDays =
+    utsavDuration >= 8
+      ? 15
+      : 8;
+
+  const feedbackEndDate = moment(
+    feedbackStartDate
+  ).add(
+    feedbackWindowDays,
+    'days'
+  );
+
+  // Feedback not started yet
+  if (now.isBefore(feedbackStartDate)) {
+
+    throw new ApiError(
+      400,
+      ERR_UTSAV_FEEDBACK_NOT_ALLOWED
+    );
+
+  }
+
+  // Feedback expired
+  if (now.isAfter(feedbackEndDate)) {
+
+    throw new ApiError(
+      400,
+      `Feedback submission is only allowed within ${feedbackWindowDays} days after the utsav starts`
+    );
+
+  }
+
+  // Check if user has valid booking
+  const booking = await UtsavBooking.findOne({
+    where: {
+      cardno,
+      utsavid: utsav_id,
+      status: [
+        STATUS_CONFIRMED,
+        STATUS_CASH_COMPLETED,
+        ROOM_STATUS_CHECKEDIN
+      ]
+    }
+  });
+
+  if (!booking) {
+
+    throw new ApiError(
+      403,
+      ERR_UTSAV_FEEDBACK_NOT_ALLOWED
+    );
+
+  }
+
+  // Prevent duplicate feedback
+  const existingFeedback =
+    await UtsavFeedback.findOne({
+      where: {
+        cardno,
+        utsav_id
+      }
+    });
+
+  if (existingFeedback) {
+
+    throw new ApiError(
+      400,
+      ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED
+    );
+
+  }
+
+  return {
+    utsav,
+    booking
+  };
+
 }
