@@ -8,3 +8,5 @@ coverage
 logs/
 /logs/*
 .env
+.claude/
+.superpowers/
