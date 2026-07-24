@@ -649,9 +649,9 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
 
   const currentTime = moment().tz('Asia/Kolkata');
   const mealTimes = {
-    breakfast: moment().tz('Asia/Kolkata').hour(10).minute(0).second(0), // Ends at 10:00 AM IST
-    lunch: moment().tz('Asia/Kolkata').hour(14).minute(0).second(0),     // Ends at 2:00 PM IST
-    dinner: moment().tz('Asia/Kolkata').hour(19).minute(0).second(0)     // Ends at 7:00 PM IST
+    breakfast: moment().tz('Asia/Kolkata').hour(10).minute(30).second(0), // Ends at 10:30 AM IST
+    lunch: moment().tz('Asia/Kolkata').hour(15).minute(30).second(0),     // Ends at 3:30 PM IST
+    dinner: moment().tz('Asia/Kolkata').hour(22).minute(30).second(0)     // Ends at 10:30 PM IST
   };
 
   // ✅ Find booking for the TARGET DATE (not always today)
