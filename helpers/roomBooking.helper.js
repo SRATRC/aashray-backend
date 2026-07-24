@@ -41,7 +41,11 @@ import {
 } from './utsavBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
-import { checkRollingWindowLimitBatch } from './rollingWindow.helper.js';
+import {
+  checkRollingWindowLimitBatch,
+  checkRollingWindowLimitForCards,
+  rollingWaitlistFields
+} from './rollingWindow.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import logger from '../config/logger.js';
@@ -537,17 +541,14 @@ export async function bookFlatForMumukshus(
 
   const nights = await calculateNights(startDay, endDay);
 
-  // Batched rolling-window cap for the whole group: a fixed few queries plus one
-  // sorted card-row lock (deadlock-safe), instead of a per-occupant check.
-  const rangesByCard = {};
-  for (const m of mumukshus) {
-    rangesByCard[m] = [{ checkin: startDay, checkout: endDay }];
-  }
-  const capByCard = await checkRollingWindowLimitBatch({
-    cards: flatCardDb,
-    rangesByCard,
+  // Batched rolling-window cap for the whole group (fixed queries + sorted,
+  // deadlock-safe per-person locks), instead of a per-occupant check.
+  const capByCard = await checkRollingWindowLimitForCards(
+    flatCardDb,
+    startDay,
+    endDay,
     t
-  });
+  );
 
   const userBookingIds = {},
     bookingIds = [];
@@ -826,7 +827,7 @@ export async function checkFlatAvailabilityForMumukshus(
   }
 
   validateDate(checkin_date, checkout_date);
-  await validateCards(mumukshus);
+  const flatCardDb = await validateCards(mumukshus);
 
   if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
@@ -841,10 +842,32 @@ export async function checkFlatAvailabilityForMumukshus(
     }
   });
 
+  // Preview the 9-night/30-day cap so this matches the actual booking outcome:
+  // createFlatBooking forces WAITING with no charge when the cap is exceeded.
+  // No transaction (read-only preview → no lock); residents are exempt centrally.
+  const capByCard = await checkRollingWindowLimitForCards(
+    flatCardDb,
+    checkin_date,
+    checkout_date
+  );
+
   // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
   const tempUser = { ...user, credits: { ...user.credits } };
 
   for (const mumukshu of mumukshus) {
+    const cap = capByCard.get(mumukshu);
+    if (cap.exceeds) {
+      // Over the cap → waitlisted with no charge, mirroring createFlatBooking.
+      flatDetails.push({
+        mumukshu: mumukshu,
+        flatno: flat.flatno,
+        nights: nights,
+        availableCredits: 0,
+        ...rollingWaitlistFields(cap)
+      });
+      continue;
+    }
+
     const isFlatOwner = flatOwnerData.some(
       (item) => item.dataValues.owner == mumukshu
     );

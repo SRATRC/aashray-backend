@@ -8,7 +8,8 @@ import {
   STATUS_RESIDENT,
   ROLLING_WINDOW_DAYS,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  MSG_ROLLING_WINDOW_EXCEEDED
+  MSG_ROLLING_WINDOW_EXCEEDED,
+  HOLD_REASON
 } from '../config/constants.js';
 import {
   expandNights,
@@ -202,4 +203,26 @@ export async function getPromotionCapWarning({ booking, payerCardno, payerCard, 
 // Attach a `warning` to a response body only when one is present.
 export function withWarning(body, warning) {
   return warning ? { ...body, warning } : body;
+}
+
+// Convenience wrapper for the common "same single date range for a list of
+// cards" shape (flat previews + flat booking). Returns Map<cardno, {exceeds, windowNights}>.
+export async function checkRollingWindowLimitForCards(cards, checkin, checkout, t = null) {
+  const rangesByCard = {};
+  for (const c of cards) rangesByCard[c.cardno] = [{ checkin, checkout }];
+  return checkRollingWindowLimitBatch({ cards, rangesByCard, t });
+}
+
+// The preview/detail fields for a stay forced to waiting by the rolling cap —
+// one source of truth so previews and the actual booking can't drift.
+export function rollingWaitlistFields(cap) {
+  return {
+    charge: 0,
+    status: STATUS_WAITING,
+    holdReason: HOLD_REASON.ROLLING_WINDOW_LIMIT,
+    holdReasonMeta: {
+      windowNights: cap.windowNights,
+      limit: ROLLING_WINDOW_NIGHT_LIMIT
+    }
+  };
 }
