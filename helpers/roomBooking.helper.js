@@ -465,11 +465,19 @@ export async function getPriorityOrderForMonth(checkinDate) {
   return rec.priority_order.split(',').map((s) => s.trim());
 }
 
-function buildPriorityOrderClause(priorityList) {
-  const oag1Index = priorityList.indexOf('OAG_1st') !== -1 ? priorityList.indexOf('OAG_1st') + 1 : 99;
-  const oag2Index = priorityList.indexOf('OAG_2nd') !== -1 ? priorityList.indexOf('OAG_2nd') + 1 : 99;
-  const nag1Index = priorityList.indexOf('NAG_1st') !== -1 ? priorityList.indexOf('NAG_1st') + 1 : 99;
-  const nag2Index = priorityList.indexOf('NAG_2nd') !== -1 ? priorityList.indexOf('NAG_2nd') + 1 : 99;
+function buildPriorityOrderClause(priorityList, isGroundPref = false) {
+  let orderedList = [...priorityList];
+
+  if (isGroundPref) {
+    const firstFloor = priorityList.filter((item) => item.endsWith('_1st'));
+    const secondFloor = priorityList.filter((item) => item.endsWith('_2nd'));
+    orderedList = [...firstFloor, ...secondFloor];
+  }
+
+  const oag1Index = orderedList.indexOf('OAG_1st') !== -1 ? orderedList.indexOf('OAG_1st') + 1 : 99;
+  const oag2Index = orderedList.indexOf('OAG_2nd') !== -1 ? orderedList.indexOf('OAG_2nd') + 1 : 99;
+  const nag1Index = orderedList.indexOf('NAG_1st') !== -1 ? orderedList.indexOf('NAG_1st') + 1 : 99;
+  const nag2Index = orderedList.indexOf('NAG_2nd') !== -1 ? orderedList.indexOf('NAG_2nd') + 1 : 99;
 
   return [
     Sequelize.literal(`
@@ -492,8 +500,12 @@ export async function findRoom(
   room_type,
   gender,
   excludeRooms = [],
-  t = null
+  t = null,
+  floorPref = null
 ) {
+  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || gender === 'SCM' || gender === 'SCF';
+  const normalizedGender = (gender === 'SCM' ? 'M' : (gender === 'SCF' ? 'F' : gender));
+
   const queryCheckout = checkin === checkout
     ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
@@ -515,7 +527,7 @@ export async function findRoom(
 
   const whereConditions = {
     roomtype: room_type,
-    gender: gender,
+    gender: normalizedGender,
     [Sequelize.Op.and]: [
       { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
       { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
@@ -539,7 +551,7 @@ export async function findRoom(
   }
 
   const priorityList = await getPriorityOrderForMonth(checkin);
-  const orderClause = buildPriorityOrderClause(priorityList);
+  const orderClause = buildPriorityOrderClause(priorityList, isGroundPref);
 
   return RoomDb.findOne({
     attributes: ['roomno'],
@@ -557,7 +569,10 @@ export async function findRoom(
   });
 }
 
-export async function findAllRooms(checkin, checkout, room_type, gender) {
+export async function findAllRooms(checkin, checkout, room_type, gender, floorPref = null) {
+  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || gender === 'SCM' || gender === 'SCF';
+  const normalizedGender = (gender === 'SCM' ? 'M' : (gender === 'SCF' ? 'F' : gender));
+
   const queryCheckout = checkin === checkout
     ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
@@ -607,7 +622,7 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
   const allExcluded = [...new Set([...bookedRooms, ...adminBlockedRooms])];
 
   const priorityList = await getPriorityOrderForMonth(checkin);
-  const orderClause = buildPriorityOrderClause(priorityList);
+  const orderClause = buildPriorityOrderClause(priorityList, isGroundPref);
 
   return RoomDb.findAll({
     where: {
@@ -617,7 +632,7 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
         [Sequelize.Op.notIn]: allExcluded.length > 0 ? allExcluded : ['']
       },
       roomtype: room_type,
-      ...(gender && { gender })
+      ...(normalizedGender && { gender: normalizedGender })
     },
     order: orderClause
   });
