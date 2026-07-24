@@ -16,6 +16,7 @@ import { Op } from 'sequelize';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import logger from '../../config/logger.js';
 import {
   TYPE_ROOM,
   TYPE_FOOD,

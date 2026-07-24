@@ -1,4 +1,5 @@
 import { Op } from 'sequelize';
+import logger from '../../config/logger.js';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
