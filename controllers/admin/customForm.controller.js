@@ -535,6 +535,39 @@ export const getFormResponses = async (req, res) => {
     });
 };
 
+/**
+ * DELETE /api/v1/admin/forms/:id/responses/:responseId
+ * Delete a single response to a form.
+ */
+export const deleteFormResponse = async (req, res) => {
+    const { id, responseId } = req.params;
+
+    const form = await CustomForm.findByPk(id);
+    if (!form) {
+        throw new ApiError(404, 'Form not found');
+    }
+
+    const userRoles = req.roles || [];
+    if (!hasAccessToDept(userRoles, form.dept_name)) {
+        throw new ApiError(403, 'You do not have access to this form');
+    }
+
+    const response = await CustomFormResponse.findOne({
+        where: { id: responseId, form_id: id }
+    });
+
+    if (!response) {
+        throw new ApiError(404, 'Response not found');
+    }
+
+    await response.destroy();
+
+    res.status(200).json({
+        success: true,
+        message: 'Response deleted successfully'
+    });
+};
+
 // ── Public / Client Facing ──────────────────────────────────────────────────
 
 /**
@@ -620,6 +653,7 @@ export const submitFormResponse = async (req, res) => {
     }
 
     validateDateConstraints(form.fields, responses);
+    validateShortAnswerLimits(form.fields, responses);
 
     let resolvedCardNo = null;
 
@@ -847,6 +881,7 @@ export const updatePublicResponse = async (req, res) => {
     }
 
     validateDateConstraints(form.fields, responses);
+    validateShortAnswerLimits(form.fields, responses);
 
     await response.update({
         responses,
@@ -1002,6 +1037,12 @@ function validateDateConstraints(fields, responses) {
                     minDateStr = dateConstraints.minFixed;
                 }
 
+                // Once date settings exist for a field, never allow a date before today,
+                // regardless of the configured minType (including "no minimum" or a past fixed date).
+                if (!minDateStr || minDateStr < nowStr) {
+                    minDateStr = nowStr;
+                }
+
                 if (minDateStr && chosenStr < minDateStr) {
                     throw new ApiError(400, `"${field.label}" must be on or after ${minDateStr}`);
                 }
@@ -1026,6 +1067,25 @@ function validateDateConstraints(fields, responses) {
                     if (nowStr > cutoffDayStr || (nowStr === cutoffDayStr && currentHour >= dateConstraints.cutoffHour)) {
                         throw new ApiError(400, `Booking/Selection for ${chosenStr} has closed (Cutoff was ${dateConstraints.cutoffHour}:00 of previous day)`);
                     }
+                }
+            }
+        }
+    }
+}
+
+const SHORT_ANSWER_MAX_WORDS = 20;
+
+/**
+ * Internal helper to enforce the 20-word limit on "Short Answer" (type: 'text') fields.
+ */
+function validateShortAnswerLimits(fields, responses) {
+    for (const field of fields) {
+        if (field.type === 'text') {
+            const answer = responses[field.id];
+            if (typeof answer === 'string' && answer.trim() !== '') {
+                const wordCount = answer.trim().split(/\s+/).length;
+                if (wordCount > SHORT_ANSWER_MAX_WORDS) {
+                    throw new ApiError(400, `"${field.label}" must not exceed ${SHORT_ANSWER_MAX_WORDS} words`);
                 }
             }
         }

@@ -32,6 +32,7 @@ import {
     updateForm,
     deleteForm,
     getFormResponses,
+    deleteFormResponse,
     cloneForm,
     // Public (no auth)
     getPublicForm,
@@ -112,6 +113,12 @@ router.get(
     '/:id/responses',
     authorizeRoles(...ALL_FORM_ROLES),
     CatchAsync(getFormResponses)
+);
+
+router.delete(
+    '/:id/responses/:responseId',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(deleteFormResponse)
 );
 
 router.post(
