@@ -35,7 +35,8 @@ import {
   STATUS_PAYMENT_COMPLETED,
   ERR_TRANSACTION_NOT_FOUND,
   AMT_TYPE_LATE_CHECKOUT_ROOM,
-  STATUS_CONFIRMED
+  STATUS_CONFIRMED,
+  STATUS_AWAITING_CONFIRMATION
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -2041,10 +2042,10 @@ export const updateBookingStatus = async (req, res) => {
     }
 
     case STATUS_ADMIN_CANCELLED: {
-      if (![STATUS_WAITING, STATUS_PAYMENT_PENDING].includes(originalStatus)) {
+      if (![STATUS_WAITING, STATUS_PAYMENT_PENDING, STATUS_AWAITING_CONFIRMATION].includes(originalStatus)) {
         throw new ApiError(
           400,
-          'Admin Cancelled allowed only from waiting or pending'
+          'Admin Cancelled allowed only from waiting, pending, or awaiting confirmation'
         );
       }
 
@@ -2418,10 +2419,10 @@ export const updateFlatBookingStatus = async (req, res) => {
     }
 
     case STATUS_ADMIN_CANCELLED: {
-      if (![STATUS_WAITING, STATUS_PAYMENT_PENDING].includes(originalStatus)) {
+      if (![STATUS_WAITING, STATUS_PAYMENT_PENDING, STATUS_AWAITING_CONFIRMATION].includes(originalStatus)) {
         throw new ApiError(
           400,
-          'Admin Cancelled allowed only from waiting or pending'
+          'Admin Cancelled allowed only from waiting, pending, or awaiting confirmation'
         );
       }
 
@@ -2835,6 +2836,31 @@ export const createExemption = async (req, res) => {
 
   return res.status(201).send({
     message: 'Booking limit bypass exemption created successfully',
+    data: exemption
+  });
+};
+
+export const updateExemption = async (req, res) => {
+  const { id } = req.params;
+  const { is_permanent, valid_from, valid_to, reason } = req.body;
+
+  const exemption = await RoomBookingExemption.findByPk(id);
+  if (!exemption) {
+    throw new ApiError(404, 'Exemption record not found');
+  }
+
+  exemption.is_permanent = is_permanent !== undefined ? !!is_permanent : exemption.is_permanent;
+  exemption.valid_from = exemption.is_permanent ? null : (valid_from !== undefined ? valid_from : exemption.valid_from);
+  exemption.valid_to = exemption.is_permanent ? null : (valid_to !== undefined ? valid_to : exemption.valid_to);
+  if (reason !== undefined) {
+    exemption.reason = reason;
+  }
+  exemption.updatedBy = req.user?.username || 'ADMIN';
+
+  await exemption.save();
+
+  return res.status(200).send({
+    message: 'Exemption updated successfully',
     data: exemption
   });
 };

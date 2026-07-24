@@ -693,6 +693,9 @@ Transactions.belongsTo(FlatBooking, {
   targetKey: 'bookingid'
 });
 
+RoomBookingExemption.belongsTo(CardDb, { foreignKey: 'cardno', targetKey: 'cardno' });
+CardDb.hasMany(RoomBookingExemption, { foreignKey: 'cardno', sourceKey: 'cardno' });
+
 export {
   CardDb,
   Transactions,

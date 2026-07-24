@@ -525,6 +525,34 @@ export function splitDateRanges(
   return ranges;
 }
 
+export async function findOverlappingUtsav(startDate, endDate) {
+  const utsav = await UtsavDb.findOne({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { start_date: { [Sequelize.Op.gte]: startDate } },
+            { start_date: { [Sequelize.Op.lt]: endDate } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { end_date: { [Sequelize.Op.gt]: startDate } },
+            { end_date: { [Sequelize.Op.lte]: endDate } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { start_date: { [Sequelize.Op.lte]: startDate } },
+            { end_date: { [Sequelize.Op.gte]: endDate } }
+          ]
+        }
+      ]
+    }
+  });
+  return utsav;
+}
+
 export async function getDateRangesDuringUtsav(
   mumukshus,
   startDate,
@@ -558,9 +586,13 @@ export async function getDateRangesDuringUtsav(
       continue;
     }
 
-    const utsavBooking = inProgressUtsavOverlapping
+    let utsavBooking = inProgressUtsavOverlapping
       ? utsav
       : existingUtsavBookings[mumukshu]?.UtsavDb;
+
+    if (!utsavBooking) {
+      utsavBooking = await findOverlappingUtsav(startDate, endDate);
+    }
 
     const dateRanges = [];
     if (utsavBooking) {

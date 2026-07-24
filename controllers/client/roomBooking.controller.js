@@ -12,7 +12,7 @@ import {
 import { sendUnifiedEmail, sendUnifiedEmailForBookedBy, getBlockedDates } from '../helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import { RoomBooking, FlatBooking } from '../../models/associations.js';
-import { bookFlatForMumukshus } from '../../helpers/roomBooking.helper.js';
+import { bookFlatForMumukshus, validateBookingLimits } from '../../helpers/roomBooking.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
@@ -322,7 +322,7 @@ export const FlatBookingMumukshu = async (req, res) => {
 };
 
 export const CheckBlockedDates = async (req, res) => {
-  const { checkin, checkout } = req.body;
+  const { checkin, checkout, cardno, mumukshus, guests } = req.body;
   if (!checkin || !checkout) {
     throw new ApiError(400, 'Checkin and checkout dates are required');
   }
@@ -341,8 +341,102 @@ export const CheckBlockedDates = async (req, res) => {
       ).format('Do MMMM, YYYY')}${b.comments ? ` (Reason: ${b.comments})` : ''}`
   );
 
+  let exceedsLimit = false;
+  let limitMessage = '';
+  let reasonType = '';
+  let totalWindowNights = 0;
+
+  const cardsToCheck = [];
+  const stayingCards = [];
+
+  const extractCardno = async (item) => {
+    if (!item) return null;
+    if (typeof item === 'string' || typeof item === 'number') return String(item);
+    if (typeof item === 'object') {
+      if (item.cardno) return String(item.cardno);
+      if (item.mobno) {
+        const card = await CardDb.findOne({
+          attributes: ['cardno'],
+          where: { mobno: item.mobno }
+        });
+        return card ? String(card.cardno) : null;
+      }
+    }
+    return null;
+  };
+
+  if (Array.isArray(mumukshus)) {
+    for (const m of mumukshus) {
+      const c = await extractCardno(m);
+      if (c && !stayingCards.includes(c)) stayingCards.push(c);
+    }
+  }
+  if (Array.isArray(guests)) {
+    for (const g of guests) {
+      const c = await extractCardno(g);
+      if (c && !stayingCards.includes(c)) stayingCards.push(c);
+    }
+  }
+
+  const isGuestOrMumukshuBooking =
+    (Array.isArray(mumukshus) && mumukshus.length > 0) ||
+    (Array.isArray(guests) && guests.length > 0);
+
+  if (stayingCards.length > 0) {
+    cardsToCheck.push(...stayingCards);
+  } else if (cardno && !isGuestOrMumukshuBooking) {
+    cardsToCheck.push(cardno);
+  }
+
+  for (const card of cardsToCheck) {
+    const limitCheck = await validateBookingLimits(card, checkin, checkout, 'nac');
+    if (!limitCheck.passed) {
+      exceedsLimit = true;
+      limitMessage = limitCheck.message || 'Stay duration exceeds 9-night limit.';
+      reasonType = limitCheck.reasonType || '';
+      const requestedNights = moment(checkout).diff(moment(checkin), 'days');
+      const existingNights = limitCheck.nightsUsed || 0;
+      totalWindowNights = limitCheck.reasonType === 'rolling_limit_exceeded'
+        ? (limitCheck.maxNightsInWindow || (existingNights + requestedNights))
+        : requestedNights;
+      break;
+    }
+  }
+
+  // Check if stay is split around an Utsav event
+  let splitRanges = null;
+  if (cardsToCheck.length > 0) {
+    const { getDateRangesDuringUtsav } = await import('../../helpers/utsavBooking.helper.js');
+    const rangesMap = await getDateRangesDuringUtsav(cardsToCheck, checkin, checkout, null);
+    const primaryCardRanges = rangesMap[cardsToCheck[0]] || [];
+    if (primaryCardRanges.length > 1) {
+      splitRanges = primaryCardRanges.map(r => ({
+        start: r.start,
+        end: r.end,
+        nights: moment(r.end).diff(moment(r.start), 'days'),
+        isBlocked: r.isBlocked
+      }));
+    }
+  }
+
+  // Check if any blocked period corresponds to a Utsav event
+  let isUtsavBlock = false;
+  if (blockedDates.length > 0) {
+    const { findOverlappingUtsav } = await import('../../helpers/utsavBooking.helper.js');
+    const utsav = await findOverlappingUtsav(checkin, checkout);
+    if (utsav) {
+      isUtsavBlock = true;
+    }
+  }
+
   return res.status(200).send({
     isBlocked: blockedDates.length > 0,
-    blockedPeriods
+    isUtsavBlock,
+    blockedPeriods,
+    exceedsLimit,
+    limitMessage,
+    reasonType,
+    totalWindowNights,
+    splitRanges
   });
 };

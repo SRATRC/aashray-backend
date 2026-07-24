@@ -226,7 +226,8 @@ export async function validateBookingLimits(
   newCheckin,
   newCheckout,
   newRoomtype = 'nac',
-  t = null
+  t = null,
+  priorNightDates = []
 ) {
   // 1. Check if cardno is Resident / Staff
   const card = await CardDb.findOne({
@@ -239,7 +240,9 @@ export async function validateBookingLimits(
   }
 
   // 2. Check room_booking_exemptions for an active bypass record
-  const today = moment().format('YYYY-MM-DD');
+  const checkinDate = newCheckin || moment().format('YYYY-MM-DD');
+  const checkoutDate = newCheckout || checkinDate;
+
   const exemption = await RoomBookingExemption.findOne({
     where: {
       cardno,
@@ -247,8 +250,8 @@ export async function validateBookingLimits(
         { is_permanent: true },
         {
           [Sequelize.Op.and]: [
-            { valid_from: { [Sequelize.Op.lte]: today } },
-            { valid_to: { [Sequelize.Op.gte]: today } }
+            { valid_from: { [Sequelize.Op.lte]: checkinDate } },
+            { valid_to: { [Sequelize.Op.gte]: checkoutDate } }
           ]
         }
       ]
@@ -315,7 +318,7 @@ export async function validateBookingLimits(
   const proposedNightDates = expandToNightDates(newCheckin, singleStayNights);
 
   // Combine into single set of unique dates
-  const combinedSet = new Set([...existingNightDatesSet, ...proposedNightDates]);
+  const combinedSet = new Set([...existingNightDatesSet, ...priorNightDates, ...proposedNightDates]);
 
   // Determine window scanning range
   const windowStartRangeBegin = moment(newCheckin).subtract(ROLLING_WINDOW_DAYS - 1, 'days');
@@ -326,6 +329,7 @@ export async function validateBookingLimits(
   let limitExceeded = false;
   let violatingWindowStart = null;
   let violatingWindowEnd = null;
+  let maxNightsInWindow = 0;
 
   const currentMoment = windowStartRangeBegin.clone();
   while (currentMoment.isSameOrBefore(windowStartRangeEnd)) {
@@ -341,6 +345,10 @@ export async function validateBookingLimits(
         countInWindow++;
       }
     });
+
+    if (countInWindow > maxNightsInWindow) {
+      maxNightsInWindow = countInWindow;
+    }
 
     if (countInWindow > ROLLING_WINDOW_NIGHT_LIMIT && !limitExceeded) {
       limitExceeded = true;
@@ -360,6 +368,7 @@ export async function validateBookingLimits(
       reasonType: 'rolling_limit_exceeded',
       limit: ROLLING_WINDOW_NIGHT_LIMIT,
       nightsUsed: existingNightsUsed,
+      maxNightsInWindow,
       nightsRemaining,
       windowStart: violatingWindowStart,
       windowEnd: violatingWindowEnd,
@@ -1062,14 +1071,24 @@ export async function checkRoomAvailabilityForMumukshus(
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
       const gender = floorType === 'SC' ? 'SC' + card.gender : card.gender;
-      const limitCheck = await validateBookingLimits(mumukshu, checkin_date, checkout_date, roomType);
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
+      const accumulatedPriorNightDates = [];
+
       for (const range of dateRanges) {
         var status = STATUS_WAITING;
         var charge = 0;
         var availableCredits = 0;
         var assignedRoom = null;
+
+        const limitCheck = await validateBookingLimits(
+          mumukshu,
+          range.start,
+          range.end,
+          roomType,
+          null,
+          accumulatedPriorNightDates
+        );
 
         const nights = await calculateNights(range.start, range.end);
         const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
@@ -1119,6 +1138,9 @@ export async function checkRoomAvailabilityForMumukshus(
             assignedRooms.push(roomno.roomno);
           }
         }
+
+        const rangeNightDates = expandToNightDates(range.start, nights);
+        accumulatedPriorNightDates.push(...rangeNightDates);
 
         roomDetails.push({
           mumukshu,
