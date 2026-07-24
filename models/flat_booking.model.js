@@ -71,6 +71,17 @@ const FlatBooking = sequelize.define(
         STATUS_CANCELLED,
         STATUS_ADMIN_CANCELLED
       ]
+    },
+    // Why the booking is held (only meaningful while status is `waiting`).
+    // Machine-readable code from HOLD_REASON in config/constants.js.
+    hold_reason: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    // Optional structured detail for the reason, e.g. { usedNights, limit }.
+    hold_reason_meta: {
+      type: DataTypes.JSON,
+      allowNull: true
     }
   },
   {

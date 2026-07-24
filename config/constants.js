@@ -162,6 +162,47 @@ export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
 
+export const ROLLING_WINDOW_DAYS = 30;
+export const ROLLING_WINDOW_NIGHT_LIMIT = 9;
+export const MSG_ROLLING_WINDOW_EXCEEDED = `This stay exceeds the ${ROLLING_WINDOW_NIGHT_LIMIT}-night limit within ${ROLLING_WINDOW_DAYS} days and has been placed on the waitlist for approval.`;
+
+// Why a booking is being held on the waitlist. Orthogonal to `status`:
+// `status` is where the booking is, HOLD_REASON is why it's waiting.
+export const HOLD_REASON = {
+  ROLLING_WINDOW_LIMIT: 'ROLLING_WINDOW_LIMIT',
+  ROOM_UNAVAILABLE: 'ROOM_UNAVAILABLE',
+  UTSAV_BOUNDARY: 'UTSAV_BOUNDARY',
+  MANUAL: 'MANUAL',
+  UNKNOWN: 'UNKNOWN'
+};
+
+// Single source of truth for how each hold reason is presented. Backend-owned
+// so the app and admin render consistent copy — clients display these directly.
+export const HOLD_REASON_COPY = {
+  ROLLING_WINDOW_LIMIT: {
+    adminLabel: `${ROLLING_WINDOW_NIGHT_LIMIT}-night limit`,
+    userMessage: MSG_ROLLING_WINDOW_EXCEEDED
+  },
+  ROOM_UNAVAILABLE: {
+    adminLabel: 'No room available',
+    userMessage:
+      'Rooms are currently full for these dates. You are on the waitlist and will be confirmed if one frees up.'
+  },
+  UTSAV_BOUNDARY: {
+    adminLabel: 'Event boundary date',
+    userMessage:
+      'This single-night stay falls on an event boundary date and is on the waitlist for review.'
+  },
+  MANUAL: {
+    adminLabel: 'Manually waitlisted',
+    userMessage: 'Your booking is on the waitlist and pending review.'
+  },
+  UNKNOWN: {
+    adminLabel: 'Waitlisted',
+    userMessage: 'Your booking is on the waitlist and pending review.'
+  }
+};
+
 export const SUBJECT_BOOKING = 'Vitraag Vigyaan Aashray: ';
 export const BOOKING_STATUS_PENDING = 'pending';
 
