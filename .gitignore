@@ -8,3 +8,6 @@ coverage
 logs/
 /logs/*
 .env
+
+# Local Claude scratch (docs/plans/ops artifacts — not for the repo)
+.claude/
