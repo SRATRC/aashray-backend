@@ -529,9 +529,11 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
       const bookingStatus = rawStatus.trim().toLowerCase();
 
-      // Normalize status to waiting, pending, or confirmed
+      // Normalize status to waiting, pending, awaiting confirmation, or confirmed
       let statusNormalized = "confirmed";
-      if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+      if (bookingStatus === "awaiting confirmation" || bookingStatus === "awaiting_confirmation") {
+        statusNormalized = "awaiting confirmation";
+      } else if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
         statusNormalized = "waiting";
       } else if ((bookingStatus === "pending" || bookingStatus.includes("pend")) && !bookingStatus.includes("checkin")) {
         statusNormalized = "pending";
@@ -589,7 +591,11 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
           const bookerName = user.issuedto || "";
           headerParam = attendeeName;
 
-          if (statusNormalized === "waiting") {
+          if (statusNormalized === "awaiting confirmation") {
+            template = "bn_sha_gu_b_awc";
+            const extraReason = b.extra_stay_reason || b.extraReason || "Extended stay request";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "awaiting confirmation", roomTypeStr, extraReason, attendeeName];
+          } else if (statusNormalized === "waiting") {
             template = "bn_sha_gu_b_w";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
@@ -606,7 +612,11 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
           const attendeeName = user.issuedto || "";
           headerParam = bookerName;
 
-          if (statusNormalized === "waiting") {
+          if (statusNormalized === "awaiting confirmation") {
+            template = "bn_sha_gu_f_awc";
+            const extraReason = b.extra_stay_reason || b.extraReason || "Extended stay request";
+            bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "awaiting confirmation", roomTypeStr, extraReason];
+          } else if (statusNormalized === "waiting") {
             template = "bn_sha_gu_f_wg";
             bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
@@ -619,7 +629,11 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
         } else {
           const bookerName = user.issuedto || "";
 
-          if (statusNormalized === "waiting") {
+          if (statusNormalized === "awaiting confirmation") {
+            template = "bn_sha_s_b_awc";
+            const extraReason = b.extra_stay_reason || b.extraReason || "Extended stay request";
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "awaiting confirmation", roomTypeStr, extraReason];
+          } else if (statusNormalized === "waiting") {
             template = "bn_sha_s_b_w";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
@@ -1539,7 +1553,22 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
       let templateName = null;
       let parameters = [];
 
-      if (prevStatusNormalized === "waiting") {
+      if (prevStatusNormalized === "awaiting confirmation" || prevStatusNormalized === "awaiting_confirmation") {
+        const extraReason = booking.extra_stay_reason || booking.extraReason || "Extended stay request";
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_s_b_awc2cn";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled"];
+        } else if (newStatus === "admin cancelled" || newStatus === "admin_cancelled") {
+          templateName = "bk_sha_s_b_awc2acn";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled"];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_sha_s_b_awc2ppg";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending", extraReason];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_s_b_ppg2pgci";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin"];
+        }
+      } else if (prevStatusNormalized === "waiting") {
         if (newStatus === "cancelled") {
           templateName = "bk_sha_s_b_w2cn";
           parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled"];
@@ -1626,7 +1655,22 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
       let templateName = null;
       let parameters = [];
 
-      if (prevStatusNormalized === "waiting") {
+      if (prevStatusNormalized === "awaiting confirmation" || prevStatusNormalized === "awaiting_confirmation") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_gu_b_awc2cn";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled" || newStatus === "admin_cancelled") {
+          templateName = "bk_sha_gu_b_awc2acn";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", attendeeName];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_sha_gu_b_awc2ppg";
+          const extraReason = booking.extra_stay_reason || booking.extraReason || "Extended stay request";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending", attendeeName, extraReason];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_gu_b_pypnd2pndchki";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin", attendeeName];
+        }
+      } else if (prevStatusNormalized === "waiting") {
         if (newStatus === "cancelled") {
           templateName = "bk_sha_gu_b_wtg2cnfm";
           parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", attendeeName];
