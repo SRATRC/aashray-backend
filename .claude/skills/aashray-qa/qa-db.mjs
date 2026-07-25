@@ -32,13 +32,16 @@ const allowWrite = process.env.QA_DB_ALLOW_WRITE === '1';
 
 // Read-only = starts with a read verb (WITH included for CTEs) AND none of the
 // known ways a "read" statement can still mutate/write:
-//   - EXPLAIN ANALYZE <DML> actually EXECUTES the DML on MySQL 8.0.18+
+//   - EXPLAIN ANALYZE <anything containing DML> actually EXECUTES it on MySQL
+//     8.0.18+ (the DML need not be adjacent — it can be behind a WITH clause or
+//     a comment: `EXPLAIN ANALYZE WITH c AS (...) DELETE ...`)
 //   - a CTE (WITH ...) can front an INSERT/UPDATE/DELETE/REPLACE
 //   - SELECT ... INTO OUTFILE/DUMPFILE writes a file to the DB server
+const hasDml = /\b(insert|update|delete|replace)\b/i.test(sql);
 const isReadOnly =
   /^(select|show|describe|desc|explain|with)\b/i.test(sql) &&
-  !/^explain\s+analyze\s+(insert|update|delete|replace)\b/i.test(sql) &&
-  !(/^with\b/i.test(sql) && /\b(insert|update|delete|replace)\b/i.test(sql)) &&
+  !(/^explain\s+analyze\b/i.test(sql) && hasDml) &&
+  !(/^with\b/i.test(sql) && hasDml) &&
   !/\binto\s+(outfile|dumpfile)\b/i.test(sql);
 
 if (sql.includes(';')) {
