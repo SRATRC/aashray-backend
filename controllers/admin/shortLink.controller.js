@@ -150,7 +150,7 @@ export const redirectShortLink = async (req, res, next) => {
 
 export const updateShortLink = async (req, res, next) => {
     const { id } = req.params;
-    const { target_url, type, active } = req.body;
+    const { slug, target_url, type, active } = req.body;
 
     if (type && !VALID_TYPES.includes(type)) {
         throw new ApiError(400, `Invalid link type. Must be one of: ${VALID_TYPES.join(', ')}`);
@@ -186,6 +186,15 @@ export const updateShortLink = async (req, res, next) => {
         }
 
         const updateData = {};
+        if (slug !== undefined && slug.trim() !== '' && slug.trim() !== link.slug) {
+            const formattedSlug = slug.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '');
+            const existingSlug = await ShortLink.findOne({ where: { slug: formattedSlug }, transaction: t });
+            if (existingSlug && existingSlug.id !== link.id) {
+                throw new ApiError(400, 'Slug already exists');
+            }
+            updateData.slug = formattedSlug;
+        }
+
         if (target_url !== undefined) updateData.target_url = target_url;
         if (type !== undefined) updateData.type = type;
         if (active !== undefined) updateData.active = active;
