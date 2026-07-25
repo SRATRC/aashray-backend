@@ -17,7 +17,7 @@ The first time this skill is used in a repo/machine, verify prerequisites **befo
 
 | Prerequisite | Check | If missing, tell the user |
 |---|---|---|
-| Node 20+ (for `--env-file`) | `node -v` | Install/switch to Node ≥ 20 (e.g. `nvm use 20`). |
+| Node ≥ 20.6 (for `--env-file`) | `node -v` (must be ≥ v20.6.0 — `--env-file` was added in 20.6) | Install/switch to Node ≥ 20.6 (e.g. `nvm use 20`). |
 | Repo deps (`mysql2`) | `node -e "require.resolve('mysql2')"` from repo root | Run `npm ci` in the repo root. |
 | `.env.qa` present | `test -f .env.qa && echo ok` | It's gitignored, so it isn't in a fresh clone. Ask a teammate for the QA env file and save it as `aashray-backend/.env.qa`. |
 | DB reachable | run the step-1 command with `SELECT 1` | Read the runner's error — it prints the specific fix (creds, network/VPN, stale cert). |
@@ -69,6 +69,7 @@ Check whether a QA or PR deploy is live/failed with the Render MCP: `list_deploy
 - **QA only.** Never point these steps at prod. For prod, use the `aashray` MCP instead.
 - **DB is read-only by default** — writes require explicit human approval + the opt-in flag.
 - **Never print secret values** from `.env.qa` (passwords, cert, Razorpay keys).
+- **Never echo or log the Render API key** the user hands you during first-run setup — treat it like the `.env.qa` secrets; use it only to configure the Render MCP.
 
 ## Keep this skill evolving
 

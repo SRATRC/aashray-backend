@@ -29,7 +29,17 @@ if (!sql) {
 }
 
 const allowWrite = process.env.QA_DB_ALLOW_WRITE === '1';
-const isReadOnly = /^(select|show|describe|desc|explain)\b/i.test(sql);
+
+// Read-only = starts with a read verb (WITH included for CTEs) AND none of the
+// known ways a "read" statement can still mutate/write:
+//   - EXPLAIN ANALYZE <DML> actually EXECUTES the DML on MySQL 8.0.18+
+//   - a CTE (WITH ...) can front an INSERT/UPDATE/DELETE/REPLACE
+//   - SELECT ... INTO OUTFILE/DUMPFILE writes a file to the DB server
+const isReadOnly =
+  /^(select|show|describe|desc|explain|with)\b/i.test(sql) &&
+  !/^explain\s+analyze\s+(insert|update|delete|replace)\b/i.test(sql) &&
+  !(/^with\b/i.test(sql) && /\b(insert|update|delete|replace)\b/i.test(sql)) &&
+  !/\binto\s+(outfile|dumpfile)\b/i.test(sql);
 
 if (sql.includes(';')) {
   console.error('Refused: multi-statement queries (containing ";") are not allowed.');
@@ -37,16 +47,17 @@ if (sql.includes(';')) {
 }
 if (!isReadOnly && !allowWrite) {
   console.error(
-    'Refused: only SELECT/SHOW/DESCRIBE/EXPLAIN are allowed by default.\n' +
+    'Refused: only read-only statements (SELECT/SHOW/DESCRIBE/EXPLAIN/WITH) are allowed by default.\n' +
       'This is the QA database. Re-run with QA_DB_ALLOW_WRITE=1 ONLY if the human explicitly asked for a write.',
   );
   process.exit(2);
 }
 
-// Auto-cap unbounded SELECTs, mirroring the prod MCP behaviour.
+// Auto-cap unbounded reads, mirroring the prod MCP behaviour. Append on a NEW
+// line so a trailing "-- ..."/"# ..." comment on the last line can't swallow it.
 let finalSql = sql;
-if (/^select\b/i.test(sql) && !/\blimit\b/i.test(sql)) {
-  finalSql = `${sql} LIMIT 1000`;
+if (/^(select|with)\b/i.test(sql) && !/\blimit\b/i.test(sql)) {
+  finalSql = `${sql}\nLIMIT 1000`;
 }
 
 // The Aiven CA cert is stored as JSON in DB_CERT: {"private_key": "-----BEGIN CERTIFICATE----- ..."}
