@@ -21,7 +21,7 @@ The first time this skill is used in a repo/machine, verify prerequisites **befo
 | Repo deps (`mysql2`) | `node -e "require.resolve('mysql2')"` from repo root | Run `npm ci` in the repo root. |
 | `.env.qa` present | `test -f .env.qa && echo ok` | It's gitignored, so it isn't in a fresh clone. Ask a teammate for the QA env file and save it as `aashray-backend/.env.qa`. |
 | DB reachable | run the step-1 command with `SELECT 1` | Read the runner's error — it prints the specific fix (creds, network/VPN, stale cert). |
-| Render MCP (**required** for logs/deploys) | call `list_workspaces` | If the `render` MCP tools aren't available, it isn't installed — have the user install & connect the [Render MCP](https://render.com/docs/mcp-server) (needs a Render API key), then retry. If it errors on auth, it's installed but not logged in — add the API key. Once it lists workspaces, **ask the user which one** and `select_workspace` (never pick for them). |
+| Render MCP (**required** for logs/deploys) | call `list_workspaces` | If the `render` MCP tools aren't available, it isn't installed — **offer to set it up for the user** ("I can install & connect the Render MCP for you — I'll need your Render API key. Go ahead?"). On their OK, add it yourself with your MCP-install method (e.g. `claude mcp add`) using their key, per the [Render MCP docs](https://render.com/docs/mcp-server), then retry. If it errors on auth, it's installed but not logged in — offer to add their API key the same way. Once it lists workspaces, **ask the user which one** and `select_workspace` (never pick for them). |
 
 Once each needed prerequisite passes, proceed to the task. You only need the ones a given task touches (a DB query needs the first four; logs need Render MCP).
 
@@ -48,7 +48,7 @@ node --env-file=.env.qa .claude/skills/aashray-qa/qa-db.mjs "SELECT id, name FRO
 
 ## 2. Logs (QA + PR previews) — via the Render MCP
 
-Do **not** read log files off disk — Render's filesystem is ephemeral. This step **requires the Render MCP** (see Dependencies); if it isn't installed, ask the user to set it up first. Then:
+Do **not** read log files off disk — Render's filesystem is ephemeral. This step **requires the Render MCP** (see Dependencies); if it isn't installed, offer to set it up for the user (see first-run setup) and do it once they approve. Then:
 
 1. If you get "no workspace selected", call `list_workspaces` and **ask the user which one** (never pick yourself), then `select_workspace`.
 2. `list_services` (with `includePreviews: true` for PR deploys) → find the service by name from the table above → note its `id`.
