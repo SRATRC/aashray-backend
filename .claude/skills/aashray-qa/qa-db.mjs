@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+// Read-only query runner for the Aashray QA database (Aiven MySQL, TLS required).
+//
+// Usage (run from the aashray-backend repo root so mysql2 + .env.qa resolve):
+//   node --env-file=.env.qa .claude/skills/aashray-qa/qa-db.mjs "SELECT * FROM users LIMIT 5"
+//
+// Reads DB creds + the Aiven CA cert from the environment loaded via --env-file=.env.qa.
+// Read-only by default: only SELECT / SHOW / DESCRIBE / EXPLAIN are allowed, and any
+// multi-statement query (containing ';') is rejected. A missing LIMIT is auto-capped.
+//
+// To run a write/DDL statement you must OPT IN explicitly (only when the human asked):
+//   QA_DB_ALLOW_WRITE=1 node --env-file=.env.qa .claude/skills/aashray-qa/qa-db.mjs "UPDATE ..."
+
+let mysql;
+try {
+  mysql = (await import('mysql2/promise')).default;
+} catch {
+  console.error(
+    'Setup needed: mysql2 is not installed.\n' +
+      'Fix: run "npm ci" (or "npm install") in the aashray-backend repo root, then retry.',
+  );
+  process.exit(3);
+}
+
+const sql = process.argv.slice(2).join(' ').trim();
+if (!sql) {
+  console.error('No SQL provided. Pass a statement as an argument.');
+  process.exit(2);
+}
+
+const allowWrite = process.env.QA_DB_ALLOW_WRITE === '1';
+const isReadOnly = /^(select|show|describe|desc|explain)\b/i.test(sql);
+
+if (sql.includes(';')) {
+  console.error('Refused: multi-statement queries (containing ";") are not allowed.');
+  process.exit(2);
+}
+if (!isReadOnly && !allowWrite) {
+  console.error(
+    'Refused: only SELECT/SHOW/DESCRIBE/EXPLAIN are allowed by default.\n' +
+      'This is the QA database. Re-run with QA_DB_ALLOW_WRITE=1 ONLY if the human explicitly asked for a write.',
+  );
+  process.exit(2);
+}
+
+// Auto-cap unbounded SELECTs, mirroring the prod MCP behaviour.
+let finalSql = sql;
+if (/^select\b/i.test(sql) && !/\blimit\b/i.test(sql)) {
+  finalSql = `${sql} LIMIT 1000`;
+}
+
+// The Aiven CA cert is stored as JSON in DB_CERT: {"private_key": "-----BEGIN CERTIFICATE----- ..."}
+if (!process.env.DB_HOST || !process.env.DB_CERT) {
+  console.error(
+    'Setup needed: QA credentials not loaded.\n' +
+      'Cause: either .env.qa is missing, or you did not pass --env-file=.env.qa.\n' +
+      'Fix:\n' +
+      '  1. Make sure aashray-backend/.env.qa exists (get it from the team — it is gitignored).\n' +
+      '  2. Run from the repo root with: node --env-file=.env.qa .claude/skills/aashray-qa/qa-db.mjs "<SQL>"',
+  );
+  process.exit(3);
+}
+
+let ca;
+try {
+  ca = JSON.parse(process.env.DB_CERT).private_key;
+} catch {
+  console.error('Setup needed: DB_CERT in .env.qa is not valid JSON. Re-fetch .env.qa from the team.');
+  process.exit(3);
+}
+
+let conn;
+try {
+  conn = await mysql.createConnection({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT),
+    user: process.env.DB_USERNAME,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    ssl: { ca },
+    connectTimeout: 10000,
+  });
+} catch (err) {
+  const hints = {
+    ER_ACCESS_DENIED_ERROR: 'Wrong DB username/password in .env.qa — re-fetch it from the team.',
+    ENOTFOUND: 'DB host not found — check DB_HOST in .env.qa, and your network/VPN.',
+    ETIMEDOUT: 'Connection timed out — check your network/VPN and that the QA DB is up.',
+    HANDSHAKE_SSL_ERROR: 'TLS handshake failed — DB_CERT may be stale; re-fetch .env.qa.',
+  };
+  console.error(`Could not connect to the QA database: ${err.message}`);
+  if (hints[err.code]) console.error(`Likely fix: ${hints[err.code]}`);
+  process.exit(3);
+}
+
+try {
+  const [rows] = await conn.query(finalSql);
+  console.log(JSON.stringify(rows, null, 2));
+} finally {
+  await conn.end();
+}
