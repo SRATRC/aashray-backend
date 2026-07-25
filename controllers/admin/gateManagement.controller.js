@@ -34,15 +34,83 @@ export const fetchTotal = async (req, res) => {
   return res.status(200).send({ message: 'Success', data: result });
 };
 
-export const fetchPR = async (req, res) => {
-  const total_pr = await CardDb.findAll({
-    where: {
-      status: STATUS_ONPREM,
-      res_status: STATUS_RESIDENT
-    },
+const fetchResidentsByStatus = async (req, res, resStatus) => {
+  const search = req.query.search || '';
+
+  // Validate sort parameters against allow-list and sanitize inputs
+  const rawSortBy = req.query.sort_by;
+  const ALLOWED_SORT_COLUMNS = ['cardno', 'issuedto', 'mobno', 'status', 'last_checkin', 'last_checkout', 'createdAt', 'res_status'];
+  const sortBy = ALLOWED_SORT_COLUMNS.includes(rawSortBy) ? rawSortBy : 'cardno';
+
+  const rawSortOrder = String(req.query.sort_order || '').toUpperCase();
+  const ALLOWED_SORT_ORDERS = ['ASC', 'DESC'];
+  const sortOrder = ALLOWED_SORT_ORDERS.includes(rawSortOrder) ? rawSortOrder : 'ASC';
+
+  const isPaged = req.query.page !== undefined;
+  let page = null;
+  let pageSize = 20;
+
+  if (isPaged) {
+    const parsedPage = parseInt(req.query.page, 10);
+    page = (!isNaN(parsedPage) && parsedPage > 0) ? parsedPage : 1;
+
+    const parsedPageSize = parseInt(req.query.page_size, 10);
+    const rawPageSize = !isNaN(parsedPageSize) ? parsedPageSize : 20;
+    pageSize = Math.min(Math.max(1, rawPageSize), 100);
+  }
+
+  const whereClause = {};
+  if (resStatus && resStatus !== 'all') {
+    whereClause.res_status = resStatus;
+  }
+
+  const statusFilter = req.query.status;
+  if (statusFilter === 'onprem') {
+    whereClause.status = STATUS_ONPREM;
+  } else if (statusFilter === 'offprem') {
+    whereClause.status = STATUS_OFFPREM;
+  }
+
+  if (search) {
+    whereClause[Sequelize.Op.or] = [
+      { cardno: { [Sequelize.Op.like]: `%${search}%` } },
+      { issuedto: { [Sequelize.Op.like]: `%${search}%` } },
+      { mobno: { [Sequelize.Op.like]: `%${search}%` } }
+    ];
+  }
+
+  let orderClause = [];
+  if (sortBy === 'last_checkin') {
+    orderClause = [
+      [
+        Sequelize.literal(`(
+          SELECT MAX(createdAt)
+          FROM gate_record AS gr
+          WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
+        )`),
+        sortOrder
+      ]
+    ];
+  } else if (sortBy === 'last_checkout') {
+    orderClause = [
+      [
+        Sequelize.literal(`(
+          SELECT MAX(createdAt)
+          FROM gate_record AS gr
+          WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
+        )`),
+        sortOrder
+      ]
+    ];
+  } else {
+    orderClause = [[sortBy, sortOrder]];
+  }
+
+  const queryOptions = {
+    where: whereClause,
     attributes: {
       include: [
-        // Subquery: Last check-in (status = ONPREM)
+        // Last check-in time
         [
           Sequelize.literal(`(
             SELECT MAX(createdAt)
@@ -51,7 +119,7 @@ export const fetchPR = async (req, res) => {
           )`),
           'last_checkin'
         ],
-        // Subquery: Last check-out (status = OFFPREM)
+        // Last check-out time
         [
           Sequelize.literal(`(
             SELECT MAX(createdAt)
@@ -61,109 +129,68 @@ export const fetchPR = async (req, res) => {
           'last_checkout'
         ]
       ]
-    }
-  });
+    },
+    order: orderClause,
+    subQuery: false
+  };
 
-  return res.status(200).send({ message: 'Success', data: total_pr });
+  if (page) {
+    queryOptions.limit = pageSize;
+    queryOptions.offset = (page - 1) * pageSize;
+
+    const { count, rows } = await CardDb.findAndCountAll(queryOptions);
+
+    return res.status(200).send({
+      message: 'Success',
+      data: {
+        records: rows,
+        pagination: {
+          page,
+          page_size: pageSize,
+          totalCount: count,
+          totalPages: Math.ceil(count / pageSize)
+        }
+      }
+    });
+  } else {
+    const records = await CardDb.findAll(queryOptions);
+    return res.status(200).send({
+      message: 'Success',
+      data: {
+        records,
+        pagination: null
+      }
+    });
+  }
+};
+
+export const fetchPR = async (req, res) => {
+  return fetchResidentsByStatus(req, res, STATUS_RESIDENT);
 };
 
 export const fetchGuest = async (req, res) => {
-  const total_guest = await CardDb.findAll({
-    where: {
-      status: STATUS_ONPREM,
-      res_status: STATUS_GUEST
-    },
-    attributes: {
-      include: [
-        // Last check-in time
-        [
-          Sequelize.literal(`(
-            SELECT MAX(createdAt)
-            FROM gate_record AS gr
-            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
-          )`),
-          'last_checkin'
-        ],
-        // Last check-out time
-        [
-          Sequelize.literal(`(
-            SELECT MAX(createdAt)
-            FROM gate_record AS gr
-            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
-          )`),
-          'last_checkout'
-        ]
-      ]
-    }
-  });
-
-  return res.status(200).send({ message: 'Success', data: total_guest });
+  return fetchResidentsByStatus(req, res, STATUS_GUEST);
 };
 
 export const fetchMumukshu = async (req, res) => {
-  const total_mumukshu = await CardDb.findAll({
-    where: {
-      status: STATUS_ONPREM,
-      res_status: STATUS_MUMUKSHU
-    },
-    attributes: {
-      include: [
-        // Last check-in time
-        [
-          Sequelize.literal(`(
-            SELECT MAX(createdAt)
-            FROM gate_record AS gr
-            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
-          )`),
-          'last_checkin'
-        ],
-        // Last check-out time
-        [
-          Sequelize.literal(`(
-            SELECT MAX(createdAt)
-            FROM gate_record AS gr
-            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
-          )`),
-          'last_checkout'
-        ]
-      ]
-    }
-  });
-
-  return res.status(200).send({ message: 'Success', data: total_mumukshu });
+  return fetchResidentsByStatus(req, res, STATUS_MUMUKSHU);
 };
 
 export const fetchSevaKutir = async (req, res) => {
-  const total_seva = await CardDb.findAll({
-    where: {
-      status: STATUS_ONPREM,
-      res_status: STATUS_SEVA_KUTIR
-    },
-    attributes: {
-      include: [
-        // Last check-in time (latest ONPREM entry)
-        [
-          Sequelize.literal(`(
-            SELECT MAX(createdAt)
-            FROM gate_record AS gr
-            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_ONPREM}'
-          )`),
-          'last_checkin'
-        ],
-        // Last check-out time (latest OFFPREM entry)
-        [
-          Sequelize.literal(`(
-            SELECT MAX(createdAt)
-            FROM gate_record AS gr
-            WHERE gr.cardno = CardDb.cardno AND gr.status = '${STATUS_OFFPREM}'
-          )`),
-          'last_checkout'
-        ]
-      ]
-    }
-  });
+  return fetchResidentsByStatus(req, res, STATUS_SEVA_KUTIR);
+};
 
-  return res.status(200).send({ message: 'Success', data: total_seva });
+export const fetchResidents = async (req, res) => {
+  const reqStatus = req.query.res_status; // 'pr', 'mumukshu', 'guest', 'seva', or 'all'
+  let resStatus = 'all';
+  if (reqStatus) {
+    const statusUpper = reqStatus.toUpperCase();
+    if (statusUpper === 'PR') resStatus = STATUS_RESIDENT;
+    else if (statusUpper === 'MUMUKSHU') resStatus = STATUS_MUMUKSHU;
+    else if (statusUpper === 'GUEST') resStatus = STATUS_GUEST;
+    else if (statusUpper === 'SEVA' || statusUpper === 'SEVA_KUTIR' || statusUpper === 'SEVA KUTIR') resStatus = STATUS_SEVA_KUTIR;
+  }
+  return fetchResidentsByStatus(req, res, resStatus);
 };
 
 export const gateEntry = async (req, res) => {
@@ -282,27 +309,108 @@ export const gateExit = async (req, res) => {
 };
 
 export const gateRecord = async (req, res) => {
-  const result = await database.query(
-    `
-  SELECT 
-  gr.*, 
-  cd.issuedto, 
-  cd.mobno
-FROM 
-  gate_record AS gr
-LEFT JOIN 
-  card_db AS cd 
-ON 
-  gr.cardno = cd.cardno
-ORDER BY 
-  gr.createdAt DESC;
-`,
-    {
-      type: Sequelize.QueryTypes.SELECT
-    }
-  );
+  const search = req.query.search || '';
 
-  return res.status(200).send({ message: 'Success', data: result });
+  // Validate sort parameters against allow-list and sanitize inputs
+  const rawSortBy = req.query.sort_by;
+  const ALLOWED_SORT_COLUMNS = ['cardno', 'issuedto', 'mobno', 'status', 'createdAt'];
+  const sortBy = ALLOWED_SORT_COLUMNS.includes(rawSortBy) ? rawSortBy : 'createdAt';
+
+  const rawSortOrder = String(req.query.sort_order || '').toUpperCase();
+  const ALLOWED_SORT_ORDERS = ['ASC', 'DESC'];
+  const sortOrder = ALLOWED_SORT_ORDERS.includes(rawSortOrder) ? rawSortOrder : 'DESC';
+
+  const isPaged = req.query.page !== undefined;
+  let page = null;
+  let pageSize = 20;
+
+  if (isPaged) {
+    const parsedPage = parseInt(req.query.page, 10);
+    page = (!isNaN(parsedPage) && parsedPage > 0) ? parsedPage : 1;
+
+    const parsedPageSize = parseInt(req.query.page_size, 10);
+    const rawPageSize = !isNaN(parsedPageSize) ? parsedPageSize : 20;
+    pageSize = Math.min(Math.max(1, rawPageSize), 100);
+  }
+
+  const whereClause = {};
+
+  if (search) {
+    whereClause[Sequelize.Op.or] = [
+      { cardno: { [Sequelize.Op.like]: `%${search}%` } },
+      { status: { [Sequelize.Op.like]: `%${search}%` } },
+      { '$CardDb.issuedto$': { [Sequelize.Op.like]: `%${search}%` } },
+      { '$CardDb.mobno$': { [Sequelize.Op.like]: `%${search}%` } }
+    ];
+  }
+
+  const startDate = req.query.start_date;
+  const endDate = req.query.end_date;
+
+  if (startDate || endDate) {
+    whereClause.createdAt = {};
+    if (startDate) {
+      whereClause.createdAt[Sequelize.Op.gte] = moment(startDate).startOf('day').toDate();
+    }
+    if (endDate) {
+      whereClause.createdAt[Sequelize.Op.lte] = moment(endDate).endOf('day').toDate();
+    }
+  }
+
+  const resStatus = req.query.res_status;
+  if (resStatus) {
+    whereClause['$CardDb.res_status$'] = resStatus;
+  }
+
+  let orderClause = [];
+  if (sortBy === 'issuedto') {
+    orderClause = [[{ model: CardDb }, 'issuedto', sortOrder]];
+  } else if (sortBy === 'mobno') {
+    orderClause = [[{ model: CardDb }, 'mobno', sortOrder]];
+  } else {
+    orderClause = [[sortBy, sortOrder]];
+  }
+
+  const queryOptions = {
+    include: [
+      {
+        model: CardDb,
+        attributes: ['issuedto', 'mobno', 'res_status']
+      }
+    ],
+    where: whereClause,
+    order: orderClause,
+    subQuery: false
+  };
+
+  if (page) {
+    queryOptions.limit = pageSize;
+    queryOptions.offset = (page - 1) * pageSize;
+
+    const { count, rows } = await GateRecord.findAndCountAll(queryOptions);
+
+    return res.status(200).send({
+      message: 'Success',
+      data: {
+        records: rows,
+        pagination: {
+          page,
+          page_size: pageSize,
+          totalCount: count,
+          totalPages: Math.ceil(count / pageSize)
+        }
+      }
+    });
+  } else {
+    const records = await GateRecord.findAll(queryOptions);
+    return res.status(200).send({
+      message: 'Success',
+      data: {
+        records,
+        pagination: null
+      }
+    });
+  }
 };
 
 export const fetchGateHistoryByCard = async (req, res) => {

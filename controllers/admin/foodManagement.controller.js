@@ -1185,11 +1185,28 @@ export const getMealCountByMobile = async (req, res) => {
     raw: true
   });
 
-  req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length });
+  const dailyBookings = await FoodDb.findAll({
+    attributes: [
+      'id', 'date', 'breakfast', 'breakfast_plate_issued',
+      'lunch', 'lunch_plate_issued', 'dinner', 'dinner_plate_issued'
+    ],
+    include: [{ model: CardDb, attributes: [], required: true, where: { mobno } }],
+    where: {
+      date: { [Op.between]: [fromDate, toDate] },
+      ...(exclusionConditions.length > 0 && {
+        [Op.not]: { [Op.or]: exclusionConditions }
+      })
+    },
+    order: [['date', 'DESC']],
+    raw: true
+  });
+
+  req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length, dailyCount: dailyBookings.length });
   return res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
     data,
     person,
-    utsavExcluded: utsavs
+    utsavExcluded: utsavs,
+    dailyBookings
   });
 };
