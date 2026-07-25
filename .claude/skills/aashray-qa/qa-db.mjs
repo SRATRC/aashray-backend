@@ -37,12 +37,22 @@ const allowWrite = process.env.QA_DB_ALLOW_WRITE === '1';
 //     a comment: `EXPLAIN ANALYZE WITH c AS (...) DELETE ...`)
 //   - a CTE (WITH ...) can front an INSERT/UPDATE/DELETE/REPLACE
 //   - SELECT ... INTO OUTFILE/DUMPFILE writes a file to the DB server
-const hasDml = /\b(insert|update|delete|replace)\b/i.test(sql);
+// Scan for dangerous keywords on a copy with string/identifier literals and
+// comments blanked out, so a DML word used as a quoted VALUE (e.g.
+// `WHERE status = 'update'`) or in a comment doesn't cause a false refusal.
+const sqlNoLiterals = sql
+  .replace(/'(?:\\.|''|[^'])*'/g, "''") // single-quoted strings
+  .replace(/"(?:\\.|""|[^"])*"/g, '""') // double-quoted strings
+  .replace(/`(?:``|[^`])*`/g, '``') // backtick identifiers
+  .replace(/\/\*[\s\S]*?\*\//g, ' ') // /* block comments */
+  .replace(/(--|#)[^\n]*/g, ' '); // -- and # line comments
+
+const hasDml = /\b(insert|update|delete|replace)\b/i.test(sqlNoLiterals);
 const isReadOnly =
   /^(select|show|describe|desc|explain|with)\b/i.test(sql) &&
   !(/^explain\s+analyze\b/i.test(sql) && hasDml) &&
   !(/^with\b/i.test(sql) && hasDml) &&
-  !/\binto\s+(outfile|dumpfile)\b/i.test(sql);
+  !/\binto\s+(outfile|dumpfile)\b/i.test(sqlNoLiterals);
 
 if (sql.includes(';')) {
   console.error('Refused: multi-statement queries (containing ";") are not allowed.');
