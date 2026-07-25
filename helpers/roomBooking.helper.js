@@ -14,7 +14,9 @@ import {
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
   ERR_FLAT_FAILED_TO_BOOK,
-  ERR_FLAT_ALREADY_BOOKED
+  ERR_FLAT_ALREADY_BOOKED,
+  HOLD_REASON,
+  ROLLING_WINDOW_NIGHT_LIMIT
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -39,6 +41,11 @@ import {
 } from './utsavBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { validateCards } from './card.helper.js';
+import {
+  checkRollingWindowLimitBatch,
+  checkRollingWindowLimitForCards,
+  rollingWaitlistFields
+} from './rollingWindow.helper.js';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import logger from '../config/logger.js';
@@ -119,7 +126,9 @@ async function bookWaitingRoom(
   gender,
   bookedBy,
   updatedBy,
-  t
+  t,
+  holdReason,
+  holdReasonMeta = null
 ) {
   const bookingId = uuidv4();
   await RoomBooking.create(
@@ -134,7 +143,9 @@ async function bookWaitingRoom(
       nights,
       roomtype,
       gender,
-      updatedBy
+      updatedBy,
+      hold_reason: holdReason,
+      hold_reason_meta: holdReasonMeta
     },
     { transaction: t }
   );
@@ -321,12 +332,16 @@ export async function bookRoomForMumukshus(
   });
   const cardDb = await validateCards(mumukshus);
 
+  // Pass the booking transaction so the rolling-window cap check runs under a
+  // card-row lock (race-safe) in a single authoritative pass. roomDetail.status
+  // already reflects the cap decision, so the dispatch below just trusts it.
   const roomDetails = await checkRoomAvailabilityForMumukshus(
     checkin_date,
     checkout_date,
     mumukshuGroup,
     user,
-    utsav
+    utsav,
+    t
   );
 
   let amount = 0;
@@ -335,8 +350,17 @@ export async function bookRoomForMumukshus(
   const updatedBy = user.cardno;
 
   for (const roomDetail of roomDetails) {
-    const { mumukshu, status, range, nights, roomno, roomType, gender } =
-      roomDetail;
+    const {
+      mumukshu,
+      status,
+      range,
+      nights,
+      roomno,
+      roomType,
+      gender,
+      holdReason,
+      holdReasonMeta
+    } = roomDetail;
 
     const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
     const bookedBy = card.cardno == user.cardno ? null : user.cardno;
@@ -363,7 +387,9 @@ export async function bookRoomForMumukshus(
         gender,
         bookedBy,
         updatedBy,
-        t
+        t,
+        holdReason || HOLD_REASON.UNKNOWN,
+        holdReasonMeta
       );
       userBookingIds[card.cardno].push(result.bookingId);
     } else if (status == STATUS_AVAILABLE) {
@@ -432,7 +458,8 @@ export async function createRoomBooking(
         gender,
         bookedBy,
         user.cardno,
-        t
+        t,
+        HOLD_REASON.UTSAV_BOUNDARY
       );
       return result;
     }
@@ -506,13 +533,22 @@ export async function bookFlatForMumukshus(
   }
 
   validateDate(startDay, endDay);
-  await validateCards(mumukshus);
+  const flatCardDb = await validateCards(mumukshus);
 
   if (await checkFlatAlreadyBooked(startDay, endDay, mumukshus)) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
 
   const nights = await calculateNights(startDay, endDay);
+
+  // Batched rolling-window cap for the whole group (fixed queries + sorted,
+  // deadlock-safe per-person locks), instead of a per-occupant check.
+  const capByCard = await checkRollingWindowLimitForCards(
+    flatCardDb,
+    startDay,
+    endDay,
+    t
+  );
 
   const userBookingIds = {},
     bookingIds = [];
@@ -526,7 +562,9 @@ export async function bookFlatForMumukshus(
       flat.flatno,
       user,
       user.cardno,
-      t
+      t,
+      false,
+      capByCard.get(mumukshu)
     );
     amount += booking.discountedAmount;
     userBookingIds[mumukshu] = [booking.bookingId];
@@ -557,7 +595,8 @@ export async function createFlatBooking(
   bookedBy,
   updatedBy,
   t,
-  cashAllowed = false
+  cashAllowed = false,
+  capResult = null
 ) {
   let bookingId = uuidv4();
 
@@ -566,6 +605,20 @@ export async function createFlatBooking(
   const mumukshuIsFlatOwner = await isMumukshuFlatOwner(cardno, flatno);
   if (mumukshuIsFlatOwner) {
     status = ROOM_STATUS_PENDING_CHECKIN;
+  }
+
+  // 9-night / 30-day rolling cap → force waiting. `capResult` is precomputed by
+  // the caller's batched check (already a no-op for residents); the admin path
+  // omits it (it warns via its own gate).
+  let holdReason = null;
+  let holdReasonMeta = null;
+  if (nights > 0 && capResult && capResult.exceeds) {
+    status = STATUS_WAITING;
+    holdReason = HOLD_REASON.ROLLING_WINDOW_LIMIT;
+    holdReasonMeta = {
+      windowNights: capResult.windowNights,
+      limit: ROLLING_WINDOW_NIGHT_LIMIT
+    };
   }
 
   const booking = await FlatBooking.create(
@@ -578,7 +631,9 @@ export async function createFlatBooking(
       nights,
       updatedBy,
       bookedBy: bookedBy.cardno == cardno ? null : bookedBy.cardno,
-      status
+      status,
+      hold_reason: holdReason,
+      hold_reason_meta: holdReasonMeta
     },
     { transaction: t }
   );
@@ -588,7 +643,7 @@ export async function createFlatBooking(
   }
 
   let discountedAmount = 0;
-  if (!mumukshuIsFlatOwner) {
+  if (!mumukshuIsFlatOwner && status !== STATUS_WAITING) {
     // Check if flat is AC or NAC
     let amount = roomCharge('nac') * nights;
 
@@ -625,7 +680,8 @@ export async function checkRoomAvailabilityForMumukshus(
   checkout_date,
   mumukshuGroup,
   user,
-  utsav
+  utsav,
+  t = null
 ) {
   validateDate(checkin_date, checkout_date);
 
@@ -649,6 +705,29 @@ export async function checkRoomAvailabilityForMumukshus(
   // without mutating the original user object.
   const tempUser = { ...user, credits: { ...user.credits } };
 
+  // Determine occupants over the 9-night / 30-day rolling cap up front, so they
+  // are waitlisted WITHOUT reserving a room another occupant could use. One
+  // batched call (not per-occupant) keeps this to a fixed few queries for a
+  // group. When called within a booking transaction (t set) it also takes the
+  // batched card-row lock, making the client's auto-waitlist decision race-safe
+  // in one pass. (Admin bookings don't auto-waitlist — they warn via a gate.)
+  const rangesByCard = {};
+  for (const mum of mumukshus) {
+    rangesByCard[mum] = (dateRangesByMumukshu[mum] || []).map((r) => ({
+      checkin: r.start,
+      checkout: r.end
+    }));
+  }
+  const capByCard = await checkRollingWindowLimitBatch({
+    cards: cardDb,
+    rangesByCard,
+    t
+  });
+  const overCapUsage = new Map();
+  for (const [cno, cap] of capByCard) {
+    if (cap.exceeds) overCapUsage.set(cno, cap.windowNights);
+  }
+
   var roomDetails = [];
   const assignedRooms = [];
 
@@ -666,6 +745,9 @@ export async function checkRoomAvailabilityForMumukshus(
         var charge = 0;
         var availableCredits = 0;
         var assignedRoom = null;
+        // Why this range would be waitlisted (only used when status stays WAITING).
+        var holdReason = null;
+        var holdReasonMeta = null;
 
         const nights = await calculateNights(range.start, range.end);
         const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
@@ -673,6 +755,14 @@ export async function checkRoomAvailabilityForMumukshus(
         if (nights == 0) {
           // 1 day visit
           status = STATUS_AVAILABLE;
+        } else if (overCapUsage.has(mumukshu)) {
+          // over the rolling cap → stay waitlisted (status already WAITING),
+          // do not consume a room
+          holdReason = HOLD_REASON.ROLLING_WINDOW_LIMIT;
+          holdReasonMeta = {
+            windowNights: overCapUsage.get(mumukshu),
+            limit: ROLLING_WINDOW_NIGHT_LIMIT
+          };
         } else if (nights > minNights) {
           // when booking around utsav, 2 or more nights are confirmed
           // but 1 night is waitlisted.
@@ -689,7 +779,13 @@ export async function checkRoomAvailabilityForMumukshus(
             availableCredits = usableCredits(tempUser, TYPE_ROOM, charge);
             assignedRoom = roomno.roomno;
             assignedRooms.push(roomno.roomno);
+          } else {
+            // no bed free for these dates → scarcity waitlist
+            holdReason = HOLD_REASON.ROOM_UNAVAILABLE;
           }
+        } else {
+          // single night on an utsav boundary date → waitlisted for review
+          holdReason = HOLD_REASON.UTSAV_BOUNDARY;
         }
 
         roomDetails.push({
@@ -697,6 +793,8 @@ export async function checkRoomAvailabilityForMumukshus(
           status,
           charge,
           availableCredits,
+          holdReason,
+          holdReasonMeta,
           dates: range.start + ' to ' + range.end,
           range,
           nights,
@@ -729,7 +827,7 @@ export async function checkFlatAvailabilityForMumukshus(
   }
 
   validateDate(checkin_date, checkout_date);
-  await validateCards(mumukshus);
+  const flatCardDb = await validateCards(mumukshus);
 
   if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
@@ -744,10 +842,32 @@ export async function checkFlatAvailabilityForMumukshus(
     }
   });
 
+  // Preview the 9-night/30-day cap so this matches the actual booking outcome:
+  // createFlatBooking forces WAITING with no charge when the cap is exceeded.
+  // No transaction (read-only preview → no lock); residents are exempt centrally.
+  const capByCard = await checkRollingWindowLimitForCards(
+    flatCardDb,
+    checkin_date,
+    checkout_date
+  );
+
   // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
   const tempUser = { ...user, credits: { ...user.credits } };
 
   for (const mumukshu of mumukshus) {
+    const cap = capByCard.get(mumukshu);
+    if (cap.exceeds) {
+      // Over the cap → waitlisted with no charge, mirroring createFlatBooking.
+      flatDetails.push({
+        mumukshu: mumukshu,
+        flatno: flat.flatno,
+        nights: nights,
+        availableCredits: 0,
+        ...rollingWaitlistFields(cap)
+      });
+      continue;
+    }
+
     const isFlatOwner = flatOwnerData.some(
       (item) => item.dataValues.owner == mumukshu
     );

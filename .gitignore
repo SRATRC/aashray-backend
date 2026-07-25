@@ -11,3 +11,4 @@ logs/
 
 # Local Claude scratch (docs/plans/ops artifacts — not for the repo)
 .claude/
+.superpowers/
