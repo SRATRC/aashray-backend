@@ -53,10 +53,7 @@ module.exports = {
     if (table.min_os) await queryInterface.removeColumn('updates', 'min_os');
     if (table.build_number)
       await queryInterface.removeColumn('updates', 'build_number');
-
-    // Clean up the ENUM type MySQL creates for the tier column.
-    await queryInterface.sequelize
-      .query('DROP TYPE IF EXISTS "enum_updates_tier"')
-      .catch(() => {});
+    // MySQL ENUMs are inline column types (not named types), so removeColumn
+    // above already drops the tier enum — no separate DROP TYPE needed.
   }
 };

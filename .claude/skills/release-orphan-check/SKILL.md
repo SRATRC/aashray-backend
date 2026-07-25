@@ -116,3 +116,26 @@ If nothing is orphaned, say so directly and confirm which files you checked.
   never modify release rows — you *recommend* `tier` changes, you don't apply them.
 - Never fabricate impact numbers; distinguish "flagged" from "sized".
 - Compare versions numerically, per `references/native-floor.md`.
+
+## Keep this skill evolving — live, during the run
+
+This skill is not fixed. The release landscape shifts under it: a new native
+dependency raises the floor in a way this skill didn't look for, the Expo SDK
+changes where the deployment target lives, a new API-contract shape slips
+through, or the `updates` / `device_telemetry` schema grows a field. **When a run
+exposes a gap — a real orphaning path this skill would have missed, a query that's
+now wrong, a file location that moved — fix this SKILL.md (or its `references/`)
+then and there, in the same session.** Don't defer it to "later" or trust memory.
+
+Signals that the file needs an edit:
+- You had to check a native file or config key not listed in "Inputs to gather"
+  or `references/native-floor.md` → add it.
+- An MCP query in `references/mcp-queries.md` returned the wrong shape or errored
+  → correct it against the live schema.
+- A reviewer or a shipped incident revealed an orphaning path (OS-floor or
+  contract) the two hunts don't cover → add the hunt.
+- The output shape didn't fit the decision the user actually had to make → refine it.
+
+When the signal is clear (not a one-off), act in the same session: name the gap in
+one line, propose the exact edit, and on the user's OK apply it — keeping the
+structure, reusing the real moment as the example.

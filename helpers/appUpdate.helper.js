@@ -26,9 +26,14 @@ export function decideUpdate(rows, currentBuild, osVersion) {
 
   // Rungs of the ladder this device can actually install. A NULL floor means
   // "installable by everyone"; a floor above the device OS is unreachable.
-  const installable = rows.filter(
-    (r) => r.min_os == null || compareVersions(r.min_os, osVersion) <= 0
-  );
+  const installable = rows.filter((r) => {
+    if (r.min_os == null) return true; // NULL floor = installable by everyone
+    const cmp = compareVersions(r.min_os, osVersion);
+    // A NULL comparison means an unparseable min_os (bad data). Per the
+    // versionCompare contract, fall back safely: treat the row as NOT
+    // installable rather than risk sending a device to a build it can't run.
+    return cmp !== null && cmp <= 0;
+  });
   const target = installable[0] || null; // newest installable (rows are desc)
   const targetBuild = target ? target.build_number : null;
 
