@@ -451,7 +451,9 @@ async function bookAvailableRoom(
 
 export async function getPriorityOrderForMonth(checkinDate) {
   const defaultList = ['OAG_1st', 'OAG_2nd', 'NAG_1st', 'NAG_2nd'];
-  const monthNum = checkinDate ? moment(checkinDate).month() + 1 : null;
+  const monthNum = checkinDate
+    ? moment(checkinDate, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).month() + 1
+    : null;
   let rec = null;
   if (monthNum) {
     rec = await RoomAllocationPriority.findOne({ where: { month: monthNum } });
@@ -507,7 +509,7 @@ export async function findRoom(
   const normalizedGender = (gender === 'SCM' ? 'M' : (gender === 'SCF' ? 'F' : gender));
 
   const queryCheckout = checkin === checkout
-    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
 
   // Get admin-blocked rooms overlapping [checkin, queryCheckout)

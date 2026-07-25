@@ -46,6 +46,7 @@ import {
   sendUnifiedEmail
 } from '../helper.js';
 import {
+  findRoom,
   bookDayVisit,
   checkRoomAlreadyBooked,
   createFlatBooking,
@@ -1975,9 +1976,29 @@ export const updateBookingStatus = async (req, res) => {
         txStatus = STATUS_CASH_PENDING;
       }
 
+      let assignedRoom = booking.roomno;
+      if (req.body.roomno && req.body.roomno.trim()) {
+        assignedRoom = req.body.roomno.trim();
+      } else if (!assignedRoom || assignedRoom === 'NA') {
+        const found = await findRoom(
+          booking.checkin,
+          booking.checkout,
+          booking.roomtype,
+          booking.gender,
+          [],
+          t
+        );
+        if (found && found.roomno) {
+          assignedRoom = found.roomno;
+        } else {
+          throw new ApiError(400, 'No room/bed available for allocation during these dates.');
+        }
+      }
+
       await booking.update(
         {
           amount: finalAmount,
+          roomno: assignedRoom,
           status: newStatus,
           updatedBy: req.user.username
         },
@@ -2913,6 +2934,22 @@ export const updateAllocationPriority = async (req, res) => {
     message: `Allocation priority for ${monthVal === null ? 'Global Default' : 'Month ' + monthVal} updated successfully`,
     data: record
   });
+};
+
+export const deleteAllocationPriority = async (req, res) => {
+  const { month } = req.params;
+  const monthVal = (month === null || month === undefined || month === '' || month === 'default' || month === 'null') ? null : Number(month);
+
+  const record = await RoomAllocationPriority.findOne({
+    where: { month: monthVal }
+  });
+
+  if (!record) {
+    throw new ApiError(404, 'Allocation priority rule not found');
+  }
+
+  await record.destroy();
+  return res.status(200).send({ message: 'Allocation priority rule removed successfully' });
 };
 
 
