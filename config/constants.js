@@ -254,4 +254,18 @@ export const DEEP_CLEANING_WA_RECIPIENTS = [
   '0002945068'
 ];
 
+// APP VERSION / FORCED-UPDATE (see docs/version-os-compatibility.md)
+// Release severity tier — source of truth for how hard we push a release.
+export const TIER_OPTIONAL = 'optional';
+export const TIER_REQUIRED = 'required';
 
+// Server-computed update decision returned to the client.
+export const UPDATE_TYPE_NONE = 'none';
+export const UPDATE_TYPE_OPTIONAL = 'optional';
+export const UPDATE_TYPE_FORCED = 'forced';
+export const UPDATE_TYPE_UNSUPPORTED = 'unsupported';
+
+// Compatibility headers the client sends on the updates check.
+export const HEADER_PLATFORM = 'x-platform';
+export const HEADER_APP_BUILD = 'x-app-build';
+export const HEADER_OS_VERSION = 'x-os-version';

@@ -33,6 +33,7 @@ import SupportTickets from './support_tickets.model.js';
 import BlockDates from './block_dates.model.js';
 import PermanentWifiCodes from './permanent_wifi_codes.model.js';
 import Updates from './updates.model.js';
+import DeviceTelemetry from './deviceTelemetry.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js';
@@ -722,6 +723,7 @@ export {
   SupportTickets,
   BlockDates,
   Updates,
+  DeviceTelemetry,
   AdhyayanFeedback,
   RazorpaySettlementRecon,
   ShibirAttendanceDb,
