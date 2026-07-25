@@ -520,3 +520,26 @@ export const getCardByMobile = async (req, res) => {
   req.log.info('get_card_by_mobile_success', { mobno, cardno: card.cardno });
   return res.status(200).json({ message: 'Found card', data: card });
 };
+
+export const getCardByCardno = async (req, res) => {
+  const { cardno } = req.params;
+  req.log.info('get_card_by_cardno_start', { cardno });
+
+  if (!cardno) {
+    req.log.warn('get_card_by_cardno_missing_param');
+    return res.status(400).json({ message: 'cardno is required' });
+  }
+
+  const card = await CardDb.findOne({
+    attributes: ['cardno', 'issuedto', 'center', 'mobno', 'res_status', 'gender'],
+    where: { cardno }
+  });
+
+  if (!card) {
+    req.log.warn('get_card_by_cardno_not_found', { cardno });
+    return res.status(404).json({ message: 'Card not found' });
+  }
+
+  req.log.info('get_card_by_cardno_success', { cardno, issuedto: card.issuedto });
+  return res.status(200).json({ message: 'Found card', data: card });
+};
