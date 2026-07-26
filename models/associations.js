@@ -45,6 +45,7 @@ import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
 import CustomForm from './custom_form.model.js';
 import CustomFormResponse from './custom_form_response.model.js';
+import CustomFormDraft from './custom_form_draft.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -708,6 +709,15 @@ CustomFormResponse.belongsTo(CardDb, {
   targetKey: 'cardno',
   as: 'respondent'
 });
+CustomForm.hasMany(CustomFormDraft, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'drafts'
+});
+CustomFormDraft.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
 
 export {
   CardDb,
@@ -756,5 +766,6 @@ export {
   UtsavFeedback,
   UtsavFeedbackAnswer,
   CustomForm,
-  CustomFormResponse
+  CustomFormResponse,
+  CustomFormDraft
 };

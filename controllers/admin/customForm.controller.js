@@ -1,4 +1,4 @@
-import { CustomForm, CustomFormResponse, CardDb, Departments } from '../../models/associations.js';
+import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import ShortLink from '../../models/short_link.model.js';
@@ -6,8 +6,12 @@ import { handleFormSubmissionActions } from '../../utils/customFormActions.js';
 import CoordinatorOtp from '../../models/coordinatorOtp.model.js';
 import { sendCoordinatorOtp } from '../../helpers/sendCoordinatorOtp.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import sendMail from '../../utils/sendMail.js';
 import crypto from 'crypto';
 import Sequelize from 'sequelize';
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8000';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const mapDeptToShortLinkType = (deptName) => {
     const validTypes = [
@@ -172,7 +176,7 @@ export const createForm = async (req, res) => {
         if (slugVal) {
             await ShortLink.create({
                 slug: slugVal,
-                target_url: `/admin/forms/view.html?id=${form.id}`,
+                target_url: `${FRONTEND_URL}/admin/forms/view.html?id=${form.id}`,
                 type: mapDeptToShortLinkType(dept_name),
                 createdBy: req.user?.username
             }, { transaction: t });
@@ -353,7 +357,7 @@ export const updateForm = async (req, res) => {
 
                     await ShortLink.create({
                         slug: newSlug,
-                        target_url: `/admin/forms/view.html?id=${form.id}`,
+                        target_url: `${FRONTEND_URL}/admin/forms/view.html?id=${form.id}`,
                         type: mapDeptToShortLinkType(form.dept_name),
                         createdBy: req.user?.username
                     }, { transaction: t });
@@ -406,8 +410,13 @@ export const deleteForm = async (req, res) => {
             });
         }
 
-        // Delete all responses first, then the form
+        // Delete all responses and in-progress drafts first, then the form
         await CustomFormResponse.destroy({
+            where: { form_id: id },
+            transaction: t
+        });
+
+        await CustomFormDraft.destroy({
             where: { form_id: id },
             transaction: t
         });
@@ -618,10 +627,18 @@ export const getPublicForm = async (req, res) => {
  */
 export const submitFormResponse = async (req, res) => {
     const { id } = req.params;
-    const { responses, cardno, mobno } = req.body;
+    const { responses, cardno, mobno, email } = req.body;
 
     if (!responses || typeof responses !== 'object') {
         throw new ApiError(400, 'responses object is required');
+    }
+
+    let normalizedEmail = null;
+    if (email !== undefined && email !== null && String(email).trim() !== '') {
+        normalizedEmail = String(email).trim().toLowerCase();
+        if (!EMAIL_REGEX.test(normalizedEmail)) {
+            throw new ApiError(400, 'A valid email address is required');
+        }
     }
 
     const form = await CustomForm.findOne({
@@ -724,12 +741,23 @@ export const submitFormResponse = async (req, res) => {
     const submission = await CustomFormResponse.create({
         form_id: parseInt(id),
         cardno: resolvedCardNo || null,
+        email: normalizedEmail,
         responses,
         submittedAt: new Date()
     });
 
     // Run any registered action hooks (non-blocking — errors are caught inside)
     await handleFormSubmissionActions(form, responses, resolvedCardNo);
+
+    // Best-effort: a finished submission means any in-progress draft for this
+    // email is no longer useful — clear it so it doesn't resurface later.
+    if (normalizedEmail) {
+        try {
+            await CustomFormDraft.destroy({ where: { form_id: parseInt(id), email: normalizedEmail } });
+        } catch (err) {
+            req.log?.warn?.('Failed to clear form draft after submission', { formId: id, error: err.message });
+        }
+    }
 
     res.status(201).json({
         success: true,
@@ -784,10 +812,18 @@ export const getPublicResponse = async (req, res) => {
  */
 export const updatePublicResponse = async (req, res) => {
     const { id, responseId } = req.params;
-    const { responses, cardno, mobno } = req.body;
+    const { responses, cardno, mobno, email } = req.body;
 
     if (!responses || typeof responses !== 'object') {
         throw new ApiError(400, 'responses object is required');
+    }
+
+    let normalizedEmail = null;
+    if (email !== undefined && email !== null && String(email).trim() !== '') {
+        normalizedEmail = String(email).trim().toLowerCase();
+        if (!EMAIL_REGEX.test(normalizedEmail)) {
+            throw new ApiError(400, 'A valid email address is required');
+        }
     }
 
     const form = await CustomForm.findOne({
@@ -885,16 +921,95 @@ export const updatePublicResponse = async (req, res) => {
 
     await response.update({
         responses,
+        email: normalizedEmail !== null ? normalizedEmail : response.email,
         updatedAt: new Date()
     });
 
     // Re-run action hooks on edit (e.g. tapp choice changed)
     await handleFormSubmissionActions(form, responses, resolvedCardNo);
 
+    // Best-effort: an updated submission means any in-progress draft for this
+    // email is no longer useful — clear it so it doesn't resurface later.
+    if (normalizedEmail) {
+        try {
+            await CustomFormDraft.destroy({ where: { form_id: parseInt(id), email: normalizedEmail } });
+        } catch (err) {
+            req.log?.warn?.('Failed to clear form draft after response update', { formId: id, error: err.message });
+        }
+    }
+
     res.status(200).json({
         success: true,
         message: 'Response updated successfully',
         data: { id: response.id }
+    });
+};
+
+/**
+ * Formats a single field's answer for display in the "email me my response" email.
+ */
+function formatAnswerForEmail(answer) {
+    if (answer === undefined || answer === null || answer === '') {
+        return '(no answer)';
+    }
+    if (Array.isArray(answer)) {
+        return answer.length ? answer.join(', ') : '(no answer)';
+    }
+    if (typeof answer === 'object') {
+        return Object.entries(answer)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join('; ');
+    }
+    return String(answer);
+}
+
+/**
+ * POST /api/v1/forms/:id/responses/:responseId/email
+ * Public endpoint — emails the respondent a copy of their submitted answers.
+ */
+export const emailFormResponse = async (req, res) => {
+    const { id, responseId } = req.params;
+    const { email } = req.body;
+
+    if (!email || !EMAIL_REGEX.test(String(email).trim())) {
+        throw new ApiError(400, 'A valid email address is required');
+    }
+
+    const form = await CustomForm.findOne({
+        where: { id, status: 'active' }
+    });
+    if (!form) {
+        throw new ApiError(404, 'Form not found or inactive');
+    }
+
+    const response = await CustomFormResponse.findOne({
+        where: { id: responseId, form_id: id }
+    });
+    if (!response) {
+        throw new ApiError(404, 'Response not found');
+    }
+
+    const qa = (form.fields || [])
+        .filter((field) => field.type !== 'section')
+        .map((field) => ({
+            label: field.label,
+            answer: formatAnswerForEmail(response.responses ? response.responses[field.id] : undefined)
+        }));
+
+    sendMail({
+        email: String(email).trim(),
+        subject: `Your response to "${form.title}"`,
+        template: 'customFormResponseEmail',
+        context: {
+            formTitle: form.title,
+            submittedAt: new Date(response.submittedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+            qa
+        }
+    }, req.log);
+
+    res.status(200).json({
+        success: true,
+        message: 'Response emailed successfully'
     });
 };
 
@@ -971,7 +1086,7 @@ export const resolveIdentity = async (req, res) => {
             const parsedMob = parseInt(cleanMob, 10);
             card = await CardDb.findOne({
                 where: { mobno: parsedMob },
-                attributes: ['cardno', 'issuedto', 'center']
+                attributes: ['cardno', 'issuedto', 'center', 'email']
             });
         }
     } else {
@@ -993,8 +1108,92 @@ export const resolveIdentity = async (req, res) => {
         data: {
             cardno: card.cardno,
             name: card.issuedto,
-            center: card.center
+            center: card.center,
+            email: card.email
         }
+    });
+};
+
+/**
+ * POST /api/v1/admin/forms/public/:id/draft
+ * Save (create or update) an in-progress, unsubmitted set of answers for a
+ * form, keyed by the respondent's email, so they can resume later if they
+ * navigate away mid-fill. Opt-in on the frontend — only called once the user
+ * has checked "save my progress" and provided a valid email.
+ */
+export const saveFormDraft = async (req, res) => {
+    const { id } = req.params;
+    const { email, cardno, mobno, responses } = req.body;
+
+    if (!email || !EMAIL_REGEX.test(String(email).trim())) {
+        throw new ApiError(400, 'A valid email address is required');
+    }
+    if (!responses || typeof responses !== 'object') {
+        throw new ApiError(400, 'responses object is required');
+    }
+
+    const form = await CustomForm.findOne({ where: { id, status: 'active' } });
+    if (!form) {
+        throw new ApiError(404, 'Form not found or inactive');
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    const existing = await CustomFormDraft.findOne({
+        where: { form_id: parseInt(id), email: normalizedEmail }
+    });
+
+    if (existing) {
+        await existing.update({
+            responses,
+            cardno: cardno || existing.cardno,
+            mobno: mobno || existing.mobno
+        });
+    } else {
+        await CustomFormDraft.create({
+            form_id: parseInt(id),
+            email: normalizedEmail,
+            cardno: cardno || null,
+            mobno: mobno || null,
+            responses
+        });
+    }
+
+    res.status(200).json({
+        success: true,
+        message: 'Draft saved'
+    });
+};
+
+/**
+ * GET /api/v1/admin/forms/public/:id/draft?email=...
+ * Fetch a previously saved in-progress draft for a form, if one exists.
+ * Also returns the mobile/card number the draft was last saved under, so an
+ * authenticated form can restore that field too once the visitor has proven
+ * who they are by typing their email — no separate "remember me" needed.
+ */
+export const getFormDraft = async (req, res) => {
+    const { id } = req.params;
+    const { email } = req.query;
+
+    if (!email || !EMAIL_REGEX.test(String(email).trim())) {
+        throw new ApiError(400, 'A valid email address is required');
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    const draft = await CustomFormDraft.findOne({
+        where: { form_id: parseInt(id), email: normalizedEmail }
+    });
+
+    res.status(200).json({
+        success: true,
+        data: draft ? {
+            responses: draft.responses,
+            cardno: draft.cardno,
+            mobno: draft.mobno,
+            updatedAt: draft.updatedAt
+        } : null
     });
 };
 

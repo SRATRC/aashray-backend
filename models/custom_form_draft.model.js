@@ -1,8 +1,8 @@
 import { DataTypes } from 'sequelize';
 import sequelize from '../config/database.js';
 
-const CustomFormResponse = sequelize.define(
-    'custom_form_responses',
+const CustomFormDraft = sequelize.define(
+    'custom_form_drafts',
     {
         id: {
             type: DataTypes.INTEGER,
@@ -13,27 +13,32 @@ const CustomFormResponse = sequelize.define(
             type: DataTypes.INTEGER,
             allowNull: false
         },
+        email: {
+            type: DataTypes.STRING,
+            allowNull: false
+        },
         cardno: {
             type: DataTypes.STRING,
             allowNull: true
         },
-        email: {
+        mobno: {
             type: DataTypes.STRING,
             allowNull: true
         },
         responses: {
             type: DataTypes.JSON,
             allowNull: false
-        },
-        submittedAt: {
-            type: DataTypes.DATE,
-            allowNull: false,
-            defaultValue: DataTypes.NOW
         }
     },
     {
-        timestamps: true
+        timestamps: true,
+        indexes: [
+            {
+                unique: true,
+                fields: ['form_id', 'email']
+            }
+        ]
     }
 );
 
-export default CustomFormResponse;
+export default CustomFormDraft;

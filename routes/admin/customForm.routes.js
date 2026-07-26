@@ -39,9 +39,12 @@ import {
     submitFormResponse,
     getPublicResponse,
     updatePublicResponse,
+    emailFormResponse,
     resolveIdentity,
     sendFormOtp,
-    verifyFormOtp
+    verifyFormOtp,
+    saveFormDraft,
+    getFormDraft
 } from '../../controllers/admin/customForm.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -55,6 +58,9 @@ router.get('/public/:id', CatchAsync(getPublicForm));
 router.post('/public/:id/submit', CatchAsync(submitFormResponse));
 router.get('/public/:id/responses/:responseId', CatchAsync(getPublicResponse));
 router.post('/public/:id/responses/:responseId', CatchAsync(updatePublicResponse));
+router.post('/public/:id/responses/:responseId/email', CatchAsync(emailFormResponse));
+router.post('/public/:id/draft', CatchAsync(saveFormDraft));
+router.get('/public/:id/draft', CatchAsync(getFormDraft));
 
 
 // All routes require authentication
