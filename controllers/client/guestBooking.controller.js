@@ -49,6 +49,10 @@ import {
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
+  checkRollingWindowLimitForCards,
+  rollingWaitlistFields
+} from '../../helpers/rollingWindow.helper.js';
+import {
   generateOrderId,
   updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
@@ -69,6 +73,17 @@ import { validateCards } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+
+// Defensive: the app double-nests the reason. Accept it top-level, on the
+// booking node, or under its `details`. Optional — null when absent.
+function extractExtraStayReason(body, data) {
+  return (
+    body?.extra_stay_reason ||
+    data?.extra_stay_reason ||
+    data?.details?.extra_stay_reason ||
+    null
+  );
+}
 
 async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const typeMap = userBookingIdMap[cardno] || {};
@@ -411,7 +426,7 @@ async function book(
       break;
 
     case TYPE_FLAT:
-      const flatResult = await bookFlat(data, t, user);
+      const flatResult = await bookFlat(body, data, t, user);
       amount += flatResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
       break;
@@ -505,7 +520,7 @@ async function bookUtsav(data, t, user) {
 
 async function bookRoom(body, data, t, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
-  const extra_stay_reason = body?.extra_stay_reason || data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
+  const extra_stay_reason = extractExtraStayReason(body, data);
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
@@ -783,7 +798,7 @@ export const checkGuests = async (req, res) => {
   }
 };
 
-async function bookFlat(data, t, user) {
+async function bookFlat(body, data, t, user) {
   const { checkin_date, checkout_date, guests } = data.details;
 
   // Handle missing checkout_date
@@ -798,12 +813,17 @@ async function bookFlat(data, t, user) {
     );
   }
 
+  const extra_stay_reason = extractExtraStayReason(body, data);
+
   const result = await bookFlatForMumukshus(
     checkin_date,
     checkout_date,
     guests,
     user,
-    t
+    t,
+    true,
+    logger,
+    extra_stay_reason
   );
   return {
     amount: result.order.amount,
@@ -839,7 +859,7 @@ async function checkFlatAvailability(data, user) {
   }
 
   validateDate(checkin_date, checkout_date);
-  await validateCards(guests);
+  const guestCardDb = await validateCards(guests);
 
   // Check if any guest already has a flat booking for these dates
   for (const guest of guests) {
@@ -854,7 +874,28 @@ async function checkFlatAvailability(data, user) {
   const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
 
+  // Preview the 9-night/30-day cap so this matches the actual booking outcome
+  // (createFlatBooking force-waitlists with no charge when exceeded). Guests are
+  // always non-residents, so the cap applies. No transaction (read-only preview).
+  const capByCard = await checkRollingWindowLimitForCards(
+    guestCardDb,
+    checkin_date,
+    checkout_date
+  );
+
   for (const guest of guests) {
+    const cap = capByCard.get(guest);
+    if (cap.exceeds) {
+      flatDetails.push({
+        guest: guest,
+        flatno: flat.flatno,
+        nights: nights,
+        requiresExtraStayReason: true,
+        ...rollingWaitlistFields(cap)
+      });
+      continue;
+    }
+
     // Check if this guest is the flat owner
     const isFlatOwner = await FlatDb.findOne({
       where: {

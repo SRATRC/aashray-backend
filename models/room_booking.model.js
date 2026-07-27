@@ -5,7 +5,6 @@ import {
   ROOM_STATUS_CHECKEDOUT,
   ROOM_STATUS_PENDING_CHECKIN,
   STATUS_ADMIN_CANCELLED,
-  STATUS_AWAITING_CONFIRMATION,
   STATUS_CANCELLED,
   STATUS_PAYMENT_PENDING,
   STATUS_WAITING
@@ -79,13 +78,8 @@ const RoomBooking = sequelize.define(
         ROOM_STATUS_CHECKEDIN,
         ROOM_STATUS_CHECKEDOUT,
         STATUS_CANCELLED,
-        STATUS_ADMIN_CANCELLED,
-        STATUS_AWAITING_CONFIRMATION
+        STATUS_ADMIN_CANCELLED
       ]
-    },
-    extra_stay_reason: {
-      type: DataTypes.TEXT,
-      allowNull: true
     },
     gender: {
       type: DataTypes.ENUM,
@@ -96,6 +90,17 @@ const RoomBooking = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: 'USER'
+    },
+    // Why the booking is held (only meaningful while status is `waiting`).
+    // Machine-readable code from HOLD_REASON in config/constants.js.
+    hold_reason: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    // Optional structured detail for the reason, e.g. { usedNights, limit }.
+    hold_reason_meta: {
+      type: DataTypes.JSON,
+      allowNull: true
     }
   },
   {

@@ -36,7 +36,6 @@ import {
   bulkCancelRoomBlocks,
   bulkRoomBooking,
   checkRoomConflict,
-  getRollingWindowUsage,
   getExemptions,
   createExemption,
   updateExemption,
@@ -67,7 +66,6 @@ router.get('/room_list', CatchAsync(roomList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));
 router.get('/available_rooms_for_day', CatchAsync(availableRoomsForDay))
 router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
-router.get('/rolling_window/:cardno', CatchAsync(getRollingWindowUsage));
 
 // booking exemption routes
 router.get('/exemptions', CatchAsync(getExemptions));
@@ -115,14 +113,5 @@ router.get('/daywise_report', CatchAsync(dayWiseGuestCountReport));
 router.get('/guestsByDateAndRoomtype', CatchAsync(guestsByDateAndRoomtype));
 router.get('/late-checkout-fees', CatchAsync(fetchLateCheckoutFees));
 router.put('/late-checkout-fees/revoke', CatchAsync(revokeLateCheckoutFee));
-
-// exemptions
-router.get('/exemptions', CatchAsync(getExemptions));
-router.post('/exemptions', CatchAsync(createExemption));
-router.delete('/exemptions/:id', CatchAsync(deleteExemption));
-
-// allocation priorities
-router.get('/allocation_priority', CatchAsync(getAllocationPriorities));
-router.post('/allocation_priority', CatchAsync(updateAllocationPriority));
 
 export default router;

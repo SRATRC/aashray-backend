@@ -39,7 +39,9 @@ import {
   RESEARCH_CENTRE,
   STATUS_OPEN,
   STATUS_PAYMENT_COMPLETED,
-  ERR_BOOKING_ALREADY_CANCELLED
+  ERR_BOOKING_ALREADY_CANCELLED,
+  STATUS_ACTIVE,
+  STATUS_INACTIVE
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
@@ -193,6 +195,13 @@ function validateMealField(value, fieldName) {
     throw new ApiError(400, `${fieldName} contains duplicate values`);
 }
 
+// Utsav auto-block convention: the block's exclusive checkout is the day AFTER
+// the utsav's last day (end + 1), so the last festival night (end_date) is held.
+// One owner for the +1 offset, shared by createUtsav and updateUtsav.
+function utsavBlockCheckout(end_date) {
+  return moment(end_date).add(1, 'day').format('YYYY-MM-DD');
+}
+
 export const createUtsav = async (req, res) => {
   const {
     name,
@@ -266,7 +275,7 @@ export const createUtsav = async (req, res) => {
       await BlockDates.create(
         {
           checkin: start_date,
-          checkout: moment(end_date).add(1, 'day').format('YYYY-MM-DD'),
+          checkout: utsavBlockCheckout(end_date),
           comments: name,
           updatedBy: req.user.username
         },
@@ -566,6 +575,14 @@ export const updateUtsav = async (req, res) => {
       }
     }
 
+    // I2: capture the pre-update values BEFORE utsav.update mutates the
+    // instance, so we can locate the auto-created block_dates row (createUtsav
+    // stores checkin=start, checkout=end+1, comments=name and no utsavid FK).
+    const oldName = utsav.name;
+    const oldStart = moment(utsav.start_date).format('YYYY-MM-DD');
+    const oldCheckout = utsavBlockCheckout(utsav.end_date);
+    const oldLocation = utsav.location;
+
     await utsav.update({
       name,
       start_date,
@@ -582,6 +599,56 @@ export const updateUtsav = async (req, res) => {
       whatsapp_link,
       updatedBy: req.user.username
     }, { transaction: t });
+
+    // I2: resync this utsav's auto-block. createUtsav only ever creates the
+    // block row and nothing kept it in step with edits, so changing a
+    // RESEARCH_CENTRE utsav's dates left a STALE block — non-attendees could
+    // book through the new festival dates while the old dates stayed rejected.
+    // Locate the existing row by its old (name, checkin, checkout) triple, then:
+    //  - new location IS RESEARCH_CENTRE → update dates/name (or create if
+    //    missing), reusing createUtsav's checkin=start, checkout=end+1 convention;
+    //  - new location moved OFF RESEARCH_CENTRE → deactivate the stale block.
+    // Mirrors createUtsav's `(location || RESEARCH_CENTRE) === RESEARCH_CENTRE`.
+    const existingBlock = await BlockDates.findOne({
+      where: {
+        comments: oldName,
+        checkin: oldStart,
+        checkout: oldCheckout
+      },
+      transaction: t
+    });
+
+    const effectiveLocation = location || oldLocation || RESEARCH_CENTRE;
+    if (effectiveLocation === RESEARCH_CENTRE) {
+      const newCheckout = utsavBlockCheckout(end_date);
+      if (existingBlock) {
+        await existingBlock.update(
+          {
+            checkin: start_date,
+            checkout: newCheckout,
+            comments: name,
+            status: STATUS_ACTIVE,
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      } else {
+        await BlockDates.create(
+          {
+            checkin: start_date,
+            checkout: newCheckout,
+            comments: name,
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      }
+    } else if (existingBlock) {
+      await existingBlock.update(
+        { status: STATUS_INACTIVE, updatedBy: req.user.username },
+        { transaction: t }
+      );
+    }
 
     await t.commit();
     req.log.info('update_utsav_success', { utsavId, newAvailableSeats });

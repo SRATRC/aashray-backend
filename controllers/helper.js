@@ -38,20 +38,64 @@ import sendMail from '../utils/sendMail.js';
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { sendUnifiedWhatsApp } from '../helpers/whatsapp.helper.js';
 
+// Normalize the inconsistent block_dates.checkout (utsav auto-blocks store end+1
+// = exclusive departure; manual same-day blocks store checkout == checkin) into a
+// block's true night span. Single owner for the C1/I1 invariant, shared by
+// getBlockedDates, formatBlockedPeriod, and GetBlockedDatesInRange.
+//   effectiveCheckout = exclusive day AFTER the last blocked night
+//   lastNight         = the last blocked night (inclusive)
+export function blockNightBounds(checkin, checkout) {
+  const checkinM = moment(checkin);
+  const effectiveCheckout = moment(checkout).isAfter(checkinM)
+    ? moment(checkout)
+    : checkinM.clone().add(1, 'day');
+  return { effectiveCheckout, lastNight: effectiveCheckout.clone().subtract(1, 'day') };
+}
+
 export async function getBlockedDates(checkin_date, checkout_date) {
-  const blockedDates = await BlockDates.findAll({
+  // Half-open overlap: a block [checkin, checkout) conflicts with a stay
+  // [checkin_date, checkout_date) when `checkin < checkout_date` AND
+  // `checkout > checkin_date`. But block_dates.checkout is INCONSISTENT — utsav
+  // auto-blocks store end+1 (exclusive departure) while a MANUAL same-day block
+  // stores checkout == checkin (zero-length). For a zero-length block the raw
+  // `checkout > checkin_date` test wrongly excludes a booking that STARTS on the
+  // blocked day (block 15th/15th vs stay 15th→16th: `15th > 15th` is false), so
+  // the block was never returned and the booking slipped through (C1).
+  //
+  // Fix: normalize a zero-length block to one night
+  // (`effectiveCheckout = checkout > checkin ? checkout : checkin + 1 day`, the
+  // same derivation used by formatBlockedPeriod / GetBlockedDatesInRange) before
+  // the checkout side of the overlap test. Multi-day and utsav-auto (end+1)
+  // blocks already have checkout > checkin, so effectiveCheckout == checkout —
+  // they are unaffected. The `checkin < checkout_date` side stays in SQL; the
+  // `checkout >= checkin_date` bound is a safe superset that keeps the row set
+  // small (never drops a block whose effectiveCheckout > checkin_date).
+  // The QUERY range can ALSO be zero-length: a day visit stores
+  // checkin_date === checkout_date. The raw `checkin < checkout_date` then
+  // becomes `checkin < checkin_date` and excludes a same-day block on that very
+  // day (day visit onto the 15th vs block 15th → nothing matches, I1). Normalize
+  // the query's checkout the same way (a day visit occupies the night of its
+  // date) so the block is found. Normal/multi-night queries are unaffected.
+  const effectiveCheckoutDate = blockNightBounds(checkin_date, checkout_date)
+    .effectiveCheckout.format('YYYY-MM-DD');
+
+  const candidates = await BlockDates.findAll({
     where: {
       status: STATUS_ACTIVE,
       checkin: {
-        [Sequelize.Op.lt]: checkout_date
+        [Sequelize.Op.lt]: effectiveCheckoutDate
       },
       checkout: {
-        [Sequelize.Op.gt]: checkin_date
+        [Sequelize.Op.gte]: checkin_date
       }
     }
   });
 
-  return blockedDates;
+  return candidates.filter((block) =>
+    blockNightBounds(block.checkin, block.checkout).effectiveCheckout.isAfter(
+      moment(checkin_date)
+    )
+  );
 }
 
 export async function checkFlatAlreadyBooked(checkin, checkout, cardnos) {
@@ -820,15 +864,25 @@ export function isDateBlocked(blockedDate, startDate, endDate, boundaryAllowed) 
   );
 }
 
+// Format a block's blocked-NIGHT span for display. block_dates checkout is
+// inconsistent (utsav auto-blocks store end+1 = exclusive departure; manual
+// same-day blocks store checkout == checkin), so derive the last blocked night
+// and collapse a single night to one date ("15th August, 2026") instead of the
+// redundant "15th August, 2026 to 15th August, 2026".
+export function formatBlockedPeriod(block) {
+  const checkin = moment(block.checkin);
+  const { lastNight } = blockNightBounds(block.checkin, block.checkout);
+  return checkin.isSame(lastNight, 'day')
+    ? checkin.format('Do MMMM, YYYY')
+    : `${checkin.format('Do MMMM, YYYY')} to ${lastNight.format('Do MMMM, YYYY')}`;
+}
+
 export function validateBlockedDates(blockedDates, dateRanges) {
   const conflictingBlocks = [];
   for (const range of dateRanges) {
     for (const blockedDate of blockedDates) {
       if (isDateBlocked(blockedDate, range.start, range.end, range.overlappingWithUtsav)) {
-        conflictingBlocks.push(
-          `${moment(blockedDate.checkin).format('Do MMMM, YYYY')} to ${moment(
-            blockedDate.checkout).format('Do MMMM, YYYY')}`
-        );
+        conflictingBlocks.push(formatBlockedPeriod(blockedDate));
       }
     }
   }

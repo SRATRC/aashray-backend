@@ -1060,6 +1060,12 @@ export async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForU
       const bookingStatus = rawStatus.trim().toLowerCase();
       const isPaymentPending = bookingStatus === "payment pending" || bookingStatus === "pending" || (bookingStatus.includes("payment") && !bookingStatus.includes("checkin"));
 
+      // Phase 1: no correct flat-waiting template yet — skip waiting flats to
+      // avoid sending the wrong "confirmed" message.
+      if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+        continue;
+      }
+
       const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
       const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
 

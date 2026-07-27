@@ -514,9 +514,21 @@ export function splitDateRanges(
     });
   }
 
-  if (new Date(bookingEnd) > new Date(utsavEnd)) {
+  // Post-festival segment. The utsav's auto-block covers nights
+  // start_date..end_date INCLUSIVE (block checkout = end_date + 1, exclusive
+  // departure). Starting the post segment at utsavEnd (= end_date, itself a
+  // blocked festival night) made the utsav's OWN block flag this segment as
+  // isBlocked, wrongly rejecting an attending member extending past the festival
+  // (I3). The post-festival stay actually begins the night AFTER end_date, so
+  // start it at utsavEnd + 1 (departure day is exclusive) and only add it when a
+  // real night exists beyond that day. overlappingWithUtsav stays true so the
+  // boundary-night behavior (minNights = 1 / UTSAV_BOUNDARY) is preserved: the
+  // first genuine post-festival night is still waitlisted for review, and a
+  // block whose checkout touches postStart is allowed at the boundary.
+  const postStart = moment(utsavEnd).add(1, 'day').format('YYYY-MM-DD');
+  if (new Date(bookingEnd) > new Date(postStart)) {
     ranges.push({
-      start: utsavEnd,
+      start: postStart,
       end: bookingEnd,
       overlappingWithUtsav: true
     });
@@ -575,47 +587,54 @@ export async function getDateRangesDuringUtsav(
   for (const mumukshu of mumukshus) {
     const isDayVisit = startDate === endDate;
 
-    if (isDayVisit) {
-      dateRangesByMumukshu[mumukshu] = [
-        {
-          start: startDate,
-          end: endDate,
-          overlappingWithUtsav: false
-        }
-      ];
-      continue;
-    }
-
-    let utsavBooking = inProgressUtsavOverlapping
-      ? utsav
-      : existingUtsavBookings[mumukshu]?.UtsavDb;
-
-    if (!utsavBooking) {
-      utsavBooking = await findOverlappingUtsav(startDate, endDate);
-    }
-
     const dateRanges = [];
-    if (utsavBooking) {
-      dateRanges.push(
-        ...splitDateRanges(
-          utsavBooking.start_date,
-          utsavBooking.end_date,
-          startDate,
-          endDate
-        )
-      );
-    } else {
-      // In case, utsav booking is not found for this mumukshu, check if there is any
-      // utsav starts on checkout or ends on checkin date
-      const utsavOnBoundary = await findUtsavOnBoundaryDates(
-        startDate,
-        endDate
-      );
+
+    if (isDayVisit) {
+      // A day visit is a single whole range. It must STILL flow through the
+      // shared isBlocked-flagging loop below — the previous `continue` returned
+      // before it, leaving isBlocked === undefined, so a day visit landing on a
+      // blocked day was neither rejected nor counted (I1). It is never split.
       dateRanges.push({
         start: startDate,
         end: endDate,
-        overlappingWithUtsav: utsavOnBoundary ? true : false
+        overlappingWithUtsav: false
       });
+    } else {
+      // Gate the utsav split on ACTUAL attendance: only split the stay around a
+      // utsav the member is truly attending — either an in-flow utsav being booked
+      // in this same request (`inProgressUtsavOverlapping`) or an existing
+      // (non-cancelled) utsav booking (`getUtsavBookingsByCardno`). The previous
+      // `findOverlappingUtsav` fallback split the stay for NON-attendees too,
+      // silently excluding the festival days from a stay the member never signed up
+      // for. Per the locked "blocked = unavailable" rule, a non-attended overlapping
+      // utsav's dates are treated as a plain centre block: the range stays WHOLE and
+      // is rejected downstream via `isBlocked` — never auto-split.
+      let utsavBooking = inProgressUtsavOverlapping
+        ? utsav
+        : existingUtsavBookings[mumukshu]?.UtsavDb;
+
+      if (utsavBooking) {
+        dateRanges.push(
+          ...splitDateRanges(
+            utsavBooking.start_date,
+            utsavBooking.end_date,
+            startDate,
+            endDate
+          )
+        );
+      } else {
+        // In case, utsav booking is not found for this mumukshu, check if there is any
+        // utsav starts on checkout or ends on checkin date
+        const utsavOnBoundary = await findUtsavOnBoundaryDates(
+          startDate,
+          endDate
+        );
+        dateRanges.push({
+          start: startDate,
+          end: endDate,
+          overlappingWithUtsav: utsavOnBoundary ? true : false
+        });
+      }
     }
 
     // flag blockedDates so they can be booked in waiting list status
