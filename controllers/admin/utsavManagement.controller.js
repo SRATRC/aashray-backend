@@ -1221,8 +1221,8 @@ export const utsavCheckin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { cardno, utsavid } = req.body;
-  req.log.info('utsav_checkin_start', { cardno, utsavid });
+  const { cardno, utsavid, scannedAt } = req.body;
+  req.log.info('utsav_checkin_start', { cardno, utsavid, scannedAt });
 
   const booking = await UtsavBooking.findOne({
     where: {
@@ -1261,7 +1261,12 @@ export const utsavCheckin = async (req, res) => {
 
   const previousStatus = booking.status;
 
-  await booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t });
+  const updateFields = { status: ROOM_STATUS_CHECKEDIN };
+  if (scannedAt) {
+    updateFields.updatedAt = new Date(scannedAt);
+  }
+
+  await booking.update(updateFields, { transaction: t });
 
   await t.commit();
 
@@ -1659,7 +1664,9 @@ export const issuePlate = async (req, res) => {
   const { message, issuedto } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
-    t
+    t,
+    req.body.date,
+    req.body.scannedAt
   );
 
   await t.commit();

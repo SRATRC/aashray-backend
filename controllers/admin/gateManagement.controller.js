@@ -170,7 +170,8 @@ export const gateEntry = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { cardno } = req.body;
+  const { cardno, scannedAt } = req.body;
+  const createdAt = scannedAt ? new Date(scannedAt) : undefined;
 
   const user = await CardDb.findOne({
     where: { cardno }
@@ -190,7 +191,8 @@ export const gateEntry = async (req, res) => {
     {
       cardno,
       status: STATUS_ONPREM,
-      updatedBy: req.user.username
+      updatedBy: req.user.username,
+      ...(createdAt && { createdAt })
     },
     { transaction: t }
   );
@@ -239,20 +241,29 @@ export const gateExit = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  const { cardno, scannedAt } = req.body;
+  const createdAt = scannedAt ? new Date(scannedAt) : undefined;
+
   const user = await CardDb.findOne({
-    where: { cardno: req.body.cardno }
+    where: { cardno }
   });
 
-  user.update(
-    { status: STATUS_OFFPREM, updatedBy: req.user.username },
-    { transaction: t }
-  );
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  if (user.status == STATUS_ONPREM)
+    await user.update(
+      { status: STATUS_OFFPREM, updatedBy: req.user.username },
+      { transaction: t }
+    );
 
   await GateRecord.create(
     {
-      cardno: req.body.cardno,
+      cardno,
       status: STATUS_OFFPREM,
-      updatedBy: req.user.username
+      updatedBy: req.user.username,
+      ...(createdAt && { createdAt })
     },
     { transaction: t }
   );
