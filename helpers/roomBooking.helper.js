@@ -17,7 +17,6 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  EXEMPT_RES_STATUSES,
   ERR_BLOCKED_DATES
 } from '../config/constants.js';
 import {
@@ -735,21 +734,6 @@ export function roomCharge(roomtype) {
   return roomtype == 'nac' ? NAC_ROOM_PRICE : AC_ROOM_PRICE;
 }
 
-// "Blocked = unavailable" for flats: MUMUKSHU + GUEST cannot book a flat on a centre-blocked
-// night (PR + SEVA KUTIR bypass). Throws via validateBlockedDates if any night is blocked.
-export async function rejectFlatIfBlocked(flatCardDb, checkin, checkout) {
-  const flatBlockApplies = flatCardDb.some(
-    (c) => !EXEMPT_RES_STATUSES.has(c.res_status)
-  );
-  if (!flatBlockApplies) return;
-  const flatBlockedDates = await getBlockedDates(checkin, checkout);
-  if (flatBlockedDates.length > 0) {
-    validateBlockedDates(flatBlockedDates, [
-      { start: checkin, end: checkout, overlappingWithUtsav: false }
-    ]);
-  }
-}
-
 export async function bookFlatForMumukshus(
   startDay,
   endDay,
@@ -780,7 +764,8 @@ export async function bookFlatForMumukshus(
   validateDate(startDay, endDay);
   const flatCardDb = await validateCards(mumukshus);
 
-  await rejectFlatIfBlocked(flatCardDb, startDay, endDay);
+  // Flats bypass the Research Centre block: a flat owner may book their flat for
+  // people even when RC is blocked. The 9-night/30-day cap below still applies.
 
   if (await checkFlatAlreadyBooked(startDay, endDay, mumukshus)) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
@@ -1150,7 +1135,8 @@ export async function checkFlatAvailabilityForMumukshus(
   validateDate(checkin_date, checkout_date);
   const flatCardDb = await validateCards(mumukshus);
 
-  await rejectFlatIfBlocked(flatCardDb, checkin_date, checkout_date);
+  // Flats bypass the Research Centre block: a flat owner may book their flat for
+  // people even when RC is blocked. The 9-night/30-day cap below still applies.
 
   if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
