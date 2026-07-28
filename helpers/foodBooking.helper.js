@@ -643,6 +643,9 @@ export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t)
 
 export async function issueFoodPlate(cardno, meal, t, providedDate = null, scannedAt = null) {
   // ✅ Use scannedAt timestamp if provided, fallback to providedDate or current IST date
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
   const referenceTime = scannedAt ? moment(scannedAt).tz('Asia/Kolkata') : moment().tz('Asia/Kolkata');
   const targetDate = providedDate
     ? moment.tz(providedDate, 'Asia/Kolkata').format('YYYY-MM-DD')

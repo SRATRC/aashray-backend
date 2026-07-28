@@ -1263,6 +1263,9 @@ export const utsavCheckin = async (req, res) => {
 
   const updateFields = { status: ROOM_STATUS_CHECKEDIN };
   if (scannedAt) {
+    if (!moment(scannedAt).isValid()) {
+      throw new ApiError(400, 'Invalid scannedAt timestamp');
+    }
     updateFields.updatedAt = new Date(scannedAt);
   }
 

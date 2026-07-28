@@ -919,6 +919,9 @@ export const markAdhyayanAttendance = async (req, res) => {
   });
 
   const scannedAt = req.body?.scannedAt;
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
   const createdAt = scannedAt ? new Date(scannedAt) : undefined;
 
   await ShibirAttendanceRecord.upsert(

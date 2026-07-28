@@ -171,6 +171,9 @@ export const gateEntry = async (req, res) => {
   req.transaction = t;
 
   const { cardno, scannedAt } = req.body;
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
   const createdAt = scannedAt ? new Date(scannedAt) : undefined;
 
   const user = await CardDb.findOne({
@@ -242,6 +245,9 @@ export const gateExit = async (req, res) => {
   req.transaction = t;
 
   const { cardno, scannedAt } = req.body;
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
   const createdAt = scannedAt ? new Date(scannedAt) : undefined;
 
   const user = await CardDb.findOne({
