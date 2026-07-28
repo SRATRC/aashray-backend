@@ -641,17 +641,21 @@ export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t)
 
 
 
-export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
-  // ✅ Use provided date or fallback to current date in IST
+export async function issueFoodPlate(cardno, meal, t, providedDate = null, scannedAt = null) {
+  // ✅ Use scannedAt timestamp if provided, fallback to providedDate or current IST date
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
+  const referenceTime = scannedAt ? moment(scannedAt).tz('Asia/Kolkata') : moment().tz('Asia/Kolkata');
   const targetDate = providedDate
     ? moment.tz(providedDate, 'Asia/Kolkata').format('YYYY-MM-DD')
-    : moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+    : referenceTime.format('YYYY-MM-DD');
 
-  const currentTime = moment().tz('Asia/Kolkata');
+  const currentTime = referenceTime;
   const mealTimes = {
-    breakfast: moment().tz('Asia/Kolkata').hour(10).minute(0).second(0), // Ends at 10:00 AM IST
-    lunch: moment().tz('Asia/Kolkata').hour(14).minute(0).second(0),     // Ends at 2:00 PM IST
-    dinner: moment().tz('Asia/Kolkata').hour(19).minute(0).second(0)     // Ends at 7:00 PM IST
+    breakfast: referenceTime.clone().hour(10).minute(0).second(0), // Ends at 10:00 AM IST
+    lunch: referenceTime.clone().hour(14).minute(0).second(0),     // Ends at 2:00 PM IST
+    dinner: referenceTime.clone().hour(19).minute(0).second(0)     // Ends at 7:00 PM IST
   };
 
   // ✅ Find booking for the TARGET DATE (not always today)

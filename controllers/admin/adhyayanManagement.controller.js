@@ -918,6 +918,12 @@ export const markAdhyayanAttendance = async (req, res) => {
     transaction: t
   });
 
+  const scannedAt = req.body?.scannedAt;
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
+  const createdAt = scannedAt ? new Date(scannedAt) : undefined;
+
   await ShibirAttendanceRecord.upsert(
     {
       shibir_id,
@@ -925,7 +931,8 @@ export const markAdhyayanAttendance = async (req, res) => {
       cardno,
       session_number: sessionNo,
       attended: true,
-      updatedBy: req.user.cardno || req.user.username
+      updatedBy: req.user.cardno || req.user.username,
+      ...(createdAt && { createdAt })
     },
     { transaction: t }
   );

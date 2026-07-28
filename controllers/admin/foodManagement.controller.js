@@ -41,7 +41,9 @@ export const issuePlate = async (req, res) => {
   const { message, issuedto } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
-    t
+    t,
+    req.body.date,
+    req.body.scannedAt
   );
 
   await t.commit();
