@@ -23,6 +23,7 @@ import {
   checkFlatAlreadyBooked,
   checkRoomBookingProgress,
   checkSpecialAllowance,
+  checkUtsavBookingAllowance,
   validateDate
 } from '../controllers/helper.js';
 import {
@@ -345,6 +346,13 @@ export async function validateFood(
       (await checkRoomAlreadyBooked(start_date, end_date, card.cardno)) ||
       (await checkFlatAlreadyBooked(start_date, end_date, card.cardno)) ||
       (await checkSpecialAllowance(
+        start_date,
+        end_date,
+        primary_booking,
+        addons,
+        card.cardno
+      )) ||
+      (await checkUtsavBookingAllowance(
         start_date,
         end_date,
         primary_booking,

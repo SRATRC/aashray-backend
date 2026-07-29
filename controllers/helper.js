@@ -215,6 +215,72 @@ export async function checkSpecialAllowance(
   return false;
 }
 
+export async function checkUtsavBookingAllowance(
+  start_date,
+  end_date,
+  primary_booking,
+  addons,
+  cardno
+) {
+  // Check if a utsav booking is being made in the same session (in-progress)
+  const utsavRequests = [];
+  if (primary_booking && primary_booking.booking_type === TYPE_UTSAV) {
+    utsavRequests.push(primary_booking);
+  }
+  if (addons && addons.length > 0) {
+    utsavRequests.push(
+      ...addons.filter((addon) => addon.booking_type === TYPE_UTSAV)
+    );
+  }
+
+  if (utsavRequests.length > 0) {
+    const utsavIds = utsavRequests
+      .map((req) => req.details?.utsavid)
+      .filter(Boolean);
+
+    if (utsavIds.length > 0) {
+      const utsavs = await UtsavDb.findAll({
+        where: { id: utsavIds }
+      });
+
+      const startDate = new Date(start_date);
+      const endDate = new Date(end_date);
+
+      for (const utsav of utsavs) {
+        const utsavStart = new Date(utsav.start_date);
+        const utsavEnd = new Date(utsav.end_date);
+        if (startDate >= utsavStart && endDate <= utsavEnd) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // Check if the user already has a confirmed utsav booking covering the food dates
+  const utsavBookings = await UtsavBooking.findAll({
+    include: [
+      {
+        model: UtsavDb,
+        as: 'UtsavDb',
+        where: {
+          start_date: { [Sequelize.Op.lte]: end_date },
+          end_date: { [Sequelize.Op.gte]: start_date }
+        }
+      }
+    ],
+    where: {
+      cardno: cardno,
+      status: { [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] }
+    }
+  });
+
+  if (utsavBookings && utsavBookings.length > 0) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function checkRoomBookingProgress(
   start_date,
   end_date,
