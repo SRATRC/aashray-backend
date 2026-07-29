@@ -270,7 +270,7 @@ export async function checkUtsavBookingAllowance(
     ],
     where: {
       cardno: cardno,
-      status: { [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] }
+      status: STATUS_CONFIRMED
     }
   });
 
