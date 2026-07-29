@@ -806,7 +806,7 @@ export async function bookFlatForMumukshus(
   }
 
   var order = null;
-  if (createOrder && user.country == 'India' && amount > 0) {
+  if (createOrder && amount > 0) {
     order = await generateOrderId(amount);
     await updateRazorpayTransactions(bookingIds, [], order.id, t);
   } else {
