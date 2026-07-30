@@ -1223,7 +1223,7 @@ export async function sendWifiRequestWhatsApp(cardno, username, status, code = n
       rejected: 'per_wf_code_req_rej',
       reset: 'per_wf_code_req_res',
       pending: 'per_wf_code_req_pend',
-      approved: 'per_wf_code_req_cnf_ad_m'
+      approved: 'per_wf_code_req_cnf_ad_m_wtl'
     };
 
     const templateName = templateMap[status];
@@ -1242,7 +1242,16 @@ export async function sendWifiRequestWhatsApp(cardno, username, status, code = n
       }
     ];
 
-
+    // Append dynamic store-link buttons for the approved template
+    if (status === 'approved') {
+      const isPR = user.res_status === 'PR';
+      const androidSuffix = isPR ? 'wifiap2' : 'wifiat2';
+      const iosSuffix = isPR ? 'wifiip2' : 'wifiit2';
+      components.push(
+        { type: "button", sub_type: "url", index: 0, parameters: [{ type: "text", text: androidSuffix }] },
+        { type: "button", sub_type: "url", index: 1, parameters: [{ type: "text", text: iosSuffix }] }
+      );
+    }
 
     const sendResult = await sendWhatsAppMessage(phone, templateName, components);
     if (!sendResult.ok) {
