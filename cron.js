@@ -358,11 +358,130 @@ const wifiLowAlertJob = cron.schedule('*/30 * * * *', async () => {
   }
 });
 
+const TICKET_AUTO_CLOSE_GRACE_DAYS = 7;
+
+// A ticket an admin marked "resolved" auto-closes after sitting untouched for
+// TICKET_AUTO_CLOSE_GRACE_DAYS with no further activity — matching how
+// Zendesk (default 4 days) and Freshdesk (default 48h) separate the agent's
+// "solved" action from the final "closed" state. A user reply to a resolved
+// ticket moves it back to "in progress" (see ticket.controller.js), which
+// resets updatedAt and pulls it out of this window; an admin follow-up
+// message on an already-resolved ticket also refreshes updatedAt, restarting
+// the countdown. Runs once daily — a 7-day window doesn't need finer polling.
+const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
+  logger.info('ticketAutoCloseJob cron job started.');
+  try {
+    const { Ticket } = await import('./models/associations.js');
+    const { STATUS_RESOLVED, STATUS_CLOSED } = await import('./config/constants.js');
+    const { notifyCardno } = await import('./helpers/notification.helper.js');
+
+    const cutoff = moment().utc().subtract(TICKET_AUTO_CLOSE_GRACE_DAYS, 'days').toDate();
+
+    const staleTickets = await Ticket.findAll({
+      where: { status: STATUS_RESOLVED, updatedAt: { [Sequelize.Op.lt]: cutoff } }
+    });
+
+    if (staleTickets.length > 0) {
+      // Single bulk UPDATE instead of one query per ticket — the per-row
+      // write here has no row-specific logic that could fail differently per
+      // ticket, so there's nothing gained from doing it one at a time.
+      await Ticket.update(
+        { status: STATUS_CLOSED, updatedBy: 'system:auto-close' },
+        { where: { id: { [Sequelize.Op.in]: staleTickets.map((ticket) => ticket.id) } } }
+      );
+
+      // notifyCardno never throws (it catches internally and resolves with
+      // {success, reason}), so Promise.allSettled here is purely to run the
+      // notifications concurrently rather than one after another — a
+      // fulfilled-but-unsuccessful result is inspected below, not a rejection.
+      const notifyResults = await Promise.allSettled(
+        staleTickets.map((ticket) =>
+          notifyCardno(ticket.issued_by, {
+            title: 'Support ticket closed',
+            body: `Your ${ticket.service} ticket was automatically closed after ${TICKET_AUTO_CLOSE_GRACE_DAYS} days of inactivity`,
+            screen: `/support/${ticket.id}`,
+            data: { ticketId: ticket.id }
+          })
+        )
+      );
+      const failedNotifications = notifyResults.filter(
+        (r) => r.status === 'rejected' || r.value?.success === false
+      ).length;
+      if (failedNotifications > 0) {
+        logger.warn(
+          `ticketAutoCloseJob: ${failedNotifications} of ${staleTickets.length} notifications failed (best-effort, non-fatal).`
+        );
+      }
+    }
+
+    logger.info(`ticketAutoCloseJob finished: closed ${staleTickets.length} ticket(s).`);
+  } catch (error) {
+    logger.error(`ticketAutoCloseJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+// Ticket media is auto-deleted ATTACHMENT_RETENTION_DAYS after upload. This
+// daily job (mirrors ticketAutoCloseJob) selects non-expired attachments past
+// the retention window and batch-deletes their S3 objects via deleteObjects
+// (which chunks internally to S3's 1000-keys/request limit and never throws —
+// returns { deleted, errors } — so one object's failure never aborts the rest),
+// then tombstones every selected row by setting expired_at — kept so the UI can
+// explain the gap and we never re-attempt. Rows are tombstoned even if their S3
+// delete failed; the bucket lifecycle rule is the backstop that reclaims any
+// object that slipped through.
+const ticketAttachmentCleanupJob = cron.schedule('30 2 * * *', async () => {
+  logger.info('ticketAttachmentCleanupJob cron job started.');
+  try {
+    const { TicketAttachment } = await import('./models/associations.js');
+    const { ATTACHMENT_RETENTION_DAYS } = await import('./config/constants.js');
+    const { deleteObjects } = await import('./helpers/ticketAttachment.helper.js');
+
+    const cutoff = moment().utc().subtract(ATTACHMENT_RETENTION_DAYS, 'days').toDate();
+
+    const staleAttachments = await TicketAttachment.findAll({
+      where: { expired_at: null, uploaded_at: { [Sequelize.Op.lt]: cutoff } }
+    });
+
+    if (staleAttachments.length > 0) {
+      const keys = staleAttachments.map((a) => a.s3_key);
+
+      const { deleted, errors } = await deleteObjects(keys);
+      if (errors.length > 0) {
+        logger.warn(
+          `ticketAttachmentCleanupJob: ${errors.length} S3 delete failure(s) (best-effort; lifecycle rule is the backstop).`
+        );
+      }
+
+      // Tombstone every selected row regardless of per-object S3 outcome.
+      await TicketAttachment.update(
+        { expired_at: new Date() },
+        { where: { id: { [Sequelize.Op.in]: staleAttachments.map((a) => a.id) } } }
+      );
+
+      logger.info(
+        `ticketAttachmentCleanupJob finished: deleted ${deleted} S3 object(s), tombstoned ${staleAttachments.length} attachment(s).`
+      );
+    } else {
+      logger.info('ticketAttachmentCleanupJob finished: no attachments to expire.');
+    }
+  } catch (error) {
+    logger.error(`ticketAttachmentCleanupJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
 job.start();
 mealsCount9PMJob.start();
 mealsCount10PMJob.start();
 mealsCount11PMJob.start();
 wifiLowAlertJob.start();
+ticketAutoCloseJob.start();
+ticketAttachmentCleanupJob.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
@@ -374,6 +493,8 @@ const gracefulShutdown = async () => {
   mealsCount10PMJob.stop();
   mealsCount11PMJob.stop();
   wifiLowAlertJob.stop();
+  ticketAutoCloseJob.stop();
+  ticketAttachmentCleanupJob.stop();
 
   // Wait for the current task to finish if it's running
   const waitInterval = setInterval(() => {

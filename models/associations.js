@@ -43,6 +43,9 @@ import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
+import Ticket from './ticket.model.js';
+import TicketMessage from './ticket_message.model.js';
+import TicketAttachment from './ticket_attachment.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -194,6 +197,12 @@ CardDb.hasMany(SupportTickets, {
 });
 CardDb.hasMany(AdhyayanFeedback, {
   foreignKey: 'cardno',
+  sourceKey: 'cardno',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+CardDb.hasMany(Ticket, {
+  foreignKey: 'issued_by',
   sourceKey: 'cardno',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE'
@@ -565,6 +574,47 @@ SupportTickets.belongsTo(CardDb, {
   targetKey: 'cardno'
 });
 
+// Ticket
+Ticket.belongsTo(CardDb, {
+  foreignKey: 'issued_by',
+  targetKey: 'cardno'
+});
+Ticket.hasMany(TicketMessage, {
+  as: 'messages',
+  foreignKey: 'ticket_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+TicketMessage.belongsTo(Ticket, {
+  foreignKey: 'ticket_id',
+  targetKey: 'id'
+});
+
+// Ticket media attachments
+Ticket.hasMany(TicketAttachment, {
+  as: 'attachments',
+  foreignKey: 'ticket_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+TicketAttachment.belongsTo(Ticket, {
+  foreignKey: 'ticket_id',
+  targetKey: 'id'
+});
+TicketMessage.hasMany(TicketAttachment, {
+  as: 'attachments',
+  foreignKey: 'message_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+TicketAttachment.belongsTo(TicketMessage, {
+  foreignKey: 'message_id',
+  targetKey: 'id'
+});
+
 // Card → Shibir Attendance
 CardDb.hasMany(ShibirAttendanceDb, {
   foreignKey: 'cardno',
@@ -731,5 +781,8 @@ export {
   ShibirSession,
   ShibirAttendanceRecord,
   UtsavFeedback,
-  UtsavFeedbackAnswer
+  UtsavFeedbackAnswer,
+  Ticket,
+  TicketMessage,
+  TicketAttachment
 };

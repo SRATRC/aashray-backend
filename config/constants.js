@@ -42,6 +42,7 @@ export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
 export const STATUS_DELETED = 'deleted';
 export const STATUS_INPROGRESS = 'in progress';
+export const STATUS_RESOLVED = 'resolved';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
 export const STATUS_PROCEED_FOR_PAYMENT = 'proceed for payment';
@@ -105,6 +106,40 @@ export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
 export const ROLE_UTSAV_ADMIN_RAJ = 'utsavAdminRaj';
+
+// Which admin role(s) can see tickets filed against each service (department).
+// This map is the single source of truth for the ticket department taxonomy —
+// the keys are the human-readable labels AND the persisted `service` values.
+// The order below is the order rendered in the app dropdown and admin filter.
+// superAdmin always sees every service regardless of this map. An empty list
+// (`IT`) means the service is superAdmin-only. `officeAdmin` intentionally
+// covers both "Raj Sharan" and "Others" — a role mapping to multiple services
+// works because getAllowedServices iterates every entry.
+export const TICKET_SERVICE_ROLE_MAP = {
+  Electrical: [ROLE_ELECTRICAL_ADMIN],
+  Housekeeping: [ROLE_HOUSEKEEPING_ADMIN],
+  Maintenance: [ROLE_MAINTENANCE_ADMIN],
+  'Raj Prasad': [ROLE_FOOD_ADMIN],
+  'Raj Adhyayan': [ROLE_ADHYAYAN_ADMIN],
+  'Raj Sharan': [ROLE_OFFICE_ADMIN],
+  'Raj Pravas': [ROLE_TRAVEL_ADMIN],
+  'Raj Utsav': [ROLE_UTSAV_ADMIN],
+  WiFi: [ROLE_WIFI_ADMIN],
+  'Payment/Accounts': [ROLE_ACCOUNTS_ADMIN],
+  IT: [],
+  Others: [ROLE_OFFICE_ADMIN]
+};
+
+// TICKET MEDIA ATTACHMENTS
+// Limits enforced on presign (batch) and on attach (per-file HeadObject verify
+// + per-ticket video cap). Kept here so the app/admin clients and the backend
+// stay in sync against one source of truth.
+export const MAX_IMAGES_PER_BATCH = 5;
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per image (post client compression)
+export const MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50 MB per video
+export const MAX_VIDEO_SECONDS = 60; // max video duration
+export const MAX_VIDEOS_PER_TICKET = 2; // counted across all user, non-expired videos on a ticket
+export const ATTACHMENT_RETENTION_DAYS = 60; // media auto-deleted this many days after upload
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
