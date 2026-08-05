@@ -1,4 +1,4 @@
-import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments } from '../../models/associations.js';
+import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments, CustomFormOtpAllowlist } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import ShortLink from '../../models/short_link.model.js';
@@ -1074,14 +1074,15 @@ export const cloneForm = async (req, res) => {
  * Resolve card/mobile number to user details (publicly accessible).
  */
 export const resolveIdentity = async (req, res) => {
-    const { type, value } = req.query;
+    const { type, value, formId } = req.query;
     if (!type || !value) {
         throw new ApiError(400, 'type and value are required');
     }
 
     let card = null;
+    let cleanMob = null;
     if (type === 'mobno') {
-        const cleanMob = String(value).replace(/\D/g, '').slice(-10);
+        cleanMob = String(value).replace(/\D/g, '').slice(-10);
         if (cleanMob.length === 10) {
             const parsedMob = parseInt(cleanMob, 10);
             card = await CardDb.findOne({
@@ -1103,13 +1104,25 @@ export const resolveIdentity = async (req, res) => {
         });
     }
 
+    // If a formId is given and this number is on that form's OTP allowlist, surface
+    // the department it's the head of so the frontend can pre-fill the Department
+    // field before the user even goes through OTP verification.
+    let department = null;
+    if (formId && cleanMob) {
+        const allowed = await CustomFormOtpAllowlist.findOne({
+            where: { form_id: formId, mobno: cleanMob, status: 'active' }
+        });
+        department = allowed ? allowed.department : null;
+    }
+
     res.status(200).json({
         success: true,
         data: {
             cardno: card.cardno,
             name: card.issuedto,
             center: card.center,
-            email: card.email
+            email: card.email,
+            department
         }
     });
 };
