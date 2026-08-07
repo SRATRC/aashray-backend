@@ -66,6 +66,10 @@ const UtsavDb = sequelize.define(
     ending_meal: {
       type: DataTypes.JSON,
       allowNull: true
+    },
+    whatsapp_link: {
+      type: DataTypes.STRING,
+      allowNull: true
     }
   },
   {
