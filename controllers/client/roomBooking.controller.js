@@ -8,16 +8,25 @@ import {
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
   BOOKING_STATUS_PENDING,
-  HOLD_REASON_COPY
+  HOLD_REASON_COPY,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED
 } from '../../config/constants.js';
 import { sendUnifiedEmail, sendUnifiedEmailForBookedBy, getBlockedDates, formatBlockedPeriod, blockNightBounds } from '../helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
-import { RoomBooking, FlatBooking, CardDb, UtsavDb } from '../../models/associations.js';
+import {
+  RoomBooking,
+  FlatBooking,
+  CardDb,
+  UtsavDb,
+  UtsavBooking
+} from '../../models/associations.js';
 import { bookFlatForMumukshus } from '../../helpers/roomBooking.helper.js';
 import { checkRollingWindowLimit } from '../../helpers/rollingWindow.helper.js';
 import {
   getDateRangesDuringUtsav,
-  findOverlappingUtsav
+  findOverlappingUtsav,
+  ACTIVE_UTSAV_BOOKING_STATUSES
 } from '../../helpers/utsavBooking.helper.js';
 import {
   getOtherBookingUser,
@@ -523,13 +532,31 @@ export const CheckBlockedDates = async (req, res) => {
   });
 };
 
-// Phase-2 calendar prevention (T1d). Read-only, no lock: returns a per-date map
-// over [from, to] so the room date-picker can DISABLE non-utsav centre blocks
-// (member can never stay) and INFORMATIONALLY mark utsav days (still selectable —
-// an attendee legitimately books a range spanning the festival; the booking
-// engine splits pre/post or rejects a non-attendee). Booking-time reject (Phase 1)
-// stays the race/stale backstop.
-//   { data: { "YYYY-MM-DD": { type: "block" | "utsav", reason }, ... } }
+// Read-only, no lock: the per-date map the stay date-picker uses to answer the
+// ONLY question a calendar can answer — "can these dates be booked at all?".
+// It cannot answer availability, because a free bed depends on room type, floor
+// and gender, which the member picks after the dates.
+//
+// Every date it returns is a hard no or a shape change, never a waitlist. A
+// blocked date must never be offered as a waitlist: no cron promotes one, so it
+// would wait forever.
+//
+//   { data: { "YYYY-MM-DD": { type, kind, reason, utsavName? }, ... } }
+//
+// `kind` is the precise cause and is what current clients read:
+//   closed     - a non-utsav centre block. Nobody can stay.
+//   utsav_out  - an Utsav this card is NOT attending. The centre is closed to them.
+//   utsav_in   - an Utsav this card IS attending. Selectable: the stay splits
+//                pre/post and the festival nights drop out.
+//   own        - this card already holds a room or flat booking on that night.
+//
+// `type` is kept for older app builds that only understand 'block' | 'utsav'.
+// Mapping it so utsav_out and own arrive as 'block' also fixes those builds:
+// they previously left both selectable until the booking call rejected them.
+//
+// Without `cardno` the map still returns centre blocks, but it cannot resolve
+// attendance or own bookings, so every Utsav day is reported as utsav_out. That
+// is the safe direction: it over-blocks rather than promising a stay we reject.
 export const GetBlockedDatesInRange = async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) {
@@ -549,52 +576,159 @@ export const GetBlockedDatesInRange = async (req, res) => {
     throw new ApiError(400, 'Date range too large; max 92 days');
   }
 
+  const cardno = req.query.cardno || req.user?.cardno || null;
+
   // Active centre blocks overlapping the window (reuses the booking-path helper).
   const blockedDates = await getBlockedDates(from, to);
 
-  // Utsavs overlapping the window. Utsav days stay SELECTABLE — we only mark them
-  // informationally so the member sees "festival here"; never disabled.
   const utsavs = await UtsavDb.findAll({
     where: {
       start_date: { [Sequelize.Op.lte]: to },
       end_date: { [Sequelize.Op.gte]: from }
     },
-    attributes: ['name', 'start_date', 'end_date']
+    attributes: ['id', 'name', 'start_date', 'end_date']
   });
 
-  const dateMap = {};
-
-  // 1) Utsav days first — they take precedence over a plain block on the same day
-  //    so an attendee still sees the festival span as selectable.
-  for (const u of utsavs) {
-    const cursor = moment(u.start_date, 'YYYY-MM-DD');
-    const last = moment(u.end_date, 'YYYY-MM-DD');
-    for (; cursor.isSameOrBefore(last); cursor.add(1, 'days')) {
-      const key = cursor.format('YYYY-MM-DD');
-      if (key < from || key > to) continue;
-      dateMap[key] = { type: 'utsav', reason: u.name || 'Festival' };
+  // Which of those Utsavs this card actually holds a booking for. Attendance is
+  // what separates "the centre is closed to you" from "your stay will split".
+  // Reuses the same helper the booking path uses, so the calendar and the
+  // booking engine cannot disagree about attendance.
+  const attendedUtsavIds = new Set();
+  if (cardno && utsavs.length > 0) {
+    // Queried directly with explicit attributes rather than through
+    // getUtsavBookings, which eager-loads the whole UtsavDb row. That include
+    // selects every column the model declares, so a column that exists in the
+    // model but not yet in the database (a pending migration) turns this
+    // read-only lookup into a 500.
+    const held = await UtsavBooking.findAll({
+      attributes: ['utsavid'],
+      where: {
+        cardno: String(cardno),
+        utsavid: utsavs.map((u) => u.id),
+        status: { [Sequelize.Op.in]: ACTIVE_UTSAV_BOOKING_STATUSES }
+      }
+    });
+    for (const row of held) {
+      if (row.utsavid != null) attendedUtsavIds.add(String(row.utsavid));
     }
   }
 
-  // 2) Non-utsav block nights → DISABLE. A block {checkin, checkout} closes the
-  //    centre for nights checkin .. checkout-1 (checkout is the departure day),
-  //    matching the overlap test in getBlockedDates. Utsav days already claimed
-  //    above are left alone.
-  for (const b of blockedDates) {
-    // block_dates checkout is INCONSISTENT: utsav auto-blocks store end+1
-    // (exclusive departure day) while manual same-day blocks store checkout ==
-    // checkin (inclusive). So the last blocked night = checkout-1 only when
-    // checkout is after checkin; for a same-day/malformed block it's checkin
-    // itself. (Getting this wrong silently dropped same-day manual blocks.)
-    const checkinM = moment(b.checkin, 'YYYY-MM-DD');
-    const { lastNight } = blockNightBounds(b.checkin, b.checkout);
-    const cursor = checkinM.clone();
-    for (; cursor.isSameOrBefore(lastNight); cursor.add(1, 'days')) {
-      const key = cursor.format('YYYY-MM-DD');
-      if (key < from || key > to) continue;
-      if (dateMap[key]?.type === 'utsav') continue;
-      dateMap[key] = { type: 'block', reason: b.comments || 'Unavailable' };
+  const dateMap = {};
+  const setDay = (key, value) => {
+    if (key < from || key > to) return;
+    dateMap[key] = value;
+  };
+
+  const eachNight = (startDate, lastNight, fn) => {
+    const cursor = moment(startDate, 'YYYY-MM-DD');
+    const last = moment(lastNight, 'YYYY-MM-DD');
+    for (; cursor.isSameOrBefore(last); cursor.add(1, 'days')) {
+      fn(cursor.format('YYYY-MM-DD'));
     }
+  };
+
+  // 1) Utsav days. An attended Utsav stays selectable; a non-attended one closes
+  //    the centre for this card exactly like a plain block.
+  for (const u of utsavs) {
+    const attending = attendedUtsavIds.has(String(u.id));
+    const name = u.name || 'Utsav';
+    eachNight(u.start_date, u.end_date, (key) =>
+      setDay(
+        key,
+        attending
+          ? {
+              type: 'utsav',
+              kind: 'utsav_in',
+              utsavName: name,
+              reason: `${name} — you are attending. These nights are part of the Utsav, not of your stay.`
+            }
+          : {
+              type: 'block',
+              kind: 'utsav_out',
+              utsavName: name,
+              reason: `${name} — you are not attending, so the centre is closed to you on these dates.`
+            }
+      )
+    );
+  }
+
+  // 2) Non-utsav centre blocks. A block {checkin, checkout} closes the centre for
+  //    nights checkin .. checkout-1, matching the overlap test in getBlockedDates.
+  //    block_dates checkout is inconsistent: utsav auto-blocks store end+1
+  //    (exclusive departure day) while manual same-day blocks store checkout ==
+  //    checkin. blockNightBounds resolves both. An attended Utsav day is left
+  //    alone, because its own auto-block would otherwise close a span the
+  //    attendee is entitled to book across.
+  for (const b of blockedDates) {
+    const { lastNight } = blockNightBounds(b.checkin, b.checkout);
+    eachNight(b.checkin, lastNight, (key) => {
+      // An Utsav already explains itself better than "the centre is closed",
+      // whether or not the member attends. Utsavs auto-create a block row, so
+      // without this the same festival reports two different reasons across its
+      // own days.
+      const existing = dateMap[key]?.kind;
+      if (existing === 'utsav_in' || existing === 'utsav_out') return;
+      setDay(key, {
+        type: 'block',
+        kind: 'closed',
+        reason: b.comments
+          ? `The centre is closed on these dates: ${b.comments}`
+          : 'The centre is closed on these dates.'
+      });
+    });
+  }
+
+  // 3) Nights this card already holds. An overlapping booking is a hard no for
+  //    both rooms and flats, and it is the one blocked case the old map missed —
+  //    the endpoint accepted `cardno` and never used it, so a member could pick
+  //    dates they already held and only learn at submit.
+  if (cardno) {
+    const overlapWhere = {
+      cardno: String(cardno),
+      checkin: { [Sequelize.Op.lte]: to },
+      checkout: { [Sequelize.Op.gte]: from },
+      status: {
+        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
+      }
+    };
+
+    const [ownRooms, ownFlats] = await Promise.all([
+      RoomBooking.findAll({
+        attributes: ['checkin', 'checkout', 'nights'],
+        where: overlapWhere
+      }),
+      FlatBooking.findAll({
+        attributes: ['checkin', 'checkout'],
+        where: overlapWhere
+      })
+    ]);
+
+    const markOwn = (booking, label) => {
+      // checkout is the departure day, so the last night held is checkout-1. A
+      // day visit (nights === 0) holds the checkin day itself.
+      const isDayVisit = booking.nights === 0 || booking.checkout <= booking.checkin;
+      const lastNight = isDayVisit
+        ? booking.checkin
+        : moment(booking.checkout, 'YYYY-MM-DD')
+            .subtract(1, 'days')
+            .format('YYYY-MM-DD');
+      const span = isDayVisit
+        ? moment(booking.checkin).format('D MMM')
+        : `${moment(booking.checkin).format('D MMM')} to ${moment(
+            booking.checkout
+          ).format('D MMM')}`;
+      eachNight(booking.checkin, lastNight, (key) => {
+        if (dateMap[key]?.kind === 'closed' || dateMap[key]?.kind === 'utsav_out') return;
+        setDay(key, {
+          type: 'block',
+          kind: 'own',
+          reason: `You already have a ${label} booked from ${span}.`
+        });
+      });
+    };
+
+    for (const booking of ownRooms) markOwn(booking, 'stay');
+    for (const booking of ownFlats) markOwn(booking, 'flat stay');
   }
 
   return res.status(200).send({ data: dateMap });

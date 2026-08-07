@@ -51,7 +51,7 @@ const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 // 'admin cancelled' bookings are ignored. Previously this list omitted
 // checkedin / cash pending / cash completed, which let a member whose first
 // booking had advanced past confirmed book a second package for the same Utsav.
-const ACTIVE_UTSAV_BOOKING_STATUSES = [
+export const ACTIVE_UTSAV_BOOKING_STATUSES = [
   STATUS_PAYMENT_PENDING,
   STATUS_CONFIRMED,
   STATUS_WAITING,

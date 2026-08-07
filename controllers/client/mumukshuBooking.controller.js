@@ -606,7 +606,12 @@ async function checkRoomAvailability(data, user, utsav) {
     checkout_date,
     mumukshuGroup,
     user,
-    utsav
+    utsav,
+    null,
+    // preview: report "cannot be booked" as data on each row instead of throwing,
+    // so the client shows all three answers in one place. The write path still
+    // throws, so a blocked or overlapping stay can never be created.
+    true
   );
 
   return result;
@@ -671,7 +676,10 @@ async function checkFlatAvailability(data, user) {
     checkin_date,
     checkout_date,
     mumukshus,
-    user
+    user,
+    // preview: report an overlapping flat stay as data on the row instead of
+    // throwing. The write path still throws.
+    true
   );
   return result;
 }

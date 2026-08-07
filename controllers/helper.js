@@ -98,8 +98,12 @@ export async function getBlockedDates(checkin_date, checkout_date) {
   );
 }
 
-export async function checkFlatAlreadyBooked(checkin, checkout, cardnos) {
+// Flat bookings held by these cards that overlap [checkin, checkout), grouped by
+// cardno. The preview path needs WHICH card clashes and on WHAT dates so it can
+// name the clash per person. checkFlatAlreadyBooked keeps its boolean contract.
+export async function getOverlappingFlatBookings(checkin, checkout, cardnos) {
   const result = await FlatBooking.findAll({
+    attributes: ['cardno', 'checkin', 'checkout', 'status'],
     where: {
       [Sequelize.Op.or]: [
         {
@@ -132,7 +136,18 @@ export async function checkFlatAlreadyBooked(checkin, checkout, cardnos) {
     }
   });
 
-  return result.length > 0;
+  const byCard = {};
+  for (const booking of result) {
+    const key = String(booking.cardno);
+    if (!byCard[key]) byCard[key] = [];
+    byCard[key].push(booking);
+  }
+  return byCard;
+}
+
+export async function checkFlatAlreadyBooked(checkin, checkout, cardnos) {
+  const byCard = await getOverlappingFlatBookings(checkin, checkout, cardnos);
+  return Object.keys(byCard).length > 0;
 }
 
 export async function calculateNights(checkin, checkout) {

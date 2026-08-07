@@ -17,7 +17,8 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  ERR_BLOCKED_DATES
+  ERR_BLOCKED_DATES,
+  HOLD_REASON_COPY
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -38,9 +39,11 @@ import {
 import {
   calculateNights,
   checkFlatAlreadyBooked,
+  getOverlappingFlatBookings,
   validateDate,
   getBlockedDates,
-  validateBlockedDates
+  validateBlockedDates,
+  formatBlockedPeriod
 } from '../controllers/helper.js';
 import {
   findUtsavOnBoundaryDates,
@@ -59,12 +62,17 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import logger from '../config/logger.js';
 
-export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
+// Room bookings held by these cards that overlap [checkin, checkout), grouped by
+// cardno. The preview path needs WHICH card clashes and on WHAT dates so it can
+// name the clash per person, instead of failing the whole request with one
+// message. checkRoomAlreadyBooked keeps its boolean contract on top of this.
+export async function getOverlappingRoomBookings(checkin, checkout, cardnos) {
   const queryCheckout = checkin === checkout
     ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
 
   const result = await RoomBooking.findAll({
+    attributes: ['cardno', 'checkin', 'checkout', 'nights', 'status'],
     where: {
       [Sequelize.Op.or]: [
         {
@@ -96,7 +104,18 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
     }
   });
 
-  return result.length > 0;
+  const byCard = {};
+  for (const booking of result) {
+    const key = String(booking.cardno);
+    if (!byCard[key]) byCard[key] = [];
+    byCard[key].push(booking);
+  }
+  return byCard;
+}
+
+export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
+  const byCard = await getOverlappingRoomBookings(checkin, checkout, cardnos);
+  return Object.keys(byCard).length > 0;
 }
 
 export async function bookDayVisit(
@@ -913,13 +932,31 @@ async function isMumukshuFlatOwner(cardno, flatno) {
   return flat ? true : false;
 }
 
+/**
+ * Prices and resolves a stay request without writing anything.
+ *
+ * `preview` changes only WHO reports a hard no, never what counts as one.
+ *  - preview === false (default, the booking write path): a blocked range or an
+ *    overlapping booking THROWS, so no booking row can ever be created for
+ *    dates the member may not have.
+ *  - preview === true (the /validate path): the same two cases come back as
+ *    rows flagged `isBlocked` / `isAlreadyBooked` with a member-facing
+ *    `unavailableReason`. The client then renders all three answers — cannot
+ *    book, waitlisted, confirmed — in one place, per person and per segment,
+ *    instead of showing a raw error string in a modal.
+ *
+ * Every waitlisted row also carries `holdReasonMessage`, the backend-owned
+ * sentence from HOLD_REASON_COPY. Clients display it directly, so adding a
+ * fifth hold reason needs no client release.
+ */
 export async function checkRoomAvailabilityForMumukshus(
   checkin_date,
   checkout_date,
   mumukshuGroup,
   user,
   utsav,
-  t = null
+  t = null,
+  preview = false
 ) {
   validateDate(checkin_date, checkout_date);
 
@@ -928,7 +965,12 @@ export async function checkRoomAvailabilityForMumukshus(
   );
   const cardDb = await validateCards(mumukshus);
 
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
+  const overlappingByCard = await getOverlappingRoomBookings(
+    checkin_date,
+    checkout_date,
+    mumukshus
+  );
+  if (Object.keys(overlappingByCard).length > 0 && !preview) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
@@ -941,12 +983,10 @@ export async function checkRoomAvailabilityForMumukshus(
 
   // "Blocked = unavailable": if any occupant's range hit a centre block (or a
   // non-attended overlapping utsav), REJECT here — before the cap lock — so the
-  // shared availability path throws. This is what makes /validate reject blocked
-  // dates on the add-on screen AND before checkout (and restores the pre-refactor
-  // behavior where getDateRangesDuringUtsav threw inline). getDateRangesDuringUtsav
-  // now only FLAGS isBlocked because the /stay/blocked-dates endpoint needs the
-  // flag WITHOUT throwing, so the hard-reject lives here. Attended-utsav pre/post
-  // split segments are never isBlocked, so a legit split still books.
+  // shared availability path throws. getDateRangesDuringUtsav only FLAGS
+  // isBlocked because the /stay/blocked-dates endpoint needs the flag WITHOUT
+  // throwing, so the hard-reject lives here. Attended-utsav pre/post split
+  // segments are never isBlocked, so a legit split still books.
   const blockedRanges = [];
   for (const mum of mumukshus) {
     for (const r of dateRangesByMumukshu[mum] || []) {
@@ -959,12 +999,21 @@ export async function checkRoomAvailabilityForMumukshus(
       }
     }
   }
+  // The preview keeps going and reports the block per range. Only the write path
+  // throws, which is what makes a blocked booking impossible to create.
+  let blockedReason = null;
   if (blockedRanges.length > 0) {
     const blockedDates = await getBlockedDates(checkin_date, checkout_date);
-    // Reuse validateBlockedDates so the message names the exact blocked period(s).
-    validateBlockedDates(blockedDates, blockedRanges);
-    // Safety net if the block rows changed mid-request.
-    throw new ApiError(400, ERR_BLOCKED_DATES);
+    if (!preview) {
+      // Reuse validateBlockedDates so the message names the exact blocked period(s).
+      validateBlockedDates(blockedDates, blockedRanges);
+      // Safety net if the block rows changed mid-request.
+      throw new ApiError(400, ERR_BLOCKED_DATES);
+    }
+    const periods = blockedDates.map((b) => formatBlockedPeriod(b)).join(', ');
+    blockedReason = periods
+      ? `The centre is closed on these dates (${periods}), so this stay cannot be booked.`
+      : 'The centre is closed on these dates, so this stay cannot be booked.';
   }
 
   // Create a temp user with cloned credits to track usage during this validation loop
@@ -1092,6 +1141,25 @@ export async function checkRoomAvailabilityForMumukshus(
           holdReason = HOLD_REASON.UTSAV_BOUNDARY;
         }
 
+        // A card that already holds an overlapping booking cannot take these
+        // dates at all. Reported per card so a group booking can say "Rakesh
+        // already has a stay" instead of failing for everyone.
+        const clashes = overlappingByCard[String(mumukshu)] || [];
+        const isAlreadyBooked = clashes.length > 0;
+        let unavailableReason = null;
+        if (range.isBlocked) {
+          unavailableReason = blockedReason;
+        } else if (isAlreadyBooked) {
+          const clash = clashes[0];
+          const span =
+            clash.nights === 0 || clash.checkout <= clash.checkin
+              ? moment(clash.checkin).format('D MMM')
+              : `${moment(clash.checkin).format('D MMM')} to ${moment(
+                  clash.checkout
+                ).format('D MMM')}`;
+          unavailableReason = `You already have a stay booked from ${span}. Cancel it first, or pick dates that do not overlap.`;
+        }
+
         roomDetails.push({
           mumukshu,
           status,
@@ -1099,12 +1167,22 @@ export async function checkRoomAvailabilityForMumukshus(
           availableCredits,
           holdReason,
           holdReasonMeta,
+          // Backend-owned copy for this hold reason. Clients render it directly
+          // so a new reason code never needs a client release.
+          holdReasonMessage:
+            status === STATUS_WAITING && holdReason
+              ? (HOLD_REASON_COPY[holdReason] || HOLD_REASON_COPY.UNKNOWN)
+                  .userMessage
+              : null,
           dates: range.start + ' to ' + range.end,
           range,
           nights,
           roomType,
+          floorType,
           gender,
           isBlocked: range.isBlocked || false,
+          isAlreadyBooked,
+          unavailableReason,
           requiresExtraStayReason: overCapUsage.has(mumukshu),
           ...(assignedRoom && { roomno: assignedRoom })
         });
@@ -1119,7 +1197,8 @@ export async function checkFlatAvailabilityForMumukshus(
   checkin_date,
   checkout_date,
   mumukshus,
-  user
+  user,
+  preview = false
 ) {
   const flat = await FlatDb.findOne({
     attributes: ['flatno'],
@@ -1138,7 +1217,12 @@ export async function checkFlatAvailabilityForMumukshus(
   // Flats bypass the Research Centre block: a flat owner may book their flat for
   // people even when RC is blocked. The 9-night/30-day cap below still applies.
 
-  if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
+  const overlappingByCard = await getOverlappingFlatBookings(
+    checkin_date,
+    checkout_date,
+    mumukshus
+  );
+  if (Object.keys(overlappingByCard).length > 0 && !preview) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
 
@@ -1167,6 +1251,27 @@ export async function checkFlatAvailabilityForMumukshus(
   const tempUser = { ...user, credits: { ...user.credits } };
 
   for (const mumukshu of mumukshus) {
+    // An overlapping flat booking is a hard no, not a waitlist. Reported per card
+    // so a group booking names the person who clashes.
+    const clashes = overlappingByCard[String(mumukshu)] || [];
+    if (clashes.length > 0) {
+      const clash = clashes[0];
+      const span = `${moment(clash.checkin).format('D MMM')} to ${moment(
+        clash.checkout
+      ).format('D MMM')}`;
+      flatDetails.push({
+        mumukshu: mumukshu,
+        flatno: flat.flatno,
+        nights: nights,
+        charge: 0,
+        availableCredits: 0,
+        status: STATUS_WAITING,
+        isAlreadyBooked: true,
+        unavailableReason: `You already have a flat stay booked from ${span}. Cancel it first, or pick dates that do not overlap.`
+      });
+      continue;
+    }
+
     const cap = capByCard.get(mumukshu);
     if (cap.exceeds) {
       // Over the cap → waitlisted with no charge, mirroring createFlatBooking.
@@ -1176,6 +1281,10 @@ export async function checkFlatAvailabilityForMumukshus(
         nights: nights,
         availableCredits: 0,
         requiresExtraStayReason: true,
+        isAlreadyBooked: false,
+        unavailableReason: null,
+        holdReasonMessage:
+          HOLD_REASON_COPY.ROLLING_WINDOW_LIMIT.userMessage,
         ...rollingWaitlistFields(cap)
       });
       continue;
@@ -1195,7 +1304,10 @@ export async function checkFlatAvailabilityForMumukshus(
       nights: nights,
       charge: charge,
       availableCredits: availableCredits,
-      status: STATUS_AVAILABLE
+      status: STATUS_AVAILABLE,
+      isAlreadyBooked: false,
+      unavailableReason: null,
+      holdReasonMessage: null
     });
   }
 

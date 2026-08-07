@@ -17,6 +17,7 @@ import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import logger from '../../config/logger.js';
+import moment from 'moment';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -29,7 +30,10 @@ import {
   TYPE_FLAT,
   TYPE_TRAVEL,
   MSG_BOOKING_WAITING,
-  BOOKING_STATUS_PENDING
+  BOOKING_STATUS_PENDING,
+  STATUS_AVAILABLE,
+  STATUS_WAITING,
+  HOLD_REASON_COPY
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -40,6 +44,7 @@ import {
   sendUnifiedEmail,
   sendUnifiedEmailForBookedBy,
   checkFlatAlreadyBooked,
+  getOverlappingFlatBookings,
   setWaitingBookingCountMap
 } from '../helper.js';
 import {
@@ -506,7 +511,12 @@ async function checkRoomAvailability(data, user, utsav) {
     checkout_date,
     guestGroup,
     user,
-    utsav
+    utsav,
+    null,
+    // preview: report "cannot be booked" as data on each row instead of throwing,
+    // so the client shows all three answers in one place. The write path still
+    // throws, so a blocked or overlapping stay can never be created.
+    true
   );
 
   return result;
@@ -864,15 +874,14 @@ async function checkFlatAvailability(data, user) {
   validateDate(checkin_date, checkout_date);
   const guestCardDb = await validateCards(guests);
 
-  // Check if any guest already has a flat booking for these dates
-  for (const guest of guests) {
-    if (await checkFlatAlreadyBooked(checkin_date, checkout_date, guest)) {
-      throw new ApiError(
-        400,
-        `Flat already booked for ${guest} during selected dates`
-      );
-    }
-  }
+  // Guests who already hold an overlapping flat booking. This function only ever
+  // runs on the preview (/validate) path, so it reports the clash per guest
+  // instead of failing the whole request. The write path still throws.
+  const overlappingByCard = await getOverlappingFlatBookings(
+    checkin_date,
+    checkout_date,
+    guests
+  );
 
   const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
@@ -887,6 +896,24 @@ async function checkFlatAvailability(data, user) {
   );
 
   for (const guest of guests) {
+    const clashes = overlappingByCard[String(guest)] || [];
+    if (clashes.length > 0) {
+      const clash = clashes[0];
+      const span = `${moment(clash.checkin).format('D MMM')} to ${moment(
+        clash.checkout
+      ).format('D MMM')}`;
+      flatDetails.push({
+        guest: guest,
+        flatno: flat.flatno,
+        nights: nights,
+        charge: 0,
+        status: STATUS_WAITING,
+        isAlreadyBooked: true,
+        unavailableReason: `This guest already has a flat stay booked from ${span}. Cancel it first, or pick dates that do not overlap.`
+      });
+      continue;
+    }
+
     const cap = capByCard.get(guest);
     if (cap.exceeds) {
       flatDetails.push({
@@ -894,6 +921,9 @@ async function checkFlatAvailability(data, user) {
         flatno: flat.flatno,
         nights: nights,
         requiresExtraStayReason: true,
+        isAlreadyBooked: false,
+        unavailableReason: null,
+        holdReasonMessage: HOLD_REASON_COPY.ROLLING_WINDOW_LIMIT.userMessage,
         ...rollingWaitlistFields(cap)
       });
       continue;
@@ -914,7 +944,10 @@ async function checkFlatAvailability(data, user) {
       flatno: flat.flatno,
       nights: nights,
       charge: charge,
-      status: 'available'
+      status: STATUS_AVAILABLE,
+      isAlreadyBooked: false,
+      unavailableReason: null,
+      holdReasonMessage: null
     });
   }
 
