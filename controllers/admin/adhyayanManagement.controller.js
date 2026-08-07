@@ -8,6 +8,7 @@ import {
   ShibirSession,
   ShibirAttendanceRecord
 } from '../../models/associations.js';
+import ShortLink from '../../models/short_link.model.js';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -59,7 +60,8 @@ export const createAdhyayan = async (req, res) => {
     location,
     total_seats,
     food_allowed,
-    comments
+    comments,
+    whatsapp_link
   } = req.body;
 
   req.log.info('create_adhyayan_start', { name, speaker, start_date, end_date, total_seats, amount });
@@ -91,12 +93,27 @@ export const createAdhyayan = async (req, res) => {
       available_seats: total_seats,
       food_allowed: food_allowed,
       comments: comments,
+      whatsapp_link: whatsapp_link,
       updatedBy: req.user.username
     }, { transaction: t });
 
     // Initialize sessions immediately on creation if it's Research Centre
     if (location === RESEARCH_CENTRE) {
       await initializeShibirSessions(adhyayan_details, t);
+    }
+
+    if (whatsapp_link) {
+      const slug = `a${adhyayan_details.id}`;
+      await ShortLink.upsert(
+        {
+          slug,
+          target_url: whatsapp_link,
+          type: 'adhyayan',
+          active: true,
+          createdBy: req.user.username
+        },
+        { transaction: t }
+      );
     }
 
     await t.commit();
@@ -402,7 +419,8 @@ export const updateAdhyayan = async (req, res) => {
     total_seats,
     food_allowed,
     comments,
-    available_seats // optional manual override
+    available_seats, // optional manual override
+    whatsapp_link
   } = req.body;
 
   const adhyayanId = req.params.id;
@@ -461,6 +479,7 @@ export const updateAdhyayan = async (req, res) => {
       available_seats: newAvailableSeats,
       food_allowed,
       comments,
+      whatsapp_link,
       updatedBy: req.user.username
     }, { transaction: t });
 
@@ -471,6 +490,20 @@ export const updateAdhyayan = async (req, res) => {
       // If changed away from Research Centre, clear sessions and attendance records
       await ShibirSession.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
       await ShibirAttendanceRecord.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
+    }
+
+    if (whatsapp_link) {
+      const slug = `a${adhyayanId}`;
+      await ShortLink.upsert(
+        {
+          slug,
+          target_url: whatsapp_link,
+          type: 'adhyayan',
+          active: true,
+          createdBy: req.user.username
+        },
+        { transaction: t }
+      );
     }
 
     await t.commit();

@@ -886,6 +886,33 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
       let utsavName = b.utsavname || (b.UtsavDb && b.UtsavDb.name) || "";
       let packageName = b.package || (b.UtsavPackagesDb && b.UtsavPackagesDb.name) || "";
 
+      // Calculate meal details for confirmed templates
+      const utsavObj = b.UtsavDb || {};
+      const packageObj = b.UtsavPackagesDb || {};
+      const utsavIdVal = b.utsavid || utsavObj.id || "";
+      const isRC = utsavObj.location === RESEARCH_CENTRE || utsavObj.location === "Research Centre";
+
+      const pkgStart = packageObj.start_date ? moment(packageObj.start_date).format("DD/MM/YYYY") : (utsavObj.start_date ? moment(utsavObj.start_date).format("DD/MM/YYYY") : "");
+      const pkgEnd = packageObj.end_date ? moment(packageObj.end_date).format("DD/MM/YYYY") : (utsavObj.end_date ? moment(utsavObj.end_date).format("DD/MM/YYYY") : "");
+
+      const getFirstMeal = (arr, defaultVal) => {
+        if (!Array.isArray(arr) || !arr.length) return defaultVal;
+        const m = arr[0];
+        return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+      };
+
+      const getLastMeal = (arr, defaultVal) => {
+        if (!Array.isArray(arr) || !arr.length) return defaultVal;
+        const m = arr[arr.length - 1];
+        return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+      };
+
+      const startMeals = getFirstMeal(utsavObj.starting_meal, "Breakfast");
+      const endMeals = getLastMeal(utsavObj.ending_meal, "Dinner");
+
+      const startingMealText = isRC && pkgStart ? `${pkgStart} (${startMeals})` : "N/A";
+      const endingMealText = isRC && pkgEnd ? `${pkgEnd} (${endMeals})` : "N/A";
+
       // transaction
       const bookingId = String(b.bookingid || b.bookingId || b.id || "");
       const tx = transactionsMap.get(bookingId) || { amount: null, discount: null, razorpay_order_id: null };
@@ -894,6 +921,7 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
       let template = "";
       let bodyParams = [];
       let headerParam = "";
+      let includeButton = false;
 
       const isWaiting = status === "waiting" || status.includes("wait");
       const isPending = status === "pending" || status.includes("pend") || status.includes("pay");
@@ -915,7 +943,8 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           bodyParams = [bookerName, utsavName, "payment pending", packageName];
         } else {
           template = "bn_usv_gu_b_cf";
-          bodyParams = [bookerName, utsavName, packageName, paymentId];
+          bodyParams = [bookerName, utsavName, packageName, paymentId, startingMealText, endingMealText, attendeeName];
+          includeButton = true;
         }
       } else if (isGuestFor) {
         const bookerName = await getCardName(b.bookedBy);
@@ -930,7 +959,8 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           bodyParams = [attendeeName, utsavName, "payment pending", packageName];
         } else {
           template = "bn_usv_gu_f_cf";
-          bodyParams = [attendeeName, utsavName, packageName];
+          bodyParams = [attendeeName, utsavName, packageName, startingMealText, endingMealText];
+          includeButton = true;
         }
       } else {
         const selfName = user.issuedto || "";
@@ -942,7 +972,8 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           bodyParams = [selfName, utsavName, "payment pending", packageName];
         } else {
           template = "bn_usv_s_b_cf";
-          bodyParams = [selfName, utsavName, packageName, paymentId];
+          bodyParams = [selfName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          includeButton = true;
         }
       }
 
@@ -959,6 +990,15 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
         ];
       } else {
         components = [bodyComp];
+      }
+
+      if (includeButton && utsavIdVal) {
+        components.push({
+          type: "button",
+          sub_type: "url",
+          index: "1",
+          parameters: [{ type: "text", text: `u${utsavIdVal}` }]
+        });
       }
 
       const result = await (sendWithTemplateFallback ? sendWithTemplateFallback(phone, template, components) : sendWhatsAppMessage(phone, template, components));

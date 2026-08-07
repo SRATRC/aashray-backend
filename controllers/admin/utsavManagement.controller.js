@@ -5,6 +5,7 @@ import {
   CardDb,
   RoomBooking
 } from '../../models/associations.js';
+import ShortLink from '../../models/short_link.model.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
   validateUtsavBooking,
@@ -201,7 +202,8 @@ export const createUtsav = async (req, res) => {
     location,
     registration_deadline,
     starting_meal,
-    ending_meal
+    ending_meal,
+    whatsapp_link
   } = req.body;
 
   validateMealField(starting_meal, 'starting_meal');
@@ -251,6 +253,7 @@ export const createUtsav = async (req, res) => {
       registration_deadline,
       starting_meal,
       ending_meal,
+      whatsapp_link,
       updatedBy: req.user.username
     },
     { transaction: t }
@@ -263,6 +266,20 @@ export const createUtsav = async (req, res) => {
         checkout: moment(end_date).add(1, 'day').format('YYYY-MM-DD'),
         comments: name,
         updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
+
+  if (whatsapp_link) {
+    const slug = `u${utsavDetails.id}`;
+    await ShortLink.upsert(
+      {
+        slug,
+        target_url: whatsapp_link,
+        type: 'utsav',
+        active: true,
+        createdBy: req.user.username
       },
       { transaction: t }
     );
@@ -485,7 +502,8 @@ export const updateUtsav = async (req, res) => {
     location,
     registration_deadline,
     starting_meal,
-    ending_meal
+    ending_meal,
+    whatsapp_link
   } = req.body;
 
   validateMealField(starting_meal, 'starting_meal');
@@ -527,8 +545,20 @@ export const updateUtsav = async (req, res) => {
     registration_deadline,
     starting_meal,
     ending_meal,
+    whatsapp_link,
     updatedBy: req.user.username
   });
+
+  if (whatsapp_link) {
+    const slug = `u${utsavId}`;
+    await ShortLink.upsert({
+      slug,
+      target_url: whatsapp_link,
+      type: 'utsav',
+      active: true,
+      createdBy: req.user.username
+    });
+  }
 
   req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
   return res.status(200).send({ message: 'Updated Utsav' });
