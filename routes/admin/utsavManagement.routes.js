@@ -115,6 +115,10 @@ utsavAdminRouter.get(
   CatchAsync(fetchUtsavFeedbacks)
 );
 utsavAdminRouter.get('/group-audit', CatchAsync(utsavGroupAudit));
-utsavAdminRouter.post('/send-group-reminder', CatchAsync(sendUtsavGroupReminder));
+utsavAdminRouter.post(
+  '/send-group-reminder',
+  authorizeRoles(ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN, ROLE_OFFICE_ADMIN),
+  CatchAsync(sendUtsavGroupReminder)
+);
 
 export { utsavPublicRouter, utsavAdminRouter };
