@@ -67,6 +67,7 @@ router.get('/pendinglist/:id', CatchAsync(adhyayanPendinglist));
 router.get('/bookings', CatchAsync(fetchAdhyayanBookings));
 router.put('/status', CatchAsync(adhyayanStatusUpdate));
 router.put('/attendance/toggle', CatchAsync(toggleAttendance));
+router.post('/attendance/bulk-toggle', CatchAsync(bulkToggleAttendance));
 router.post('/send-group-reminder', CatchAsync(sendAdhyayanGroupReminder));
 router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 router.get('/fetchList', CatchAsync(fetchAllAdhyayanList));

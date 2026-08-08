@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { WaGroupJob, UtsavDb, ShibirDb, WaTemplate, CardDb, UtsavBooking, ShibirBookingDb, WaSession } from '../../models/associations.js';
+import { WaGroupJob, UtsavDb, ShibirDb, CardDb, UtsavBooking, ShibirBookingDb, WaSession } from '../../models/associations.js';
 import moment from 'moment-timezone';
 import { Op } from 'sequelize';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
