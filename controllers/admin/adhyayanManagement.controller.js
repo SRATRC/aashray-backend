@@ -487,6 +487,7 @@ export const updateAdhyayan = async (req, res) => {
     }
   }
 
+  const previousWhatsappLink = adhyayan.whatsapp_link;
   const t = await database.transaction();
   try {
     await adhyayan.update({
@@ -528,7 +529,7 @@ export const updateAdhyayan = async (req, res) => {
       );
 
       const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
-      if (inviteMatch && inviteMatch[1] && whatsapp_link !== adhyayan.whatsapp_link) {
+      if (inviteMatch && inviteMatch[1] && whatsapp_link !== previousWhatsappLink) {
         await WaGroupJob.create(
           {
             action: 'resolve_invite_link',
