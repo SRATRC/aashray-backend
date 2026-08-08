@@ -5,7 +5,8 @@ import {
   ROLE_PRA_ACCOUNTS_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
   ROLE_UTSAV_READ_ONLY,
-  ROLE_UTSAV_ADMIN_RAJ
+  ROLE_UTSAV_ADMIN_RAJ,
+  ROLE_OFFICE_ADMIN
 } from '../../config/constants.js';
 import {
   createUtsav,
