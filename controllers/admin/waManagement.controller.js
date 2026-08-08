@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { WaGroupJob, UtsavDb, ShibirDb, CardDb, UtsavBooking, ShibirBookingDb, WaSession } from '../../models/associations.js';
 import moment from 'moment-timezone';
-import { Op } from 'sequelize';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import { STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN } from '../../config/constants.js';
 
@@ -239,19 +238,7 @@ export const fetchGroupReconciliationInternal = async (groupJid, type, event_id)
     }
   });
 
-  const remainingLids = Object.keys(actualPhonesMap).filter(p => (p.includes('@lid') || p.length > 13) && (!ownLid || p !== ownLid));
-  if (remainingLids.length > 0 && missing.length > 0) {
-    for (let i = missing.length - 1; i >= 0; i--) {
-      const m = missing[i];
-      if (remainingLids.length > 0) {
-        const usedLid = remainingLids.pop();
-        matched.push(m);
-        matchedCardNos.add(String(m.cardno));
-        matchedPhones.add(usedLid);
-        missing.splice(i, 1);
-      }
-    }
-  }
+
 
   const extra = [];
   const extraPhonesList = Object.keys(actualPhonesMap).filter(phone => !matchedPhones.has(phone));
