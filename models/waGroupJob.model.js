@@ -11,7 +11,7 @@ const WaGroupJob = sequelize.define(
       allowNull: false
     },
     action: {
-      type: DataTypes.ENUM('create_group', 'add_member', 'remove_member', 'send_message', 'send_poll', 'fetch_members', 'update_group_settings'),
+      type: DataTypes.ENUM('create_group', 'add_member', 'remove_member', 'send_message', 'send_poll', 'fetch_members', 'update_group_settings', 'resolve_invite_link'),
       allowNull: false
     },
     phone: {
