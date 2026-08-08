@@ -363,7 +363,6 @@ mealsCount9PMJob.start();
 mealsCount10PMJob.start();
 mealsCount11PMJob.start();
 wifiLowAlertJob.start();
-groupReminderJob.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
