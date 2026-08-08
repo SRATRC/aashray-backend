@@ -16,6 +16,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   ERR_BOOKING_ALREADY_CANCELLED,
   STATUS_DELETED,
+  STATUS_WAITING,
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
@@ -54,12 +55,39 @@ export const FetchAllShibir = async (req, res) => {
     order: [['start_date', 'ASC']]
   });
 
+  // How many people are already queued on each shibir. A full shibir is still
+  // bookable — it goes to the waitlist — so the app shows the queue length in
+  // place of "N seats left", and could not until this was sent.
+  const waitlistCounts = shibirs.length
+    ? await ShibirBookingDb.findAll({
+        attributes: [
+          'shibir_id',
+          [Sequelize.fn('COUNT', Sequelize.col('bookingid')), 'waitlist_count']
+        ],
+        where: {
+          shibir_id: { [Sequelize.Op.in]: shibirs.map((shibir) => shibir.id) },
+          status: STATUS_WAITING
+        },
+        group: ['shibir_id'],
+        raw: true
+      })
+    : [];
+
+  const waitlistByShibir = new Map(
+    waitlistCounts.map((row) => [row.shibir_id, Number(row.waitlist_count)])
+  );
+
   const groupedByMonth = shibirs.reduce((acc, event) => {
     const month = event.month;
     if (!acc[month]) {
       acc[month] = [];
     }
-    acc[month].push(event);
+    // Plain object so the added field survives serialization — a model instance
+    // only serializes its own attributes.
+    acc[month].push({
+      ...event.toJSON(),
+      waitlist_count: waitlistByShibir.get(event.id) ?? 0
+    });
     return acc;
   }, {});
 
