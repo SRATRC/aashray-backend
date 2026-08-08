@@ -9,6 +9,7 @@ import {
   ShibirAttendanceRecord
 } from '../../models/associations.js';
 import ShortLink from '../../models/short_link.model.js';
+import WaGroupJob from '../../models/waGroupJob.model.js';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -114,6 +115,23 @@ export const createAdhyayan = async (req, res) => {
         },
         { transaction: t }
       );
+
+      const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
+      if (inviteMatch && inviteMatch[1]) {
+        await WaGroupJob.create(
+          {
+            action: 'resolve_invite_link',
+            status: 'pending',
+            priority: 'high',
+            payload: {
+              inviteCode: inviteMatch[1],
+              type: 'shibir',
+              eventId: adhyayan_details.id
+            }
+          },
+          { transaction: t }
+        );
+      }
     }
 
     await t.commit();
@@ -508,6 +526,23 @@ export const updateAdhyayan = async (req, res) => {
         },
         { transaction: t }
       );
+
+      const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
+      if (inviteMatch && inviteMatch[1]) {
+        await WaGroupJob.create(
+          {
+            action: 'resolve_invite_link',
+            status: 'pending',
+            priority: 'high',
+            payload: {
+              inviteCode: inviteMatch[1],
+              type: 'shibir',
+              eventId: adhyayanId
+            }
+          },
+          { transaction: t }
+        );
+      }
     }
 
     await t.commit();
