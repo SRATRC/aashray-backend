@@ -578,7 +578,7 @@ export const updateUtsav = async (req, res) => {
     });
 
     const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
-    if (inviteMatch && inviteMatch[1]) {
+    if (inviteMatch && inviteMatch[1] && whatsapp_link !== utsav.whatsapp_link) {
       await WaGroupJob.create({
         action: 'resolve_invite_link',
         status: 'pending',
