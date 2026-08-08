@@ -5,7 +5,8 @@ import {
   ROLE_PRA_ACCOUNTS_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
   ROLE_UTSAV_READ_ONLY,
-  ROLE_UTSAV_ADMIN_RAJ
+  ROLE_UTSAV_ADMIN_RAJ,
+  ROLE_OFFICE_ADMIN
 } from '../../config/constants.js';
 import {
   createUtsav,
@@ -115,6 +116,10 @@ utsavAdminRouter.get(
   CatchAsync(fetchUtsavFeedbacks)
 );
 utsavAdminRouter.get('/group-audit', CatchAsync(utsavGroupAudit));
-utsavAdminRouter.post('/send-group-reminder', CatchAsync(sendUtsavGroupReminder));
+utsavAdminRouter.post(
+  '/send-group-reminder',
+  authorizeRoles(ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN, ROLE_OFFICE_ADMIN),
+  CatchAsync(sendUtsavGroupReminder)
+);
 
 export { utsavPublicRouter, utsavAdminRouter };
