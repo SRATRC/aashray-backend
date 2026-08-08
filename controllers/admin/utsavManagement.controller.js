@@ -6,6 +6,7 @@ import {
   RoomBooking
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
+import ShortLink from '../../models/short_link.model.js';
 import {
   validateUtsavBooking,
   reserveUtsavSeat,
@@ -38,7 +39,9 @@ import {
   RESEARCH_CENTRE,
   STATUS_OPEN,
   STATUS_PAYMENT_COMPLETED,
-  ERR_BOOKING_ALREADY_CANCELLED
+  ERR_BOOKING_ALREADY_CANCELLED,
+  STATUS_ACTIVE,
+  STATUS_INACTIVE
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
@@ -192,6 +195,13 @@ function validateMealField(value, fieldName) {
     throw new ApiError(400, `${fieldName} contains duplicate values`);
 }
 
+// Utsav auto-block convention: the block's exclusive checkout is the day AFTER
+// the utsav's last day (end + 1), so the last festival night (end_date) is held.
+// One owner for the +1 offset, shared by createUtsav and updateUtsav.
+function utsavBlockCheckout(end_date) {
+  return moment(end_date).add(1, 'day').format('YYYY-MM-DD');
+}
+
 export const createUtsav = async (req, res) => {
   const {
     name,
@@ -201,13 +211,15 @@ export const createUtsav = async (req, res) => {
     location,
     registration_deadline,
     starting_meal,
-    ending_meal
+    ending_meal,
+    comments,
+    whatsapp_link
   } = req.body;
 
   validateMealField(starting_meal, 'starting_meal');
   validateMealField(ending_meal, 'ending_meal');
 
-  req.log.info('create_utsav_start', { name, start_date, end_date, total_seats, location });
+  req.log.info('create_utsav_start', { name, start_date, end_date, total_seats, location, whatsapp_link });
 
   if (
     !moment(registration_deadline, 'YYYY-MM-DD').isBefore(
@@ -238,40 +250,57 @@ export const createUtsav = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const utsavDetails = await UtsavDb.create(
-    {
-      name,
-      start_date,
-      end_date,
-      month,
-      total_seats,
-      location: location || RESEARCH_CENTRE,
-      available_seats: total_seats,
-      status: STATUS_OPEN,
-      registration_deadline,
-      starting_meal,
-      ending_meal,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-
-  if ((location || RESEARCH_CENTRE) === RESEARCH_CENTRE) {
-    await BlockDates.create(
+  try {
+    const utsavDetails = await UtsavDb.create(
       {
-        checkin: start_date,
-        checkout: moment(end_date).add(1, 'day').format('YYYY-MM-DD'),
-        comments: name,
+        name,
+        start_date,
+        end_date,
+        month,
+        total_seats,
+        location: location || RESEARCH_CENTRE,
+        available_seats: total_seats,
+        status: STATUS_OPEN,
+        registration_deadline,
+        starting_meal,
+        ending_meal,
+        comments,
+        whatsapp_link,
         updatedBy: req.user.username
       },
       { transaction: t }
     );
+
+    if ((location || RESEARCH_CENTRE) === RESEARCH_CENTRE) {
+      await BlockDates.create(
+        {
+          checkin: start_date,
+          checkout: utsavBlockCheckout(end_date),
+          comments: name,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
+    }
+
+    if (whatsapp_link) {
+      await ShortLink.create({
+        slug: String(utsavDetails.id),
+        target_url: whatsapp_link,
+        type: 'utsav',
+        createdBy: req.user.username
+      }, { transaction: t });
+    }
+
+    await t.commit();
+
+    req.log.info('create_utsav_success', { utsavId: utsavDetails.id, name, start_date, end_date });
+    return res.status(200).send({ message: 'Created Utsav', data: utsavDetails });
+  } catch (error) {
+    await t.rollback();
+    req.log.error('create_utsav_failed', { name, start_date, error: error.message });
+    throw error;
   }
-
-  await t.commit();
-
-  req.log.info('create_utsav_success', { utsavId: utsavDetails.id, name, start_date, end_date });
-  return res.status(200).send({ message: 'Created Utsav', data: utsavDetails });
 };
 
 export const addUtsavPackagesBulk = async (req, res) => {
@@ -485,14 +514,15 @@ export const updateUtsav = async (req, res) => {
     location,
     registration_deadline,
     starting_meal,
-    ending_meal
+    ending_meal,
+    whatsapp_link
   } = req.body;
 
   validateMealField(starting_meal, 'starting_meal');
   validateMealField(ending_meal, 'ending_meal');
 
   const utsavId = req.params.id;
-  req.log.info('update_utsav_start', { utsavId, name, start_date, end_date, status, total_seats });
+  req.log.info('update_utsav_start', { utsavId, name, start_date, end_date, status, total_seats, whatsapp_link });
 
   const utsav = await validateUtsav(utsavId);
   const month = moment(start_date).format('MMMM');
@@ -514,24 +544,120 @@ export const updateUtsav = async (req, res) => {
     newAvailableSeats = utsav.available_seats;
   }
 
-  await utsav.update({
-    name,
-    start_date,
-    end_date,
-    month,
-    status,
-    total_seats,
-    available_seats: newAvailableSeats,
-    comments,
-    location,
-    registration_deadline,
-    starting_meal,
-    ending_meal,
-    updatedBy: req.user.username
-  });
+  const t = await database.transaction();
+  req.transaction = t;
 
-  req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
-  return res.status(200).send({ message: 'Updated Utsav' });
+  try {
+    const oldLink = await ShortLink.findOne({
+      where: {
+        slug: String(utsavId),
+        type: 'utsav'
+      },
+      transaction: t
+    });
+
+    if (whatsapp_link) {
+      if (oldLink) {
+        await oldLink.update({
+          target_url: whatsapp_link
+        }, { transaction: t });
+      } else {
+        await ShortLink.create({
+          slug: String(utsavId),
+          target_url: whatsapp_link,
+          type: 'utsav',
+          createdBy: req.user.username
+        }, { transaction: t });
+      }
+    } else {
+      if (oldLink) {
+        await oldLink.destroy({ transaction: t });
+      }
+    }
+
+    // I2: capture the pre-update values BEFORE utsav.update mutates the
+    // instance, so we can locate the auto-created block_dates row (createUtsav
+    // stores checkin=start, checkout=end+1, comments=name and no utsavid FK).
+    const oldName = utsav.name;
+    const oldStart = moment(utsav.start_date).format('YYYY-MM-DD');
+    const oldCheckout = utsavBlockCheckout(utsav.end_date);
+    const oldLocation = utsav.location;
+
+    await utsav.update({
+      name,
+      start_date,
+      end_date,
+      month,
+      status,
+      total_seats,
+      available_seats: newAvailableSeats,
+      comments,
+      location,
+      registration_deadline,
+      starting_meal,
+      ending_meal,
+      whatsapp_link,
+      updatedBy: req.user.username
+    }, { transaction: t });
+
+    // I2: resync this utsav's auto-block. createUtsav only ever creates the
+    // block row and nothing kept it in step with edits, so changing a
+    // RESEARCH_CENTRE utsav's dates left a STALE block — non-attendees could
+    // book through the new festival dates while the old dates stayed rejected.
+    // Locate the existing row by its old (name, checkin, checkout) triple, then:
+    //  - new location IS RESEARCH_CENTRE → update dates/name (or create if
+    //    missing), reusing createUtsav's checkin=start, checkout=end+1 convention;
+    //  - new location moved OFF RESEARCH_CENTRE → deactivate the stale block.
+    // Mirrors createUtsav's `(location || RESEARCH_CENTRE) === RESEARCH_CENTRE`.
+    const existingBlock = await BlockDates.findOne({
+      where: {
+        comments: oldName,
+        checkin: oldStart,
+        checkout: oldCheckout
+      },
+      transaction: t
+    });
+
+    const effectiveLocation = location || oldLocation || RESEARCH_CENTRE;
+    if (effectiveLocation === RESEARCH_CENTRE) {
+      const newCheckout = utsavBlockCheckout(end_date);
+      if (existingBlock) {
+        await existingBlock.update(
+          {
+            checkin: start_date,
+            checkout: newCheckout,
+            comments: name,
+            status: STATUS_ACTIVE,
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      } else {
+        await BlockDates.create(
+          {
+            checkin: start_date,
+            checkout: newCheckout,
+            comments: name,
+            updatedBy: req.user.username
+          },
+          { transaction: t }
+        );
+      }
+    } else if (existingBlock) {
+      await existingBlock.update(
+        { status: STATUS_INACTIVE, updatedBy: req.user.username },
+        { transaction: t }
+      );
+    }
+
+    await t.commit();
+    req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
+    return res.status(200).send({ message: 'Updated Utsav' });
+  } catch (error) {
+    await t.rollback();
+    req.log.error('update_utsav_failed', { utsavId, error: error.message });
+    throw error;
+  }
 };
 
 export const fetchUtsavBookings = async (req, res) => {
@@ -671,6 +797,7 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.location,
       utsav_db.available_seats,
       utsav_db.registration_deadline,
+      utsav_db.whatsapp_link,
       COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN utsav_booking.status = '${ROOM_STATUS_CHECKEDIN}' THEN 1 END) AS checkedin_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
@@ -697,7 +824,8 @@ END) AS volunteer_opted_count
       utsav_db.total_seats,
       utsav_db.location,
       utsav_db.available_seats,
-      utsav_db.registration_deadline
+      utsav_db.registration_deadline,
+      utsav_db.whatsapp_link
      ORDER BY 
       utsav_db.start_date ASC;`,
     {

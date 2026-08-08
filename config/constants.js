@@ -126,6 +126,9 @@ export const ERR_ROOM_FAILED_TO_BOOK = 'Failed to book a room';
 export const ERR_ROOM_MUST_BE_BOOKED =
   'Must have room booked on one or more selected dates';
 
+export const ERR_EXTRA_STAY_REASON_REQUIRED =
+  'Please provide a reason for requesting a stay beyond the 9-night limit.';
+
 export const ERR_FLAT_FAILED_TO_BOOK = 'Failed to book flat';
 
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan already booked';
@@ -164,6 +167,21 @@ export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
 
 export const ROLLING_WINDOW_DAYS = 30;
 export const ROLLING_WINDOW_NIGHT_LIMIT = 9;
+
+// Residency statuses exempt from the rolling-window night cap. Widened from the
+// original PR-only rule to also cover SEVA KUTIR and Staff (spec §2.4 / decision
+// #4). Literals are the exact `card_db.res_status` values: 'PR' and 'SEVA KUTIR'
+// are the live values (verified against card_db); 'Staff' is forward-compatible
+// (no such row exists yet, harmless until one does) and matches the locked spec.
+// The two RESIDENT classes are exempt from the visitor-facing 9-night cap;
+// MUMUKSHU + GUEST (transient visitors) are subject to it. Per the business
+// spec (docs/business-logic/02-accounts-identity-and-auth.md) there are exactly
+// four res_status classes and NO "Staff" residency — staff are admin accounts,
+// not a card res_status — so no phantom literal here.
+export const EXEMPT_RES_STATUSES = new Set([
+  STATUS_RESIDENT, // 'PR'
+  STATUS_SEVA_KUTIR // 'SEVA KUTIR'
+]);
 export const MSG_ROLLING_WINDOW_EXCEEDED = `This stay exceeds the ${ROLLING_WINDOW_NIGHT_LIMIT}-night limit within ${ROLLING_WINDOW_DAYS} days and has been placed on the waitlist for approval.`;
 
 // Why a booking is being held on the waitlist. Orthogonal to `status`:

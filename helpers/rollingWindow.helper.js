@@ -1,15 +1,20 @@
 import Sequelize from 'sequelize';
-import { RoomBooking, FlatBooking, CardDb } from '../models/associations.js';
+import {
+  RoomBooking,
+  FlatBooking,
+  CardDb,
+  RoomBookingExemption
+} from '../models/associations.js';
 import {
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
   STATUS_REJECTED,
   STATUS_WAITING,
-  STATUS_RESIDENT,
   ROLLING_WINDOW_DAYS,
   ROLLING_WINDOW_NIGHT_LIMIT,
   MSG_ROLLING_WINDOW_EXCEEDED,
-  HOLD_REASON
+  HOLD_REASON,
+  EXEMPT_RES_STATUSES
 } from '../config/constants.js';
 import {
   expandNights,
@@ -20,11 +25,31 @@ import { validateCard } from './card.helper.js';
 
 const toISO = (ms) => new Date(ms).toISOString().slice(0, 10);
 
+// Pure predicate: is a card exempt from the cap by a per-card `room_booking_exemptions`
+// row? `rows` are that card's exemption rows; `lastNightISO` is the card's LAST
+// requested night as `YYYY-MM-DD` (= checkout − 1 day, because checkout is exclusive).
+// A permanent row always exempts. A temporary row exempts when its inclusive
+// [valid_from, valid_to] range covers the last night — compared on calendar date,
+// NOT against the exclusive checkout (fixes the off-by-one). `YYYY-MM-DD` strings
+// sort lexicographically == chronologically. A row whose valid_to EQUALS the last
+// night still matches. Temporary rows missing either bound cannot cover anything.
+export function isExemptByExemptionRow(rows, lastNightISO) {
+  if (!rows || rows.length === 0) return false;
+  for (const r of rows) {
+    if (r.is_permanent) return true;
+    if (r.valid_from == null || r.valid_to == null) continue;
+    const from = String(r.valid_from).slice(0, 10);
+    const to = String(r.valid_to).slice(0, 10);
+    if (from <= lastNightISO && lastNightISO <= to) return true;
+  }
+  return false;
+}
+
 // Only committed stays count. `waiting` is excluded: it is unconfirmed (no
 // room, no payment, may never be approved), and the cap itself creates waiting
 // bookings — counting them would cascade-waitlist a user off their own
 // speculative bookings.
-const COMMITTED_ONLY = {
+export const COMMITTED_ONLY = {
   [Sequelize.Op.notIn]: [
     STATUS_CANCELLED,
     STATUS_ADMIN_CANCELLED,
@@ -34,10 +59,20 @@ const COMMITTED_ONLY = {
 };
 
 // Overlap predicate for bookings intersecting the padded date range.
+// `nights > 0` EXCLUDES day visits from the count. A day visit stores
+// `checkout = checkin + 1 day` with `nights = 0`; these projected reads select
+// only cardno/checkin/checkout (NOT nights), so the room_booking.checkout getter
+// (which returns checkin only when nights===0) cannot fire — it would see
+// `nights === undefined` and return the raw `checkin + 1`, making `expandNights`
+// wrongly count the day visit as 1 committed night and inflate the cap. Filtering
+// at the query is the robust fix and never depends on the getter. Safe for flats:
+// flat nights = checkout − checkin, so a 0-night flat has checkout === checkin and
+// already contributes 0 nights via expandNights — excluding it removes nothing.
 function overlapWhere(cardnoClause, rangeStart, rangeEndExclusive) {
   return {
     cardno: cardnoClause,
     status: COMMITTED_ONLY,
+    nights: { [Sequelize.Op.gt]: 0 },
     checkin: { [Sequelize.Op.lt]: rangeEndExclusive },
     checkout: { [Sequelize.Op.gt]: rangeStart }
   };
@@ -76,7 +111,8 @@ export async function checkRollingWindowLimit({ card, ranges, t = null }) {
 // ~2 per occupant. Per-person card-row locks are taken one at a time in sorted
 // order: provably deadlock-free (all transactions lock shared rows in the same
 // order; no dependence on multi-row-statement lock ordering), bounded by the
-// number of people in the request. Residents are exempt; occupants with no
+// number of people in the request. Exempt-status cards (PR / SEVA KUTIR / Staff)
+// and cards with an active per-card exemption row are exempt; occupants with no
 // requested nights are skipped.
 //   cards         — card_db rows (MUST include `cardno` and `res_status`)
 //   rangesByCard  — { cardno: [{ checkin, checkout }, ...] }
@@ -95,14 +131,39 @@ export async function checkRollingWindowLimitBatch({ cards, rangesByCard, t = nu
     result.set(c.cardno, { exceeds: false, windowNights: 0 });
   }
 
-  // Expand each occupant's requested nights ONCE; keep only non-residents who
-  // actually request nights.
+  // Expand each occupant's requested nights ONCE; keep only non-exempt-status
+  // occupants who actually request nights. Residency exemption is now the WIDENED
+  // set (PR + SEVA KUTIR + Staff), not PR-only — exempt statuses are skipped here
+  // and keep their default {exceeds:false, windowNights:0}.
   const nightsByCard = new Map();
   for (const c of cards) {
-    if (c.res_status === STATUS_RESIDENT) continue;
+    if (EXEMPT_RES_STATUSES.has(c.res_status)) continue;
     const nights = expandNights(rangesByCard[c.cardno]);
     if (nights.length) nightsByCard.set(c.cardno, nights);
   }
+  if (nightsByCard.size === 0) return result;
+
+  // Per-card exemption fold (vvshk's `room_booking_exemptions`): batch-load ONCE
+  // for exactly the non-status-exempt cards that reach the cap check, then drop
+  // any card covered by a permanent exemption or a temporary one covering its
+  // last requested night. Dropped cards keep the default {exceeds:false}.
+  const candidateCardnos = [...nightsByCard.keys()];
+  const exemptionRows = await RoomBookingExemption.findAll({
+    where: { cardno: { [Sequelize.Op.in]: candidateCardnos } },
+    transaction: t
+  });
+  const exemptionsByCard = {};
+  for (const r of exemptionRows) {
+    (exemptionsByCard[r.cardno] = exemptionsByCard[r.cardno] || []).push(r);
+  }
+  const exemptByCard = new Set();
+  for (const [cardno, nights] of nightsByCard) {
+    const lastNightISO = toISO(nights[nights.length - 1]); // checkout − 1 day
+    if (isExemptByExemptionRow(exemptionsByCard[cardno], lastNightISO)) {
+      exemptByCard.add(cardno);
+    }
+  }
+  for (const cardno of exemptByCard) nightsByCard.delete(cardno);
   if (nightsByCard.size === 0) return result;
 
   const cardnos = [...nightsByCard.keys()].sort();
@@ -214,15 +275,18 @@ export async function checkRollingWindowLimitForCards(cards, checkin, checkout, 
 }
 
 // The preview/detail fields for a stay forced to waiting by the rolling cap —
-// one source of truth so previews and the actual booking can't drift.
-export function rollingWaitlistFields(cap) {
+// one source of truth so previews and the actual booking can't drift. When the
+// user supplied an extra-stay reason it is folded into `holdReasonMeta.userReason`
+// (key OMITTED when no reason was given — a reason is always optional).
+export function rollingWaitlistFields(cap, userReason = null) {
   return {
     charge: 0,
     status: STATUS_WAITING,
     holdReason: HOLD_REASON.ROLLING_WINDOW_LIMIT,
     holdReasonMeta: {
       windowNights: cap.windowNights,
-      limit: ROLLING_WINDOW_NIGHT_LIMIT
+      limit: ROLLING_WINDOW_NIGHT_LIMIT,
+      ...(userReason ? { userReason } : {})
     }
   };
 }

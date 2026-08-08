@@ -120,7 +120,7 @@ export const wifiRecord = async (req, res) => {
       cd.email,
 
       rb.checkin AS room_checkin,
-      rb.checkout AS room_checkout,
+      CASE WHEN rb.nights = 0 THEN rb.checkin ELSE rb.checkout END AS room_checkout,
       rb.updatedAt AS room_updatedAt,
 
       fb.checkin AS flat_checkin,

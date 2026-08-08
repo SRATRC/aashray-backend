@@ -16,14 +16,20 @@ import {
   ERR_FLAT_FAILED_TO_BOOK,
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
-  ROLLING_WINDOW_NIGHT_LIMIT
+  ROLLING_WINDOW_NIGHT_LIMIT,
+  ERR_BLOCKED_DATES,
+  HOLD_REASON_COPY
 } from '../config/constants.js';
 import {
   RoomBooking,
   RoomDb,
   FlatBooking,
-  FlatDb
+  FlatDb,
+  CardDb
 } from '../models/associations.js';
+import RoomBlock from '../models/room_block.model.js';
+import RoomBookingExemption from '../models/room_booking_exemption.model.js';
+import RoomAllocationPriority from '../models/room_allocation_priority.model.js';
 import {
   createPendingTransaction,
   generateOrderId,
@@ -33,15 +39,21 @@ import {
 import {
   calculateNights,
   checkFlatAlreadyBooked,
-  validateDate
+  getOverlappingFlatBookings,
+  validateDate,
+  getBlockedDates,
+  validateBlockedDates,
+  formatBlockedPeriod
 } from '../controllers/helper.js';
 import {
   findUtsavOnBoundaryDates,
   getDateRangesDuringUtsav
 } from './utsavBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { validateCards } from './card.helper.js';
+import { validateCard, validateCards } from './card.helper.js';
+import moment from 'moment';
 import {
+  checkRollingWindowLimit,
   checkRollingWindowLimitBatch,
   checkRollingWindowLimitForCards,
   rollingWaitlistFields
@@ -50,26 +62,35 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import logger from '../config/logger.js';
 
-export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
+// Room bookings held by these cards that overlap [checkin, checkout), grouped by
+// cardno. The preview path needs WHICH card clashes and on WHAT dates so it can
+// name the clash per person, instead of failing the whole request with one
+// message. checkRoomAlreadyBooked keeps its boolean contract on top of this.
+export async function getOverlappingRoomBookings(checkin, checkout, cardnos) {
+  const queryCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   const result = await RoomBooking.findAll({
+    attributes: ['cardno', 'checkin', 'checkout', 'nights', 'status'],
     where: {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
+            { checkin: { [Sequelize.Op.lt]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
+            { checkout: { [Sequelize.Op.lte]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
+            { checkout: { [Sequelize.Op.gte]: queryCheckout } }
           ]
         }
       ],
@@ -83,7 +104,18 @@ export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
     }
   });
 
-  return result.length > 0;
+  const byCard = {};
+  for (const booking of result) {
+    const key = String(booking.cardno);
+    if (!byCard[key]) byCard[key] = [];
+    byCard[key].push(booking);
+  }
+  return byCard;
+}
+
+export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
+  const byCard = await getOverlappingRoomBookings(checkin, checkout, cardnos);
+  return Object.keys(byCard).length > 0;
 }
 
 export async function bookDayVisit(
@@ -94,12 +126,16 @@ export async function bookDayVisit(
   updatedBy,
   t
 ) {
+  const effectiveCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   const booking = await RoomBooking.create(
     {
       bookingid: uuidv4(),
       cardno,
       checkin,
-      checkout,
+      checkout: effectiveCheckout,
       roomno: 'NA',
       roomtype: 'NA',
       gender: 'NA',
@@ -131,6 +167,10 @@ async function bookWaitingRoom(
   holdReasonMeta = null
 ) {
   const bookingId = uuidv4();
+  const effectiveCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   await RoomBooking.create(
     {
       bookingid: bookingId,
@@ -139,7 +179,7 @@ async function bookWaitingRoom(
       cardno,
       bookedBy,
       checkin,
-      checkout,
+      checkout: effectiveCheckout,
       nights,
       roomtype,
       gender,
@@ -167,6 +207,10 @@ async function bookAvailableRoom(
 ) {
   const bookingId = uuidv4();
   const updatedBy = user.cardno;
+  const effectiveCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
   const booking = await RoomBooking.create(
     {
       bookingid: bookingId,
@@ -175,7 +219,7 @@ async function bookAvailableRoom(
       cardno,
       bookedBy,
       checkin,
-      checkout,
+      checkout: effectiveCheckout,
       nights,
       roomtype,
       gender,
@@ -188,7 +232,7 @@ async function bookAvailableRoom(
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const amount = roomCharge(roomtype) * nights;
+  const amount = nights === 0 ? (roomCharge(roomtype) / 2) : (roomCharge(roomtype) * nights);
 
   const { transaction, discountedAmount } = await createPendingTransaction(
     user,
@@ -207,18 +251,108 @@ async function bookAvailableRoom(
   return { t, discountedAmount, bookingId, bookedRoomNo: roomno };
 }
 
+export async function getPriorityOrderForMonth(checkinDate) {
+  const defaultList = ['OAG_1st', 'OAG_2nd', 'NAG_1st', 'NAG_2nd'];
+  // Fail safe: any parse/query problem falls back to the default ordering rather
+  // than throwing and breaking room allocation.
+  try {
+    const parsed = checkinDate
+      ? moment(checkinDate, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY'])
+      : null;
+    const monthNum = parsed && parsed.isValid() ? parsed.month() + 1 : null;
+    let rec = null;
+    if (monthNum) {
+      rec = await RoomAllocationPriority.findOne({ where: { month: monthNum } });
+    }
+    if (!rec) {
+      rec = await RoomAllocationPriority.findOne({ where: { month: null } });
+    }
+    if (!rec || !rec.priority_order) {
+      return defaultList;
+    }
+    const list = rec.priority_order.split(',').map((s) => s.trim()).filter(Boolean);
+    return list.length > 0 ? list : defaultList;
+  } catch (err) {
+    logger.warn('get_priority_order_failed', { checkinDate, error: err.message });
+    return defaultList;
+  }
+}
+
+function buildPriorityOrderClause(priorityList, isGroundPref = false) {
+  let orderedList = [...priorityList];
+
+  if (isGroundPref) {
+    const firstFloor = priorityList.filter((item) => item.endsWith('_1st'));
+    const secondFloor = priorityList.filter((item) => item.endsWith('_2nd'));
+    orderedList = [...firstFloor, ...secondFloor];
+  }
+
+  const oag1Index = orderedList.indexOf('OAG_1st') !== -1 ? orderedList.indexOf('OAG_1st') + 1 : 99;
+  const oag2Index = orderedList.indexOf('OAG_2nd') !== -1 ? orderedList.indexOf('OAG_2nd') + 1 : 99;
+  const nag1Index = orderedList.indexOf('NAG_1st') !== -1 ? orderedList.indexOf('NAG_1st') + 1 : 99;
+  const nag2Index = orderedList.indexOf('NAG_2nd') !== -1 ? orderedList.indexOf('NAG_2nd') + 1 : 99;
+
+  // Guard the hardcoded room-number bands (1-18/19-36/37-48/49-60) against
+  // roomnos that don't match the expected `<digits><letter>` shape (e.g. 'NA',
+  // 'WL', or any malformed value). Such rooms are pushed to the end (band 99 /
+  // large numeric key) so a bad roomno falls back to default ordering instead
+  // of mis-sorting — CAST of a non-numeric prefix would otherwise coerce to 0
+  // and float unparseable rooms to the top.
+  const ROOMNO_SHAPE = `roomno REGEXP '^[0-9]+[A-Za-z]$'`;
+  return [
+    Sequelize.literal(`
+      CASE
+        WHEN NOT (${ROOMNO_SHAPE}) THEN 99
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 1 AND 18 THEN ${oag1Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 19 AND 36 THEN ${oag2Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 37 AND 48 THEN ${nag1Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 49 AND 60 THEN ${nag2Index}
+        ELSE 99
+      END ASC
+    `),
+    Sequelize.literal(`CASE WHEN ${ROOMNO_SHAPE} THEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) ELSE 999999 END ASC`),
+    Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno)) ASC`)
+  ];
+}
+
 export async function findRoom(
   checkin,
   checkout,
   room_type,
   gender,
   excludeRooms = [],
-  t = null
+  t = null,
+  floorPref = null,
+  // Optional: pass a pre-fetched allocation priority list to avoid re-querying
+  // getPriorityOrderForMonth on every call (N+1 in per-guest loops). When null
+  // we fetch it here for backward compatibility.
+  priorityList = null
 ) {
+  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || gender === 'SCM' || gender === 'SCF';
+  const normalizedGender = (gender === 'SCM' ? 'M' : (gender === 'SCF' ? 'F' : gender));
+
+  const queryCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
+  // Get admin-blocked rooms overlapping [checkin, queryCheckout)
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: queryCheckout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gt]: checkin } }
+      ]
+    }
+  });
+  const blockedRooms = blocks.map((b) => b.roomno);
+  const allExcluded = [...new Set([...excludeRooms, ...blockedRooms])];
+
   const whereConditions = {
-    roomstatus: STATUS_AVAILABLE,
     roomtype: room_type,
-    gender: gender,
+    gender: normalizedGender,
     [Sequelize.Op.and]: [
       { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
       { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
@@ -235,25 +369,24 @@ export async function findRoom(
     ]
   };
 
-  if (excludeRooms.length > 0) {
+  if (allExcluded.length > 0) {
     whereConditions[Sequelize.Op.and].push({
-      roomno: { [Sequelize.Op.notIn]: excludeRooms }
+      roomno: { [Sequelize.Op.notIn]: allExcluded }
     });
   }
- 
+
+  const effectivePriorityList =
+    priorityList || (await getPriorityOrderForMonth(checkin));
+  const orderClause = buildPriorityOrderClause(effectivePriorityList, isGroundPref);
+
   return RoomDb.findOne({
     attributes: ['roomno'],
     where: whereConditions,
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ],
+    order: orderClause,
     replacements: {
-      reqCheckin: checkin,    // Your variable for the requested check-in
-      reqCheckout: checkout,  // Your variable for the requested check-out
-      excludeStatus1: 'cancelled',           // Statuses that mean the room is actually free
+      reqCheckin: checkin,
+      reqCheckout: queryCheckout,
+      excludeStatus1: 'cancelled',
       excludeStatus2: 'admin cancelled'
     },
     transaction: t,
@@ -262,26 +395,47 @@ export async function findRoom(
   });
 }
 
-export async function findAllRooms(checkin, checkout, room_type, gender) {
+export async function findAllRooms(checkin, checkout, room_type, gender, floorPref = null) {
+  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || gender === 'SCM' || gender === 'SCF';
+  const normalizedGender = (gender === 'SCM' ? 'M' : (gender === 'SCF' ? 'F' : gender));
+
+  const queryCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
+  // Get admin-blocked rooms overlapping [checkin, queryCheckout)
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: queryCheckout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gt]: checkin } }
+      ]
+    }
+  });
+  const adminBlockedRooms = blocks.map((b) => b.roomno);
+
   const bookings = await RoomBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
+            { checkin: { [Sequelize.Op.lt]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
+            { checkout: { [Sequelize.Op.lte]: queryCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
+            { checkout: { [Sequelize.Op.gte]: queryCheckout } }
           ]
         }
       ],
@@ -291,24 +445,22 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
     }
   });
   const bookedRooms = bookings.map((x) => x.roomno);
+  const allExcluded = [...new Set([...bookedRooms, ...adminBlockedRooms])];
+
+  const priorityList = await getPriorityOrderForMonth(checkin);
+  const orderClause = buildPriorityOrderClause(priorityList, isGroundPref);
 
   return RoomDb.findAll({
     where: {
       roomno: {
         [Sequelize.Op.notLike]: 'NA%',
         [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: bookedRooms
+        [Sequelize.Op.notIn]: allExcluded.length > 0 ? allExcluded : ['']
       },
-      roomstatus: STATUS_AVAILABLE,
       roomtype: room_type,
-      ...(gender && { gender })
+      ...(normalizedGender && { gender: normalizedGender })
     },
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ]
+    order: orderClause
   });
 }
 
@@ -319,7 +471,8 @@ export async function bookRoomForMumukshus(
   t,
   user,
   utsav,
-  log = logger
+  log = logger,
+  extra_stay_reason = null
 ) {
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
@@ -343,6 +496,11 @@ export async function bookRoomForMumukshus(
     utsav,
     t
   );
+
+  // "Blocked = unavailable" (centre block, or a non-attended overlapping utsav)
+  // is rejected inside checkRoomAvailabilityForMumukshus above — with the booking
+  // transaction's cap lock held — so a blocked stay throws before any room is
+  // written. No separate guard is needed here.
 
   let amount = 0;
   const userBookingIds = {};
@@ -368,16 +526,55 @@ export async function bookRoomForMumukshus(
     userBookingIds[card.cardno] = userBookingIds[card.cardno] || [];
 
     if (nights == 0) {
-      const result = await bookDayVisit(
-        card.cardno,
-        range.start,
-        range.end,
-        bookedBy,
-        updatedBy,
-        t
-      );
-      userBookingIds[card.cardno].push(result.bookingid);
+      if (roomType === 'NA') {
+        const result = await bookDayVisit(
+          card.cardno,
+          range.start,
+          range.end,
+          bookedBy,
+          updatedBy,
+          t
+        );
+        userBookingIds[card.cardno].push(result.bookingid);
+      } else if (status == STATUS_WAITING) {
+        const result = await bookWaitingRoom(
+          card.cardno,
+          range.start,
+          range.end,
+          nights,
+          roomType,
+          gender,
+          bookedBy,
+          updatedBy,
+          t
+        );
+        userBookingIds[card.cardno].push(result.bookingId);
+      } else if (status == STATUS_AVAILABLE) {
+        const result = await bookAvailableRoom(
+          card.cardno,
+          range.start,
+          range.end,
+          nights,
+          roomno,
+          roomType,
+          gender,
+          bookedBy,
+          user,
+          false,
+          t
+        );
+        amount += result.discountedAmount;
+        userBookingIds[card.cardno].push(result.bookingId);
+        assignedRooms.push(result.bookedRoomNo);
+      }
     } else if (status == STATUS_WAITING) {
+      // For an over-cap hold, fold the user's extra-stay reason into the meta so
+      // it persists as `hold_reason_meta.userReason`. Room-full / utsav-boundary
+      // holds keep their own reason and meta untouched. Reason stays optional.
+      const effectiveMeta =
+        holdReason === HOLD_REASON.ROLLING_WINDOW_LIMIT && extra_stay_reason
+          ? { ...(holdReasonMeta || {}), userReason: extra_stay_reason }
+          : holdReasonMeta;
       const result = await bookWaitingRoom(
         card.cardno,
         range.start,
@@ -389,7 +586,7 @@ export async function bookRoomForMumukshus(
         updatedBy,
         t,
         holdReason || HOLD_REASON.UNKNOWN,
-        holdReasonMeta
+        effectiveMeta
       );
       userBookingIds[card.cardno].push(result.bookingId);
     } else if (status == STATUS_AVAILABLE) {
@@ -431,7 +628,11 @@ export async function createRoomBooking(
   user,
   t,
   cashAllowed = false,
-  excludeRooms = []
+  excludeRooms = [],
+  extra_stay_reason = null,
+  // Optional pre-fetched allocation priority list, threaded through to findRoom
+  // so bulk/loop callers fetch it once instead of per booking (N+1 fix).
+  priorityList = null
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
@@ -464,13 +665,59 @@ export async function createRoomBooking(
       return result;
     }
   }
+
+  // 9-night / 30-day rolling cap (admin + bulk write path). The admin path is
+  // NON-BLOCKING by design — the controller attaches a getRollingWindowWarning to
+  // the success response — so we do NOT throw here; we simply route an over-cap
+  // stay to waiting instead of assigning a room, mirroring the client funnel.
+  // The cap applies to the OCCUPANT (`cardno`), so fetch that card (guarantees
+  // res_status for the residency/exemption fold); residents/exempt come back as
+  // exceeds:false. A supplied extra_stay_reason is persisted as
+  // hold_reason_meta.userReason (omitted when none).
+  if (nights > 0) {
+    const occupantCard = await validateCard(cardno);
+    const cap = await checkRollingWindowLimit({
+      card: occupantCard,
+      ranges: [{ checkin, checkout }],
+      t
+    });
+    if (cap.exceeds) {
+      logger.debug('room_booking_rolling_cap_waiting', {
+        cardno,
+        checkin,
+        checkout,
+        windowNights: cap.windowNights
+      });
+      const holdReasonMeta = {
+        windowNights: cap.windowNights,
+        limit: ROLLING_WINDOW_NIGHT_LIMIT,
+        ...(extra_stay_reason ? { userReason: extra_stay_reason } : {})
+      };
+      return await bookWaitingRoom(
+        cardno,
+        checkin,
+        checkout,
+        nights,
+        roomtype,
+        gender,
+        bookedBy,
+        user.cardno,
+        t,
+        HOLD_REASON.ROLLING_WINDOW_LIMIT,
+        holdReasonMeta
+      );
+    }
+  }
+
   const roomno = await findRoom(
     checkin,
     checkout,
     roomtype,
     gender,
     excludeRooms,
-    t
+    t,
+    null,
+    priorityList
   );
 
   if (!roomno) {
@@ -513,7 +760,8 @@ export async function bookFlatForMumukshus(
   user,
   t,
   createOrder = true,
-  log = logger
+  log = logger,
+  extra_stay_reason = null
 ) {
   log.info('flat_booking_start', {
     startDay,
@@ -535,6 +783,9 @@ export async function bookFlatForMumukshus(
   validateDate(startDay, endDay);
   const flatCardDb = await validateCards(mumukshus);
 
+  // Flats bypass the Research Centre block: a flat owner may book their flat for
+  // people even when RC is blocked. The 9-night/30-day cap below still applies.
+
   if (await checkFlatAlreadyBooked(startDay, endDay, mumukshus)) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
@@ -553,6 +804,7 @@ export async function bookFlatForMumukshus(
   const userBookingIds = {},
     bookingIds = [];
   let amount = 0;
+
   for (var mumukshu of mumukshus) {
     const booking = await createFlatBooking(
       mumukshu,
@@ -564,7 +816,8 @@ export async function bookFlatForMumukshus(
       user.cardno,
       t,
       false,
-      capByCard.get(mumukshu)
+      capByCard.get(mumukshu),
+      extra_stay_reason
     );
     amount += booking.discountedAmount;
     userBookingIds[mumukshu] = [booking.bookingId];
@@ -572,7 +825,7 @@ export async function bookFlatForMumukshus(
   }
 
   var order = null;
-  if (createOrder && user.country == 'India' && amount > 0) {
+  if (createOrder && amount > 0) {
     order = await generateOrderId(amount);
     await updateRazorpayTransactions(bookingIds, [], order.id, t);
   } else {
@@ -596,7 +849,8 @@ export async function createFlatBooking(
   updatedBy,
   t,
   cashAllowed = false,
-  capResult = null
+  capResult = null,
+  userReason = null
 ) {
   let bookingId = uuidv4();
 
@@ -607,9 +861,11 @@ export async function createFlatBooking(
     status = ROOM_STATUS_PENDING_CHECKIN;
   }
 
-  // 9-night / 30-day rolling cap → force waiting. `capResult` is precomputed by
-  // the caller's batched check (already a no-op for residents); the admin path
-  // omits it (it warns via its own gate).
+  // 9-night / 30-day rolling cap → force waiting (SOFT, never a hard-fail — flats
+  // behave exactly like rooms now). `capResult` is precomputed by the caller's
+  // batched check (already a no-op for residents); the admin path omits it (it
+  // warns via its own gate). A supplied userReason persists as
+  // hold_reason_meta.userReason (omitted when none — the reason is optional).
   let holdReason = null;
   let holdReasonMeta = null;
   if (nights > 0 && capResult && capResult.exceeds) {
@@ -617,7 +873,8 @@ export async function createFlatBooking(
     holdReason = HOLD_REASON.ROLLING_WINDOW_LIMIT;
     holdReasonMeta = {
       windowNights: capResult.windowNights,
-      limit: ROLLING_WINDOW_NIGHT_LIMIT
+      limit: ROLLING_WINDOW_NIGHT_LIMIT,
+      ...(userReason ? { userReason } : {})
     };
   }
 
@@ -675,13 +932,31 @@ async function isMumukshuFlatOwner(cardno, flatno) {
   return flat ? true : false;
 }
 
+/**
+ * Prices and resolves a stay request without writing anything.
+ *
+ * `preview` changes only WHO reports a hard no, never what counts as one.
+ *  - preview === false (default, the booking write path): a blocked range or an
+ *    overlapping booking THROWS, so no booking row can ever be created for
+ *    dates the member may not have.
+ *  - preview === true (the /validate path): the same two cases come back as
+ *    rows flagged `isBlocked` / `isAlreadyBooked` with a member-facing
+ *    `unavailableReason`. The client then renders all three answers — cannot
+ *    book, waitlisted, confirmed — in one place, per person and per segment,
+ *    instead of showing a raw error string in a modal.
+ *
+ * Every waitlisted row also carries `holdReasonMessage`, the backend-owned
+ * sentence from HOLD_REASON_COPY. Clients display it directly, so adding a
+ * fifth hold reason needs no client release.
+ */
 export async function checkRoomAvailabilityForMumukshus(
   checkin_date,
   checkout_date,
   mumukshuGroup,
   user,
   utsav,
-  t = null
+  t = null,
+  preview = false
 ) {
   validateDate(checkin_date, checkout_date);
 
@@ -690,7 +965,12 @@ export async function checkRoomAvailabilityForMumukshus(
   );
   const cardDb = await validateCards(mumukshus);
 
-  if (await checkRoomAlreadyBooked(checkin_date, checkout_date, ...mumukshus)) {
+  const overlappingByCard = await getOverlappingRoomBookings(
+    checkin_date,
+    checkout_date,
+    mumukshus
+  );
+  if (Object.keys(overlappingByCard).length > 0 && !preview) {
     throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
   }
 
@@ -700,6 +980,41 @@ export async function checkRoomAvailabilityForMumukshus(
     checkout_date,
     utsav
   );
+
+  // "Blocked = unavailable": if any occupant's range hit a centre block (or a
+  // non-attended overlapping utsav), REJECT here — before the cap lock — so the
+  // shared availability path throws. getDateRangesDuringUtsav only FLAGS
+  // isBlocked because the /stay/blocked-dates endpoint needs the flag WITHOUT
+  // throwing, so the hard-reject lives here. Attended-utsav pre/post split
+  // segments are never isBlocked, so a legit split still books.
+  const blockedRanges = [];
+  for (const mum of mumukshus) {
+    for (const r of dateRangesByMumukshu[mum] || []) {
+      if (r.isBlocked) {
+        blockedRanges.push({
+          start: r.start,
+          end: r.end,
+          overlappingWithUtsav: r.overlappingWithUtsav
+        });
+      }
+    }
+  }
+  // The preview keeps going and reports the block per range. Only the write path
+  // throws, which is what makes a blocked booking impossible to create.
+  let blockedReason = null;
+  if (blockedRanges.length > 0) {
+    const blockedDates = await getBlockedDates(checkin_date, checkout_date);
+    if (!preview) {
+      // Reuse validateBlockedDates so the message names the exact blocked period(s).
+      validateBlockedDates(blockedDates, blockedRanges);
+      // Safety net if the block rows changed mid-request.
+      throw new ApiError(400, ERR_BLOCKED_DATES);
+    }
+    const periods = blockedDates.map((b) => formatBlockedPeriod(b)).join(', ');
+    blockedReason = periods
+      ? `The centre is closed on these dates (${periods}), so this stay cannot be booked.`
+      : 'The centre is closed on these dates, so this stay cannot be booked.';
+  }
 
   // Create a temp user with cloned credits to track usage during this validation loop
   // without mutating the original user object.
@@ -711,12 +1026,20 @@ export async function checkRoomAvailabilityForMumukshus(
   // group. When called within a booking transaction (t set) it also takes the
   // batched card-row lock, making the client's auto-waitlist decision race-safe
   // in one pass. (Admin bookings don't auto-waitlist — they warn via a gate.)
+  // Cap counts only EFFECTIVE bookable nights: nights the occupant will actually
+  // stay in a committed room. Blocked ranges (isBlocked === true) are never
+  // bookable ("blocked = unavailable" → rejected on the write path), so they must
+  // NOT inflate the rolling-window usage. Excluding them here also means a stay
+  // that is entirely inside a block yields no effective ranges → not over-cap →
+  // the cap never fires before the write path rejects it for the block.
   const rangesByCard = {};
   for (const mum of mumukshus) {
-    rangesByCard[mum] = (dateRangesByMumukshu[mum] || []).map((r) => ({
-      checkin: r.start,
-      checkout: r.end
-    }));
+    rangesByCard[mum] = (dateRangesByMumukshu[mum] || [])
+      .filter((r) => !r.isBlocked)
+      .map((r) => ({
+        checkin: r.start,
+        checkout: r.end
+      }));
   }
   const capByCard = await checkRollingWindowLimitBatch({
     cards: cardDb,
@@ -737,9 +1060,10 @@ export async function checkRoomAvailabilityForMumukshus(
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
-      const gender = floorType ? floorType + card.gender : card.gender;
+      const gender = floorType === 'SC' ? 'SC' + card.gender : card.gender;
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
+
       for (const range of dateRanges) {
         var status = STATUS_WAITING;
         var charge = 0;
@@ -752,9 +1076,38 @@ export async function checkRoomAvailabilityForMumukshus(
         const nights = await calculateNights(range.start, range.end);
         const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
 
-        if (nights == 0) {
+        if (range.isBlocked) {
+          // Blocked (centre block, or an overlapping utsav the member is NOT
+          // attending): NOT bookable and NOT waitlisted. A block waitlist is a
+          // dead-end — no room cron promotes it — so "blocked = unavailable".
+          // The write path (bookRoomForMumukshus) throws BEFORE any booking is
+          // created when it sees an isBlocked range; here in the shared preview
+          // we only surface the flag (roomDetails.isBlocked below) so the client
+          // can render the reject. No room is assigned, nothing is charged, and
+          // no hold reason is invented (a blocked range never becomes a hold).
+        } else if (nights == 0) {
           // 1 day visit
-          status = STATUS_AVAILABLE;
+          if (roomType === 'NA') {
+            status = STATUS_AVAILABLE;
+            charge = 0;
+          } else {
+            const roomno = await findRoom(
+              range.start,
+              range.end,
+              roomType,
+              gender,
+              assignedRooms
+            );
+            if (roomno) {
+              status = STATUS_AVAILABLE;
+              charge = roomCharge(roomType) / 2;
+              availableCredits = usableCredits(tempUser, TYPE_ROOM, charge);
+              assignedRoom = roomno.roomno;
+              assignedRooms.push(roomno.roomno);
+            } else {
+              status = STATUS_WAITING;
+            }
+          }
         } else if (overCapUsage.has(mumukshu)) {
           // over the rolling cap → stay waitlisted (status already WAITING),
           // do not consume a room
@@ -788,6 +1141,25 @@ export async function checkRoomAvailabilityForMumukshus(
           holdReason = HOLD_REASON.UTSAV_BOUNDARY;
         }
 
+        // A card that already holds an overlapping booking cannot take these
+        // dates at all. Reported per card so a group booking can say "Rakesh
+        // already has a stay" instead of failing for everyone.
+        const clashes = overlappingByCard[String(mumukshu)] || [];
+        const isAlreadyBooked = clashes.length > 0;
+        let unavailableReason = null;
+        if (range.isBlocked) {
+          unavailableReason = blockedReason;
+        } else if (isAlreadyBooked) {
+          const clash = clashes[0];
+          const span =
+            clash.nights === 0 || clash.checkout <= clash.checkin
+              ? moment(clash.checkin).format('D MMM')
+              : `${moment(clash.checkin).format('D MMM')} to ${moment(
+                  clash.checkout
+                ).format('D MMM')}`;
+          unavailableReason = `You already have a stay booked from ${span}. Cancel it first, or pick dates that do not overlap.`;
+        }
+
         roomDetails.push({
           mumukshu,
           status,
@@ -795,11 +1167,23 @@ export async function checkRoomAvailabilityForMumukshus(
           availableCredits,
           holdReason,
           holdReasonMeta,
+          // Backend-owned copy for this hold reason. Clients render it directly
+          // so a new reason code never needs a client release.
+          holdReasonMessage:
+            status === STATUS_WAITING && holdReason
+              ? (HOLD_REASON_COPY[holdReason] || HOLD_REASON_COPY.UNKNOWN)
+                  .userMessage
+              : null,
           dates: range.start + ' to ' + range.end,
           range,
           nights,
           roomType,
+          floorType,
           gender,
+          isBlocked: range.isBlocked || false,
+          isAlreadyBooked,
+          unavailableReason,
+          requiresExtraStayReason: overCapUsage.has(mumukshu),
           ...(assignedRoom && { roomno: assignedRoom })
         });
       }
@@ -813,7 +1197,8 @@ export async function checkFlatAvailabilityForMumukshus(
   checkin_date,
   checkout_date,
   mumukshus,
-  user
+  user,
+  preview = false
 ) {
   const flat = await FlatDb.findOne({
     attributes: ['flatno'],
@@ -829,10 +1214,21 @@ export async function checkFlatAvailabilityForMumukshus(
   validateDate(checkin_date, checkout_date);
   const flatCardDb = await validateCards(mumukshus);
 
-  if (await checkFlatAlreadyBooked(checkin_date, checkout_date, mumukshus)) {
+  // Flats bypass the Research Centre block: a flat owner may book their flat for
+  // people even when RC is blocked. The 9-night/30-day cap below still applies.
+
+  const overlappingByCard = await getOverlappingFlatBookings(
+    checkin_date,
+    checkout_date,
+    mumukshus
+  );
+  if (Object.keys(overlappingByCard).length > 0 && !preview) {
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
 
+  // NOTE: no hard-fail on long stays. Over-cap flats go SOFT (waiting) through the
+  // rolling-window engine below, exactly like rooms — the previous
+  // `nights > 9 → ERR_ROOM_INVALID_DURATION` throw has been removed.
   const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
 
@@ -855,6 +1251,27 @@ export async function checkFlatAvailabilityForMumukshus(
   const tempUser = { ...user, credits: { ...user.credits } };
 
   for (const mumukshu of mumukshus) {
+    // An overlapping flat booking is a hard no, not a waitlist. Reported per card
+    // so a group booking names the person who clashes.
+    const clashes = overlappingByCard[String(mumukshu)] || [];
+    if (clashes.length > 0) {
+      const clash = clashes[0];
+      const span = `${moment(clash.checkin).format('D MMM')} to ${moment(
+        clash.checkout
+      ).format('D MMM')}`;
+      flatDetails.push({
+        mumukshu: mumukshu,
+        flatno: flat.flatno,
+        nights: nights,
+        charge: 0,
+        availableCredits: 0,
+        status: STATUS_WAITING,
+        isAlreadyBooked: true,
+        unavailableReason: `You already have a flat stay booked from ${span}. Cancel it first, or pick dates that do not overlap.`
+      });
+      continue;
+    }
+
     const cap = capByCard.get(mumukshu);
     if (cap.exceeds) {
       // Over the cap → waitlisted with no charge, mirroring createFlatBooking.
@@ -863,6 +1280,11 @@ export async function checkFlatAvailabilityForMumukshus(
         flatno: flat.flatno,
         nights: nights,
         availableCredits: 0,
+        requiresExtraStayReason: true,
+        isAlreadyBooked: false,
+        unavailableReason: null,
+        holdReasonMessage:
+          HOLD_REASON_COPY.ROLLING_WINDOW_LIMIT.userMessage,
         ...rollingWaitlistFields(cap)
       });
       continue;
@@ -882,7 +1304,10 @@ export async function checkFlatAvailabilityForMumukshus(
       nights: nights,
       charge: charge,
       availableCredits: availableCredits,
-      status: STATUS_AVAILABLE
+      status: STATUS_AVAILABLE,
+      isAlreadyBooked: false,
+      unavailableReason: null,
+      holdReasonMessage: null
     });
   }
 

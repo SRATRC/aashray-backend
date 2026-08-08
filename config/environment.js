@@ -6,7 +6,5 @@ const envFilePath = resolve('./', `.env.${env}`);
 
 config({ path: envFilePath });
 
-const { default: logger } = await import('./logger.js');
-
-logger.info(`Environment loaded: ${env}`);
-logger.info(`Environment file: ${envFilePath}`);
+console.log(`Environment loaded: ${env}`);
+console.log(`Environment file: ${envFilePath}`);

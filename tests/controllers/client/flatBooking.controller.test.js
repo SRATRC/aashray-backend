@@ -59,6 +59,21 @@ describe('Flat Booking Integration Tests', () => {
       expect(booking.status).toBe(ROOM_STATUS_PENDING_CHECKIN); // Flat owner gets free booking
     });
 
+    it('should fail to book flat for more than 9 days', async () => {
+      const startDay = nDaysFromToday(1);
+      const endDay = nDaysFromToday(11); // 10 nights
+
+      const res = await request(app)
+        .post('/api/v1/mumukshu/booking')
+        .send({
+          cardno: MUMUKSHU_1,
+          primary_booking: createFlatBookingJson(MUMUKSHU_1, startDay, endDay)
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Invalid booking duration');
+    });
+
     it('should validate flat booking successfully', async () => {
       const startDay = nDaysFromToday(1);
       const endDay = nDaysFromToday(3);
