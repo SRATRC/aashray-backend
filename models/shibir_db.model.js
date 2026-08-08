@@ -74,6 +74,10 @@ const ShibirDb = sequelize.define(
     whatsapp_link: {
       type: DataTypes.STRING,
       allowNull: true
+    },
+    whatsapp_group_jid: {
+      type: DataTypes.STRING,
+      allowNull: true
     }
   },
   {

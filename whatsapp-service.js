@@ -276,16 +276,61 @@ async function processQueue(sock) {
       console.log(`[WA Queue] Fetching group participants for JID: ${groupJid}`);
       try {
         const metadata = await sock.groupMetadata(groupJid);
-        const participants = (metadata.participants || []).map(p => p.id);
+        const rawParticipants = metadata.participants || [];
+        console.log(`[WA Queue] Raw group metadata participants for ${groupJid}:`, JSON.stringify(rawParticipants));
+        
+        const participants = [];
+
+        for (const p of rawParticipants) {
+          let phoneJid = p.id;
+          if (p.phoneNumber) {
+            phoneJid = p.phoneNumber.replace(/\D/g, '') + '@s.whatsapp.net';
+          } else if (p.id.endsWith('@lid')) {
+            // Try resolving LID via Baileys signalRepository or store
+            if (p.user) {
+              phoneJid = p.user + '@s.whatsapp.net';
+            }
+          }
+          participants.push(phoneJid);
+        }
+
+        // Include currently logged in phone number if available
+        const ownPn = sock.user?.id ? sock.user.id.split(':')[0] : null;
+        if (ownPn) {
+          const ownJid = ownPn.includes('@') ? ownPn : ownPn + '@s.whatsapp.net';
+          if (!participants.includes(ownJid)) {
+            participants.push(ownJid);
+          }
+        }
 
         await job.update({
           status: 'success',
           payload: { participants }
         });
-        console.log(`[WA Queue] Fetched ${participants.length} JIDs successfully.`);
+        console.log(`[WA Queue] Fetched ${participants.length} JIDs successfully:`, participants);
       } catch (fetchErr) {
         console.error(`[WA Queue] Failed to fetch group metadata:`, fetchErr.message);
         await job.update({ status: 'failed', error: `WhatsApp API fetch error: ${fetchErr.message}` });
+      }
+    } else if (job.action === 'resolve_invite_link') {
+      const { inviteCode } = job.payload || {};
+      if (!inviteCode) {
+        throw new Error('Missing inviteCode for resolve_invite_link action');
+      }
+
+      console.log(`[WA Queue] Resolving group metadata from invite code: ${inviteCode}`);
+      try {
+        const groupInfo = await sock.groupGetInviteInfo(inviteCode);
+        const groupJid = groupInfo.id;
+        console.log(`[WA Queue] Successfully resolved group JID: ${groupJid}`);
+
+        await job.update({
+          status: 'success',
+          payload: { ...job.payload, groupJid, subject: groupInfo.subject, size: groupInfo.size }
+        });
+      } catch (resolveErr) {
+        console.error(`[WA Queue] Failed to resolve invite code:`, resolveErr.message);
+        await job.update({ status: 'failed', error: `Failed to resolve invite code: ${resolveErr.message}` });
       }
     } else if (job.action === 'update_group_settings') {
       const { groupJid, announcement, name, description } = job.payload || {};
@@ -379,46 +424,6 @@ async function connectToWhatsApp() {
       console.log(`[WA Service] Connection closed. Status Code: ${statusCode}, Logged Out: ${isLoggedOut}`);
       updateStatus('disconnected', null);
 
-      // Start alert timer if not already running
-      if (!disconnectTimer && !isAlertSent) {
-        disconnectTimer = setTimeout(async () => {
-          try {
-            console.log('[WA Service] Service has been disconnected for 5 minutes. Sending alerts...');
-            const { default: sendMail } = await import('./utils/sendMail.js');
-            const { sendWhatsAppMessage } = await import('./utils/sendWhatsAppMessage.js');
-            
-            const alertEmail = process.env.ADMIN_ALERT_EMAIL || process.env.SMTP_EMAIL || 'admin@example.com';
-            await sendMail({
-              email: alertEmail,
-              subject: '🚨 Aashray WhatsApp Service Offline Alert',
-              html: `
-                <h3>Aashray WhatsApp Automation Offline</h3>
-                <p>The WhatsApp automation service has been offline for more than 5 minutes.</p>
-                <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-                <p><strong>Disconnect Reason:</strong> Code ${statusCode} (${isLoggedOut ? 'Logged Out' : 'Disconnected/Lost Connection'})</p>
-                <p>Please log in to the admin dashboard and scan the QR code to re-link your device if necessary.</p>
-              `
-            });
-
-            // Send WhatsApp Alert to 918274856695 using template fallback
-            const components = [
-              {
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: 'Aashray WA Service' },
-                  { type: 'text', text: 'Offline Alert' },
-                  { type: 'text', text: `disconnected (offline >5 mins, code ${statusCode || 'unknown'})` }
-                ]
-              }
-            ];
-            await sendWhatsAppMessage('918274856695', 'admin_status_updated', components);
-            isAlertSent = true;
-          } catch (alertErr) {
-            console.error('[WA Service] Failed to send disconnect alerts:', alertErr.message);
-          }
-        }, 5 * 60 * 1000); // 5 minutes
-      }
-
       if (isLoggedOut) {
         console.log('[WA Service] Session was logged out or invalidated. Deleting credentials from DB to start fresh...');
         try {
@@ -438,46 +443,6 @@ async function connectToWhatsApp() {
       isConnOpen = true;
       updateStatus('connected', null);
       console.log('[WA Service] Connection established successfully! 🚀');
-
-      // Clear disconnect alert timer and reset flag
-      if (disconnectTimer) {
-        clearTimeout(disconnectTimer);
-        disconnectTimer = null;
-      }
-      if (isAlertSent) {
-        // Send a recovery alert
-        try {
-          console.log('[WA Service] Service reconnected. Sending recovery alerts...');
-          const { default: sendMail } = await import('./utils/sendMail.js');
-          const { sendWhatsAppMessage } = await import('./utils/sendWhatsAppMessage.js');
-          
-          const alertEmail = process.env.ADMIN_ALERT_EMAIL || process.env.SMTP_EMAIL || 'admin@example.com';
-          await sendMail({
-            email: alertEmail,
-            subject: '✅ Aashray WhatsApp Service Reconnected',
-            html: `
-              <h3>Aashray WhatsApp Automation Reconnected</h3>
-              <p>The WhatsApp automation service is back online and has successfully re-established its connection.</p>
-              <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-            `
-          });
-
-          const components = [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: 'Aashray WA Service' },
-                { type: 'text', text: 'Online Status' },
-                { type: 'text', text: 'reconnected successfully (back online)' }
-              ]
-            }
-          ];
-          await sendWhatsAppMessage('918274856695', 'admin_status_updated', components);
-        } catch (alertErr) {
-          console.error('[WA Service] Failed to send recovery alerts:', alertErr.message);
-        }
-        isAlertSent = false;
-      }
 
       if (!isQueueRunning) {
         isQueueRunning = true;

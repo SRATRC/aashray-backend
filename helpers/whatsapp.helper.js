@@ -2668,6 +2668,42 @@ export async function sendLateCheckoutFeeWaivedWhatsApp(transaction) {
   }
 }
 
+/**
+ * Send WhatsApp Group Join Reminder message to participants.
+ * Template: bn_grp_join_reminder (or fallback bn_usv_s_b_cf with parameters)
+ */
+export async function sendGroupJoinReminderWhatsApp(phone, attendeeName, eventName, slug) {
+  if (!phone) return { ok: false, error: 'No phone number' };
+  try {
+    const formattedPhone = formatWhatsAppPhone(phone, 'India');
+    const sanitizedName = sanitizeParamText(attendeeName || 'Mumukshu');
+    const sanitizedEvent = sanitizeParamText(eventName || 'Event');
+
+    const bodyParams = [sanitizedName, sanitizedEvent];
+    const sanitizedParams = bodyParams.map(p => sanitizeParamText(p));
+    const bodyComp = buildBodyComponents(sanitizedParams)[0];
+
+    const components = [
+      bodyComp,
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', text: slug }]
+      }
+    ];
+
+    // Use bn_utv_wg_rem for Utsav (slug starts with 'u') and bn_adh_wg_rem for Adhyayan (slug starts with 'a')
+    const templateName = slug && slug.startsWith('u') ? 'bn_utv_wg_rem' : 'bn_adh_wg_rem';
+
+    const result = await sendWithTemplateFallback(formattedPhone, templateName, components);
+    return result;
+  } catch (err) {
+    console.error(`Error sending group join reminder to ${phone}:`, err.message || err);
+    return { ok: false, error: err.message };
+  }
+}
+
 
 
 

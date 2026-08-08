@@ -358,11 +358,81 @@ const wifiLowAlertJob = cron.schedule('*/30 * * * *', async () => {
   }
 });
 
+// Automatic daily group join reminder cron job disabled (manual reminder only via Audit Reconciliation modal)
+/*
+const groupReminderJob = cron.schedule('0 9 * * *', async () => {
+  logger.info('Daily Group Join Reminder cron job started.');
+  try {
+    const today = moment().tz('Asia/Kolkata');
+    const day7Str = today.clone().add(7, 'days').format('YYYY-MM-DD');
+    const day10Str = today.clone().add(10, 'days').format('YYYY-MM-DD');
+
+    const { sendGroupJoinReminderWhatsApp } = await import('./helpers/whatsapp.helper.js');
+    const CardDb = (await import('./models/card.model.js')).default;
+    const UtsavBooking = (await import('./models/utsav_boking.model.js')).default;
+    const ShibirBookingDb = (await import('./models/shibir_booking_db.model.js')).default;
+
+    // 1. Check Utsav events starting in 7 or 10 days
+    const upcomingUtsavs = await UtsavDb.findAll({
+      where: {
+        start_date: { [Op.in]: [day7Str, day10Str] }
+      }
+    });
+
+    for (const utsav of upcomingUtsavs) {
+      const slug = `u${utsav.id}`;
+      const bookings = await UtsavBooking.findAll({
+        where: {
+          utsavid: utsav.id,
+          status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN]
+        },
+        include: [{ model: CardDb }]
+      });
+
+      for (const b of bookings) {
+        if (b.CardDb && b.CardDb.mobno) {
+          await sendGroupJoinReminderWhatsApp(b.CardDb.mobno, b.CardDb.issuedto, utsav.name, slug);
+        }
+      }
+    }
+
+    // 2. Check Adhyayan events starting in 7 or 10 days
+    const upcomingShibirs = await ShibirDb.findAll({
+      where: {
+        start_date: { [Op.in]: [day7Str, day10Str] }
+      }
+    });
+
+    for (const shibir of upcomingShibirs) {
+      const slug = `a${shibir.id}`;
+      const bookings = await ShibirBookingDb.findAll({
+        where: {
+          shibir_id: shibir.id,
+          status: [STATUS_CONFIRMED]
+        },
+        include: [{ model: CardDb }]
+      });
+
+      for (const b of bookings) {
+        if (b.CardDb && b.CardDb.mobno) {
+          await sendGroupJoinReminderWhatsApp(b.CardDb.mobno, b.CardDb.issuedto, shibir.name, slug);
+        }
+      }
+    }
+
+    logger.info('Daily Group Join Reminder cron job finished.');
+  } catch (err) {
+    logger.error(`Group Join Reminder cron error: ${err.message}`);
+  }
+});
+*/
+
 job.start();
 mealsCount9PMJob.start();
 mealsCount10PMJob.start();
 mealsCount11PMJob.start();
 wifiLowAlertJob.start();
+groupReminderJob.start();
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
