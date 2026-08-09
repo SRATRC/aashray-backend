@@ -12,7 +12,9 @@ function resolveLogFile(prefix, date) {
   return null;
 }
 
-async function* readLines(filePath, compressed) {
+// Yields raw lines, unparsed. Callers JSON.parse only the lines they actually
+// keep, instead of parsing every line in the file up front.
+async function* readRawLines(filePath, compressed) {
   const raw = fs.createReadStream(filePath);
 
   await new Promise((resolve, reject) => {
@@ -30,12 +32,8 @@ async function* readLines(filePath, compressed) {
 
   try {
     for await (const line of rl) {
-      if (!line.trim()) continue;
-      try {
-        yield JSON.parse(line);
-      } catch {
-        // skip malformed lines silently
-      }
+      const trimmed = line.trim();
+      if (trimmed) yield trimmed;
     }
   } catch (err) {
     throw new Error(`Error reading log file "${filePath}": ${err.message}`);
@@ -45,8 +43,67 @@ async function* readLines(filePath, compressed) {
   }
 }
 
+// Fixed-capacity "keep the last N pushed" buffer, O(1) per push instead of
+// the O(n) array-shift this replaced.
+function makeRing(capacity) {
+  const buf = new Array(capacity);
+  let count = 0;
+  let idx = 0;
+  return {
+    push(item) {
+      buf[idx] = item;
+      idx = (idx + 1) % capacity;
+      if (count < capacity) count += 1;
+    },
+    toArray() {
+      if (count < capacity) return buf.slice(0, count);
+      return [...buf.slice(idx), ...buf.slice(0, idx)];
+    },
+  };
+}
+
+function parseLines(rawLines) {
+  const out = [];
+  for (const line of rawLines) {
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      // skip malformed lines silently
+    }
+  }
+  return out;
+}
+
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Shared shape behind get_recent_logs/search_logs/get_error_logs: stream raw
+// lines, reject on cheap raw text before paying for JSON.parse, keep the last
+// `capacity` survivors. With no tests at all, skips parsing entirely except
+// for the lines actually kept.
+async function collectLogs(filePath, compressed, capacity, { rawTest, parsedTest } = {}) {
+  const ring = makeRing(capacity);
+
+  if (!rawTest && !parsedTest) {
+    for await (const line of readRawLines(filePath, compressed)) {
+      ring.push(line);
+    }
+    return parseLines(ring.toArray());
+  }
+
+  for await (const line of readRawLines(filePath, compressed)) {
+    if (rawTest && !rawTest(line)) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (parsedTest && !parsedTest(entry)) continue;
+    ring.push(entry);
+  }
+  return ring.toArray();
 }
 
 const getRecentLogs = {
@@ -79,29 +136,16 @@ const getRecentLogs = {
 
       if (!resolved) {
         return {
-          content: [
-            {
-              type: 'text',
-              text: `No application log found for ${date} in ${LOG_DIR}.`,
-            },
-          ],
+          content: [{ type: 'text', text: `No application log found for ${date} in ${LOG_DIR}.` }],
         };
       }
 
-      const buf = [];
-      for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
-        if (level && entry.level !== level) continue;
-        if (buf.length >= limit) buf.shift();
-        buf.push(entry);
-      }
+      const entries = await collectLogs(resolved.filePath, resolved.compressed, limit, level
+        ? { rawTest: (line) => line.includes(level), parsedTest: (entry) => entry.level === level }
+        : {});
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(buf, null, 2),
-          },
-        ],
+        content: [{ type: 'text', text: JSON.stringify(entries) }],
       };
     } catch (err) {
       return {
@@ -162,35 +206,31 @@ const searchLogs = {
 
       if (!resolved) {
         return {
-          content: [
-            {
-              type: 'text',
-              text: `No application log found for ${targetDate} in ${LOG_DIR}.`,
-            },
-          ],
+          content: [{ type: 'text', text: `No application log found for ${targetDate} in ${LOG_DIR}.` }],
         };
       }
 
-      const buf = [];
-      for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
-        if (level && entry.level !== level) continue;
-        if (userId && entry.userId !== userId) continue;
-        if (correlationId && entry.correlationId !== correlationId) continue;
-        if (keyword) {
-          const serialised = JSON.stringify(entry);
-          if (!serialised.includes(keyword)) continue;
-        }
-        if (buf.length >= cap) buf.shift();
-        buf.push(entry);
-      }
+      const hasFilter = Boolean(keyword || level || userId || correlationId);
+      const userIdStr = userId && String(userId);
+      const correlationIdStr = correlationId && String(correlationId);
+
+      const entries = await collectLogs(resolved.filePath, resolved.compressed, cap, hasFilter
+        ? {
+            // Cheap raw-text rejects first — parsing is the expensive part.
+            rawTest: (line) =>
+              (!keyword || line.includes(keyword)) &&
+              (!level || line.includes(level)) &&
+              (!userIdStr || line.includes(userIdStr)) &&
+              (!correlationIdStr || line.includes(correlationIdStr)),
+            parsedTest: (entry) =>
+              (!level || entry.level === level) &&
+              (!userId || entry.userId === userId) &&
+              (!correlationId || entry.correlationId === correlationId),
+          }
+        : {});
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(buf, null, 2),
-          },
-        ],
+        content: [{ type: 'text', text: JSON.stringify(entries) }],
       };
     } catch (err) {
       return {
@@ -234,28 +274,14 @@ const getErrorLogs = {
 
       if (!resolved) {
         return {
-          content: [
-            {
-              type: 'text',
-              text: `No error log found for ${targetDate} in ${LOG_DIR}.`,
-            },
-          ],
+          content: [{ type: 'text', text: `No error log found for ${targetDate} in ${LOG_DIR}.` }],
         };
       }
 
-      const buf = [];
-      for await (const entry of readLines(resolved.filePath, resolved.compressed)) {
-        if (buf.length >= limit) buf.shift();
-        buf.push(entry);
-      }
+      const entries = await collectLogs(resolved.filePath, resolved.compressed, limit);
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(buf, null, 2),
-          },
-        ],
+        content: [{ type: 'text', text: JSON.stringify(entries) }],
       };
     } catch (err) {
       return {
@@ -266,5 +292,4 @@ const getErrorLogs = {
   },
 };
 
-// ---------------------------------------------------------------------------
 export const logTools = [getRecentLogs, searchLogs, getErrorLogs];

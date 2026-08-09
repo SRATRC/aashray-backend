@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { DB } from '../config.js';
 import logger from '../logger.js';
+import { loadAnnotations, fetchSchemaRows, buildSchemaIndex, buildSchemaDetail } from '../resources/schema.js';
 
 let pool = null;
 
@@ -31,75 +32,79 @@ export async function executeQuery(sql, params = []) {
   }
 }
 
+const MAX_CELL_LEN = 500;
+
+function sanitizeCell(value) {
+  if (Buffer.isBuffer(value)) return `<binary ${value.length} bytes>`;
+  if (typeof value === 'string' && value.length > MAX_CELL_LEN) {
+    return `${value.slice(0, MAX_CELL_LEN)}… (truncated, ${value.length} chars total)`;
+  }
+  return value;
+}
+
+// Row objects repeat every column name per row — columnar form drops that repetition,
+// which is most of the payload on wide result sets.
+function toColumnar(rows) {
+  if (!rows.length) return { columns: [], rows: [] };
+  const columns = Object.keys(rows[0]);
+  return {
+    columns,
+    rows: rows.map((row) => columns.map((col) => sanitizeCell(row[col]))),
+  };
+}
+
 const getSchema = {
   name: 'get_schema',
   description:
-    'Returns the live database schema with column types, nullability, defaults, enum values, primary keys, and FK relationships — merged with business annotations (table purposes, column meanings, status flows). Read-only introspection via information_schema; cannot modify the schema. Prefer the schema://aashray MCP resource at session start to avoid a round-trip; use this tool only when you need a mid-session schema refresh.',
+    'Returns database schema info via live introspection, merged with business annotations. ' +
+    'Call with no arguments for a lightweight index: every table\'s one-line description and column NAMES only (no types/FKs) — use this to decide which tables you need. ' +
+    'Call with `tables: ["a","b"]` for full detail on just those tables: column types, nullability, defaults, enum values, primary keys, FK relationships, and per-column annotations. ' +
+    'Prefer the schema://aashray resource once at session start for the full database with full detail; use this tool for a mid-session lookup instead of re-reading everything.',
   inputSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      tables: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Table names to return full column detail for. Omit for a lightweight whole-database index instead.',
+      },
+    },
     required: [],
   },
-  handler: async (_args) => {
+  handler: async ({ tables } = {}) => {
     try {
-      const [colRows, fkRows] = await Promise.all([
-        executeQuery(
-          `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE,
-                  COLUMN_DEFAULT, COLUMN_KEY
-           FROM information_schema.COLUMNS
-           WHERE TABLE_SCHEMA = DATABASE()
-           ORDER BY TABLE_NAME, ORDINAL_POSITION`
-        ),
-        executeQuery(
-          `SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
-           FROM information_schema.KEY_COLUMN_USAGE
-           WHERE TABLE_SCHEMA = DATABASE()
-             AND REFERENCED_TABLE_NAME IS NOT NULL`
-        ),
-      ]);
+      const annotations = loadAnnotations();
+      const wantsDetail = Boolean(tables && tables.length);
+      const { colRows, fkRows } = await fetchSchemaRows(executeQuery, {
+        tables: wantsDetail ? tables : undefined,
+        includeForeignKeys: wantsDetail, // the index never renders FKs
+      });
 
-      // Build FK lookup: "table.column" -> "ref_table.ref_column"
-      const fkMap = {};
-      for (const fk of fkRows) {
-        fkMap[`${fk.TABLE_NAME}.${fk.COLUMN_NAME}`] = `${fk.REFERENCED_TABLE_NAME}.${fk.REFERENCED_COLUMN_NAME}`;
-      }
-
-      const schema = {};
-      for (const row of colRows) {
-        const table = row.TABLE_NAME;
-        if (!schema[table]) schema[table] = { columns: [], foreignKeys: [] };
-
-        const col = {
-          column: row.COLUMN_NAME,
-          type: row.DATA_TYPE,
-          nullable: row.IS_NULLABLE === 'YES',
+      if (!wantsDetail) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(buildSchemaIndex(colRows, annotations)) }],
         };
-
-        if (row.COLUMN_DEFAULT !== null) col.default = row.COLUMN_DEFAULT;
-        if (row.COLUMN_KEY === 'PRI') col.primaryKey = true;
-
-        // Expand enum/set values from COLUMN_TYPE e.g. "enum('a','b')"
-        if (row.DATA_TYPE === 'enum' || row.DATA_TYPE === 'set') {
-          const match = row.COLUMN_TYPE.match(/^(?:enum|set)\((.+)\)$/i);
-          if (match) col.values = match[1].replace(/'/g, '').split(',');
-        }
-
-        const fkRef = fkMap[`${table}.${row.COLUMN_NAME}`];
-        if (fkRef) col.references = fkRef;
-
-        schema[table].columns.push(col);
       }
 
-      // Attach FK summary per table for quick join lookup
-      for (const fk of fkRows) {
-        const entry = schema[fk.TABLE_NAME];
-        if (entry) {
-          entry.foreignKeys.push(`${fk.COLUMN_NAME} → ${fk.REFERENCED_TABLE_NAME}.${fk.REFERENCED_COLUMN_NAME}`);
-        }
+      const detail = buildSchemaDetail(colRows, fkRows, annotations);
+      const missing = tables.filter((t) => !detail[t]);
+
+      let warning;
+      if (missing.length) {
+        const allTables = await executeQuery(`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`);
+        const names = allTables.map((r) => r.TABLE_NAME);
+        warning = missing
+          .map((m) => {
+            const target = m.toLowerCase();
+            const similar = names.filter((n) => n.toLowerCase().includes(target) || target.includes(n.toLowerCase()));
+            return similar.length ? `"${m}" not found — did you mean: ${similar.join(', ')}?` : `"${m}" not found.`;
+          })
+          .join(' ');
       }
 
+      const result = warning ? { tables: detail, warning } : { tables: detail };
       return {
-        content: [{ type: 'text', text: JSON.stringify(schema, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(result) }],
       };
     } catch (err) {
       return {
@@ -110,10 +115,35 @@ const getSchema = {
   },
 };
 
+// Matches a trailing top-level LIMIT clause so we only cap the row-count number,
+// never a LIMIT living inside a subquery, and never the offset number by mistake.
+const TRAILING_LIMIT_RE = /\bLIMIT\s+(\d+)(?:\s*(,)\s*(\d+)|\s+(OFFSET)\s+(\d+))?\s*$/i;
+
+const capNum = (n) => Math.min(parseInt(n, 10), 1000);
+
+function capTrailingLimit(sql) {
+  const match = sql.match(TRAILING_LIMIT_RE);
+  if (!match) return `${sql}\nLIMIT 1000`;
+
+  const [, n1, comma, n2, offsetKw, n3] = match;
+  let replacement;
+  if (comma) {
+    // LIMIT offset, count — cap count, leave offset alone
+    replacement = `LIMIT ${n1}, ${capNum(n2)}`;
+  } else if (offsetKw) {
+    // LIMIT count OFFSET offset — cap count, leave offset alone
+    replacement = `LIMIT ${capNum(n1)} OFFSET ${n3}`;
+  } else {
+    replacement = `LIMIT ${capNum(n1)}`;
+  }
+  return sql.slice(0, match.index) + replacement;
+}
+
 const queryDb = {
   name: 'query_db',
   description:
-    'Executes a SQL query against the Aashray database. The database user has SELECT-only privileges — the DB server will reject INSERT, UPDATE, DELETE, DROP, TRUNCATE, and any other write or DDL statements. SELECT and WITH (CTE) results are capped at 1000 rows; include your own LIMIT clause for smaller sets. SHOW and DESCRIBE are also supported. Read the schema://aashray resource at session start to discover table structure before querying.',
+    'Executes a SQL query against the Aashray database. The database user has SELECT-only privileges — the DB server will reject INSERT, UPDATE, DELETE, DROP, TRUNCATE, and any other write or DDL statements. SELECT and WITH (CTE) results are capped at 1000 rows; include your own LIMIT clause for smaller sets. SHOW and DESCRIBE are also supported. Read the schema://aashray resource at session start to discover table structure before querying. ' +
+    'Results come back columnar as {"columns": [...], "rows": [[...], ...]} — each inner array in `rows` lines up positionally with `columns`, instead of repeating column names per row.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -129,19 +159,15 @@ const queryDb = {
     const normalised = trimmed.toUpperCase();
 
     try {
-      let safeSql = trimmed;
       const isSelect =
         normalised.startsWith('SELECT') ||
         normalised.startsWith('WITH') ||
         normalised.startsWith('(');
-      const hasTopLevelLimit = /\bLIMIT\s+\d+(\s*,\s*\d+|\s+OFFSET\s+\d+)?\s*$/i.test(trimmed);
-      if (isSelect && !hasTopLevelLimit) {
-        safeSql = `${trimmed}\nLIMIT 1000`;
-      }
-      safeSql = safeSql.replace(/\bLIMIT\s+(\d+)/gi, (_, n) => `LIMIT ${Math.min(parseInt(n, 10), 1000)}`);
+      const safeSql = isSelect ? capTrailingLimit(trimmed) : trimmed;
+
       const rows = await executeQuery(safeSql);
       return {
-        content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(toColumnar(rows)) }],
       };
     } catch (err) {
       logger.error('query_db_error', { error: err.message, sql: sql.slice(0, 300) });
@@ -186,7 +212,8 @@ const queryDb = {
 const getTableSample = {
   name: 'get_table_sample',
   description:
-    'Returns a sample of rows from the specified table (default 10, max 50). Useful for understanding data shape and realistic values before writing a full query. Read-only — the DB user has SELECT-only privileges.',
+    'Returns a sample of rows from the specified table (default 10, max 50). Useful for understanding data shape and realistic values before writing a full query. Read-only — the DB user has SELECT-only privileges. ' +
+    'Results come back columnar as {"columns": [...], "rows": [[...], ...]} — each inner array in `rows` lines up positionally with `columns`, instead of repeating column names per row.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -222,7 +249,7 @@ const getTableSample = {
     try {
       const rows = await executeQuery(`SELECT * FROM \`${table}\` LIMIT ${cap}`);
       return {
-        content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(toColumnar(rows)) }],
       };
     } catch (err) {
       return {
