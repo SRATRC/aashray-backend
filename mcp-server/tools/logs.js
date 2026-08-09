@@ -62,35 +62,17 @@ function makeRing(capacity) {
   };
 }
 
-function parseLines(rawLines) {
-  const out = [];
-  for (const line of rawLines) {
-    try {
-      out.push(JSON.parse(line));
-    } catch {
-      // skip malformed lines silently
-    }
-  }
-  return out;
-}
-
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
 // Shared shape behind get_recent_logs/search_logs/get_error_logs: stream raw
 // lines, reject on cheap raw text before paying for JSON.parse, keep the last
-// `capacity` survivors. With no tests at all, skips parsing entirely except
-// for the lines actually kept.
+// `capacity` survivors. Parses before pushing to the ring so the ring always
+// caps on valid-entry count, not raw-line count — a malformed line near the
+// tail must not silently shrink the result below `capacity`.
 async function collectLogs(filePath, compressed, capacity, { rawTest, parsedTest } = {}) {
   const ring = makeRing(capacity);
-
-  if (!rawTest && !parsedTest) {
-    for await (const line of readRawLines(filePath, compressed)) {
-      ring.push(line);
-    }
-    return parseLines(ring.toArray());
-  }
 
   for await (const line of readRawLines(filePath, compressed)) {
     if (rawTest && !rawTest(line)) continue;
@@ -224,7 +206,7 @@ const searchLogs = {
               (!correlationIdStr || line.includes(correlationIdStr)),
             parsedTest: (entry) =>
               (!level || entry.level === level) &&
-              (!userId || entry.userId === userId) &&
+              (!userId || String(entry.userId) === userIdStr) &&
               (!correlationId || entry.correlationId === correlationId),
           }
         : {});

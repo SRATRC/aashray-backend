@@ -53,6 +53,16 @@ function toColumnar(rows) {
   };
 }
 
+async function fetchAllTableNames() {
+  const rows = await executeQuery(`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`);
+  return rows.map((r) => r.TABLE_NAME);
+}
+
+function findSimilarTables(names, target) {
+  const needle = target.toLowerCase();
+  return names.filter((n) => n.toLowerCase().includes(needle) || needle.includes(n.toLowerCase()));
+}
+
 const getSchema = {
   name: 'get_schema',
   description:
@@ -91,12 +101,10 @@ const getSchema = {
 
       let warning;
       if (missing.length) {
-        const allTables = await executeQuery(`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`);
-        const names = allTables.map((r) => r.TABLE_NAME);
+        const names = await fetchAllTableNames();
         warning = missing
           .map((m) => {
-            const target = m.toLowerCase();
-            const similar = names.filter((n) => n.toLowerCase().includes(target) || target.includes(n.toLowerCase()));
+            const similar = findSimilarTables(names, m);
             return similar.length ? `"${m}" not found — did you mean: ${similar.join(', ')}?` : `"${m}" not found.`;
           })
           .join(' ');
@@ -177,12 +185,9 @@ const queryDb = {
       const tableMatch = err.message.match(/Table '[\w.]*?\.(\w+)' doesn't exist/i);
       if (tableMatch) {
         try {
-          const tables = await executeQuery(`SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`);
-          const names = tables.map((r) => r.TABLE_NAME);
-          const target = tableMatch[1].toLowerCase();
-          const similar = names.filter((n) => n.toLowerCase().includes(target) || target.includes(n.toLowerCase()));
-          if (similar.length) hint = ` Did you mean one of: ${similar.join(', ')}?`;
-          else hint = ` Available tables: ${names.join(', ')}.`;
+          const names = await fetchAllTableNames();
+          const similar = findSimilarTables(names, tableMatch[1]);
+          hint = similar.length ? ` Did you mean one of: ${similar.join(', ')}?` : ` Available tables: ${names.join(', ')}.`;
         } catch (_) { /* ignore */ }
       }
 
