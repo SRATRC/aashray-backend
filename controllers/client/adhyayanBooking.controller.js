@@ -51,7 +51,10 @@ export const FetchAllShibir = async (req, res) => {
     },
     offset,
     limit: pageSize,
-    order: [['start_date', 'ASC']]
+    order: [
+      ['start_date', 'ASC'],
+      ['id', 'ASC']
+    ]
   });
 
   const groupedByMonth = shibirs.reduce((acc, event) => {
