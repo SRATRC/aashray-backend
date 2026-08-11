@@ -112,13 +112,14 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       { transaction: t }
     );
     
-    // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
       status === STATUS_PAYMENT_PENDING &&
       package_info.amount > 0
     ) {
-      await createPendingTransaction(
+      // Accumulate the post-credit (discounted) amount into the order total,
+      // matching the room/adhyayan helpers — not the gross package_info.amount.
+      const { discountedAmount } = await createPendingTransaction(
         user,
         booking,
         TYPE_UTSAV,
@@ -126,10 +127,8 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-      
-      total_amount += package_info.amount;
-      
-      
+
+      total_amount += discountedAmount;
     }
     // Only provision food for non-waitlisted bookings
     if (booking.status !== STATUS_WAITING) {

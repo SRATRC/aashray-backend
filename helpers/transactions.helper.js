@@ -254,36 +254,55 @@ export async function cancelTransaction(
   return { credits };
 }
 
-export async function adjustAmount(
-  card,
-  booking,
-  transaction,
-  amount,
-  updatedBy,
-  t
-) {
-  const originalAmount = transaction.amount + transaction.discount;
-  const bookingType = getBookingType(transaction);
-
-  if (originalAmount > amount) {
-    const credits = originalAmount - amount;
-    await addCredit(user, card, bookingType, credits, t);
-    await useCredit(card, booking, transaction, amount, updatedBy, t);
-  } else if (originalAmount < amount) {
-    const balance = amount - originalAmount;
-    await transaction.update(
-      {
-        // set status to cash pending as only admin
-        // can call this function
-        status: STATUS_CASH_PENDING,
-        discount: originalAmount,
-        amount: balance,
-        description: `Transaction updated. New Balance ${balance}.`,
-        updatedBy: updatedBy
-      },
-      { transaction: t }
-    );
+/**
+ * Adjusts the net amount owed on a pending transaction (admin edit).
+ *
+ * `amount` is the new NET the customer owes — a non-negative number that the
+ * caller is responsible for parsing/validating. It matches the value the admin
+ * travel report displays and re-submits (`transactions.amount`, already
+ * post-credit). Credits already applied (`transaction.discount`) are left
+ * untouched; this never adds or refunds wallet credit. Re-submitting the
+ * unchanged value is a no-op, which is what stops redundant admin saves from
+ * corrupting the transaction.
+ *
+ * Scope: updates the transaction row only (amount + settled status). Booking
+ * status is intentionally left to the booking-status endpoints.
+ */
+export async function adjustAmount(transaction, amount, updatedBy, t) {
+  if (
+    [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
+      transaction.status
+    )
+  ) {
+    throw new ApiError(400, 'Cannot update amount for a completed transaction');
   }
+
+  // Idempotent: an unchanged net (the common redundant-save case) is a no-op.
+  if (Number(transaction.amount) === amount) return;
+
+  const discount = Number(transaction.discount);
+
+  // Nothing left to collect — settle the transaction, preserving cash vs online.
+  let status = transaction.status;
+  if (amount === 0) {
+    status =
+      transaction.status === STATUS_CASH_PENDING
+        ? STATUS_CASH_COMPLETED
+        : STATUS_PAYMENT_COMPLETED;
+  }
+
+  await transaction.update(
+    {
+      amount,
+      status,
+      description:
+        discount > 0
+          ? `Balance updated to ${amount} (credits used: ${discount})`
+          : `Balance updated to ${amount}`,
+      updatedBy
+    },
+    { transaction: t }
+  );
 }
 
 function getCreditType(bookingType) {

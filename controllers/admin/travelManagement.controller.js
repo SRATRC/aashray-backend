@@ -27,7 +27,8 @@ import {
 import {
   adminCancelTransaction,
   createPendingTransaction,
-  cancelTransaction
+  cancelTransaction,
+  adjustAmount
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
@@ -862,13 +863,12 @@ export async function updateBooking(req, res) {
       throw new ApiError(404, 'Transaction not found');
     }
 
-    await transaction.update(
-      {
-        amount,
-        updatedBy: req.user.username,
-      },
-      { transaction: t }
-    );
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+      throw new ApiError(400, 'Amount must be a non-negative number');
+    }
+
+    await adjustAmount(transaction, parsedAmount, req.user.username, t);
 
     updatedFields.push('amount');
   }
