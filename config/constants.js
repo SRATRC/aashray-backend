@@ -17,6 +17,7 @@ export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
 export const FEEDBACK_ELIGIBILITY_HOUR = 13;
+export const MAX_APP_PAYMENT_DURATION_MINUTES = 24 * 60;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
