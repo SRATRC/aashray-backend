@@ -14,8 +14,10 @@ import {
   TYPE_TRAVEL,
   TYPE_UTSAV,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from '../../config/constants.js';
+import moment from 'moment';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
 import { resolveOrderForTransactions } from '../../helpers/transactions.helper.js';
@@ -385,6 +387,28 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     },
     { totalAmount: 0, validTransactions: [] }
   );
+
+  // Reject any online pending/failed transaction older than the 24-hour window.
+  // Cash pending transactions never expire.
+  const paymentCutoff = moment
+    .utc()
+    .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
+  const expiredTransactions = validTransactions.filter(
+    (txn) =>
+      txn.status !== STATUS_CASH_PENDING &&
+      moment.utc(txn.createdAt).isSameOrBefore(paymentCutoff)
+  );
+
+  if (expiredTransactions.length > 0) {
+    req.log.warn('create_order_v2_expired_transactions', {
+      cardno: req.user.cardno,
+      transactionIds: expiredTransactions.map((txn) => txn.id)
+    });
+    throw new ApiError(
+      400,
+      'One or more payments have expired. Please refresh and try again.'
+    );
+  }
 
   const validTransactionIds = validTransactions.map((txn) => txn.id);
 
