@@ -477,7 +477,7 @@ export async function getPendingTransactions(timeFilter) {
         attributes: ['cardno', 'email', 'mobno'],
         required: true,
         where: {
-          country: 'INDIA'
+          country: 'India'
         }
       }
     ],
