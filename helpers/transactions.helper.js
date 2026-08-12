@@ -16,12 +16,14 @@ import {
   STATUS_PAYMENT_FAILED,
   TYPE_UTSAV,
   TYPE_TRAVEL,
-  STATUS_PAYMENT_AUTHORIZED
+  STATUS_PAYMENT_AUTHORIZED,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
+import moment from 'moment';
 import { getBookingType, ifMigrated } from './booking.helper.js';
 import { validateCard } from './card.helper.js';
 import logger from '../config/logger.js';
@@ -618,6 +620,28 @@ export const resolveOrderForTransactions = async (
   transactionIds,
   t
 ) => {
+  // Reject any online pending/failed transaction older than the 24-hour window.
+  // Cash pending transactions never expire.
+  const paymentCutoff = moment
+    .utc()
+    .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
+  const expiredTransactions = transactions.filter(
+    (txn) =>
+      txn.status !== STATUS_CASH_PENDING &&
+      moment.utc(txn.createdAt).isSameOrBefore(paymentCutoff)
+  );
+
+  if (expiredTransactions.length > 0) {
+    logger.warn('resolve_order_expired_transactions', {
+      cardno: transactions[0]?.cardno,
+      transactionIds: expiredTransactions.map((txn) => txn.id)
+    });
+    throw new ApiError(
+      400,
+      'One or more payments have expired. Please refresh and try again.'
+    );
+  }
+
   const existingOrderId = getSharedRazorpayOrderId(transactions);
 
   if (existingOrderId) {
