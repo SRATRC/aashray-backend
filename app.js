@@ -109,6 +109,7 @@ app.use(urlencoded({ extended: true }));
 app.use(json());
 app.use(cors(corsOptions));
 app.use(httpLogger);
+app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 
 app.use(
   session({

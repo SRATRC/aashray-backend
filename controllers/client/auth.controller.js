@@ -1,12 +1,24 @@
-import { MSG_UPDATE_SUCCESSFUL, WHATSAPP_SUPPORT_NUMBER } from '../../config/constants.js';
-import { CardDb, FlatDb } from '../../models/associations.js';
+import {
+  MSG_UPDATE_SUCCESSFUL,
+  WHATSAPP_SUPPORT_NUMBER,
+  STATUS_MUMUKSHU,
+  STATUS_SEVA_KUTIR,
+  STATUS_GUEST
+} from '../../config/constants.js';
+import {
+  CardDb,
+  FlatDb,
+  GuestRelationship,
+  Departments
+} from '../../models/associations.js';
+import database from '../../config/database.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
 import sendMail from '../../utils/sendMail.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
-
+import moment from 'moment';
 
 export const updatePassword = async (req, res) => {
   attachUserContext(req);
@@ -28,7 +40,9 @@ export const updatePassword = async (req, res) => {
 
   const match = bcrypt.compareSync(current_password, details.password);
   if (!match) {
-    req.log.warn('update_password_incorrect_current', { cardno: req.user.cardno });
+    req.log.warn('update_password_incorrect_current', {
+      cardno: req.user.cardno
+    });
     throw new ApiError(404, 'incorrect password provided');
   }
 
@@ -57,9 +71,16 @@ export const updatePassword = async (req, res) => {
         }
       ];
 
-      await sendWhatsAppMessage(formattedPhone, 'password_update_app', components);
+      await sendWhatsAppMessage(
+        formattedPhone,
+        'password_update_app',
+        components
+      );
     } catch (err) {
-      console.error('Error sending WhatsApp message in updatePassword:', err.message || err);
+      console.error(
+        'Error sending WhatsApp message in updatePassword:',
+        err.message || err
+      );
     }
   }
 
@@ -69,7 +90,6 @@ export const updatePassword = async (req, res) => {
     .status(200)
     .send({ message: MSG_UPDATE_SUCCESSFUL, data: details });
 };
-
 
 export const logout = async (req, res) => {
   const { cardno } = req.query;
@@ -146,7 +166,10 @@ export const verifyAndLogin = async (req, res) => {
   details.setDataValue('isFlatOwner', !!isFlatOwner);
   details.setDataValue('password', '');
 
-  req.log.info('login_success', { cardno: details.cardno, isFlatOwner: !!isFlatOwner });
+  req.log.info('login_success', {
+    cardno: details.cardno,
+    isFlatOwner: !!isFlatOwner
+  });
   return res.status(200).send({ message: 'logged in', data: details });
 };
 
@@ -228,9 +251,16 @@ export async function forgotPassword(req, res) {
         }
       ];
 
-      await sendWhatsAppMessage(formattedPhone, 'password_reset_app', components);
+      await sendWhatsAppMessage(
+        formattedPhone,
+        'password_reset_app',
+        components
+      );
     } catch (err) {
-      console.error('Error sending WhatsApp message in forgotPassword:', err.message || err);
+      console.error(
+        'Error sending WhatsApp message in forgotPassword:',
+        err.message || err
+      );
     }
   }
 
@@ -240,3 +270,194 @@ export async function forgotPassword(req, res) {
   });
 }
 
+export async function checkMobile(req, res) {
+  const { mobno } = req.params;
+  req.log.info('check_mobile_start', { mobno });
+
+  if (!mobno || String(mobno).trim().length !== 10) {
+    throw new ApiError(400, 'A valid 10-digit phone number is required');
+  }
+
+  const existing = await CardDb.findOne({
+    where: { mobno },
+    attributes: ['id', 'issuedto', 'res_status']
+  });
+
+  return res.status(200).send({
+    exists: !!existing,
+    name: existing ? existing.issuedto : null,
+    res_status: existing ? existing.res_status : null
+  });
+}
+
+export async function register(req, res) {
+  const {
+    issuedto,
+    mobno,
+    gender,
+    password,
+    res_status,
+    department,
+    ref_mobno,
+    guest_type,
+    dob,
+    center
+  } = req.body;
+
+  const resStatusToUse = res_status || STATUS_MUMUKSHU;
+
+  req.log.info('register_start', { mobno, res_status: resStatusToUse });
+
+  // ── Basic required field validation ──────────────────────────────────────
+  if (!issuedto || !issuedto.trim()) {
+    throw new ApiError(400, 'Full name is required');
+  }
+  if (!mobno || String(mobno).trim().length !== 10) {
+    throw new ApiError(400, 'A valid 10-digit phone number is required');
+  }
+  if (!gender || !['M', 'F'].includes(gender)) {
+    throw new ApiError(400, 'Gender must be M or F');
+  }
+  if (!password || !password.trim()) {
+    throw new ApiError(400, 'Password is required');
+  }
+  if (!dob) {
+    throw new ApiError(400, 'Date of birth is required');
+  }
+  const dobMoment = moment(dob, 'YYYY-MM-DD', true);
+  if (!dobMoment.isValid()) {
+    throw new ApiError(400, 'Invalid date of birth format');
+  }
+  if (dobMoment.isAfter(moment(), 'day')) {
+    throw new ApiError(400, 'Date of birth cannot be in the future');
+  }
+  if (dobMoment.isBefore('1900-01-01')) {
+    throw new ApiError(400, 'Please select a valid date of birth');
+  }
+  if (!center || !center.trim()) {
+    throw new ApiError(400, 'Centre is required');
+  }
+  const validStatuses = [
+    STATUS_MUMUKSHU,
+    'PR',
+    STATUS_SEVA_KUTIR,
+    STATUS_GUEST
+  ];
+  if (!resStatusToUse || !validStatuses.includes(resStatusToUse)) {
+    throw new ApiError(400, 'Invalid residential status');
+  }
+
+  // ── Conditional validation ────────────────────────────────────────────────
+  let refMumukshuCardno = null;
+
+  if (resStatusToUse === STATUS_SEVA_KUTIR) {
+    if (!department || !department.trim()) {
+      throw new ApiError(
+        400,
+        'Department is required for Seva Kutir registration'
+      );
+    }
+    const dept = await Departments.findOne({
+      where: { dept_name: department }
+    });
+    if (!dept) {
+      throw new ApiError(400, 'Invalid department selected');
+    }
+  }
+
+  if (resStatusToUse === STATUS_GUEST) {
+    if (!ref_mobno || String(ref_mobno).trim().length !== 10) {
+      throw new ApiError(
+        400,
+        'A valid 10-digit reference Mumukshu phone number is required'
+      );
+    }
+    if (
+      !guest_type ||
+      !['family', 'friend', 'driver', 'vip'].includes(guest_type)
+    ) {
+      throw new ApiError(
+        400,
+        'Guest type must be family, friend, driver, or vip'
+      );
+    }
+    const refMumukshu = await CardDb.findOne({
+      where: { mobno: ref_mobno, res_status: STATUS_MUMUKSHU },
+      attributes: ['cardno']
+    });
+    if (!refMumukshu) {
+      throw new ApiError(
+        404,
+        'Reference phone number does not belong to a registered Mumukshu'
+      );
+    }
+    refMumukshuCardno = refMumukshu.cardno;
+  }
+
+  // ── Uniqueness check ──────────────────────────────────────────────────────
+  const existing = await CardDb.findOne({
+    where: { mobno },
+    attributes: ['id']
+  });
+  if (existing) {
+    throw new ApiError(409, 'An account with this phone number already exists');
+  }
+
+  // ── Generate cardno (MAX(id)+1, zero-padded to 10 digits) ─────────────────
+  const maxId = await CardDb.max('id');
+  const cardno = String((maxId || 0) + 1).padStart(10, '0');
+
+  // ── Hash password ─────────────────────────────────────────────────────────
+  const salt = bcrypt.genSaltSync(10);
+  const hashedPassword = bcrypt.hashSync(password.trim(), salt);
+
+  // ── Create records in a transaction ──────────────────────────────────────
+  const t = await database.transaction();
+  try {
+    const newCard = await CardDb.create(
+      {
+        cardno,
+        issuedto: issuedto.trim(),
+        gender,
+        dob,
+        mobno,
+        center: center.trim(),
+        res_status: resStatusToUse,
+        status: 'offprem',
+        active: true,
+        password: hashedPassword,
+        updatedBy: 'USER',
+        ...(resStatusToUse === STATUS_SEVA_KUTIR && { department })
+      },
+      { transaction: t }
+    );
+
+    if (resStatusToUse === STATUS_GUEST) {
+      await GuestRelationship.create(
+        {
+          cardno: refMumukshuCardno,
+          guest: cardno,
+          type: guest_type,
+          updatedBy: cardno
+        },
+        { transaction: t }
+      );
+    }
+
+    await t.commit();
+
+    req.log.info('register_success', { cardno, res_status: resStatusToUse });
+
+    // Return same shape as verifyAndLogin so setUser() works on the app
+    newCard.setDataValue('password', '');
+    newCard.setDataValue('isFlatOwner', false);
+
+    return res
+      .status(201)
+      .send({ message: 'Account created successfully', data: newCard });
+  } catch (err) {
+    await t.rollback();
+    req.log.error('register_failed', { mobno, err: err.message });
+    throw err;
+  }
+}

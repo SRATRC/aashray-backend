@@ -1,5 +1,13 @@
-import { CardDb, GuestRelationship } from '../../models/associations.js';
-import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
+import {
+  CardDb,
+  GuestRelationship,
+  Departments
+} from '../../models/associations.js';
+import {
+  ERR_CARD_NOT_FOUND,
+  MSG_UPDATE_SUCCESSFUL,
+  STATUS_OFFPREM
+} from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import bcrypt from 'bcryptjs';
 import ApiError from '../../utils/ApiError.js';
@@ -8,7 +16,6 @@ import { Op } from 'sequelize';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment-timezone';
-
 
 // export const createCard = async (req, res) => {
 //   const {
@@ -95,7 +102,6 @@ import moment from 'moment-timezone';
 
 export const createCard = async (req, res) => {
   const {
-    cardno,
     issuedto,
     gender,
     dob,
@@ -110,17 +116,27 @@ export const createCard = async (req, res) => {
     pin,
     centre,
     res_status,
-    referenceCardno,  // parent card for guest
-    guestType         // guest type: Driver, VIP, Friend, Family
+    department, // for SEVA KUTIR
+    referenceCardno, // parent card for guest
+    referencePhone, // parent phone for guest
+    ref_mobno, // parent phone for guest (alt name)
+    guestType // guest type: Driver, VIP, Friend, Family
   } = req.body;
+
+  // ── Auto-generate cardno (MAX(id)+1 zero-padded to 10 digits) ───────────
+  const maxId = await CardDb.max('id');
+  const cardno = String((maxId || 0) + 1).padStart(10, '0');
 
   req.log.info('create_card_start', { cardno, issuedto, res_status });
 
-  // --- Check if cardno already exists ---
-  const existingCard = await CardDb.findOne({ where: { cardno } });
-  if (existingCard) {
-    req.log.warn('create_card_already_exists', { cardno });
-    return res.status(400).json({ message: `Card number ${cardno} already exists` });
+  // ── Validate SEVA KUTIR department ───────────────────────────────────────
+  if (res_status === 'SEVA KUTIR') {
+    if (!department)
+      throw new ApiError(400, 'Department is required for Seva Kutir cards');
+    const dept = await Departments.findOne({
+      where: { dept_name: department }
+    });
+    if (!dept) throw new ApiError(400, 'Invalid department selected');
   }
 
   // --- Start a transaction ---
@@ -128,46 +144,81 @@ export const createCard = async (req, res) => {
 
   try {
     // --- Create the main card ---
-    const newCard = await CardDb.create({
-      cardno,
-      issuedto,
-      gender,
-      dob,
-      mobno,
-      email,
-      idType,
-      idNo,
-      address,
-      country,
-      state,
-      city,
-      pin,
-      center: centre,
-      status: STATUS_OFFPREM,
-      res_status,
-      updatedBy: req.user.username
-    }, { transaction: t });
+    const newCard = await CardDb.create(
+      {
+        cardno,
+        issuedto,
+        gender,
+        dob,
+        mobno,
+        email,
+        idType,
+        idNo,
+        address,
+        country,
+        state,
+        city,
+        pin,
+        center: centre,
+        status: STATUS_OFFPREM,
+        res_status,
+        ...(res_status === 'SEVA KUTIR' && { department }),
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
 
     if (!newCard) throw new ApiError(500, 'Failed to create card');
 
     // --- If this is a guest card, validate and insert relationship ---
     if (res_status === 'GUEST') {
-      if (!referenceCardno || !guestType) {
-        throw new ApiError(400, 'Missing referenceCardno or guestType for GUEST');
+      const refPhone = referencePhone || ref_mobno;
+      let parentCardno = referenceCardno;
+
+      if (refPhone) {
+        const parentCard = await CardDb.findOne({
+          where: { mobno: refPhone }
+        });
+        if (!parentCard) {
+          throw new ApiError(
+            400,
+            `Reference phone number ${refPhone} does not belong to a registered user`
+          );
+        }
+        parentCardno = parentCard.cardno;
+      } else if (parentCardno && /^\d{10}$/.test(parentCardno)) {
+        const parentCard = await CardDb.findOne({
+          where: { mobno: parentCardno }
+        });
+        if (parentCard) {
+          parentCardno = parentCard.cardno;
+        }
+      }
+
+      if (!parentCardno || !guestType) {
+        throw new ApiError(400, 'Missing reference phone number or guest type');
       }
 
       // Check that parent card exists
-      const parentCard = await CardDb.findOne({ where: { cardno: referenceCardno } });
+      const parentCard = await CardDb.findOne({
+        where: { cardno: parentCardno }
+      });
       if (!parentCard) {
-        throw new ApiError(400, `Reference card ${referenceCardno} does not exist`);
+        throw new ApiError(
+          400,
+          `Reference card ${parentCardno} does not exist`
+        );
       }
 
-      await GuestRelationship.create({
-        cardno: referenceCardno,
-        guest: cardno,
-        type: guestType,
-        updatedBy: req.user.username
-      }, { transaction: t });
+      await GuestRelationship.create(
+        {
+          cardno: parentCardno,
+          guest: cardno,
+          type: guestType,
+          updatedBy: req.user.username
+        },
+        { transaction: t }
+      );
     }
 
     // --- Commit everything ---
@@ -191,9 +242,16 @@ export const createCard = async (req, res) => {
           }
         ];
 
-        await sendWhatsAppMessage(formattedPhone, 'card_account_created', components);
+        await sendWhatsAppMessage(
+          formattedPhone,
+          'card_account_created',
+          components
+        );
       } catch (waErr) {
-        console.error('Error sending WhatsApp message in createCard:', waErr.message || waErr);
+        console.error(
+          'Error sending WhatsApp message in createCard:',
+          waErr.message || waErr
+        );
       }
     }
 
@@ -201,15 +259,25 @@ export const createCard = async (req, res) => {
       message: 'Card created successfully',
       data: newCard
     });
-
   } catch (error) {
     // --- Rollback on any error ---
     await t.rollback();
 
     req.log.error('create_card_error', { cardno, error: error.message });
-    const message = error.name === 'SequelizeUniqueConstraintError'
-      ? 'Card number must be unique'
-      : error.message || 'Internal server error';
+    let message = 'Internal server error';
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      const field = error.errors?.[0]?.path;
+      if (field === 'mobno') {
+        message = 'Phone number is already registered';
+      } else if (field === 'cardno') {
+        message = 'Card number must be unique';
+      } else {
+        message =
+          error.errors?.[0]?.message || 'Unique constraint validation failed';
+      }
+    } else {
+      message = error.message || 'Internal server error';
+    }
 
     return res.status(400).json({ message });
   }
@@ -217,13 +285,11 @@ export const createCard = async (req, res) => {
 
 export const fetchAllCards = async (req, res) => {
   req.log.info('fetch_all_cards_start');
-  const data = await CardDb.findAll({
-  });
+  const data = await CardDb.findAll({});
 
   req.log.info('fetch_all_cards_success', { count: data.length });
   return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
-
 
 export const searchCardsByName = async (req, res) => {
   try {
@@ -235,19 +301,49 @@ export const searchCardsByName = async (req, res) => {
         [Sequelize.Op.or]: [
           { issuedto: { [Sequelize.Op.like]: `%${term}%` } },
           { mobno: { [Sequelize.Op.like]: `%${term}%` } },
-          { cardno: { [Sequelize.Op.like]: `%${term}%` } } // ✅ added this
+          { cardno: { [Sequelize.Op.like]: `%${term}%` } }
         ]
       }
     });
 
-    req.log.info('search_cards_by_name_success', { term, count: data.length });
-    return res.status(200).send({ message: 'Fetched all cards', data });
+    const serializedData = await Promise.all(
+      data.map(async (card) => {
+        const cardJson = card.toJSON();
+        if (cardJson.res_status === 'GUEST') {
+          const relation = await GuestRelationship.findOne({
+            where: { guest: cardJson.cardno }
+          });
+          if (relation) {
+            cardJson.referenceCardno = relation.cardno;
+            cardJson.guestType = relation.type;
+            const parentCard = await CardDb.findOne({
+              where: { cardno: relation.cardno },
+              attributes: ['mobno']
+            });
+            if (parentCard) {
+              cardJson.referencePhone = parentCard.mobno;
+            }
+          }
+        }
+        return cardJson;
+      })
+    );
+
+    req.log.info('search_cards_by_name_success', {
+      term,
+      count: serializedData.length
+    });
+    return res
+      .status(200)
+      .send({ message: 'Fetched all cards', data: serializedData });
   } catch (err) {
-    req.log.error('search_cards_by_name_error', { term: req.params.name, error: err.message });
+    req.log.error('search_cards_by_name_error', {
+      term: req.params.name,
+      error: err.message
+    });
     return res.status(500).send({ message: 'Internal server error' });
   }
 };
-
 
 export const updateCard = async (req, res) => {
   const {
@@ -267,7 +363,10 @@ export const updateCard = async (req, res) => {
     center: centre,
     status,
     res_status,
+    department, // for SEVA KUTIR
     referenceCardno,
+    referencePhone, // parent phone for guest
+    ref_mobno, // parent phone for guest (alt name)
     guestType
   } = req.body;
 
@@ -280,17 +379,52 @@ export const updateCard = async (req, res) => {
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
+  let parentCardno = referenceCardno;
+  const refPhone = referencePhone || ref_mobno;
+
   // Validation for guest
   if (res_status === 'GUEST') {
-    if (!referenceCardno || !guestType) {
-      throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
+    if (refPhone) {
+      const parentCard = await CardDb.findOne({
+        where: { mobno: refPhone }
+      });
+      if (!parentCard) {
+        throw new ApiError(
+          400,
+          `Reference phone number ${refPhone} does not belong to a registered user`
+        );
+      }
+      parentCardno = parentCard.cardno;
+    } else if (parentCardno && /^\d{10}$/.test(parentCardno)) {
+      const parentCard = await CardDb.findOne({
+        where: { mobno: parentCardno }
+      });
+      if (parentCard) {
+        parentCardno = parentCard.cardno;
+      }
     }
+
+    if (!parentCardno || !guestType) {
+      throw new ApiError(
+        400,
+        'Missing reference phone number or guestType for guest'
+      );
+    }
+  }
+
+  // Validation for seva kutir
+  if (res_status === 'SEVA KUTIR' && department) {
+    const dept = await Departments.findOne({
+      where: { dept_name: department }
+    });
+    if (!dept) throw new ApiError(400, 'Invalid department selected');
   }
 
   // --- Compare to find changed fields ---
   const isChanged = (newVal, oldVal) => {
     if (newVal === undefined) return false;
-    const normalize = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    const normalize = (v) =>
+      v === null || v === undefined ? '' : String(v).trim();
     return normalize(newVal) !== normalize(oldVal);
   };
 
@@ -310,6 +444,7 @@ export const updateCard = async (req, res) => {
   if (isChanged(centre, card.center)) changed.push('Center');
   if (isChanged(status, card.status)) changed.push('Status');
   if (isChanged(res_status, card.res_status)) changed.push('Resident Status');
+  if (isChanged(department, card.department)) changed.push('Department');
 
   await card.update({
     issuedto,
@@ -327,31 +462,35 @@ export const updateCard = async (req, res) => {
     center: centre,
     status,
     res_status,
+    // Only update department for SEVA KUTIR; clear it for other statuses
+    department:
+      res_status === 'SEVA KUTIR' ? department || card.department : null,
     updatedBy: req.user.username
   });
 
   // Update or create guest relationship
   if (res_status === 'GUEST') {
-    const [relation, created] = await GuestRelationship.findOrCreate({
-      where: { cardno: cardno },
-      defaults: {
-        cardno: cardno,
-        referenceCardno,
-        guestType,
-        createdBy: req.user.username
-      }
+    const existingRelation = await GuestRelationship.findOne({
+      where: { guest: cardno }
     });
 
-    if (!created) {
-      await relation.update({
-        referenceCardno,
-        guestType,
+    if (existingRelation) {
+      await existingRelation.update({
+        cardno: parentCardno,
+        type: guestType,
+        updatedBy: req.user.username
+      });
+    } else {
+      await GuestRelationship.create({
+        cardno: parentCardno,
+        guest: cardno,
+        type: guestType,
         updatedBy: req.user.username
       });
     }
   } else {
     // If not a guest anymore, remove guest_relationship if it exists
-    await GuestRelationship.destroy({ where: { cardno: cardno } });
+    await GuestRelationship.destroy({ where: { guest: cardno } });
   }
 
   req.log.info('update_card_success', { cardno, res_status });
@@ -361,9 +500,14 @@ export const updateCard = async (req, res) => {
     const targetPhone = mobno || card.mobno;
     if (targetPhone) {
       try {
-        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
+        const formattedPhone = formatWhatsAppPhone(
+          targetPhone,
+          country || card.country
+        );
 
-        const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
+        const formattedTime = moment()
+          .tz('Asia/Kolkata')
+          .format('DD-MM-YYYY hh:mm A');
 
         const components = [
           {
@@ -378,9 +522,16 @@ export const updateCard = async (req, res) => {
           }
         ];
 
-        await sendWhatsAppMessage(formattedPhone, 'profile_updated', components);
+        await sendWhatsAppMessage(
+          formattedPhone,
+          'profile_updated',
+          components
+        );
       } catch (waErr) {
-        console.error('Error sending WhatsApp profile_updated message in updateCard:', waErr.message || waErr);
+        console.error(
+          'Error sending WhatsApp profile_updated message in updateCard:',
+          waErr.message || waErr
+        );
       }
     }
   }
@@ -401,14 +552,15 @@ export const transferCard = async (req, res) => {
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
-  await card.update(
-    {
-      cardno: new_cardno,
-      updatedBy: req.user.username
-    }
-  );
+  await card.update({
+    cardno: new_cardno,
+    updatedBy: req.user.username
+  });
 
-  req.log.info('transfer_card_success', { oldCardno: cardno, newCardno: new_cardno });
+  req.log.info('transfer_card_success', {
+    oldCardno: cardno,
+    newCardno: new_cardno
+  });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
@@ -433,15 +585,14 @@ export const fetchTotalTransactions = async (req, res) => {
       WHERE 
           cardno = ${cardno}
       GROUP BY 
-          category) as t;`);
+          category) as t;`
+  );
 
   req.log.info('fetch_total_transactions_success', { cardno });
   return res
     .status(200)
     .send({ message: 'fetched all user transactions', data: results });
 };
-
-
 
 export const resetPasswordDefault = async (req, res) => {
   const { cardno } = req.body;
@@ -462,10 +613,7 @@ export const resetPasswordDefault = async (req, res) => {
   // ✅ Use the same default value defined in the model
   const defaultPasswordHash = CardDb.rawAttributes.password.defaultValue;
 
-  await CardDb.update(
-    { password: defaultPasswordHash },
-    { where: { cardno } }
-  );
+  await CardDb.update({ password: defaultPasswordHash }, { where: { cardno } });
 
   req.log.info('reset_password_default_success', { cardno });
 
@@ -486,9 +634,16 @@ export const resetPasswordDefault = async (req, res) => {
         }
       ];
 
-      await sendWhatsAppMessage(formattedPhone, 'password_reset_admin', components);
+      await sendWhatsAppMessage(
+        formattedPhone,
+        'password_reset_admin',
+        components
+      );
     } catch (err) {
-      console.error('Error sending WhatsApp message in resetPasswordDefault:', err.message || err);
+      console.error(
+        'Error sending WhatsApp message in resetPasswordDefault:',
+        err.message || err
+      );
     }
   }
 
@@ -496,7 +651,6 @@ export const resetPasswordDefault = async (req, res) => {
     .status(200)
     .json({ message: 'Password reset successfully to default.' });
 };
-
 
 export const getCardByMobile = async (req, res) => {
   const { mobno } = req.params;
@@ -508,7 +662,14 @@ export const getCardByMobile = async (req, res) => {
   }
 
   const card = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'center', 'mobno', 'res_status', 'gender'],
+    attributes: [
+      'cardno',
+      'issuedto',
+      'center',
+      'mobno',
+      'res_status',
+      'gender'
+    ],
     where: { mobno }
   });
 

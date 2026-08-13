@@ -4,7 +4,8 @@ import {
   Countries,
   States,
   Cities,
-  CentreDb
+  CentreDb,
+  Departments
 } from '../../models/associations.js';
 import _ from 'lodash';
 const { chunk } = _;
@@ -137,4 +138,17 @@ export const getCentres = async (req, res) => {
   });
   req.log.info('fetch_centres_success', { count: data.length });
   return res.status(200).send({ message: 'fetched centres', data: data });
+};
+
+export const getDepartments = async (req, res) => {
+  req.log.info('fetch_departments_start');
+  const data = await Departments.findAll({
+    attributes: [
+      ['dept_name', 'key'],
+      ['dept_name', 'value']
+    ],
+    order: [['dept_name', 'ASC']]
+  });
+  req.log.info('fetch_departments_success', { count: data.length });
+  return res.status(200).send({ message: 'fetched departments', data: data });
 };

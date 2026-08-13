@@ -755,6 +755,22 @@ export async function createGuestsHelper(cardno, guests, t) {
   const registeredGuests = guests.filter((guest) => guest.cardno);
   const unregisteredGuests = guests.filter((guest) => !guest.cardno);
 
+  for (const guest of unregisteredGuests) {
+    if (!guest.dob) {
+      throw new ApiError(400, `Date of birth is required for guest ${guest.name || guest.mobno}`);
+    }
+    const dobMoment = moment(guest.dob, 'YYYY-MM-DD', true);
+    if (!dobMoment.isValid()) {
+      throw new ApiError(400, `Invalid date of birth format for guest ${guest.name || guest.mobno}`);
+    }
+    if (dobMoment.isAfter(moment(), 'day')) {
+      throw new ApiError(400, `Date of birth cannot be in the future for guest ${guest.name || guest.mobno}`);
+    }
+    if (dobMoment.isBefore('1900-01-01')) {
+      throw new ApiError(400, `Please select a valid date of birth for guest ${guest.name || guest.mobno}`);
+    }
+  }
+
   // Generate all needed IDs in one call
   const newCardIds =
     unregisteredGuests.length > 0
@@ -765,6 +781,8 @@ export async function createGuestsHelper(cardno, guests, t) {
     issuedto: guest.name,
     gender: guest.gender,
     mobno: guest.mobno,
+    ...(guest.dob && { dob: guest.dob }),
+    ...(guest.center && { center: guest.center }),
     guest_type: guest.type,
     cardno: newCardIds[index],
     res_status: STATUS_GUEST,
