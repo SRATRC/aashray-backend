@@ -28,6 +28,7 @@ import UtsavDb from './models/utsav_db.model.js';
 import { sendCancellationEmail, sendOpenBookingEmail } from './helpers/mailer.helper.js';
 import {
   getBooking,
+  getBookings,
   getBookingType,
   getBookingTypeFromBooking
 } from './helpers/booking.helper.js';
@@ -142,18 +143,25 @@ async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
     .subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
   const pendingTransactions = await getPendingTransactions(cancelTimeFilter);
 
+  const bookingsByType = {};
+
   for (const transaction of pendingTransactions) {
     const bookingType = getBookingType(transaction);
-    // TODO: optimize, get all bookings at once
 
     // Food bookings are handled in a special way
     if (bookingType != TYPE_FOOD) {
-      const booking = await getBooking(bookingType, transaction.bookingid);
-      if (booking) {
-        bookings.push(booking);
+      if (!bookingsByType[bookingType]) {
+        bookingsByType[bookingType] = new Set();
       }
+      bookingsByType[bookingType].add(transaction.bookingid);
     }
     transactions.push(transaction);
+  }
+
+  for (const [bookingType, bookingIdsSet] of Object.entries(bookingsByType)) {
+    const bookingIds = Array.from(bookingIdsSet);
+    const fetchedBookings = await getBookings(bookingType, bookingIds);
+    bookings.push(...fetchedBookings);
   }
 }
 

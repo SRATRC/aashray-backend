@@ -84,6 +84,57 @@ export async function getBooking(bookingType, bookingid) {
   return booking;
 }
 
+export async function getBookings(bookingType, bookingids) {
+  if (!bookingids || bookingids.length === 0) {
+    return [];
+  }
+
+  let bookings = [];
+
+  switch (bookingType) {
+    case TYPE_ROOM:
+      bookings = await RoomBooking.findAll({
+        where: { bookingid: bookingids }
+      });
+      break;
+
+    case TYPE_FLAT:
+      bookings = await FlatBooking.findAll({
+        where: { bookingid: bookingids }
+      });
+      break;
+
+    case TYPE_ADHYAYAN:
+      bookings = await ShibirBookingDb.findAll({
+        where: { bookingid: bookingids }
+      });
+      break;
+
+    case TYPE_FOOD:
+      bookings = await FoodDb.findAll({
+        where: { id: bookingids }
+      });
+      break;
+
+    case TYPE_TRAVEL:
+      bookings = await TravelDb.findAll({
+        where: { bookingid: bookingids }
+      });
+      break;
+
+    case TYPE_UTSAV:
+      bookings = await UtsavBooking.findAll({
+        where: { bookingid: bookingids }
+      });
+      break;
+
+    default:
+      throw new ApiError(400, `${ERR_INVALID_BOOKING_TYPE}: ${bookingType}`);
+  }
+
+  return bookings;
+}
+
 export function ifMigrated(transaction) {
   let bookingid = transaction.bookingid;
   let description = transaction.description;
