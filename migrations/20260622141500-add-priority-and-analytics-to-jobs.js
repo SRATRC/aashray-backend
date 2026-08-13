@@ -2,38 +2,50 @@
 
 module.exports = {
   async up(queryInterface, Sequelize) {
+    const tableInfo = await queryInterface.describeTable('wa_group_jobs');
+
     // 1. Add priority column (ENUM: high, normal, low)
-    await queryInterface.addColumn('wa_group_jobs', 'priority', {
-      type: Sequelize.ENUM('high', 'normal', 'low'),
-      defaultValue: 'normal',
-      allowNull: false
-    });
+    if (!tableInfo.priority) {
+      await queryInterface.addColumn('wa_group_jobs', 'priority', {
+        type: Sequelize.ENUM('high', 'normal', 'low'),
+        defaultValue: 'normal',
+        allowNull: false
+      });
+    }
 
     // 2. Add msgId column (VARCHAR)
-    await queryInterface.addColumn('wa_group_jobs', 'msgId', {
-      type: Sequelize.STRING(255),
-      allowNull: true
-    });
+    if (!tableInfo.msgId) {
+      await queryInterface.addColumn('wa_group_jobs', 'msgId', {
+        type: Sequelize.STRING(255),
+        allowNull: true
+      });
+    }
 
     // 3. Add deliveredCount column (INTEGER)
-    await queryInterface.addColumn('wa_group_jobs', 'deliveredCount', {
-      type: Sequelize.INTEGER,
-      defaultValue: 0,
-      allowNull: false
-    });
+    if (!tableInfo.deliveredCount) {
+      await queryInterface.addColumn('wa_group_jobs', 'deliveredCount', {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+        allowNull: false
+      });
+    }
 
     // 4. Add readCount column (INTEGER)
-    await queryInterface.addColumn('wa_group_jobs', 'readCount', {
-      type: Sequelize.INTEGER,
-      defaultValue: 0,
-      allowNull: false
-    });
+    if (!tableInfo.readCount) {
+      await queryInterface.addColumn('wa_group_jobs', 'readCount', {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+        allowNull: false
+      });
+    }
 
     // 5. Add receipts column (JSON)
-    await queryInterface.addColumn('wa_group_jobs', 'receipts', {
-      type: Sequelize.JSON,
-      allowNull: true
-    });
+    if (!tableInfo.receipts) {
+      await queryInterface.addColumn('wa_group_jobs', 'receipts', {
+        type: Sequelize.JSON,
+        allowNull: true
+      });
+    }
   },
 
   async down(queryInterface, Sequelize) {
