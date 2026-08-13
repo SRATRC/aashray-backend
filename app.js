@@ -54,6 +54,7 @@ import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
 import coordinatorAuthRoutes from './routes/admin/coordinatorAuth.routes.js';
 
 import waManagementRoutes from './routes/admin/waManagement.routes.js';
+import satshrutRoutes from './routes/admin/satshrut.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -196,6 +197,7 @@ app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 app.use('/api/v1/admin/wifi', wifiManagementRoutes);
 app.use('/api/v1/admin/wa', waManagementRoutes);
+app.use('/api/v1/admin/satshrut', satshrutRoutes);
 app.use('/api/v1/coordinator', coordinatorAuthRoutes);
 app.use('/api/v1/short-links', shortLinkRoutes);
 app.use('/', redirectRoutes);
