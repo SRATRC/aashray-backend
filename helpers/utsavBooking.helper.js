@@ -35,6 +35,7 @@ import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import {
+  blockNightBounds,
   getBlockedDates,
   isDateRangeOverlapping,
   validateBlockedDates
@@ -638,13 +639,26 @@ export async function getDateRangesDuringUtsav(
     }
 
     // flag blockedDates so they can be booked in waiting list status
+    //
+    // A manual same-day block stores checkout === checkin (zero-length), while
+    // an utsav auto-block stores end+1 (exclusive departure) — the same
+    // inconsistency getBlockedDates already normalizes for its own query (see
+    // its comment). That normalization only fixed which rows getBlockedDates
+    // returns; it never touched the raw checkin/checkout on those rows, so a
+    // range that starts exactly on a same-day block's date (block 15th/15th vs
+    // range 15th->...) still read as two ranges merely touching at an edge, not
+    // overlapping, and slipped through unblocked.
     for (const range of dateRanges) {
       range.isBlocked = false;
       for (const blockedDate of blockedDates) {
+        const effectiveCheckout = blockNightBounds(
+          blockedDate.checkin,
+          blockedDate.checkout
+        ).effectiveCheckout.format('YYYY-MM-DD');
         if (
           isDateRangeOverlapping(
             blockedDate.checkin,
-            blockedDate.checkout,
+            effectiveCheckout,
             range.start,
             range.end,
             range.overlappingWithUtsav

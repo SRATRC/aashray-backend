@@ -23,7 +23,8 @@ import { splitDateRanges } from '../../../helpers/utsavBooking.helper.js';
 import {
   STATUS_ACTIVE,
   STATUS_CONFIRMED,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  TYPE_ROOM
 } from '../../../config/constants.js';
 
 jest.mock('../../../utils/sendMail.js');
@@ -31,6 +32,16 @@ jest.mock('../../../utils/sendMail.js');
 const fmt = (m) => m.format('YYYY-MM-DD');
 const post = (body) =>
   request(app).post('/api/v1/stay/check-blocked-dates').send(body);
+const postRoomValidate = (body) =>
+  request(app).post('/api/v1/mumukshu/validate').send(body);
+const roomBookingJson = (cardno, checkin, checkout) => ({
+  booking_type: TYPE_ROOM,
+  details: {
+    checkin_date: checkin,
+    checkout_date: checkout,
+    mumukshuGroup: [{ roomType: 'ac', floorType: '', mumukshus: [cardno] }]
+  }
+});
 
 const CARD = 'BLK_BUG_1';
 const ATTENDEE = 'BLK_BUG_ATT_1';
@@ -175,5 +186,44 @@ describe('POST /stay/check-blocked-dates block bugfixes', () => {
     await BlockDates.destroy({ where: { comments: 'BLK_BUG Utsav' } });
     await UtsavPackagesDb.destroy({ where: { id: pkg.id } });
     await UtsavDb.destroy({ where: { id: utsav.id } });
+  });
+
+  // getDateRangesDuringUtsav (used by the real room-validate path, not by
+  // check-blocked-dates above) had its own copy of the same zero-length-block
+  // bug as C1: it read blockedDate.checkin/checkout straight off the DB row
+  // instead of normalizing through blockNightBounds first, so a same-day block
+  // was only caught when the stay started strictly BEFORE it, never when the
+  // stay started exactly ON it.
+  it('same-day block rejects a room booking starting exactly on the blocked day', async () => {
+    const day = fmt(moment().add(90, 'day'));
+    const dayBefore = fmt(moment().add(89, 'day'));
+    const checkout = fmt(moment().add(106, 'day'));
+    await BlockDates.create({
+      checkin: day,
+      checkout: day, // zero-length manual block, same shape as C1
+      comments: 'C1b same-day (getDateRangesDuringUtsav)',
+      status: STATUS_ACTIVE,
+      updatedBy: 'test'
+    });
+
+    // Starting exactly on the blocked day: previously slipped through unblocked.
+    const onRes = await postRoomValidate({
+      cardno: CARD,
+      primary_booking: roomBookingJson(CARD, day, checkout)
+    });
+    expect(onRes.status).toBe(200);
+    expect(onRes.body.data.roomDetails.some((r) => r.isBlocked)).toBe(true);
+
+    // Starting the day before: already worked before this fix, must still work.
+    const beforeRes = await postRoomValidate({
+      cardno: CARD,
+      primary_booking: roomBookingJson(CARD, dayBefore, checkout)
+    });
+    expect(beforeRes.status).toBe(200);
+    expect(beforeRes.body.data.roomDetails.some((r) => r.isBlocked)).toBe(true);
+
+    await BlockDates.destroy({
+      where: { comments: 'C1b same-day (getDateRangesDuringUtsav)' }
+    });
   });
 });
