@@ -19,14 +19,26 @@ const SatshrutSession = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
+    youtube_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
     video_start_seconds: {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 0
     },
+    video_end_seconds: {
+      type: DataTypes.INTEGER,
+      allowNull: false
+    },
     // Video 2 segment (optional second video in Phase 1 & 3)
     youtube2_video_id: {
       type: DataTypes.STRING,
+      allowNull: true
+    },
+    youtube2_url: {
+      type: DataTypes.STRING(500),
       allowNull: true
     },
     video2_start_seconds: {
@@ -42,8 +54,16 @@ const SatshrutSession = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
+    audio1_youtube_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
     audio2_youtube_id: {
       type: DataTypes.STRING,
+      allowNull: true
+    },
+    audio2_youtube_url: {
+      type: DataTypes.STRING(500),
       allowNull: true
     },
     notes: {
