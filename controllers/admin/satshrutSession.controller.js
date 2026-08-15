@@ -614,7 +614,7 @@ export const getTodaySession = async (req, res) => {
  * Body: { source_date, target_date, mode: 'move' | 'swap' }
  */
 export const moveSession = async (req, res) => {
-  const { source_date, target_date, mode = 'move' } = req.body;
+  const { source_date, target_date, mode = 'move', overwrite = false } = req.body;
 
   if (!source_date || !target_date) {
     throw new ApiError(400, 'source_date and target_date are required');
@@ -624,12 +624,20 @@ export const moveSession = async (req, res) => {
     throw new ApiError(400, 'Source and target dates must be different');
   }
 
+  if (!['move', 'swap'].includes(mode)) {
+    throw new ApiError(400, "mode must be 'move' or 'swap'");
+  }
+
   const sourceSession = await SatshrutSession.findOne({ where: { session_date: source_date } });
   if (!sourceSession) {
     throw new ApiError(404, `No session found for date ${source_date}`);
   }
 
   const targetSession = await SatshrutSession.findOne({ where: { session_date: target_date } });
+
+  if (mode === 'move' && targetSession && !overwrite) {
+    throw new ApiError(409, `A session already exists on target date ${target_date}. Please confirm overwrite or select Swap mode.`);
+  }
 
   const t = await SatshrutSession.sequelize.transaction();
   try {
@@ -653,7 +661,8 @@ export const moveSession = async (req, res) => {
     await t.commit();
     return res.status(200).json({
       success: true,
-      message: `Session ${mode === 'swap' ? 'swapped' : 'moved'} successfully from ${source_date} to ${target_date}`
+      message: `Session ${mode === 'swap' ? 'swapped' : 'moved'} successfully from ${source_date} to ${target_date}`,
+      overwritten: mode === 'move' && Boolean(targetSession)
     });
   } catch (err) {
     await t.rollback();
