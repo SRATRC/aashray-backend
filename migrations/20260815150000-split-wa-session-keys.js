@@ -57,8 +57,14 @@ module.exports = {
       }
     }
 
-    if (rows.length > 0) {
-      await queryInterface.bulkInsert('wa_session_keys', rows);
+    // Production holds 5479 keys in one blob, so insert in chunks rather than
+    // send a single statement of that size.
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      await queryInterface.bulkInsert(
+        'wa_session_keys',
+        rows.slice(i, i + CHUNK_SIZE)
+      );
     }
 
     // Clearing the blob also shrinks every future `creds` write, because a FULL row image

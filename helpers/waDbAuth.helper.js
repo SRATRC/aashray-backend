@@ -59,14 +59,19 @@ async function loadKeys(sessionId, session) {
     return {};
   }
 
-  await WaSessionKey.bulkCreate(
-    Object.entries(legacyKeys).map(([keyName, value]) => ({
-      session_id: sessionId,
-      key_name: keyName,
-      value
-    })),
-    { updateOnDuplicate: ['value', 'updatedAt'] }
-  );
+  const legacyRows = Object.entries(legacyKeys).map(([keyName, value]) => ({
+    session_id: sessionId,
+    key_name: keyName,
+    value
+  }));
+
+  // A live session holds thousands of keys, so insert in chunks.
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < legacyRows.length; i += CHUNK_SIZE) {
+    await WaSessionKey.bulkCreate(legacyRows.slice(i, i + CHUNK_SIZE), {
+      updateOnDuplicate: ['value', 'updatedAt']
+    });
+  }
   await WaSession.update({ keys: null }, { where: { id: sessionId } });
 
   const keys = {};

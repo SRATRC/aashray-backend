@@ -2,6 +2,8 @@ import { jest } from '@jest/globals';
 
 // @whiskeysockets/baileys ships ESM only, which the CJS test transform cannot load.
 // The adapter uses just these two exports, so stub them rather than pull in the package.
+// The stub means these tests do not exercise the real BufferJSON.replacer. The Buffer
+// round trip was checked separately against the real package and a real MySQL.
 jest.mock('@whiskeysockets/baileys', () => ({
   initAuthCreds: () => ({ registered: false }),
   BufferJSON: {
