@@ -8,6 +8,8 @@ import {
   listSessions,
   updateSession,
   deleteSession,
+  moveSession,
+  shiftSessions,
   getConfig,
   updateConfig,
   getTodaySession
@@ -21,6 +23,8 @@ router.use(authorizeRoles(ROLE_SUPER_ADMIN));
 
 // Session management
 router.post('/session/bulk', CatchAsync(bulkCreateSessions));  // before /:id routes
+router.post('/session/move', CatchAsync(moveSession));
+router.post('/session/shift', CatchAsync(shiftSessions));
 router.post('/session', CatchAsync(createSession));
 router.get('/sessions', CatchAsync(listSessions));
 router.patch('/session/:id', CatchAsync(updateSession));

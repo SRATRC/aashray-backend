@@ -27,9 +27,11 @@ const extractYouTubeId = (input) => {
 const parseTimestamp = (hms) => {
   if (!hms) return 0;
   const parts = String(hms).split(':').map(Number);
+  if (parts.some(isNaN)) return 0;
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];
-  return parseInt(hms) || 0;
+  const num = parseInt(hms);
+  return isNaN(num) ? 0 : num;
 };
 
 /**
@@ -40,6 +42,54 @@ const secondsToHMS = (secs) => {
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
+
+/**
+ * Add / subtract days to a YYYY-MM-DD string.
+ */
+const addDays = (dateStr, days) => {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split('T')[0];
+};
+
+/**
+ * Check if a date is a no-session day (Mon/Thu or Utsav).
+ */
+const isNoSessionDate = (dateStr, noSessionDays, utsavs) => {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  const jsDay = d.getUTCDay();
+  if (noSessionDays.includes(jsDay)) return true;
+  for (const u of utsavs) {
+    if (dateStr >= u.start_date && dateStr <= u.end_date) return true;
+  }
+  return false;
+};
+
+/**
+ * Get next valid session date skipping Mon, Thu, and Utsavs.
+ */
+const getNextValidSessionDate = (startDateStr, noSessionDays, utsavs) => {
+  let curr = startDateStr;
+  while (true) {
+    curr = addDays(curr, 1);
+    if (!isNoSessionDate(curr, noSessionDays, utsavs)) {
+      return curr;
+    }
+  }
+};
+
+/**
+ * Get previous valid session date skipping Mon, Thu, and Utsavs.
+ */
+const getPrevValidSessionDate = (startDateStr, noSessionDays, utsavs) => {
+  let curr = startDateStr;
+  while (true) {
+    curr = addDays(curr, -1);
+    if (!isNoSessionDate(curr, noSessionDays, utsavs)) {
+      return curr;
+    }
+  }
 };
 
 /**
@@ -73,6 +123,7 @@ export const createSession = async (req, res) => {
   } = req.body;
 
   if (status === STATUS_INACTIVE) {
+    if (!session_date) throw new ApiError(400, 'session_date is required');
     const existing = await SatshrutSession.findOne({ where: { session_date } });
     if (existing) {
       await existing.update({ status: STATUS_INACTIVE, notes: notes || null });
@@ -221,18 +272,20 @@ export const bulkCreateSessions = async (req, res) => {
       let video2_end_seconds = null;
 
       if (youtube2_url) {
+        if (!start2_time || !end2_time) {
+          results.errors.push({ session_date, reason: 'Video 2 start2_time and end2_time are required when youtube2_url is provided' });
+          continue;
+        }
         youtube2_video_id = extractYouTubeId(youtube2_url);
         if (!youtube2_video_id) {
           results.errors.push({ session_date, reason: 'Invalid Video 2 YouTube URL' });
           continue;
         }
-        if (start2_time && end2_time) {
-          video2_start_seconds = parseTimestamp(start2_time);
-          video2_end_seconds = parseTimestamp(end2_time);
-          if (video2_end_seconds <= video2_start_seconds) {
-            results.errors.push({ session_date, reason: 'Video 2 end_time must be after start2_time' });
-            continue;
-          }
+        video2_start_seconds = parseTimestamp(start2_time);
+        video2_end_seconds = parseTimestamp(end2_time);
+        if (video2_end_seconds <= 0 || video2_end_seconds <= video2_start_seconds) {
+          results.errors.push({ session_date, reason: 'Video 2 end_time must be greater than 00:00:00 and after start2_time' });
+          continue;
         }
       }
 
@@ -418,6 +471,20 @@ export const updateSession = async (req, res) => {
     throw new ApiError(400, 'Video 1 end_time must be greater than 00:00:00 and after start_time');
   }
 
+  // Validate Video 2 timestamps after merge if Video 2 exists
+  const finalY2 = updateData.youtube2_video_id !== undefined ? updateData.youtube2_video_id : session.youtube2_video_id;
+  const finalStart2 = updateData.video2_start_seconds !== undefined ? updateData.video2_start_seconds : session.video2_start_seconds;
+  const finalEnd2 = updateData.video2_end_seconds !== undefined ? updateData.video2_end_seconds : session.video2_end_seconds;
+
+  if (finalY2) {
+    if (finalStart2 === null || finalEnd2 === null) {
+      throw new ApiError(400, 'Video 2 start and end times are required when Video 2 is set');
+    }
+    if (finalEnd2 <= 0 || finalEnd2 <= finalStart2) {
+      throw new ApiError(400, 'Video 2 end_time must be greater than 00:00:00 and after start_time');
+    }
+  }
+
   await session.update(updateData);
 
   return res.status(200).json({ success: true, data: session });
@@ -539,4 +606,147 @@ export const getTodaySession = async (req, res) => {
       video_duration_seconds: v1Dur + v2Dur
     }
   });
+};
+
+/**
+ * POST /api/v1/admin/satshrut/session/move
+ * Move or swap a single session from source_date to target_date.
+ * Body: { source_date, target_date, mode: 'move' | 'swap' }
+ */
+export const moveSession = async (req, res) => {
+  const { source_date, target_date, mode = 'move' } = req.body;
+
+  if (!source_date || !target_date) {
+    throw new ApiError(400, 'source_date and target_date are required');
+  }
+
+  if (source_date === target_date) {
+    throw new ApiError(400, 'Source and target dates must be different');
+  }
+
+  const sourceSession = await SatshrutSession.findOne({ where: { session_date: source_date } });
+  if (!sourceSession) {
+    throw new ApiError(404, `No session found for date ${source_date}`);
+  }
+
+  const targetSession = await SatshrutSession.findOne({ where: { session_date: target_date } });
+
+  const t = await SatshrutSession.sequelize.transaction();
+  try {
+    if (mode === 'swap') {
+      if (targetSession) {
+        // Use a temporary date to prevent unique key collision
+        await sourceSession.update({ session_date: '1970-01-01' }, { transaction: t });
+        await targetSession.update({ session_date: source_date }, { transaction: t });
+        await sourceSession.update({ session_date: target_date }, { transaction: t });
+      } else {
+        await sourceSession.update({ session_date: target_date }, { transaction: t });
+      }
+    } else {
+      // mode === 'move' (overwrite target if exists, clear source)
+      if (targetSession) {
+        await targetSession.destroy({ transaction: t });
+      }
+      await sourceSession.update({ session_date: target_date }, { transaction: t });
+    }
+
+    await t.commit();
+    return res.status(200).json({
+      success: true,
+      message: `Session ${mode === 'swap' ? 'swapped' : 'moved'} successfully from ${source_date} to ${target_date}`
+    });
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
+};
+
+/**
+ * POST /api/v1/admin/satshrut/session/shift
+ * Shift all scheduled sessions on or after from_date forward or backward by 1 valid session day.
+ * Automatically skips Mon, Thu, and Utsavs.
+ * Body: { from_date, direction: 'forward' | 'backward' }
+ */
+export const shiftSessions = async (req, res) => {
+  const { from_date, direction = 'forward' } = req.body;
+
+  if (!from_date) {
+    throw new ApiError(400, 'from_date is required');
+  }
+
+  if (!['forward', 'backward'].includes(direction)) {
+    throw new ApiError(400, "direction must be 'forward' or 'backward'");
+  }
+
+  // Get all sessions starting on or after from_date
+  const sessions = await SatshrutSession.findAll({
+    where: {
+      session_date: { [Op.gte]: from_date }
+    },
+    order: [['session_date', 'ASC']]
+  });
+
+  if (!sessions.length) {
+    return res.status(200).json({
+      success: true,
+      message: `No sessions found on or after ${from_date} to shift.`,
+      shifted_count: 0
+    });
+  }
+
+  const config = await getOrCreateConfig();
+  const noSessionDays = config.no_session_days || [1, 4];
+  const utsavs = await UtsavDb.findAll({
+    attributes: ['start_date', 'end_date']
+  }).catch(() => []);
+
+  // Compute new target dates for each session
+  const shiftMap = []; // [{ session, oldDate, newDate }]
+
+  for (const s of sessions) {
+    const oldDate = s.session_date;
+    const newDate = direction === 'forward'
+      ? getNextValidSessionDate(oldDate, noSessionDays, utsavs)
+      : getPrevValidSessionDate(oldDate, noSessionDays, utsavs);
+    shiftMap.push({ session: s, oldDate, newDate });
+  }
+
+  // Check if backward shift collides with an existing session prior to from_date
+  if (direction === 'backward') {
+    const firstTargetDate = shiftMap[0].newDate;
+    const existingCollision = await SatshrutSession.findOne({
+      where: {
+        session_date: firstTargetDate,
+        id: { [Op.notIn]: sessions.map(s => s.id) }
+      }
+    });
+    if (existingCollision) {
+      throw new ApiError(400, `Cannot shift backward: Date ${firstTargetDate} already has an existing scheduled session.`);
+    }
+  }
+
+  // Execute in transaction: first park all in temp dates to prevent unique key conflict, then assign final dates
+  const t = await SatshrutSession.sequelize.transaction();
+  try {
+    // Step 1: Assign temporary placeholder dates (e.g. 1970-01-01, 1970-01-02, ...)
+    for (let i = 0; i < shiftMap.length; i++) {
+      const tempDate = addDays('1970-01-01', i);
+      await shiftMap[i].session.update({ session_date: tempDate }, { transaction: t });
+    }
+
+    // Step 2: Assign final calculated target dates
+    for (const item of shiftMap) {
+      await item.session.update({ session_date: item.newDate }, { transaction: t });
+    }
+
+    await t.commit();
+    return res.status(200).json({
+      success: true,
+      message: `Shifted ${shiftMap.length} session(s) ${direction} successfully.`,
+      shifted_count: shiftMap.length
+    });
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
 };
