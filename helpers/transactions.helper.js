@@ -611,7 +611,12 @@ export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
  * created and persisted only when there is no reusable one.
  *
  * @throws ApiError(409) when the existing order was already paid — that needs
- *   reconciliation, not another payable order (avoids double-charging).
+ *   reconciliation, not another payable order (avoids double-charging). Checked
+ *   before the expiry rejection below, so a transaction that is both stale in
+ *   our DB (e.g. a delayed webhook) and already paid on Razorpay is reconciled
+ *   (409), never told its payment "expired" and retried.
+ * @throws ApiError(400) when an online pending/failed transaction is older
+ *   than the 24-hour window. Cash pending transactions never expire.
  */
 export const resolveOrderForTransactions = async (
   transactions,
@@ -620,8 +625,18 @@ export const resolveOrderForTransactions = async (
   transactionIds,
   t
 ) => {
-  // Reject any online pending/failed transaction older than the 24-hour window.
-  // Cash pending transactions never expire.
+  const existingOrderId = getSharedRazorpayOrderId(transactions);
+  const existing = existingOrderId
+    ? await inspectRazorpayOrder(existingOrderId, amount)
+    : null;
+
+  if (existing?.paid) {
+    throw new ApiError(
+      409,
+      'Payment already received for this booking. Please contact support if it is not yet confirmed.'
+    );
+  }
+
   const paymentCutoff = moment
     .utc()
     .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
@@ -642,23 +657,12 @@ export const resolveOrderForTransactions = async (
     );
   }
 
-  const existingOrderId = getSharedRazorpayOrderId(transactions);
-
-  if (existingOrderId) {
-    const existing = await inspectRazorpayOrder(existingOrderId, amount);
-    if (existing?.paid) {
-      throw new ApiError(
-        409,
-        'Payment already received for this booking. Please contact support if it is not yet confirmed.'
-      );
-    }
-    if (existing?.order) {
-      logger.info('reuse_existing_razorpay_order', {
-        razorpay_order_id: existingOrderId,
-        amount
-      });
-      return existing.order;
-    }
+  if (existing?.order) {
+    logger.info('reuse_existing_razorpay_order', {
+      razorpay_order_id: existingOrderId,
+      amount
+    });
+    return existing.order;
   }
 
   const order = await generateOrderId(amount);
