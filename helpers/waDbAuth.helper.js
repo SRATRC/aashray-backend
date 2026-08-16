@@ -1,4 +1,5 @@
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
+import sequelize from '../config/database.js';
 import { WaSession, WaSessionKey } from '../models/associations.js';
 
 /**
@@ -42,41 +43,48 @@ function serialize(value) {
  * That is what filled the database volume. Keys now get one row each, so a rotation
  * writes only the key that changed. A session left on the old layout is migrated here
  * on first load, so a restore of an older dump still recovers without a new QR scan.
+ *
+ * A populated blob always wins over existing rows. Rows plus a populated blob means an
+ * earlier move never finished, and the blob still holds the complete set. The move runs
+ * in one transaction, so a crash means "start again on the next load", never "half the
+ * keys are gone". Re-running it is safe because the insert upserts.
  */
 async function loadKeys(sessionId, session) {
-  const rows = await WaSessionKey.findAll({ where: { session_id: sessionId } });
+  const legacyKeys = session.keys;
 
-  if (rows.length > 0) {
+  if (legacyKeys && Object.keys(legacyKeys).length > 0) {
+    const legacyRows = Object.entries(legacyKeys).map(([keyName, value]) => ({
+      session_id: sessionId,
+      key_name: keyName,
+      value
+    }));
+
+    // A live session holds thousands of keys, so insert in chunks.
+    const CHUNK_SIZE = 500;
+    await sequelize.transaction(async (transaction) => {
+      for (let i = 0; i < legacyRows.length; i += CHUNK_SIZE) {
+        await WaSessionKey.bulkCreate(legacyRows.slice(i, i + CHUNK_SIZE), {
+          updateOnDuplicate: ['value', 'updatedAt'],
+          transaction
+        });
+      }
+      await WaSession.update(
+        { keys: null },
+        { where: { id: sessionId }, transaction }
+      );
+    });
+
     const keys = {};
-    for (const row of rows) {
-      keys[row.key_name] = reviveBuffers(row.value);
+    for (const [keyName, value] of Object.entries(legacyKeys)) {
+      keys[keyName] = reviveBuffers(value);
     }
     return keys;
   }
 
-  const legacyKeys = session.keys;
-  if (!legacyKeys || Object.keys(legacyKeys).length === 0) {
-    return {};
-  }
-
-  const legacyRows = Object.entries(legacyKeys).map(([keyName, value]) => ({
-    session_id: sessionId,
-    key_name: keyName,
-    value
-  }));
-
-  // A live session holds thousands of keys, so insert in chunks.
-  const CHUNK_SIZE = 500;
-  for (let i = 0; i < legacyRows.length; i += CHUNK_SIZE) {
-    await WaSessionKey.bulkCreate(legacyRows.slice(i, i + CHUNK_SIZE), {
-      updateOnDuplicate: ['value', 'updatedAt']
-    });
-  }
-  await WaSession.update({ keys: null }, { where: { id: sessionId } });
-
+  const rows = await WaSessionKey.findAll({ where: { session_id: sessionId } });
   const keys = {};
-  for (const [keyName, value] of Object.entries(legacyKeys)) {
-    keys[keyName] = reviveBuffers(value);
+  for (const row of rows) {
+    keys[row.key_name] = reviveBuffers(row.value);
   }
   return keys;
 }

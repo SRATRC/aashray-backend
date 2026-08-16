@@ -109,6 +109,43 @@ test('buffers survive the round trip through the database', async () => {
   expect(loaded['1'].public.equals(bytes)).toBe(true);
 });
 
+// An earlier move that stopped part way leaves some rows behind and the blob still full.
+// The blob holds the complete set, so it must win. Trusting the rows instead would drop
+// every key that never got inserted.
+test('an unfinished move is redone from the blob, not trusted half done', async () => {
+  await WaSession.create({
+    id: SESSION_ID,
+    creds: { registered: true },
+    keys: {
+      'pre-key-1': { public: 'one' },
+      'pre-key-2': { public: 'two' },
+      'pre-key-3': { public: 'three' }
+    }
+  });
+  // Only the first key made it in before the imagined crash.
+  await WaSessionKey.create({
+    session_id: SESSION_ID,
+    key_name: 'pre-key-1',
+    value: { public: 'one' }
+  });
+
+  const { state } = await useDatabaseAuthState(SESSION_ID);
+
+  const rows = await WaSessionKey.findAll({
+    where: { session_id: SESSION_ID },
+    order: [['key_name', 'ASC']]
+  });
+  expect(rows.map((r) => r.key_name)).toEqual([
+    'pre-key-1',
+    'pre-key-2',
+    'pre-key-3'
+  ]);
+  expect(state.keys.get('pre-key', ['3'])).toEqual({ 3: { public: 'three' } });
+
+  const session = await WaSession.findByPk(SESSION_ID);
+  expect(session.keys).toBeNull();
+});
+
 test('a session still on the legacy blob is moved to rows on load', async () => {
   await WaSession.create({
     id: SESSION_ID,

@@ -36,6 +36,10 @@ module.exports = {
       }
     });
 
+    // createTable stays outside the transaction below on purpose. MySQL commits DDL on
+    // its own, so a transaction around it would give false assurance. Sequelize emits
+    // CREATE TABLE IF NOT EXISTS for MySQL, so a re-run passes this step instead.
+
     const [sessions] = await queryInterface.sequelize.query(
       'SELECT id, `keys` FROM wa_sessions WHERE `keys` IS NOT NULL'
     );
@@ -57,21 +61,33 @@ module.exports = {
       }
     }
 
-    // Production holds 5479 keys in one blob, so insert in chunks rather than
-    // send a single statement of that size.
-    const CHUNK_SIZE = 500;
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      await queryInterface.bulkInsert(
-        'wa_session_keys',
-        rows.slice(i, i + CHUNK_SIZE)
-      );
-    }
+    // The copy and the blob clear commit together. A failure part way through rolls the
+    // rows back, so a re-run starts from a clean table and cannot hit a duplicate key.
+    const transaction = await queryInterface.sequelize.transaction();
+    try {
+      // Production holds 5479 keys in one blob, so insert in chunks rather than
+      // send a single statement of that size.
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        await queryInterface.bulkInsert(
+          'wa_session_keys',
+          rows.slice(i, i + CHUNK_SIZE),
+          { transaction }
+        );
+      }
 
-    // Clearing the blob also shrinks every future `creds` write, because a FULL row image
-    // logs every column of the row, not only the one that changed.
-    await queryInterface.sequelize.query(
-      'UPDATE wa_sessions SET `keys` = NULL WHERE `keys` IS NOT NULL'
-    );
+      // Clearing the blob also shrinks every future `creds` write, because a FULL row
+      // image logs every column of the row, not only the one that changed.
+      await queryInterface.sequelize.query(
+        'UPDATE wa_sessions SET `keys` = NULL WHERE `keys` IS NOT NULL',
+        { transaction }
+      );
+
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
   },
 
   async down(queryInterface) {
