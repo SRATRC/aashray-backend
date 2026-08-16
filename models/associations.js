@@ -45,6 +45,7 @@ import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
 import WaGroupJob from './waGroupJob.model.js';
 import WaSession from './waSession.model.js';
+import WaSessionKey from './waSessionKey.model.js';
 import WaTemplate from './waTemplate.model.js';
 
 // CardDb
@@ -689,6 +690,18 @@ Transactions.belongsTo(FlatBooking, {
   targetKey: 'bookingid'
 });
 
+WaSession.hasMany(WaSessionKey, {
+  foreignKey: 'session_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+WaSessionKey.belongsTo(WaSession, {
+  foreignKey: 'session_id',
+  targetKey: 'id'
+});
+
 export {
   CardDb,
   Transactions,
@@ -737,5 +750,6 @@ export {
   UtsavFeedbackAnswer,
   WaGroupJob,
   WaSession,
+  WaSessionKey,
   WaTemplate
 };
