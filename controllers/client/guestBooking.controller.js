@@ -53,7 +53,8 @@ import {
 } from '../../helpers/rollingWindow.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import {
   bookFoodForMumukshus,
@@ -863,6 +864,10 @@ async function checkFlatAvailability(data, user) {
     checkout_date
   );
 
+  // Clone credits so this read-only preview loop doesn't mutate the caller's
+  // card (mirrors the mumukshu flat-availability preview in roomBooking.helper.js).
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const guest of guests) {
     const cap = capByCard.get(guest);
     if (cap.exceeds) {
@@ -870,6 +875,7 @@ async function checkFlatAvailability(data, user) {
         guest: guest,
         flatno: flat.flatno,
         nights: nights,
+        availableCredits: 0,
         ...rollingWaitlistFields(cap)
       });
       continue;
@@ -884,12 +890,15 @@ async function checkFlatAvailability(data, user) {
     });
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+    const availableCredits =
+      charge > 0 ? usableCredits(tempUser, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       guest: guest,
       flatno: flat.flatno,
       nights: nights,
       charge: charge,
+      availableCredits: availableCredits,
       status: 'available'
     });
   }
