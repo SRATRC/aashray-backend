@@ -82,6 +82,7 @@ function buildLogger() {
 }
 
 let instance;
+const boundCache = {};
 
 // Proxy so `import logger from './logger.js'` keeps working unchanged at
 // every call site, while the real winston instance (and its process.env
@@ -92,7 +93,11 @@ const logger = new Proxy(
     get(_target, prop) {
       instance ??= buildLogger();
       const value = instance[prop];
-      return typeof value === 'function' ? value.bind(instance) : value;
+      if (typeof value !== 'function') return value;
+      // Memoized so `logger.error === logger.error` holds across accesses —
+      // a caller that does `emitter.on('error', logger.error)` and later
+      // `.off('error', logger.error)` needs the same reference both times.
+      return (boundCache[prop] ??= value.bind(instance));
     }
   }
 );
