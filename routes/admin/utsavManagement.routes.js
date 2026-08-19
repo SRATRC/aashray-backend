@@ -33,7 +33,7 @@ import {
   createUtsavBookingByAdmin,
   addUtsavPackagesBulk,
   fetchUtsavFeedbacks,
-  utsavParticipantHistoryReport
+  utsavParticipantHistoryReport,
   utsavGroupAudit,
   sendUtsavGroupReminder
 } from '../../controllers/admin/utsavManagement.controller.js';
