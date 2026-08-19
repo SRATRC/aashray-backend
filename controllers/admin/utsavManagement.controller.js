@@ -35,6 +35,8 @@ import {
   STATUS_CREDITED,
   STATUS_CANCELLED,
   ROOM_STATUS_CHECKEDIN,
+  ROOM_STATUS_CHECKEDOUT,
+  ROOM_STATUS_PENDING_CHECKIN,
   RESEARCH_CENTRE,
   STATUS_OPEN,
   STATUS_PAYMENT_COMPLETED,
@@ -574,13 +576,30 @@ export const fetchUtsavBookings = async (req, res) => {
 
   const utsavData = await database.query(
     `SELECT 
-      t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.roomno, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
-      t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t2.dob,
+      t1.bookingid,
+      t2.cardno,
+      t2.issuedto,
       TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
-      t3.location, t3.name AS utsav_name,
       t4.name AS package_name,
-      t5.status AS transaction_status,  -- 👈 fetch status from transactions table
-      t5.description as comments
+      t1.roomno,
+      t1.createdAt,
+      t1.arrival,
+      t1.carno,
+      t1.volunteer,
+      t1.other,
+      t5.description as comments,
+      t2.mobno,
+      t2.gender,
+      t2.center,
+      t2.res_status,
+      t1.status,
+      t5.status AS transaction_status,
+      t1.bookedby,
+      t1.utsavid,
+      t1.packageid,
+      t2.dob,
+      t3.location,
+      t3.name AS utsav_name
     FROM utsav_booking AS t1
     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
@@ -1194,22 +1213,27 @@ export const fetchPackage = async (req, res) => {
 export const fetchAllUtsavList = async (req, res) => {
   try {
     req.log.info('fetch_all_utsav_list_start');
-    const location = req.query.location || RESEARCH_CENTRE;
+    const { location } = req.query;
 
-    const adhyayans = await database.query(
-      `SELECT id, name, start_date, location FROM utsav_db WHERE location = :location ORDER BY start_date DESC`,
-      {
-        replacements: {
-          location
-        },
-        type: QueryTypes.SELECT,
-        raw: true
-      }
-    );
+    let query = `SELECT id, name, start_date, location FROM utsav_db`;
+    const replacements = {};
+
+    if (location) {
+      query += ` WHERE location = :location`;
+      replacements.location = location;
+    }
+
+    query += ` ORDER BY start_date DESC, id DESC`;
+
+    const adhyayans = await database.query(query, {
+      replacements,
+      type: QueryTypes.SELECT,
+      raw: true
+    });
 
     req.log.info('fetch_all_utsav_list_success', { count: adhyayans.length });
     return res.status(200).json({
-      message: 'Fetched adhyayan list',
+      message: 'Fetched utsav list',
       data: adhyayans
     });
   } catch (error) {
@@ -1798,8 +1822,8 @@ export const fetchUtsavFeedbacks = async (req, res) => {
 
 export const utsavParticipantHistoryReport = async (req, res) => {
   try {
-    const { utsavid, tag, search, format, page, page_size, sort_by, sort_order } = req.query;
-    req.log.info('utsav_participant_history_report_start', { utsavid, tag, search, format });
+    const { utsavid, tag, search, format, page, page_size, sort_by, sort_order, devotee_type, package_name } = req.query;
+    req.log.info('utsav_participant_history_report_start', { utsavid, tag, search, format, devotee_type, package_name });
 
     if (!utsavid) {
       req.log.warn('utsav_participant_history_report_missing_utsavid');
@@ -1826,7 +1850,7 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       `SELECT 
         ub.bookingid, ub.utsavid, ub.status AS booking_status, ub.roomno, ub.packageid,
         pkg.name AS package_name,
-        c.cardno, c.issuedto, c.mobno, c.gender, c.center, c.dob, c.res_status,
+        c.cardno, c.issuedto, c.mobno, c.gender, c.center, c.dob, c.res_status, c.country,
         TIMESTAMPDIFF(YEAR, c.dob, CURDATE()) AS age,
         (CASE WHEN f.owner IS NOT NULL THEN 1 ELSE 0 END) AS is_flat_owner
        FROM utsav_booking AS ub
@@ -1873,16 +1897,17 @@ export const utsavParticipantHistoryReport = async (req, res) => {
     // 3. Perform 1-Year History Aggregations for registered participants
 
     // (A) Sharan RC Stay Days (room_booking checkin in [oneYearAgo, utsavStart), status IN ('checkedin', 'checkedout'))
+    const stayStatuses = [ROOM_STATUS_CHECKEDIN, ROOM_STATUS_CHECKEDOUT];
     const stayDaysResults = await database.query(
       `SELECT cardno, SUM(nights) AS stay_days
        FROM room_booking
        WHERE cardno IN (:cardNos)
-         AND status IN ('checkedin', 'checkedout')
+         AND status IN (:stayStatuses)
          AND checkin >= :oneYearAgo
          AND checkin < :utsavStart
        GROUP BY cardno`,
       {
-        replacements: { cardNos, oneYearAgo, utsavStart },
+        replacements: { cardNos, stayStatuses, oneYearAgo, utsavStart },
         type: QueryTypes.SELECT
       }
     );
@@ -1892,17 +1917,22 @@ export const utsavParticipantHistoryReport = async (req, res) => {
     });
 
     // (A2) Single Day Visits (nights = 0, status IN ('pending checkin', 'checkedin', 'checkedout'))
+    const singleDayStatuses = [
+      ROOM_STATUS_PENDING_CHECKIN,
+      ROOM_STATUS_CHECKEDIN,
+      ROOM_STATUS_CHECKEDOUT
+    ];
     const singleDayResults = await database.query(
       `SELECT cardno, COUNT(*) AS single_day_visits
        FROM room_booking
        WHERE cardno IN (:cardNos)
-         AND status IN ('pending checkin', 'checkedin', 'checkedout')
+         AND status IN (:singleDayStatuses)
          AND (nights = 0 OR nights IS NULL)
          AND checkin >= :oneYearAgo
          AND checkin < :utsavStart
        GROUP BY cardno`,
       {
-        replacements: { cardNos, oneYearAgo, utsavStart },
+        replacements: { cardNos, singleDayStatuses, oneYearAgo, utsavStart },
         type: QueryTypes.SELECT
       }
     );
@@ -1912,18 +1942,23 @@ export const utsavParticipantHistoryReport = async (req, res) => {
     });
 
     // (B) Param Gyaan Sabha (PGS) Adhyayans (shibir_booking_db status IN ('confirmed', 'cash completed', 'checkedin'), shibir_db name LIKE 'Param Gyaan Sabha%')
+    const pgsStatuses = [
+      STATUS_CONFIRMED,
+      STATUS_CASH_COMPLETED,
+      ROOM_STATUS_CHECKEDIN
+    ];
     const pgsResults = await database.query(
       `SELECT sb.cardno, COUNT(DISTINCT s.id) AS pgs_count
        FROM shibir_booking_db AS sb
        INNER JOIN shibir_db AS s ON sb.shibir_id = s.id
        WHERE sb.cardno IN (:cardNos)
-         AND sb.status IN ('confirmed', 'cash completed', 'checkedin')
+         AND sb.status IN (:pgsStatuses)
          AND s.name LIKE 'Param Gyaan Sabha%'
          AND s.start_date >= :oneYearAgo
          AND s.start_date < :utsavStart
        GROUP BY sb.cardno`,
       {
-        replacements: { cardNos, oneYearAgo, utsavStart },
+        replacements: { cardNos, pgsStatuses, oneYearAgo, utsavStart },
         type: QueryTypes.SELECT
       }
     );
@@ -1962,19 +1997,23 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       nonPgsMap[row.cardno] = parseInt(row.non_pgs_count, 10) || 0;
     });
 
-    // (D) Past Utsavs Attended (status = 'checkedin', utsavid != current, utsav_db start_date in [oneYearAgo, utsavStart))
+    // (D) Past Utsavs Attended (status IN ('confirmed', 'cash completed', 'checkedin'), utsavid != current, utsav_db start_date < utsavStart)
+    const pastUtsavStatuses = [
+      STATUS_CONFIRMED,
+      STATUS_CASH_COMPLETED,
+      ROOM_STATUS_CHECKEDIN
+    ];
     const utsavAttendedResults = await database.query(
       `SELECT ub.cardno, COUNT(DISTINCT u.id) AS utsav_count
        FROM utsav_booking AS ub
        INNER JOIN utsav_db AS u ON ub.utsavid = u.id
        WHERE ub.cardno IN (:cardNos)
-         AND ub.status = 'checkedin'
+         AND ub.status IN (:pastUtsavStatuses)
          AND ub.utsavid != :currentUtsavid
-         AND u.start_date >= :oneYearAgo
          AND u.start_date < :utsavStart
        GROUP BY ub.cardno`,
       {
-        replacements: { cardNos, currentUtsavid: utsavid, oneYearAgo, utsavStart },
+        replacements: { cardNos, pastUtsavStatuses, currentUtsavid: utsavid, utsavStart },
         type: QueryTypes.SELECT
       }
     );
@@ -2010,6 +2049,8 @@ export const utsavParticipantHistoryReport = async (req, res) => {
         dob: p.dob,
         age: p.age ? parseInt(p.age, 10) : null,
         res_status: p.res_status,
+        country: p.country || 'India',
+        is_nri: Boolean(p.country && p.country.trim() !== '' && p.country.trim().toLowerCase() !== 'india'),
         is_flat_owner: Boolean(p.is_flat_owner),
         booking_status: p.booking_status,
         roomno: p.roomno,
@@ -2036,21 +2077,44 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       reportData = reportData.filter((item) => item.tags.includes(targetTag));
     }
 
-    // 6. Apply Search Filter
+    // 6. Apply Devotee Type Filter (PR, Flat Owner, NRI exclusions)
+    if (devotee_type) {
+      const dType = devotee_type.trim().toLowerCase();
+      if (dType === 'exclude_pr') {
+        reportData = reportData.filter((item) => item.res_status !== 'PR');
+      } else if (dType === 'exclude_flat_owner') {
+        reportData = reportData.filter((item) => !item.is_flat_owner);
+      } else if (dType === 'exclude_nri') {
+        reportData = reportData.filter((item) => !item.is_nri);
+      } else if (dType === 'exclude_both') {
+        reportData = reportData.filter((item) => item.res_status !== 'PR' && !item.is_flat_owner);
+      } else if (dType === 'exclude_all') {
+        reportData = reportData.filter((item) => item.res_status !== 'PR' && !item.is_flat_owner && !item.is_nri);
+      }
+    }
+
+    // 7. Apply Package Filter
+    if (package_name) {
+      const pName = package_name.trim();
+      reportData = reportData.filter((item) => item.package_name === pName);
+    }
+
+    // 8. Apply Search Filter
     if (search) {
       const term = search.trim().toLowerCase();
       reportData = reportData.filter((item) => {
         return (
           (item.issuedto && item.issuedto.toLowerCase().includes(term)) ||
-          (item.cardno && item.cardno.toLowerCase().includes(term)) ||
-          (item.mobno && item.mobno.toLowerCase().includes(term)) ||
-          (item.center && item.center.toLowerCase().includes(term)) ||
-          (item.package_name && item.package_name.toLowerCase().includes(term))
+          (item.cardno && String(item.cardno).toLowerCase().includes(term)) ||
+          (item.mobno && String(item.mobno).toLowerCase().includes(term)) ||
+          (item.center && String(item.center).toLowerCase().includes(term)) ||
+          (item.country && String(item.country).toLowerCase().includes(term)) ||
+          (item.package_name && String(item.package_name).toLowerCase().includes(term))
         );
       });
     }
 
-    // 7. Apply Sorting (if explicitly specified)
+    // 9. Apply Sorting (if explicitly specified)
     if (sort_by) {
       const field = sort_by.trim();
       const order = (sort_order || 'asc').toLowerCase() === 'desc' ? -1 : 1;
@@ -2086,7 +2150,7 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       });
     }
 
-    // 8. Excel Export Handler
+    // 10. Excel Export Handler
     if (format === 'excel') {
       const excelRows = reportData.map((item) => ({
         'Card No': item.cardno,
@@ -2096,13 +2160,14 @@ export const utsavParticipantHistoryReport = async (req, res) => {
         'Gender': item.gender,
         'Age': item.age || '',
         'Center': item.center,
+        'Country': item.country || 'India',
         'Booking Status': item.booking_status,
         'Room No': item.roomno || '',
         'RC Stay Days (1Yr)': item.history_1yr.stay_days,
         '1-Day Visits (1Yr)': item.history_1yr.single_day_visits,
         'PGS Adhyayans (1Yr)': item.history_1yr.pgs_adhyayan_count,
         'Non-PGS Adhyayans (1Yr)': item.history_1yr.non_pgs_adhyayan_count,
-        'Past Utsavs Attended (1Yr)': item.history_1yr.utsav_count,
+        'Past Utsavs Attended': item.history_1yr.utsav_count,
         'Engagement Tags': item.tags.join(', ')
       }));
 
@@ -2117,11 +2182,13 @@ export const utsavParticipantHistoryReport = async (req, res) => {
         { wch: 10 },
         { wch: 8 },
         { wch: 20 },
+        { wch: 15 }, // Country
         { wch: 18 },
         { wch: 12 },
         { wch: 20 },
         { wch: 22 },
         { wch: 24 },
+        { wch: 25 },
         { wch: 25 },
         { wch: 30 }
       ];
@@ -2171,4 +2238,4 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       error: err.message
     });
   }
-};
+};
