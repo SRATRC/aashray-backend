@@ -204,7 +204,8 @@ export const createUtsav = async (req, res) => {
     location,
     registration_deadline,
     starting_meal,
-    ending_meal
+    ending_meal,
+    whatsapp_link
   } = req.body;
 
   validateMealField(starting_meal, 'starting_meal');
@@ -254,6 +255,7 @@ export const createUtsav = async (req, res) => {
       registration_deadline,
       starting_meal,
       ending_meal,
+      whatsapp_link,
       updatedBy: req.user.username
     },
     { transaction: t }
@@ -266,6 +268,20 @@ export const createUtsav = async (req, res) => {
         checkout: moment(end_date).add(1, 'day').format('YYYY-MM-DD'),
         comments: name,
         updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
+
+  if (whatsapp_link) {
+    const slug = `u${utsavDetails.id}`;
+    await ShortLink.upsert(
+      {
+        slug,
+        target_url: whatsapp_link,
+        type: 'utsav',
+        active: true,
+        createdBy: req.user.username
       },
       { transaction: t }
     );
@@ -488,7 +504,8 @@ export const updateUtsav = async (req, res) => {
     location,
     registration_deadline,
     starting_meal,
-    ending_meal
+    ending_meal,
+    whatsapp_link
   } = req.body;
 
   validateMealField(starting_meal, 'starting_meal');
@@ -530,8 +547,20 @@ export const updateUtsav = async (req, res) => {
     registration_deadline,
     starting_meal,
     ending_meal,
+    whatsapp_link,
     updatedBy: req.user.username
   });
+
+  if (whatsapp_link) {
+    const slug = `u${utsavId}`;
+    await ShortLink.upsert({
+      slug,
+      target_url: whatsapp_link,
+      type: 'utsav',
+      active: true,
+      createdBy: req.user.username
+    });
+  }
 
   req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
   return res.status(200).send({ message: 'Updated Utsav' });
@@ -691,6 +720,8 @@ export const fetchAllUtsav = async (req, res) => {
       utsav_db.location,
       utsav_db.available_seats,
       utsav_db.registration_deadline,
+      utsav_db.whatsapp_link,
+      utsav_db.whatsapp_group_jid,
       COUNT(CASE WHEN utsav_booking.status IN ('confirmed', 'cash completed', 'checkedin') THEN 1 END) AS confirmed_count,
       COUNT(CASE WHEN utsav_booking.status = '${ROOM_STATUS_CHECKEDIN}' THEN 1 END) AS checkedin_count,
       COUNT(CASE WHEN utsav_booking.status = '${STATUS_WAITING}' THEN 1 END) AS waitlist_count,
@@ -717,7 +748,9 @@ END) AS volunteer_opted_count
       utsav_db.total_seats,
       utsav_db.location,
       utsav_db.available_seats,
-      utsav_db.registration_deadline
+      utsav_db.registration_deadline,
+      utsav_db.whatsapp_link,
+      utsav_db.whatsapp_group_jid
      ORDER BY 
       utsav_db.start_date ASC;`,
     {
@@ -1214,27 +1247,18 @@ export const fetchPackage = async (req, res) => {
 export const fetchAllUtsavList = async (req, res) => {
   try {
     req.log.info('fetch_all_utsav_list_start');
-    const { location } = req.query;
 
-    let query = `SELECT id, name, start_date, location FROM utsav_db`;
-    const replacements = {};
-
-    if (location) {
-      query += ` WHERE location = :location`;
-      replacements.location = location;
-    }
-
-    query += ` ORDER BY start_date DESC, id DESC`;
-
-    const adhyayans = await database.query(query, {
-      replacements,
-      type: QueryTypes.SELECT,
-      raw: true
-    });
+    const adhyayans = await database.query(
+      `SELECT id, name FROM utsav_db ORDER BY id ASC`,
+      {
+        type: QueryTypes.SELECT,
+        raw: true
+      }
+    );
 
     req.log.info('fetch_all_utsav_list_success', { count: adhyayans.length });
     return res.status(200).json({
-      message: 'Fetched utsav list',
+      message: 'Fetched adhyayan list',
       data: adhyayans
     });
   } catch (error) {
@@ -1250,8 +1274,8 @@ export const utsavCheckin = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const { cardno, utsavid } = req.body;
-  req.log.info('utsav_checkin_start', { cardno, utsavid });
+  const { cardno, utsavid, scannedAt } = req.body;
+  req.log.info('utsav_checkin_start', { cardno, utsavid, scannedAt });
 
   const booking = await UtsavBooking.findOne({
     where: {
@@ -1290,7 +1314,15 @@ export const utsavCheckin = async (req, res) => {
 
   const previousStatus = booking.status;
 
-  await booking.update({ status: ROOM_STATUS_CHECKEDIN }, { transaction: t });
+  const updateFields = { status: ROOM_STATUS_CHECKEDIN };
+  if (scannedAt) {
+    if (!moment(scannedAt).isValid()) {
+      throw new ApiError(400, 'Invalid scannedAt timestamp');
+    }
+    updateFields.updatedAt = new Date(scannedAt);
+  }
+
+  await booking.update(updateFields, { transaction: t });
 
   await t.commit();
 
@@ -1688,7 +1720,9 @@ export const issuePlate = async (req, res) => {
   const { message, issuedto } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
-    t
+    t,
+    req.body.date,
+    req.body.scannedAt
   );
 
   await t.commit();
@@ -1818,6 +1852,120 @@ export const fetchUtsavFeedbacks = async (req, res) => {
   });
   return res.status(200).send({
     data: finalData
+  });
+};
+
+/**
+ * Audit Utsav confirmed participants against WhatsApp Group shortlink clicks
+ */
+export const utsavGroupAudit = async (req, res) => {
+  const { utsav_id } = req.query;
+  if (!utsav_id) {
+    return res.status(400).send({ message: 'utsav_id is required' });
+  }
+
+  const utsav = await UtsavDb.findByPk(utsav_id);
+  if (!utsav) {
+    return res.status(404).send({ message: 'Utsav not found' });
+  }
+
+  const slug = `u${utsav_id}`;
+  const shortlink = await ShortLink.findOne({ where: { slug } });
+
+  const bookings = await UtsavBooking.findAll({
+    where: {
+      utsavid: utsav_id,
+      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN]
+    },
+    include: [{
+      model: CardDb,
+      attributes: ['issuedto', 'mobno', 'country', 'cardno', 'center', 'res_status']
+    }]
+  });
+
+  const participants = bookings.map(b => {
+    const card = b.CardDb || {};
+    return {
+      bookingid: b.bookingid,
+      cardno: card.cardno,
+      issuedto: card.issuedto || 'Unknown',
+      mobno: card.mobno,
+      center: card.center,
+      res_status: card.res_status
+    };
+  });
+
+  return res.status(200).send({
+    message: 'Group audit fetched successfully',
+    data: {
+      utsav_name: utsav.name,
+      slug,
+      whatsapp_link: utsav.whatsapp_link,
+      shortlink_active: !!shortlink,
+      total_confirmed: participants.length,
+      participants
+    }
+  });
+};
+
+/**
+ * Send manual / automated group join reminder WhatsApp message
+ */
+export const sendUtsavGroupReminder = async (req, res) => {
+  const { utsav_id, phone, cardno } = req.body;
+  if (!utsav_id) {
+    return res.status(400).send({ message: 'utsav_id is required' });
+  }
+
+  const utsav = await UtsavDb.findByPk(utsav_id);
+  if (!utsav) {
+    return res.status(404).send({ message: 'Utsav not found' });
+  }
+
+  const slug = `u${utsav_id}`;
+  const { sendGroupJoinReminderWhatsApp } = await import('../../helpers/whatsapp.helper.js');
+
+  if (phone) {
+    const card = await CardDb.findOne({ where: { mobno: phone } }).catch(() => null);
+    const name = card?.issuedto || 'Mumukshu';
+    const result = await sendGroupJoinReminderWhatsApp(phone, name, utsav.name, slug);
+    return res.status(200).send({ message: 'Reminder sent', result });
+  }
+
+  // Send to all confirmed participants
+  const bookings = await UtsavBooking.findAll({
+    where: {
+      utsavid: utsav_id,
+      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN]
+    },
+    include: [{ model: CardDb }]
+  });
+
+  // Reconcile members to find only missing participants
+  let missingBookings = bookings;
+  if (utsav.whatsapp_group_jid) {
+    try {
+      const { fetchGroupReconciliationInternal } = await import('./waManagement.controller.js');
+      const reconData = await fetchGroupReconciliationInternal(utsav.whatsapp_group_jid, 'utsav', utsav.id);
+      if (reconData && reconData.missing) {
+        const missingCardNos = new Set(reconData.missing.map(m => String(m.cardno)));
+        missingBookings = bookings.filter(b => b.CardDb && missingCardNos.has(String(b.CardDb.cardno)));
+      }
+    } catch (auditErr) {
+      console.error('[Batch Reminder] Group reconciliation failed, sending to all bookings:', auditErr.message);
+    }
+  }
+
+  let sentCount = 0;
+  for (const b of missingBookings) {
+    if (b.CardDb && b.CardDb.mobno) {
+      await sendGroupJoinReminderWhatsApp(b.CardDb.mobno, b.CardDb.issuedto, utsav.name, slug);
+      sentCount++;
+    }
+  }
+
+  return res.status(200).send({
+    message: `Reminder batch dispatched to ${sentCount} un-joined participants`
   });
 };
 
@@ -2205,13 +2353,13 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       return res.send(buf);
     }
 
-    // 9. Handle Pagination
+    // 11. Handle Pagination
     const totalCount = reportData.length;
     let paginatedData = reportData;
 
     if (page && page_size) {
-      const pageNum = parseInt(page, 10) || 1;
-      const limit = parseInt(page_size, 10) || 10;
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limit = Math.max(1, parseInt(page_size, 10) || 10);
       const offset = (pageNum - 1) * limit;
       paginatedData = reportData.slice(offset, offset + limit);
     }
@@ -2228,8 +2376,8 @@ export const utsavParticipantHistoryReport = async (req, res) => {
         one_year_ago_date: oneYearAgo,
         total_participants: totalCount,
         package_breakdown: packageBreakdown,
-        page: page ? parseInt(page, 10) : 1,
-        page_size: page_size ? parseInt(page_size, 10) : totalCount
+        page: page ? Math.max(1, parseInt(page, 10) || 1) : 1,
+        page_size: page_size ? Math.max(1, parseInt(page_size, 10) || 10) : totalCount
       }
     });
   } catch (err) {
@@ -2239,119 +2387,4 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       error: err.message
     });
   }
-};
-
-
-/**
- * Audit Utsav confirmed participants against WhatsApp Group shortlink clicks
- */
-export const utsavGroupAudit = async (req, res) => {
-  const { utsav_id } = req.query;
-  if (!utsav_id) {
-    return res.status(400).send({ message: 'utsav_id is required' });
-  }
-
-  const utsav = await UtsavDb.findByPk(utsav_id);
-  if (!utsav) {
-    return res.status(404).send({ message: 'Utsav not found' });
-  }
-
-  const slug = `u${utsav_id}`;
-  const shortlink = await ShortLink.findOne({ where: { slug } });
-
-  const bookings = await UtsavBooking.findAll({
-    where: {
-      utsavid: utsav_id,
-      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN]
-    },
-    include: [{
-      model: CardDb,
-      attributes: ['issuedto', 'mobno', 'country', 'cardno', 'center', 'res_status']
-    }]
-  });
-
-  const participants = bookings.map(b => {
-    const card = b.CardDb || {};
-    return {
-      bookingid: b.bookingid,
-      cardno: card.cardno,
-      issuedto: card.issuedto || 'Unknown',
-      mobno: card.mobno,
-      center: card.center,
-      res_status: card.res_status
-    };
-  });
-
-  return res.status(200).send({
-    message: 'Group audit fetched successfully',
-    data: {
-      utsav_name: utsav.name,
-      slug,
-      whatsapp_link: utsav.whatsapp_link,
-      shortlink_active: !!shortlink,
-      total_confirmed: participants.length,
-      participants
-    }
-  });
-};
-
-/**
- * Send manual / automated group join reminder WhatsApp message
- */
-export const sendUtsavGroupReminder = async (req, res) => {
-  const { utsav_id, phone, cardno } = req.body;
-  if (!utsav_id) {
-    return res.status(400).send({ message: 'utsav_id is required' });
-  }
-
-  const utsav = await UtsavDb.findByPk(utsav_id);
-  if (!utsav) {
-    return res.status(404).send({ message: 'Utsav not found' });
-  }
-
-  const slug = `u${utsav_id}`;
-  const { sendGroupJoinReminderWhatsApp } = await import('../../helpers/whatsapp.helper.js');
-
-  if (phone) {
-    const card = await CardDb.findOne({ where: { mobno: phone } }).catch(() => null);
-    const name = card?.issuedto || 'Mumukshu';
-    const result = await sendGroupJoinReminderWhatsApp(phone, name, utsav.name, slug);
-    return res.status(200).send({ message: 'Reminder sent', result });
-  }
-
-  // Send to all confirmed participants
-  const bookings = await UtsavBooking.findAll({
-    where: {
-      utsavid: utsav_id,
-      status: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN]
-    },
-    include: [{ model: CardDb }]
-  });
-
-  // Reconcile members to find only missing participants
-  let missingBookings = bookings;
-  if (utsav.whatsapp_group_jid) {
-    try {
-      const { fetchGroupReconciliationInternal } = await import('./waManagement.controller.js');
-      const reconData = await fetchGroupReconciliationInternal(utsav.whatsapp_group_jid, 'utsav', utsav.id);
-      if (reconData && reconData.missing) {
-        const missingCardNos = new Set(reconData.missing.map(m => String(m.cardno)));
-        missingBookings = bookings.filter(b => b.CardDb && missingCardNos.has(String(b.CardDb.cardno)));
-      }
-    } catch (auditErr) {
-      console.error('[Batch Reminder] Group reconciliation failed, sending to all bookings:', auditErr.message);
-    }
-  }
-
-  let sentCount = 0;
-  for (const b of missingBookings) {
-    if (b.CardDb && b.CardDb.mobno) {
-      await sendGroupJoinReminderWhatsApp(b.CardDb.mobno, b.CardDb.issuedto, utsav.name, slug);
-      sentCount++;
-    }
-  }
-
-  return res.status(200).send({
-    message: `Reminder batch dispatched to ${sentCount} un-joined participants`
-  });
 };
