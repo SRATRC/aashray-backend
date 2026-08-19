@@ -10,3 +10,4 @@ const { default: logger } = await import('./logger.js');
 
 logger.info(`Environment loaded: ${env}`);
 logger.info(`Environment file: ${envFilePath}`);
+
