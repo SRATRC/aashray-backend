@@ -33,6 +33,7 @@ import {
   createUtsavBookingByAdmin,
   addUtsavPackagesBulk,
   fetchUtsavFeedbacks,
+  utsavParticipantHistoryReport,
   utsavGroupAudit,
   sendUtsavGroupReminder
 } from '../../controllers/admin/utsavManagement.controller.js';
@@ -92,6 +93,10 @@ utsavAdminRouter.put('/:id/:activate', CatchAsync(activateUtsav));
 utsavAdminRouter.put('/status', CatchAsync(utsavStatusUpdate));
 utsavAdminRouter.get('/fetchList', CatchAsync(fetchAllUtsavList));
 utsavAdminRouter.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
+utsavAdminRouter.get(
+  '/participantHistoryReport',
+  CatchAsync(utsavParticipantHistoryReport)
+);
 utsavAdminRouter.post(
   '/uploadRoomNo',
   upload.single('file'),

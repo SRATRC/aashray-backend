@@ -36,6 +36,8 @@ import {
   STATUS_CREDITED,
   STATUS_CANCELLED,
   ROOM_STATUS_CHECKEDIN,
+  ROOM_STATUS_CHECKEDOUT,
+  ROOM_STATUS_PENDING_CHECKIN,
   RESEARCH_CENTRE,
   STATUS_OPEN,
   STATUS_PAYMENT_COMPLETED,
@@ -604,13 +606,30 @@ export const fetchUtsavBookings = async (req, res) => {
 
   const utsavData = await database.query(
     `SELECT 
-      t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.roomno, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
-      t2.cardno, t2.issuedto, t2.mobno, t2.gender, t2.center, t2.res_status, t2.dob,
+      t1.bookingid,
+      t2.cardno,
+      t2.issuedto,
       TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
-      t3.location, t3.name AS utsav_name,
       t4.name AS package_name,
-      t5.status AS transaction_status,  -- 👈 fetch status from transactions table
-      t5.description as comments
+      t1.roomno,
+      t1.createdAt,
+      t1.arrival,
+      t1.carno,
+      t1.volunteer,
+      t1.other,
+      t5.description as comments,
+      t2.mobno,
+      t2.gender,
+      t2.center,
+      t2.res_status,
+      t1.status,
+      t5.status AS transaction_status,
+      t1.bookedby,
+      t1.utsavid,
+      t1.packageid,
+      t2.dob,
+      t3.location,
+      t3.name AS utsav_name
     FROM utsav_booking AS t1
     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
@@ -1948,4 +1967,424 @@ export const sendUtsavGroupReminder = async (req, res) => {
   return res.status(200).send({
     message: `Reminder batch dispatched to ${sentCount} un-joined participants`
   });
+};
+
+export const utsavParticipantHistoryReport = async (req, res) => {
+  try {
+    const { utsavid, tag, search, format, page, page_size, sort_by, sort_order, devotee_type, package_name } = req.query;
+    req.log.info('utsav_participant_history_report_start', { utsavid, tag, search, format, devotee_type, package_name });
+
+    if (!utsavid) {
+      req.log.warn('utsav_participant_history_report_missing_utsavid');
+      return res.status(400).send({ message: 'utsavid is required' });
+    }
+
+    // 1. Fetch Utsav Start Date
+    const utsav = await UtsavDb.findOne({
+      where: { id: utsavid },
+      attributes: ['id', 'name', 'start_date', 'end_date']
+    });
+
+    if (!utsav) {
+      return res.status(404).send({ message: 'Utsav not found' });
+    }
+
+    const utsavStart = moment(utsav.start_date).format('YYYY-MM-DD');
+    const oneYearAgo = moment(utsav.start_date).subtract(1, 'year').format('YYYY-MM-DD');
+
+    // 2. Fetch Confirmed Participants for this Utsav with Package details
+    const confirmedStatuses = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN];
+
+    const participants = await database.query(
+      `SELECT 
+        ub.bookingid, ub.utsavid, ub.status AS booking_status, ub.roomno, ub.packageid,
+        pkg.name AS package_name,
+        c.cardno, c.issuedto, c.mobno, c.gender, c.center, c.dob, c.res_status, c.country,
+        TIMESTAMPDIFF(YEAR, c.dob, CURDATE()) AS age,
+        (CASE WHEN f.owner IS NOT NULL THEN 1 ELSE 0 END) AS is_flat_owner
+       FROM utsav_booking AS ub
+       INNER JOIN card_db AS c ON ub.cardno = c.cardno
+       LEFT JOIN utsav_packages_db AS pkg ON ub.packageid = pkg.id AND ub.utsavid = pkg.utsavid
+       LEFT JOIN flatdb AS f ON c.cardno = f.owner
+       WHERE ub.utsavid = :utsavid AND ub.status IN (:statuses)`,
+      {
+        replacements: {
+          utsavid,
+          statuses: confirmedStatuses
+        },
+        type: QueryTypes.SELECT
+      }
+    );
+
+    if (!participants || participants.length === 0) {
+      if (format === 'excel') {
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet([]);
+        XLSX.utils.book_append_sheet(wb, ws, 'Participant History');
+        const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=Utsav_Participant_History_${utsavid}.xlsx`);
+        return res.send(buf);
+      }
+
+      return res.status(200).send({
+        message: 'No confirmed participants found for this Utsav',
+        data: [],
+        meta: { utsav_name: utsav.name, start_date: utsav.start_date, total_count: 0, package_breakdown: {} }
+      });
+    }
+
+    const cardNos = participants.map((p) => p.cardno);
+
+    // Compute Package-wise count breakdown
+    const packageBreakdown = {};
+    participants.forEach((p) => {
+      const pkgName = p.package_name || 'Unassigned / Default';
+      packageBreakdown[pkgName] = (packageBreakdown[pkgName] || 0) + 1;
+    });
+
+    // 3. Perform 1-Year History Aggregations for registered participants
+
+    // (A) Sharan RC Stay Days (room_booking checkin in [oneYearAgo, utsavStart), status IN ('checkedin', 'checkedout'))
+    const stayStatuses = [ROOM_STATUS_CHECKEDIN, ROOM_STATUS_CHECKEDOUT];
+    const stayDaysResults = await database.query(
+      `SELECT cardno, SUM(nights) AS stay_days
+       FROM room_booking
+       WHERE cardno IN (:cardNos)
+         AND status IN (:stayStatuses)
+         AND checkin >= :oneYearAgo
+         AND checkin < :utsavStart
+       GROUP BY cardno`,
+      {
+        replacements: { cardNos, stayStatuses, oneYearAgo, utsavStart },
+        type: QueryTypes.SELECT
+      }
+    );
+    const stayDaysMap = {};
+    stayDaysResults.forEach((row) => {
+      stayDaysMap[row.cardno] = parseInt(row.stay_days, 10) || 0;
+    });
+
+    // (A2) Single Day Visits (nights = 0, status IN ('pending checkin', 'checkedin', 'checkedout'))
+    const singleDayStatuses = [
+      ROOM_STATUS_PENDING_CHECKIN,
+      ROOM_STATUS_CHECKEDIN,
+      ROOM_STATUS_CHECKEDOUT
+    ];
+    const singleDayResults = await database.query(
+      `SELECT cardno, COUNT(*) AS single_day_visits
+       FROM room_booking
+       WHERE cardno IN (:cardNos)
+         AND status IN (:singleDayStatuses)
+         AND (nights = 0 OR nights IS NULL)
+         AND checkin >= :oneYearAgo
+         AND checkin < :utsavStart
+       GROUP BY cardno`,
+      {
+        replacements: { cardNos, singleDayStatuses, oneYearAgo, utsavStart },
+        type: QueryTypes.SELECT
+      }
+    );
+    const singleDayMap = {};
+    singleDayResults.forEach((row) => {
+      singleDayMap[row.cardno] = parseInt(row.single_day_visits, 10) || 0;
+    });
+
+    // (B) Param Gyaan Sabha (PGS) Adhyayans (shibir_booking_db status IN ('confirmed', 'cash completed', 'checkedin'), shibir_db name LIKE 'Param Gyaan Sabha%')
+    const pgsStatuses = [
+      STATUS_CONFIRMED,
+      STATUS_CASH_COMPLETED,
+      ROOM_STATUS_CHECKEDIN
+    ];
+    const pgsResults = await database.query(
+      `SELECT sb.cardno, COUNT(DISTINCT s.id) AS pgs_count
+       FROM shibir_booking_db AS sb
+       INNER JOIN shibir_db AS s ON sb.shibir_id = s.id
+       WHERE sb.cardno IN (:cardNos)
+         AND sb.status IN (:pgsStatuses)
+         AND s.name LIKE 'Param Gyaan Sabha%'
+         AND s.start_date >= :oneYearAgo
+         AND s.start_date < :utsavStart
+       GROUP BY sb.cardno`,
+      {
+        replacements: { cardNos, pgsStatuses, oneYearAgo, utsavStart },
+        type: QueryTypes.SELECT
+      }
+    );
+    const pgsMap = {};
+    pgsResults.forEach((row) => {
+      pgsMap[row.cardno] = parseInt(row.pgs_count, 10) || 0;
+    });
+
+    // (C) Non-Param Gyaan Sabha Adhyayans (Attendance record exists in shibir_attendance_records OR shibir_attendance_db)
+    const nonPgsResults = await database.query(
+      `SELECT sb.cardno, COUNT(DISTINCT s.id) AS non_pgs_count
+       FROM shibir_booking_db AS sb
+       INNER JOIN shibir_db AS s ON sb.shibir_id = s.id
+       LEFT JOIN shibir_attendance_records AS sar 
+         ON sb.bookingid = sar.bookingid AND sar.attended = 1
+       LEFT JOIN shibir_attendance_db AS sa 
+         ON sb.bookingid = sa.bookingid
+       WHERE sb.cardno IN (:cardNos)
+         AND s.name NOT LIKE 'Param Gyaan Sabha%'
+         AND s.start_date >= :oneYearAgo
+         AND s.start_date < :utsavStart
+         AND (
+           sar.id IS NOT NULL 
+           OR sa.session_1_attendance = 1 OR sa.session_2_attendance = 1 OR sa.session_3_attendance = 1 
+           OR sa.session_4_attendance = 1 OR sa.session_5_attendance = 1 OR sa.session_6_attendance = 1 
+           OR sa.session_7_attendance = 1 OR sa.session_8_attendance = 1 OR sa.session_9_attendance = 1
+         )
+       GROUP BY sb.cardno`,
+      {
+        replacements: { cardNos, oneYearAgo, utsavStart },
+        type: QueryTypes.SELECT
+      }
+    );
+    const nonPgsMap = {};
+    nonPgsResults.forEach((row) => {
+      nonPgsMap[row.cardno] = parseInt(row.non_pgs_count, 10) || 0;
+    });
+
+    // (D) Past Utsavs Attended (status IN ('confirmed', 'cash completed', 'checkedin'), utsavid != current, utsav_db start_date < utsavStart)
+    const pastUtsavStatuses = [
+      STATUS_CONFIRMED,
+      STATUS_CASH_COMPLETED,
+      ROOM_STATUS_CHECKEDIN
+    ];
+    const utsavAttendedResults = await database.query(
+      `SELECT ub.cardno, COUNT(DISTINCT u.id) AS utsav_count
+       FROM utsav_booking AS ub
+       INNER JOIN utsav_db AS u ON ub.utsavid = u.id
+       WHERE ub.cardno IN (:cardNos)
+         AND ub.status IN (:pastUtsavStatuses)
+         AND ub.utsavid != :currentUtsavid
+         AND u.start_date < :utsavStart
+       GROUP BY ub.cardno`,
+      {
+        replacements: { cardNos, pastUtsavStatuses, currentUtsavid: utsavid, utsavStart },
+        type: QueryTypes.SELECT
+      }
+    );
+    const utsavAttendedMap = {};
+    utsavAttendedResults.forEach((row) => {
+      utsavAttendedMap[row.cardno] = parseInt(row.utsav_count, 10) || 0;
+    });
+
+    // 4. Combine Participant Profile + 1-Yr History + Engagement Tags
+    let reportData = participants.map((p) => {
+      const stay_days = stayDaysMap[p.cardno] || 0;
+      const single_day_visits = singleDayMap[p.cardno] || 0;
+      const pgs_adhyayan_count = pgsMap[p.cardno] || 0;
+      const non_pgs_adhyayan_count = nonPgsMap[p.cardno] || 0;
+      const total_adhyayan_count = pgs_adhyayan_count + non_pgs_adhyayan_count;
+      const utsav_count = utsavAttendedMap[p.cardno] || 0;
+
+      const tags = [];
+      if (utsav_count === 0) tags.push('first_timer');
+      if (stay_days >= 30) tags.push('regular_stay');
+      if (pgs_adhyayan_count >= 5) tags.push('pgs_regular');
+      if (total_adhyayan_count >= 5) tags.push('active_adhyayan');
+      if (stay_days >= 15 || total_adhyayan_count >= 5 || utsav_count >= 2) tags.push('frequent_visitor');
+
+      return {
+        bookingid: p.bookingid,
+        utsavid: p.utsavid,
+        cardno: p.cardno,
+        issuedto: p.issuedto,
+        mobno: p.mobno,
+        gender: p.gender,
+        center: p.center,
+        dob: p.dob,
+        age: p.age ? parseInt(p.age, 10) : null,
+        res_status: p.res_status,
+        country: p.country || 'India',
+        is_nri: Boolean(p.country && p.country.trim() !== '' && p.country.trim().toLowerCase() !== 'india'),
+        is_flat_owner: Boolean(p.is_flat_owner),
+        booking_status: p.booking_status,
+        roomno: p.roomno,
+        packageid: p.packageid,
+        package_name: p.package_name || 'Unassigned / Default',
+        history_1yr: {
+          stay_days,
+          single_day_visits,
+          pgs_adhyayan_count,
+          non_pgs_adhyayan_count,
+          total_adhyayan_count,
+          utsav_count
+        },
+        tags
+      };
+    });
+
+    // Default Sort: Highest RC Stay Days first
+    reportData.sort((a, b) => b.history_1yr.stay_days - a.history_1yr.stay_days);
+
+    // 5. Apply Tag Filter
+    if (tag) {
+      const targetTag = tag.trim().toLowerCase();
+      reportData = reportData.filter((item) => item.tags.includes(targetTag));
+    }
+
+    // 6. Apply Devotee Type Filter (PR, Flat Owner, NRI exclusions)
+    if (devotee_type) {
+      const dType = devotee_type.trim().toLowerCase();
+      if (dType === 'exclude_pr') {
+        reportData = reportData.filter((item) => item.res_status !== 'PR');
+      } else if (dType === 'exclude_flat_owner') {
+        reportData = reportData.filter((item) => !item.is_flat_owner);
+      } else if (dType === 'exclude_nri') {
+        reportData = reportData.filter((item) => !item.is_nri);
+      } else if (dType === 'exclude_both') {
+        reportData = reportData.filter((item) => item.res_status !== 'PR' && !item.is_flat_owner);
+      } else if (dType === 'exclude_all') {
+        reportData = reportData.filter((item) => item.res_status !== 'PR' && !item.is_flat_owner && !item.is_nri);
+      }
+    }
+
+    // 7. Apply Package Filter
+    if (package_name) {
+      const pName = package_name.trim();
+      reportData = reportData.filter((item) => item.package_name === pName);
+    }
+
+    // 8. Apply Search Filter
+    if (search) {
+      const term = search.trim().toLowerCase();
+      reportData = reportData.filter((item) => {
+        return (
+          (item.issuedto && item.issuedto.toLowerCase().includes(term)) ||
+          (item.cardno && String(item.cardno).toLowerCase().includes(term)) ||
+          (item.mobno && String(item.mobno).toLowerCase().includes(term)) ||
+          (item.center && String(item.center).toLowerCase().includes(term)) ||
+          (item.country && String(item.country).toLowerCase().includes(term)) ||
+          (item.package_name && String(item.package_name).toLowerCase().includes(term))
+        );
+      });
+    }
+
+    // 9. Apply Sorting (if explicitly specified)
+    if (sort_by) {
+      const field = sort_by.trim();
+      const order = (sort_order || 'asc').toLowerCase() === 'desc' ? -1 : 1;
+
+      reportData.sort((a, b) => {
+        let valA, valB;
+        if (field === 'stay_days') {
+          valA = a.history_1yr.stay_days;
+          valB = b.history_1yr.stay_days;
+        } else if (field === 'single_day_visits') {
+          valA = a.history_1yr.single_day_visits;
+          valB = b.history_1yr.single_day_visits;
+        } else if (field === 'pgs_adhyayan_count') {
+          valA = a.history_1yr.pgs_adhyayan_count;
+          valB = b.history_1yr.pgs_adhyayan_count;
+        } else if (field === 'non_pgs_adhyayan_count') {
+          valA = a.history_1yr.non_pgs_adhyayan_count;
+          valB = b.history_1yr.non_pgs_adhyayan_count;
+        } else if (field === 'utsav_count') {
+          valA = a.history_1yr.utsav_count;
+          valB = b.history_1yr.utsav_count;
+        } else if (field === 'issuedto') {
+          valA = a.issuedto || '';
+          valB = b.issuedto || '';
+        } else {
+          valA = a[field] || '';
+          valB = b[field] || '';
+        }
+
+        if (valA < valB) return -1 * order;
+        if (valA > valB) return 1 * order;
+        return 0;
+      });
+    }
+
+    // 10. Excel Export Handler
+    if (format === 'excel') {
+      const excelRows = reportData.map((item) => ({
+        'Card No': item.cardno,
+        'Name': item.issuedto,
+        'Package Name': item.package_name,
+        'Mobile No': item.mobno,
+        'Gender': item.gender,
+        'Age': item.age || '',
+        'Center': item.center,
+        'Country': item.country || 'India',
+        'Booking Status': item.booking_status,
+        'Room No': item.roomno || '',
+        'RC Stay Days (1Yr)': item.history_1yr.stay_days,
+        '1-Day Visits (1Yr)': item.history_1yr.single_day_visits,
+        'PGS Adhyayans (1Yr)': item.history_1yr.pgs_adhyayan_count,
+        'Non-PGS Adhyayans (1Yr)': item.history_1yr.non_pgs_adhyayan_count,
+        'Past Utsavs Attended': item.history_1yr.utsav_count,
+        'Engagement Tags': item.tags.join(', ')
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelRows);
+
+      ws['!cols'] = [
+        { wch: 15 },
+        { wch: 25 },
+        { wch: 25 }, // Package Name
+        { wch: 15 },
+        { wch: 10 },
+        { wch: 8 },
+        { wch: 20 },
+        { wch: 15 }, // Country
+        { wch: 18 },
+        { wch: 12 },
+        { wch: 20 },
+        { wch: 22 },
+        { wch: 24 },
+        { wch: 25 },
+        { wch: 25 },
+        { wch: 30 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Participant History');
+
+      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=Utsav_Participant_History_${utsavid}.xlsx`
+      );
+      return res.send(buf);
+    }
+
+    // 11. Handle Pagination
+    const totalCount = reportData.length;
+    let paginatedData = reportData;
+
+    if (page && page_size) {
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limit = Math.max(1, parseInt(page_size, 10) || 10);
+      const offset = (pageNum - 1) * limit;
+      paginatedData = reportData.slice(offset, offset + limit);
+    }
+
+    req.log.info('utsav_participant_history_report_success', { utsavid, count: totalCount });
+
+    return res.status(200).send({
+      message: 'Fetched Utsav participant history report successfully',
+      data: paginatedData,
+      meta: {
+        utsav_id: utsav.id,
+        utsav_name: utsav.name,
+        utsav_start_date: utsav.start_date,
+        one_year_ago_date: oneYearAgo,
+        total_participants: totalCount,
+        package_breakdown: packageBreakdown,
+        page: page ? Math.max(1, parseInt(page, 10) || 1) : 1,
+        page_size: page_size ? Math.max(1, parseInt(page_size, 10) || 10) : totalCount
+      }
+    });
+  } catch (err) {
+    req.log.error('utsav_participant_history_report_error', { error: err.message });
+    return res.status(500).send({
+      message: 'Server error generating participant history report',
+      error: err.message
+    });
+  }
 };
