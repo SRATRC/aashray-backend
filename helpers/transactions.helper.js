@@ -16,12 +16,14 @@ import {
   STATUS_PAYMENT_FAILED,
   TYPE_UTSAV,
   TYPE_TRAVEL,
-  STATUS_PAYMENT_AUTHORIZED
+  STATUS_PAYMENT_AUTHORIZED,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
+import moment from 'moment';
 import { getBookingType, ifMigrated } from './booking.helper.js';
 import { validateCard } from './card.helper.js';
 import logger from '../config/logger.js';
@@ -477,7 +479,7 @@ export async function getPendingTransactions(timeFilter) {
         attributes: ['cardno', 'email', 'mobno'],
         required: true,
         where: {
-          country: 'INDIA'
+          country: 'India'
         }
       }
     ],
@@ -609,7 +611,12 @@ export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
  * created and persisted only when there is no reusable one.
  *
  * @throws ApiError(409) when the existing order was already paid — that needs
- *   reconciliation, not another payable order (avoids double-charging).
+ *   reconciliation, not another payable order (avoids double-charging). Checked
+ *   before the expiry rejection below, so a transaction that is both stale in
+ *   our DB (e.g. a delayed webhook) and already paid on Razorpay is reconciled
+ *   (409), never told its payment "expired" and retried.
+ * @throws ApiError(400) when an online pending/failed transaction is older
+ *   than the 24-hour window. Cash pending transactions never expire.
  */
 export const resolveOrderForTransactions = async (
   transactions,
@@ -619,22 +626,43 @@ export const resolveOrderForTransactions = async (
   t
 ) => {
   const existingOrderId = getSharedRazorpayOrderId(transactions);
+  const existing = existingOrderId
+    ? await inspectRazorpayOrder(existingOrderId, amount)
+    : null;
 
-  if (existingOrderId) {
-    const existing = await inspectRazorpayOrder(existingOrderId, amount);
-    if (existing?.paid) {
-      throw new ApiError(
-        409,
-        'Payment already received for this booking. Please contact support if it is not yet confirmed.'
-      );
-    }
-    if (existing?.order) {
-      logger.info('reuse_existing_razorpay_order', {
-        razorpay_order_id: existingOrderId,
-        amount
-      });
-      return existing.order;
-    }
+  if (existing?.paid) {
+    throw new ApiError(
+      409,
+      'Payment already received for this booking. Please contact support if it is not yet confirmed.'
+    );
+  }
+
+  const paymentCutoff = moment
+    .utc()
+    .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
+  const expiredTransactions = transactions.filter(
+    (txn) =>
+      txn.status !== STATUS_CASH_PENDING &&
+      moment.utc(txn.createdAt).isSameOrBefore(paymentCutoff)
+  );
+
+  if (expiredTransactions.length > 0) {
+    logger.warn('resolve_order_expired_transactions', {
+      cardno: transactions[0]?.cardno,
+      transactionIds: expiredTransactions.map((txn) => txn.id)
+    });
+    throw new ApiError(
+      400,
+      'One or more payments have expired. Please refresh and try again.'
+    );
+  }
+
+  if (existing?.order) {
+    logger.info('reuse_existing_razorpay_order', {
+      razorpay_order_id: existingOrderId,
+      amount
+    });
+    return existing.order;
   }
 
   const order = await generateOrderId(amount);

@@ -51,6 +51,11 @@ import {
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
+  getRollingWindowWarning,
+  getPromotionCapWarning,
+  withWarning
+} from '../../helpers/rollingWindow.helper.js';
+import {
   adminCancelTransaction,
   createPendingTransaction
 } from '../../helpers/transactions.helper.js';
@@ -645,6 +650,15 @@ export const roomBooking = async (req, res) => {
 
   const nights = await calculateNights(checkin_date, checkout_date);
 
+  // Non-blocking: admin bookings over the cap still go through; the warning is
+  // returned in the success response so staff are informed.
+  const rollingWarning = await getRollingWindowWarning({
+    card,
+    checkin: checkin_date,
+    checkout: checkout_date,
+    t
+  });
+
   var booking = undefined;
   if (nights == 0) {
     booking = await bookDayVisit(
@@ -715,7 +729,9 @@ export const roomBooking = async (req, res) => {
     screen: '/bookings'
   });
   req.log.info('room_booking_success', { cardno: card.cardno, checkin_date, checkout_date, bookingId: booking.bookingId });
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(201).send(
+    withWarning({ message: MSG_BOOKING_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 export const flatBooking = async (req, res) => {
@@ -734,7 +750,8 @@ export const flatBooking = async (req, res) => {
       'mobno',
       'email',
       'credits',
-      'token'
+      'token',
+      'res_status'
     ],
     where: {
       mobno: req.params.mobno
@@ -764,6 +781,15 @@ export const flatBooking = async (req, res) => {
 
   const t = await database.transaction();
   req.transaction = t;
+
+  // Non-blocking: admin flat bookings over the cap still go through; the
+  // warning is returned in the success response so staff are informed.
+  const rollingWarning = await getRollingWindowWarning({
+    card,
+    checkin: req.body.checkin_date,
+    checkout: req.body.checkout_date,
+    t
+  });
 
   const booking = await createFlatBooking(
     card.cardno,
@@ -843,7 +869,9 @@ export const flatBooking = async (req, res) => {
   });
 
   req.log.info('flat_booking_success', { cardno: card.cardno, flat_no: req.body.flat_no, checkin: req.body.checkin_date, checkout: req.body.checkout_date, bookingId: booking.bookingId });
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(201).send(
+    withWarning({ message: MSG_BOOKING_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
@@ -1515,6 +1543,7 @@ export const updateBookingStatus = async (req, res) => {
 
   const originalStatus = booking.status;
   let newStatus = originalStatus;
+  let rollingWarning = null;
 
   if (!status || status === originalStatus) {
     req.log.warn('update_room_booking_status_same_or_missing', { bookingid, status, originalStatus });
@@ -1534,6 +1563,16 @@ export const updateBookingStatus = async (req, res) => {
 
       const cardno = booking.bookedBy || booking.cardno;
       const card = await validateCard(cardno);
+
+      // Promotion commits these nights (excluded while waiting) → re-check the
+      // cap for the occupant. Non-blocking: promotion proceeds; the warning is
+      // returned in the success response.
+      rollingWarning = await getPromotionCapWarning({
+        booking,
+        payerCardno: cardno,
+        payerCard: card,
+        t
+      });
 
       const rate = booking.roomtype?.toLowerCase() === 'ac' ? 1100 : 700;
       const baseAmount = rate * booking.nights;
@@ -1751,7 +1790,9 @@ export const updateBookingStatus = async (req, res) => {
     logger.error("Error sending room status update WhatsApp:", waErr);
   }
 
-  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+  return res.status(200).send(
+    withWarning({ message: MSG_UPDATE_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 export async function findAllRoomsForDay(date, room_type, gender) {
@@ -1868,6 +1909,7 @@ export const updateFlatBookingStatus = async (req, res) => {
 
   const originalStatus = booking.status;
   let newStatus = originalStatus;
+  let rollingWarning = null;
 
   if (!status || status === originalStatus) {
     req.log.warn('update_flat_booking_status_same_or_missing', { bookingid, status, originalStatus });
@@ -1887,6 +1929,16 @@ export const updateFlatBookingStatus = async (req, res) => {
 
       const cardno = booking.bookedBy || booking.cardno;
       const card = await validateCard(cardno);
+
+      // Promotion commits these nights (excluded while waiting) → re-check the
+      // cap for the occupant. Non-blocking: promotion proceeds; the warning is
+      // returned in the success response.
+      rollingWarning = await getPromotionCapWarning({
+        booking,
+        payerCardno: cardno,
+        payerCard: card,
+        t
+      });
 
       const rate = 700; // flat rate per night
       const baseAmount = rate * booking.nights;
@@ -2103,7 +2155,9 @@ export const updateFlatBookingStatus = async (req, res) => {
     logger.error('Error sending flat booking update status WhatsApp:', waErr);
   }
 
-  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+  return res.status(200).send(
+    withWarning({ message: MSG_UPDATE_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 

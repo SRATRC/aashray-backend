@@ -34,7 +34,10 @@ import {
   addUtsavPackagesBulk,
   fetchUtsavFeedbacks,
   utsavParticipantHistoryReport
+  utsavGroupAudit,
+  sendUtsavGroupReminder
 } from '../../controllers/admin/utsavManagement.controller.js';
+
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -116,5 +119,7 @@ utsavAdminRouter.get(
   '/utsav-feedback',
   CatchAsync(fetchUtsavFeedbacks)
 );
+utsavAdminRouter.get('/group-audit', CatchAsync(utsavGroupAudit));
+utsavAdminRouter.post('/send-group-reminder', CatchAsync(sendUtsavGroupReminder));
 
 export { utsavPublicRouter, utsavAdminRouter };

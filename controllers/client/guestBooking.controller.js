@@ -48,6 +48,10 @@ import {
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
+  checkRollingWindowLimitForCards,
+  rollingWaitlistFields
+} from '../../helpers/rollingWindow.helper.js';
+import {
   generateOrderId,
   updateRazorpayTransactions
 } from '../../helpers/transactions.helper.js';
@@ -835,7 +839,7 @@ async function checkFlatAvailability(data, user) {
   }
 
   validateDate(checkin_date, checkout_date);
-  await validateCards(guests);
+  const guestCardDb = await validateCards(guests);
 
   // Check if any guest already has a flat booking for these dates
   for (const guest of guests) {
@@ -850,7 +854,27 @@ async function checkFlatAvailability(data, user) {
   const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
 
+  // Preview the 9-night/30-day cap so this matches the actual booking outcome
+  // (createFlatBooking force-waitlists with no charge when exceeded). Guests are
+  // always non-residents, so the cap applies. No transaction (read-only preview).
+  const capByCard = await checkRollingWindowLimitForCards(
+    guestCardDb,
+    checkin_date,
+    checkout_date
+  );
+
   for (const guest of guests) {
+    const cap = capByCard.get(guest);
+    if (cap.exceeds) {
+      flatDetails.push({
+        guest: guest,
+        flatno: flat.flatno,
+        nights: nights,
+        ...rollingWaitlistFields(cap)
+      });
+      continue;
+    }
+
     // Check if this guest is the flat owner
     const isFlatOwner = await FlatDb.findOne({
       where: {

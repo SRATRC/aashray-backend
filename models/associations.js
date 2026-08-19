@@ -43,6 +43,10 @@ import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
+import WaGroupJob from './waGroupJob.model.js';
+import WaSession from './waSession.model.js';
+import WaSessionKey from './waSessionKey.model.js';
+import WaTemplate from './waTemplate.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -686,6 +690,18 @@ Transactions.belongsTo(FlatBooking, {
   targetKey: 'bookingid'
 });
 
+WaSession.hasMany(WaSessionKey, {
+  foreignKey: 'session_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+WaSessionKey.belongsTo(WaSession, {
+  foreignKey: 'session_id',
+  targetKey: 'id'
+});
+
 export {
   CardDb,
   Transactions,
@@ -731,5 +747,9 @@ export {
   ShibirSession,
   ShibirAttendanceRecord,
   UtsavFeedback,
-  UtsavFeedbackAnswer
+  UtsavFeedbackAnswer,
+  WaGroupJob,
+  WaSession,
+  WaSessionKey,
+  WaTemplate
 };
