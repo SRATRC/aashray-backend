@@ -34,6 +34,10 @@ import {
     getFormResponses,
     deleteFormResponse,
     cloneForm,
+    getFormAllowlist,
+    saveFormAllowlist,
+    deleteFormAllowlistEntry,
+    getDepartmentEvents,
     // Public (no auth)
     getPublicForm,
     submitFormResponse,
@@ -61,7 +65,6 @@ router.post('/public/:id/responses/:responseId', CatchAsync(updatePublicResponse
 router.post('/public/:id/responses/:responseId/email', CatchAsync(emailFormResponse));
 router.post('/public/:id/draft', CatchAsync(saveFormDraft));
 router.get('/public/:id/draft', CatchAsync(getFormDraft));
-
 
 // All routes require authentication
 router.use(auth);
@@ -98,6 +101,12 @@ router.post(
 );
 
 router.get(
+    '/events',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(getDepartmentEvents)
+);
+
+router.get(
     '/:id',
     authorizeRoles(...ALL_FORM_ROLES),
     CatchAsync(getFormById)
@@ -131,6 +140,24 @@ router.post(
     '/:id/clone',
     authorizeRoles(...ALL_FORM_ROLES),
     CatchAsync(cloneForm)
+);
+
+router.get(
+    '/:id/allowlist',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(getFormAllowlist)
+);
+
+router.post(
+    '/:id/allowlist',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(saveFormAllowlist)
+);
+
+router.delete(
+    '/:id/allowlist/:entryId',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(deleteFormAllowlistEntry)
 );
 
 export default router;

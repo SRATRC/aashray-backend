@@ -99,6 +99,23 @@ const CustomForm = sequelize.define(
             type: DataTypes.BOOLEAN,
             allowNull: false,
             defaultValue: false
+        },
+        event_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true
+        },
+        event_name: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
+        event_type: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
+        requireRegistration: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false
         }
     },
     {

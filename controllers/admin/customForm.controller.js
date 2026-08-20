@@ -1,4 +1,4 @@
-import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments, CustomFormOtpAllowlist } from '../../models/associations.js';
+import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments, CustomFormOtpAllowlist, UtsavDb, ShibirDb, UtsavBooking, ShibirBookingDb } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import ShortLink from '../../models/short_link.model.js';
@@ -105,7 +105,7 @@ function getAccessibleDepts(userRoles) {
  * Create a new form.
  */
 export const createForm = async (req, res) => {
-    const { title, description, dept_name, fields, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp } = req.body;
+    const { title, description, dept_name, fields, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp, requireRegistration, event_id, event_name, event_type, formCategory } = req.body;
 
     if (!title || !dept_name || !fields) {
         throw new ApiError(400, 'title, dept_name, and fields are required');
@@ -170,6 +170,11 @@ export const createForm = async (req, res) => {
             closeMessage: closeMessage || null,
             maxResponses: maxResponses ? parseInt(maxResponses) : null,
             requireOtp: requireOtp !== undefined ? requireOtp : false,
+            requireRegistration: requireRegistration !== undefined ? requireRegistration : false,
+            event_id: event_id ? parseInt(event_id, 10) : null,
+            event_name: event_name || null,
+            event_type: event_type || null,
+            formCategory: formCategory || 'generic',
             createdBy: req.user?.username
         }, { transaction: t });
 
@@ -207,26 +212,19 @@ export const getForms = async (req, res) => {
 
     const whereClause = {};
     if (accessibleDepts !== null) {
-        // Not a superAdmin; filter by accessible departments (case-insensitive)
-        whereClause.dept_name = accessibleDepts.map((d) =>
+        if (accessibleDepts.length === 0) {
+            return res.status(200).json({ success: true, data: [] });
+        }
+        whereClause[sequelize.Sequelize.Op.or] = accessibleDepts.map((d) =>
             sequelize.where(
                 sequelize.fn('LOWER', sequelize.col('custom_forms.dept_name')),
                 d.toLowerCase()
             )
         );
-        // Use Op.or for multiple departments
-        if (accessibleDepts.length === 0) {
-            return res.status(200).json({ success: true, data: [] });
-        }
     }
 
     const forms = await CustomForm.findAll({
-        where: accessibleDepts !== null
-            ? sequelize.where(
-                sequelize.fn('LOWER', sequelize.col('custom_forms.dept_name')),
-                { [sequelize.Sequelize.Op.in]: accessibleDepts.map((d) => d.toLowerCase()) }
-            )
-            : {},
+        where: whereClause,
         attributes: {
             include: [
                 [
@@ -263,9 +261,38 @@ export const getFormById = async (req, res) => {
         throw new ApiError(403, 'You do not have access to this form');
     }
 
+    const allowlist = await CustomFormOtpAllowlist.findAll({
+        where: { form_id: id, status: 'active' },
+        order: [['id', 'ASC']]
+    });
+
+    const enrichedAllowlist = await Promise.all(allowlist.map(async (entry) => {
+        const cleanMob = entry.mobno ? String(entry.mobno).replace(/\D/g, '').slice(-10) : null;
+        const parsedMob = cleanMob ? parseInt(cleanMob, 10) : null;
+        const card = parsedMob ? await CardDb.findOne({
+            where: { mobno: parsedMob },
+            attributes: ['cardno', 'issuedto', 'center', 'email', 'res_status']
+        }) : null;
+
+        return {
+            id: entry.id,
+            form_id: entry.form_id,
+            mobno: cleanMob || null,
+            cardno: card ? card.cardno : null,
+            department: entry.department,
+            status: entry.status,
+            name: card ? card.issuedto : (cleanMob ? 'Ashram Member' : '— (Pending assignment)'),
+            center: card ? card.center : null,
+            res_status: card ? card.res_status : null
+        };
+    }));
+
+    const formObj = form.toJSON ? form.toJSON() : JSON.parse(JSON.stringify(form));
+    formObj.otpAllowlist = enrichedAllowlist;
+
     res.status(200).json({
         success: true,
-        data: form
+        data: formObj
     });
 };
 
@@ -315,6 +342,7 @@ export const updateForm = async (req, res) => {
 
         const updateData = {};
         if (title !== undefined) updateData.title = title;
+        if (req.body.dept_name !== undefined) updateData.dept_name = req.body.dept_name;
         if (description !== undefined) updateData.description = description;
         if (fields !== undefined) updateData.fields = fields;
         if (status !== undefined) updateData.status = status;
@@ -331,6 +359,11 @@ export const updateForm = async (req, res) => {
         if (closeMessage !== undefined) updateData.closeMessage = closeMessage || null;
         if (maxResponses !== undefined) updateData.maxResponses = maxResponses ? parseInt(maxResponses) : null;
         if (requireOtp !== undefined) updateData.requireOtp = requireOtp;
+        if (req.body.requireRegistration !== undefined) updateData.requireRegistration = req.body.requireRegistration;
+        if (req.body.event_id !== undefined) updateData.event_id = req.body.event_id ? parseInt(req.body.event_id, 10) : null;
+        if (req.body.event_name !== undefined) updateData.event_name = req.body.event_name || null;
+        if (req.body.event_type !== undefined) updateData.event_type = req.body.event_type || null;
+        if (req.body.formCategory !== undefined) updateData.formCategory = req.body.formCategory || 'generic';
 
         // If slug is updated
         if (slug !== undefined) {
@@ -368,6 +401,33 @@ export const updateForm = async (req, res) => {
         }
 
         await form.update(updateData, { transaction: t });
+
+        if (req.body.otpAllowlist && Array.isArray(req.body.otpAllowlist)) {
+            await CustomFormOtpAllowlist.destroy({ where: { form_id: id }, transaction: t });
+            for (const item of req.body.otpAllowlist) {
+                const clean = item.mobno ? String(item.mobno).replace(/\D/g, '').slice(-10) : null;
+                const dept = item.department ? String(item.department).trim() : null;
+                let cardno = item.cardno ? String(item.cardno).trim() : null;
+                if (clean && clean.length === 10 && !cardno) {
+                    const card = await CardDb.findOne({
+                        where: { mobno: parseInt(clean, 10) },
+                        attributes: ['cardno'],
+                        transaction: t
+                    });
+                    if (card) cardno = card.cardno;
+                }
+                if (dept || (clean && clean.length === 10)) {
+                    await CustomFormOtpAllowlist.create({
+                        form_id: parseInt(id, 10),
+                        mobno: (clean && clean.length === 10) ? clean : null,
+                        cardno: cardno || null,
+                        department: dept,
+                        status: 'active',
+                        createdBy: req.user?.username || 'admin'
+                    }, { transaction: t });
+                }
+            }
+        }
 
         await t.commit();
         req.transaction = null;
@@ -1100,8 +1160,22 @@ export const resolveIdentity = async (req, res) => {
     if (!card) {
         return res.status(200).json({
             success: false,
-            message: type === 'mobno' ? 'Mobile number is not registered' : 'Card number is not registered'
+            message: type === 'mobno' ? 'Mobile number is not registered in Ashram database' : 'Card number is not registered in Ashram database'
         });
+    }
+
+    if (formId) {
+        try {
+            const formObj = await CustomForm.findByPk(formId);
+            if (formObj && formObj.requireRegistration) {
+                await assertEventRegistration(formObj, card.cardno);
+            }
+        } catch (err) {
+            return res.status(200).json({
+                success: false,
+                message: err.message
+            });
+        }
     }
 
     // If a formId is given and this number is on that form's OTP allowlist, surface
@@ -1308,6 +1382,56 @@ function validateShortAnswerLimits(fields, responses) {
  * Internal helper — throws ApiError if there is no recent verified OTP for this mobile.
  * Called inside submitFormResponse when form.requireOtp === true.
  */
+
+/**
+ * Internal helper to verify that a card is registered for the event if requireRegistration is enabled.
+ */
+async function assertEventRegistration(form, cardno) {
+    if (!form || !form.requireRegistration || !form.event_id || !cardno) return;
+
+    const eventType = (form.event_type || form.dept_name || '').toLowerCase();
+    const eventId = parseInt(form.event_id, 10);
+    const eventName = form.event_name || 'this event';
+
+    if (eventType.includes('utsav')) {
+        const booking = await UtsavBooking.findOne({
+            where: {
+                utsavid: eventId,
+                cardno,
+                status: {
+                    [Sequelize.Op.in]: [
+                        'confirmed',
+                        'completed',
+                        'cash_completed',
+                        'checkedin',
+                        'open'
+                    ]
+                }
+            }
+        });
+        if (!booking) {
+            throw new ApiError(403, `You are not registered for ${eventName}. Access is restricted to registered participants only.`);
+        }
+    } else if (eventType.includes('adhyay') || eventType.includes('shibir')) {
+        const booking = await ShibirBookingDb.findOne({
+            where: {
+                shibir_id: eventId,
+                cardno,
+                status: {
+                    [Sequelize.Op.in]: [
+                        'confirmed',
+                        'completed',
+                        'open'
+                    ]
+                }
+            }
+        });
+        if (!booking) {
+            throw new ApiError(403, `You are not registered for ${eventName}. Access is restricted to registered participants only.`);
+        }
+    }
+}
+
 async function assertOtpVerified(mobno) {
     // Look for a verified OTP created in the last 10 minutes
     const record = await CoordinatorOtp.findOne({
@@ -1331,7 +1455,7 @@ async function assertOtpVerified(mobno) {
  * Send OTP to a registered mobile number for form auth.
  */
 export const sendFormOtp = async (req, res) => {
-    const { mobno } = req.body;
+    const { mobno, formId } = req.body;
 
     if (!mobno) {
         throw new ApiError(400, 'Mobile number is required');
@@ -1345,7 +1469,36 @@ export const sendFormOtp = async (req, res) => {
 
     const card = await CardDb.findOne({ where: { mobno: parsedMob } });
     if (!card) {
-        throw new ApiError(404, 'Mobile number is not registered');
+        throw new ApiError(404, 'Mobile number is not registered in Ashram database');
+    }
+
+    // Enforce event registration and allowlist if formId is provided
+    if (formId) {
+        const parsedFormId = parseInt(formId, 10);
+        const formObj = await CustomForm.findByPk(parsedFormId);
+        if (formObj && formObj.requireRegistration) {
+            await assertEventRegistration(formObj, card.cardno);
+        }
+        const configuredCount = await CustomFormOtpAllowlist.count({
+            where: {
+                form_id: parsedFormId,
+                status: 'active',
+                mobno: { [Sequelize.Op.ne]: null }
+            }
+        });
+
+        if (configuredCount > 0) {
+            const allowed = await CustomFormOtpAllowlist.findOne({
+                where: {
+                    form_id: parsedFormId,
+                    mobno: cleanMob,
+                    status: 'active'
+                }
+            });
+            if (!allowed) {
+                throw new ApiError(403, 'This mobile number is not authorized to fill out this form.');
+            }
+        }
     }
 
     // Rate limit: max 5 OTPs per 10 minutes
@@ -1420,4 +1573,149 @@ export const verifyFormOtp = async (req, res) => {
     await record.update({ verified: true, attempts: 0 });
 
     return res.status(200).json({ success: true, message: 'OTP verified successfully' });
+};
+
+/**
+ * GET /api/v1/admin/forms/:id/allowlist
+ * Get all active OTP allowlist entries for a form.
+ */
+export const getFormAllowlist = async (req, res) => {
+    const { id } = req.params;
+    const form = await CustomForm.findByPk(id);
+    if (!form) throw new ApiError(404, 'Form not found');
+
+    const allowlist = await CustomFormOtpAllowlist.findAll({
+        where: { form_id: id, status: 'active' },
+        order: [['createdAt', 'DESC']]
+    });
+
+    const enriched = await Promise.all(allowlist.map(async (entry) => {
+        const cleanMob = entry.mobno ? String(entry.mobno).replace(/\D/g, '').slice(-10) : null;
+        const parsedMob = cleanMob ? parseInt(cleanMob, 10) : null;
+        const card = parsedMob ? await CardDb.findOne({
+            where: { mobno: parsedMob },
+            attributes: ['cardno', 'issuedto', 'center', 'email']
+        }) : null;
+        return {
+            id: entry.id,
+            form_id: entry.form_id,
+            mobno: cleanMob || null,
+            cardno: entry.cardno || (card ? card.cardno : null),
+            department: entry.department,
+            status: entry.status,
+            name: card ? card.issuedto : (cleanMob ? 'Ashram Member' : '— (Pending assignment)'),
+            center: card ? card.center : null,
+            email: card ? card.email : null
+        };
+    }));
+
+    res.status(200).json({ success: true, data: enriched });
+};
+
+/**
+ * POST /api/v1/admin/forms/:id/allowlist
+ * Add or sync OTP allowlist entries for a form.
+ */
+export const saveFormAllowlist = async (req, res) => {
+    const { id } = req.params;
+    const { entries, mobno, department, cardno } = req.body;
+    const form = await CustomForm.findByPk(id);
+    if (!form) throw new ApiError(404, 'Form not found');
+
+    if (Array.isArray(entries)) {
+        await CustomFormOtpAllowlist.destroy({ where: { form_id: id } });
+        for (const e of entries) {
+            const clean = e.mobno ? String(e.mobno).replace(/\D/g, '').slice(-10) : null;
+            let resolvedCardno = e.cardno || null;
+            if (clean && clean.length === 10 && !resolvedCardno) {
+                const card = await CardDb.findOne({ where: { mobno: parseInt(clean, 10) }, attributes: ['cardno'] });
+                if (card) resolvedCardno = card.cardno;
+            }
+            const dept = e.department ? String(e.department).trim() : null;
+            if (dept || (clean && clean.length === 10)) {
+                await CustomFormOtpAllowlist.create({
+                    form_id: parseInt(id, 10),
+                    mobno: (clean && clean.length === 10) ? clean : null,
+                    cardno: resolvedCardno || null,
+                    department: dept,
+                    status: 'active',
+                    createdBy: req.user?.username || 'admin'
+                });
+            }
+        }
+        return res.status(200).json({ success: true, message: 'Allowlist synchronized successfully' });
+    }
+
+    if (mobno || department) {
+        const clean = mobno ? String(mobno).replace(/\D/g, '').slice(-10) : null;
+        let resolvedCardno = cardno || null;
+        if (clean && clean.length === 10 && !resolvedCardno) {
+            const card = await CardDb.findOne({ where: { mobno: parseInt(clean, 10) }, attributes: ['cardno'] });
+            if (card) resolvedCardno = card.cardno;
+        }
+        await CustomFormOtpAllowlist.create({
+            form_id: parseInt(id, 10),
+            mobno: (clean && clean.length === 10) ? clean : null,
+            cardno: resolvedCardno || null,
+            department: department ? String(department).trim() : null,
+            status: 'active',
+            createdBy: req.user?.username || 'admin'
+        });
+    }
+
+    res.status(200).json({ success: true, message: 'Allowlist updated successfully' });
+};
+
+/**
+ * DELETE /api/v1/admin/forms/:id/allowlist/:entryId
+ * Remove an allowlist entry.
+ */
+export const deleteFormAllowlistEntry = async (req, res) => {
+    const { id, entryId } = req.params;
+    const entry = await CustomFormOtpAllowlist.findOne({
+        where: { id: entryId, form_id: id }
+    });
+    if (!entry) throw new ApiError(404, 'Allowlist entry not found');
+
+    await entry.destroy();
+    res.status(200).json({ success: true, message: 'Allowlist entry removed' });
+};
+
+/**
+ * GET /api/v1/admin/forms/events?dept=...
+ * Fetch upcoming and ongoing events for Utsav (utsav_db) or Adhyayan (shibir_db).
+ */
+export const getDepartmentEvents = async (req, res) => {
+    const { dept } = req.query;
+    if (!dept) {
+        throw new ApiError(400, 'Department is required');
+    }
+
+    const cleanDept = String(dept).trim().toLowerCase();
+    const today = new Date().toISOString().split('T')[0];
+
+    if (cleanDept.includes('utsav')) {
+        const utsavs = await UtsavDb.findAll({
+            where: {
+                end_date: { [Sequelize.Op.gte]: today }
+            },
+            attributes: ['id', 'name', 'start_date', 'end_date', 'status'],
+            order: [['start_date', 'ASC']]
+        });
+        return res.status(200).json({ success: true, data: utsavs, eventType: 'utsav' });
+    }
+
+    if (cleanDept.includes('adhyay') || cleanDept.includes('shibir')) {
+        const shibirs = await ShibirDb.findAll({
+            where: {
+                end_date: { [Sequelize.Op.gte]: today },
+                status: { [Sequelize.Op.ne]: 'deleted' }
+            },
+            attributes: ['id', 'name', 'start_date', 'end_date', 'status'],
+            order: [['start_date', 'ASC']]
+        });
+        return res.status(200).json({ success: true, data: shibirs, eventType: 'adhyayan' });
+    }
+
+    return res.status(200).json({ success: true, data: [], eventType: null });
 };

@@ -46,6 +46,7 @@ import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
 import CustomForm from './custom_form.model.js';
 import CustomFormResponse from './custom_form_response.model.js';
 import CustomFormDraft from './custom_form_draft.model.js';
+import CustomFormOtpAllowlist from './custom_form_otp_allowlist.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -718,6 +719,15 @@ CustomFormDraft.belongsTo(CustomForm, {
   foreignKey: 'form_id',
   as: 'form'
 });
+CustomForm.hasMany(CustomFormOtpAllowlist, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'otpAllowlist'
+});
+CustomFormOtpAllowlist.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
 
 export {
   CardDb,
@@ -767,5 +777,6 @@ export {
   UtsavFeedbackAnswer,
   CustomForm,
   CustomFormResponse,
-  CustomFormDraft
+  CustomFormDraft,
+  CustomFormOtpAllowlist
 };
