@@ -48,7 +48,8 @@ import {
     sendFormOtp,
     verifyFormOtp,
     saveFormDraft,
-    getFormDraft
+    getFormDraft,
+    getMyResponse
 } from '../../controllers/admin/customForm.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -63,6 +64,7 @@ router.post('/public/:id/submit', CatchAsync(submitFormResponse));
 router.get('/public/:id/responses/:responseId', CatchAsync(getPublicResponse));
 router.post('/public/:id/responses/:responseId', CatchAsync(updatePublicResponse));
 router.post('/public/:id/responses/:responseId/email', CatchAsync(emailFormResponse));
+router.get('/public/:id/my-response', CatchAsync(getMyResponse));
 router.post('/public/:id/draft', CatchAsync(saveFormDraft));
 router.get('/public/:id/draft', CatchAsync(getFormDraft));
 

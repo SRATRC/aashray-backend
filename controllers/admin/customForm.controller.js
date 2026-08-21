@@ -105,7 +105,7 @@ function getAccessibleDepts(userRoles) {
  * Create a new form.
  */
 export const createForm = async (req, res) => {
-    const { title, description, dept_name, fields, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp, requireRegistration, event_id, event_name, event_type, formCategory } = req.body;
+    const { title, description, dept_name, fields, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp, requireRegistration, event_id, event_name, event_type } = req.body;
 
     if (!title || !dept_name || !fields) {
         throw new ApiError(400, 'title, dept_name, and fields are required');
@@ -174,7 +174,7 @@ export const createForm = async (req, res) => {
             event_id: event_id ? parseInt(event_id, 10) : null,
             event_name: event_name || null,
             event_type: event_type || null,
-            formCategory: formCategory || 'generic',
+            
             createdBy: req.user?.username
         }, { transaction: t });
 
@@ -363,7 +363,7 @@ export const updateForm = async (req, res) => {
         if (req.body.event_id !== undefined) updateData.event_id = req.body.event_id ? parseInt(req.body.event_id, 10) : null;
         if (req.body.event_name !== undefined) updateData.event_name = req.body.event_name || null;
         if (req.body.event_type !== undefined) updateData.event_type = req.body.event_type || null;
-        if (req.body.formCategory !== undefined) updateData.formCategory = req.body.formCategory || 'generic';
+        
 
         // If slug is updated
         if (slug !== undefined) {
@@ -753,7 +753,7 @@ export const submitFormResponse = async (req, res) => {
 
             // OTP gate — must come AFTER mobno is validated
             if (form.requireOtp) {
-                await assertOtpVerified(String(cleanMob));
+                await assertOtpVerified(String(cleanMob), form);
             }
         } else {
             // Default cardno auth
@@ -768,43 +768,37 @@ export const submitFormResponse = async (req, res) => {
         }
     }
 
-    // Stop user from submitting multiple entries for the same date if a date field exists
-    const dateField = form.fields.find(f => f.type === 'date');
-    if (dateField && resolvedCardNo) {
-        const submittedDate = responses[dateField.id];
-        if (submittedDate) {
-            const existingResponses = await CustomFormResponse.findAll({
-                where: {
-                    form_id: parseInt(id),
-                    cardno: resolvedCardNo
-                }
-            });
-            for (const exist of existingResponses) {
-                const existAnswers = exist.responses || {};
-                if (existAnswers[dateField.id] === submittedDate) {
-                    throw new ApiError(400, `You have already submitted a response for the date ${submittedDate}`);
-                }
-            }
-        }
-    }
+    // Upsert: if an authenticated user already has a response for this form,
+    // update it instead of creating a duplicate row.
+    let submission;
+    let isUpdate = false;
 
-    // Check limit to 1 response for authenticated users
-    if (form.limitOneResponse && resolvedCardNo) {
+    if (resolvedCardNo) {
         const existing = await CustomFormResponse.findOne({
-            where: { form_id: parseInt(id), cardno: resolvedCardNo }
+            where: { form_id: parseInt(id), cardno: resolvedCardNo },
+            order: [['submittedAt', 'DESC']]
         });
+
         if (existing) {
-            throw new ApiError(400, 'You have already submitted a response to this form');
+            await existing.update({
+                responses,
+                email: normalizedEmail !== null ? normalizedEmail : existing.email,
+                submittedAt: new Date()
+            });
+            submission = existing;
+            isUpdate = true;
         }
     }
 
-    const submission = await CustomFormResponse.create({
-        form_id: parseInt(id),
-        cardno: resolvedCardNo || null,
-        email: normalizedEmail,
-        responses,
-        submittedAt: new Date()
-    });
+    if (!submission) {
+        submission = await CustomFormResponse.create({
+            form_id: parseInt(id),
+            cardno: resolvedCardNo || null,
+            email: normalizedEmail,
+            responses,
+            submittedAt: new Date()
+        });
+    }
 
     // Run any registered action hooks (non-blocking — errors are caught inside)
     await handleFormSubmissionActions(form, responses, resolvedCardNo);
@@ -819,9 +813,9 @@ export const submitFormResponse = async (req, res) => {
         }
     }
 
-    res.status(201).json({
+    res.status(isUpdate ? 200 : 201).json({
         success: true,
-        message: 'Response submitted successfully',
+        message: isUpdate ? 'Response updated successfully' : 'Response submitted successfully',
         data: { id: submission.id }
     });
 };
@@ -1197,6 +1191,57 @@ export const resolveIdentity = async (req, res) => {
             center: card.center,
             email: card.email,
             department
+        }
+    });
+};
+
+/**
+ * GET /api/v1/admin/forms/public/:id/my-response
+ * Fetch the most recent response submitted by a given mobno/cardno for a form.
+ * Used by the frontend to pre-fill the grid on return visits.
+ */
+export const getMyResponse = async (req, res) => {
+    const { id } = req.params;
+    const { type, value } = req.query;
+
+    if (!type || !value) {
+        return res.status(200).json({ success: true, data: null });
+    }
+
+    let resolvedCardNo = null;
+
+    if (type === 'mobno') {
+        const cleanMob = String(value).replace(/\D/g, '').slice(-10);
+        if (cleanMob.length === 10) {
+            const parsedMob = parseInt(cleanMob, 10);
+            const card = await CardDb.findOne({ where: { mobno: parsedMob }, attributes: ['cardno'] });
+            if (card) resolvedCardNo = card.cardno;
+        }
+    } else {
+        const card = await CardDb.findOne({ where: { cardno: value }, attributes: ['cardno'] });
+        if (card) resolvedCardNo = card.cardno;
+    }
+
+    if (!resolvedCardNo) {
+        return res.status(200).json({ success: true, data: null });
+    }
+
+    const existing = await CustomFormResponse.findOne({
+        where: { form_id: parseInt(id), cardno: resolvedCardNo },
+        order: [['submittedAt', 'DESC']],
+        attributes: ['id', 'responses', 'submittedAt']
+    });
+
+    if (!existing) {
+        return res.status(200).json({ success: true, data: null });
+    }
+
+    res.status(200).json({
+        success: true,
+        data: {
+            responseId: existing.id,
+            responses: existing.responses,
+            submittedAt: existing.submittedAt
         }
     });
 };

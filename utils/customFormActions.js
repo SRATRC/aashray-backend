@@ -105,6 +105,13 @@ async function handleParyushanTapascharya(form, responses, cardno) {
             const normalizedDate = normalizeDateString(dateLabel, year);
             if (!normalizedDate) continue;
 
+            // Skip past dates — meals already served, don't modify food_db
+            const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+            if (normalizedDate < todayIST) {
+                logger.info('[TAPP_HOOK] Skipping past date — meal already served', { cardno, date: normalizedDate });
+                continue;
+            }
+
             const mealUpdate = TAPP_MEAL_MAP[String(tappChoice).trim()];
             if (!mealUpdate) continue;
 
