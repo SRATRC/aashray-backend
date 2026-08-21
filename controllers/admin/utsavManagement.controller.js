@@ -3,7 +3,10 @@ import {
   UtsavPackagesDb,
   UtsavBooking,
   CardDb,
-  RoomBooking
+  RoomBooking,
+  FlatDb,
+  CustomForm,
+  CustomFormResponse
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
@@ -1789,5 +1792,256 @@ export const fetchUtsavFeedbacks = async (req, res) => {
   });
   return res.status(200).send({
     data: finalData
+  });
+};
+
+/**
+ * GET /api/v1/admin/utsav/system-room-allocation
+ * Computes intelligent room suggestions for confirmed utsav participants based on:
+ * 1. Flat ownership in flatdb (auto-suggest 'Flat <flatno>')
+ * 2. Flat host form submissions & verified guest allocations
+ * 3. International (non-Indian) participants with pre/post room bookings in room_booking
+ */
+export const getSystemRoomAllocations = async (req, res) => {
+  const utsavid = req.query.utsavid;
+  req.log.info('system_room_allocation_fetch_start', { utsavid });
+
+  if (!utsavid) {
+    throw new ApiError(400, 'utsavid is required');
+  }
+
+  const utsav = await UtsavDb.findByPk(utsavid);
+  if (!utsav) {
+    throw new ApiError(404, 'Utsav event not found');
+  }
+
+  const statusToBeIncluded = [
+    STATUS_CONFIRMED,
+    STATUS_CASH_COMPLETED,
+    ROOM_STATUS_CHECKEDIN
+  ];
+
+  // Fetch confirmed participants
+  const participants = await database.query(
+    `SELECT 
+      t1.bookingid, t1.utsavid, t1.bookedby, t1.status, t1.packageid, t1.roomno, t1.arrival, t1.carno, t1.other, t1.volunteer, t1.createdAt,
+      t2.cardno, t2.issuedto AS name, t2.mobno, t2.gender, t2.center, t2.country, t2.res_status, t2.dob,
+      TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
+      t3.location, t3.name AS utsav_name,
+      t4.name AS package_name,
+      t5.status AS transaction_status,
+      t5.description AS mumukshu_comments
+    FROM utsav_booking AS t1
+    LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
+    LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
+    LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
+    LEFT JOIN transactions AS t5 ON t1.bookingid = t5.bookingid
+    WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
+    ORDER BY t1.createdAt ASC`,
+    {
+      replacements: { utsavid, status: statusToBeIncluded },
+      type: QueryTypes.SELECT
+    }
+  );
+
+  // 1. Fetch Flat Owners from flatdb
+  const flats = await FlatDb.findAll({ raw: true });
+  const flatOwnerMap = new Map(); // cardno -> flatno
+  flats.forEach(f => {
+    if (f.owner && f.flatno) {
+      flatOwnerMap.set(String(f.owner).trim(), String(f.flatno).trim());
+    }
+  });
+
+  // 2. Fetch Flat Host Forms & Submissions for this event
+  const flatHostForms = await CustomForm.findAll({
+    where: { event_id: utsavid, status: 'active' },
+    raw: true
+  });
+  const flatHostFormIds = flatHostForms.map(f => f.id);
+
+  const flatFormResponses = flatHostFormIds.length > 0 ? await CustomFormResponse.findAll({
+    where: { form_id: { [Sequelize.Op.in]: flatHostFormIds } },
+    raw: true
+  }) : [];
+
+  const formGuestMap = new Map(); // cardno / mobno -> flatno
+  flatFormResponses.forEach(r => {
+    const resp = r.responses || {};
+    const flatno = resp.flatno;
+    if (flatno) {
+      if (r.cardno) formGuestMap.set(String(r.cardno).trim(), String(flatno).trim());
+      if (Array.isArray(resp.guests_list)) {
+        resp.guests_list.forEach(g => {
+          if (g.cardno) formGuestMap.set(String(g.cardno).trim(), String(flatno).trim());
+          if (g.mobno) formGuestMap.set(String(g.mobno).trim(), String(flatno).trim());
+        });
+      }
+    }
+  });
+
+  // 3. Pre/Post event room bookings for international guests
+  const internationalParticipants = participants.filter(p => {
+    const c = String(p.country || '').trim().toLowerCase();
+    return c && c !== 'india' && c !== 'ind' && c !== 'null';
+  });
+
+  const internationalCardnos = internationalParticipants.map(p => p.cardno).filter(Boolean);
+
+  let prePostRoomMap = new Map(); // cardno -> { roomno, details }
+  if (internationalCardnos.length > 0 && utsav.start_date && utsav.end_date) {
+    const startDate = moment(utsav.start_date).format('YYYY-MM-DD');
+    const endDate = moment(utsav.end_date).format('YYYY-MM-DD');
+    const searchFromDate = moment(utsav.start_date).subtract(30, 'days').format('YYYY-MM-DD');
+    const searchToDate = moment(utsav.end_date).add(30, 'days').format('YYYY-MM-DD');
+
+    const generalRoomBookings = await RoomBooking.findAll({
+      where: {
+        cardno: { [Sequelize.Op.in]: internationalCardnos },
+        status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled'] },
+        roomno: { [Sequelize.Op.and]: [{ [Sequelize.Op.ne]: null }, { [Sequelize.Op.ne]: '' }] },
+        checkin: { [Sequelize.Op.lte]: searchToDate },
+        checkout: { [Sequelize.Op.gte]: searchFromDate }
+      },
+      raw: true,
+      order: [['checkin', 'ASC']]
+    });
+
+    generalRoomBookings.forEach(rb => {
+      const cin = moment(rb.checkin).format('YYYY-MM-DD');
+      const cout = moment(rb.checkout).format('YYYY-MM-DD');
+      const isPreEvent = cout >= startDate && cin <= startDate;
+      const isPostEvent = cin <= endDate && cout >= endDate;
+      const isOverlapping = (cin <= endDate && cout >= startDate);
+
+      if (isPreEvent || isPostEvent || isOverlapping) {
+        prePostRoomMap.set(String(rb.cardno).trim(), {
+          roomno: rb.roomno,
+          checkin: cin,
+          checkout: cout,
+          type: isPreEvent && isPostEvent ? 'Pre & Post Event' : (isPreEvent ? 'Pre-Event' : (isPostEvent ? 'Post-Event' : 'Adjacent Stay'))
+        });
+      }
+    });
+  }
+
+  // 4. Compute suggestions for all participants
+  const enrichedParticipants = participants.map((p, index) => {
+    const cardnoClean = String(p.cardno || '').trim();
+    const mobClean = String(p.mobno || '').trim();
+    const isInternational = String(p.country || '').trim().toLowerCase() !== 'india' && String(p.country || '').trim().length > 0 && String(p.country || '').trim().toLowerCase() !== 'ind';
+    
+    let suggestedRoom = '';
+    let allocationType = 'unassigned';
+    let allocationReason = 'No rule matched';
+    let ruleMatched = false;
+
+    // Rule 1 & 3: Flat Owner in flatdb
+    if (flatOwnerMap.has(cardnoClean)) {
+      const fno = flatOwnerMap.get(cardnoClean);
+      suggestedRoom = 'Flat ' + fno;
+      allocationType = 'flat_owner';
+      allocationReason = `Flat Owner (Flat ${fno})`;
+      ruleMatched = true;
+    }
+    // Rule 1: Host form allocation (co-owner or verified guest)
+    else if (formGuestMap.has(cardnoClean) || formGuestMap.has(mobClean)) {
+      const fno = formGuestMap.get(cardnoClean) || formGuestMap.get(mobClean);
+      suggestedRoom = 'Flat ' + fno;
+      allocationType = 'flat_host_guest';
+      allocationReason = `Flat Host Accommodation (Flat ${fno})`;
+      ruleMatched = true;
+    }
+    // Rule 2: International participant with pre/post general room booking
+    else if (isInternational && prePostRoomMap.has(cardnoClean)) {
+      const prePost = prePostRoomMap.get(cardnoClean);
+      suggestedRoom = prePost.roomno;
+      allocationType = 'international_pre_post';
+      allocationReason = `International Guest (${prePost.type}: Room ${prePost.roomno})`;
+      ruleMatched = true;
+    }
+    // Fallback: If room is already allotted in utsav_booking
+    else if (p.roomno && String(p.roomno).trim() !== '' && String(p.roomno).trim() !== '-') {
+      suggestedRoom = p.roomno;
+      allocationType = 'already_allotted';
+      allocationReason = 'Current Allotment';
+    }
+
+    return {
+      index: index + 1,
+      bookingid: p.bookingid,
+      cardno: p.cardno,
+      name: p.name || 'Member',
+      age: p.age !== null ? p.age : '-',
+      gender: p.gender || '-',
+      mobno: p.mobno || '-',
+      center: p.center || '-',
+      country: p.country || 'India',
+      isInternational,
+      package_name: p.package_name || 'Standard Package',
+      mumukshu_comments: p.mumukshu_comments || p.other || '',
+      current_roomno: p.roomno && p.roomno !== '-' ? p.roomno : '',
+      suggested_roomno: suggestedRoom,
+      allocation_type: allocationType,
+      allocation_reason: allocationReason,
+      rule_matched: ruleMatched
+    };
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      utsav: {
+        id: utsav.id,
+        name: utsav.name,
+        start_date: utsav.start_date,
+        end_date: utsav.end_date,
+        location: utsav.location
+      },
+      summary: {
+        total: enrichedParticipants.length,
+        auto_allotted: enrichedParticipants.filter(p => p.rule_matched).length,
+        already_assigned: enrichedParticipants.filter(p => p.current_roomno && !p.rule_matched).length,
+        unassigned: enrichedParticipants.filter(p => !p.current_roomno && !p.rule_matched).length
+      },
+      participants: enrichedParticipants
+    }
+  });
+};
+
+/**
+ * POST /api/v1/admin/utsav/apply-room-allocations
+ * Batch updates room numbers for selected utsav bookings.
+ */
+export const applyRoomAllocations = async (req, res) => {
+  const { utsavid, allocations } = req.body;
+  req.log.info('apply_room_allocations_start', { utsavid, count: allocations?.length });
+
+  if (!utsavid) {
+    throw new ApiError(400, 'utsavid is required');
+  }
+  if (!Array.isArray(allocations) || allocations.length === 0) {
+    throw new ApiError(400, 'allocations array is required');
+  }
+
+  let updatedCount = 0;
+  const adminCardno = req.user?.cardno || 'SYSTEM-ROOM-ALLOCATION';
+
+  for (const item of allocations) {
+    if (item.bookingid && item.roomno !== undefined) {
+      const cleanRoom = String(item.roomno || '').trim();
+      await UtsavBooking.update(
+        { roomno: cleanRoom || null, updatedBy: adminCardno },
+        { where: { bookingid: item.bookingid, utsavid: parseInt(utsavid, 10) } }
+      );
+      updatedCount++;
+    }
+  }
+
+  req.log.info('apply_room_allocations_success', { utsavid, updatedCount });
+  return res.status(200).json({
+    success: true,
+    message: `Successfully updated room allocations for ${updatedCount} booking(s)`,
+    data: { updatedCount }
   });
 };

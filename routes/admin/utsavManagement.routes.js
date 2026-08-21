@@ -32,7 +32,9 @@ import {
   issuePlate,
   createUtsavBookingByAdmin,
   addUtsavPackagesBulk,
-  fetchUtsavFeedbacks
+  fetchUtsavFeedbacks,
+  getSystemRoomAllocations,
+  applyRoomAllocations
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
@@ -111,5 +113,9 @@ utsavAdminRouter.get(
   '/utsav-feedback',
   CatchAsync(fetchUtsavFeedbacks)
 );
+
+
+utsavAdminRouter.get('/system-room-allocation', CatchAsync(getSystemRoomAllocations));
+utsavAdminRouter.post('/apply-room-allocations', CatchAsync(applyRoomAllocations));
 
 export { utsavPublicRouter, utsavAdminRouter };

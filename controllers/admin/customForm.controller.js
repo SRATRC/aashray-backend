@@ -732,6 +732,22 @@ export const submitFormResponse = async (req, res) => {
     validateDateConstraints(form.fields, responses);
     validateShortAnswerLimits(form.fields, responses);
 
+    // Validate number field min/max constraints
+    for (const field of form.fields) {
+        if (field.type === 'number' && responses[field.id] !== undefined && responses[field.id] !== null && String(responses[field.id]).trim() !== '') {
+            const num = parseFloat(responses[field.id]);
+            if (isNaN(num)) {
+                throw new ApiError(400, `"${field.label}" must be a valid number`);
+            }
+            if (field.min !== undefined && field.min !== null && num < parseFloat(field.min)) {
+                throw new ApiError(400, `"${field.label}" must be at least ${field.min}`);
+            }
+            if (field.max !== undefined && field.max !== null && num > parseFloat(field.max)) {
+                throw new ApiError(400, `"${field.label}" cannot exceed ${field.max}`);
+            }
+        }
+    }
+
     // Validate Flat Host Guest Details: If guest capacity > 0, every guest must have a valid mobile & cardno
     const isFlatHost = (form.event_type === 'flat_host' || (form.title || '').toLowerCase().includes('flat host'));
     if (isFlatHost) {
