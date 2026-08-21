@@ -70,7 +70,7 @@ if (process.env.NODE_ENV != 'test') {
       logger.info('Connected to Database 🚀');
 
       // Synchronize the models with the database (create tables if they don't exist)
-      await sequelize.sync({ alter: true });
+      await sequelize.sync();
 
       // Pre-warm the connection pool to minimum size
       const minConnections = sequelize.options.pool.min || 2;
