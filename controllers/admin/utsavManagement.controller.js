@@ -4,9 +4,11 @@ import {
   UtsavBooking,
   CardDb,
   RoomBooking,
+  RoomDb,
   FlatDb,
   CustomForm,
-  CustomFormResponse
+  CustomFormResponse,
+  UtsavRoomConfig
 } from '../../models/associations.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
@@ -49,6 +51,12 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
+import {
+  initializeEventRooms,
+  preprocessGuests,
+  getEventRooms,
+  runSmartAllocation
+} from '../../helpers/roomAllocationEngine.js';
 import { sendUtsavStatusChangeWhatsApp, sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { issueFoodPlate } from '../../helpers/foodBooking.helper.js';
 
@@ -2043,5 +2051,351 @@ export const applyRoomAllocations = async (req, res) => {
     success: true,
     message: `Successfully updated room allocations for ${updatedCount} booking(s)`,
     data: { updatedCount }
+  });
+};
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SMART ROOM ALLOCATION ENGINE — Controllers
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/v1/admin/utsav/room-inventory?utsavid=<id>
+ * Fetch utsav_room_config rows for an event (room inventory state).
+ */
+export const getRoomInventory = async (req, res) => {
+  const { utsavid } = req.query;
+  if (!utsavid) throw new ApiError(400, 'utsavid is required');
+
+  const rooms = await UtsavRoomConfig.findAll({
+    where: { utsavid },
+    order: [
+      ['is_inside_rc', 'DESC'],
+      ['floor', 'ASC'],
+      [Sequelize.literal('CAST(room_group AS UNSIGNED)'), 'ASC'],
+      ['room_group', 'ASC']
+    ]
+  });
+
+  // Fetch default gender and roomtype from roomdb
+  const allBeds = await RoomDb.findAll({ raw: true });
+  const roomMetaMap = new Map();
+  allBeds.forEach(b => {
+    const m = String(b.roomno).match(/^(\d+)/);
+    if (m && !roomMetaMap.has(m[1])) {
+      roomMetaMap.set(m[1], { default_gender: b.gender, roomtype: b.roomtype });
+    }
+  });
+
+  const enrichedRooms = rooms.map(r => {
+    const raw = r.toJSON();
+    const meta = roomMetaMap.get(r.room_group) || {};
+    return {
+      ...raw,
+      default_gender: meta.default_gender || 'Any',
+      roomtype: meta.roomtype || ''
+    };
+  });
+
+  return res.status(200).json({ success: true, data: enrichedRooms });
+};
+
+/**
+ * POST /api/v1/admin/utsav/init-room-inventory
+ * Auto-seed utsav_room_config from roomdb for the given event.
+ * Safe to re-run — skips existing rows.
+ */
+export const initRoomInventory = async (req, res) => {
+  const { utsavid } = req.body;
+  if (!utsavid) throw new ApiError(400, 'utsavid is required');
+
+  req.log.info('init_room_inventory_start', { utsavid });
+  const result = await initializeEventRooms(utsavid);
+  req.log.info('init_room_inventory_done', result);
+
+  return res.status(200).json({
+    success: true,
+    message: `Initialized ${result.created} RC rooms (${result.total} total in RoomDB). ${result.skipped} already configured.`,
+    data: result
+  });
+};
+
+/**
+ * POST /api/v1/admin/utsav/update-room-config
+ * Inline admin edits: floor mats, blocked status, gender override, notes.
+ * Updates are per-event only — roomdb is never touched.
+ */
+export const updateRoomConfig = async (req, res) => {
+  const { utsavid, room_group, property, updates } = req.body;
+  if (!utsavid || !room_group || !property) {
+    throw new ApiError(400, 'utsavid, room_group, and property are required');
+  }
+
+  const allowed = ['addl_capacity', 'is_blocked', 'gender_override', 'notes', 'alloc_rank'];
+  const safeUpdates = {};
+  allowed.forEach(field => {
+    if (updates[field] !== undefined) safeUpdates[field] = updates[field];
+  });
+
+  const room = await UtsavRoomConfig.findOne({ where: { utsavid, room_group, property } });
+  if (room) {
+    const isNowBlocked = safeUpdates.is_blocked !== undefined ? safeUpdates.is_blocked : room.is_blocked;
+    const addl = safeUpdates.addl_capacity !== undefined ? safeUpdates.addl_capacity : room.addl_capacity;
+
+    if (isNowBlocked) {
+      safeUpdates.avail_capacity = 0;
+    } else {
+      const currentOccupied = Math.max(0, room.base_capacity - room.avail_capacity);
+      safeUpdates.avail_capacity = Math.max(0, room.base_capacity + addl - currentOccupied);
+    }
+  }
+
+  await UtsavRoomConfig.update(safeUpdates, { where: { utsavid, room_group, property } });
+
+  return res.status(200).json({
+    success: true,
+    message: 'Room config updated for this event only'
+  });
+};
+
+/**
+ * POST /api/v1/admin/utsav/upload-external-rooms
+ * Bulk upload external hotel rooms for an event via Excel/JSON payload.
+ * Accepts JSON array from frontend (parsed from uploaded Excel).
+ *
+ * Each row: { room_group, property, floor, base_capacity, addl_capacity, gender_override, notes }
+ */
+export const uploadExternalRooms = async (req, res) => {
+  const { utsavid, rooms } = req.body;
+  if (!utsavid) throw new ApiError(400, 'utsavid is required');
+  if (!Array.isArray(rooms) || !rooms.length) throw new ApiError(400, 'rooms array is required');
+
+  req.log.info('upload_external_rooms_start', { utsavid, count: rooms.length });
+
+  let created = 0;
+  let updated = 0;
+
+  for (const room of rooms) {
+    if (!room.room_group || !room.property) continue;
+    const base = parseInt(room.base_capacity, 10) || 1;
+    const addl = parseInt(room.addl_capacity, 10) || 0;
+
+    const [record, wasCreated] = await UtsavRoomConfig.findOrCreate({
+      where: { utsavid, room_group: String(room.room_group), property: String(room.property) },
+      defaults: {
+        utsavid,
+        room_group: String(room.room_group),
+        property: String(room.property),
+        is_inside_rc: 0,  // external
+        floor: parseInt(room.floor, 10) || 0,
+        base_capacity: base,
+        addl_capacity: addl,
+        avail_capacity: base + addl,
+        is_blocked: 0,
+        gender_override: room.gender_override || '',
+        notes: room.notes || null
+      }
+    });
+
+    if (wasCreated) {
+      created++;
+    } else {
+      // Update existing row
+      await record.update({
+        floor: parseInt(room.floor, 10) || record.floor,
+        base_capacity: base,
+        addl_capacity: addl,
+        avail_capacity: base + addl,
+        gender_override: room.gender_override || record.gender_override,
+        notes: room.notes !== undefined ? room.notes : record.notes
+      });
+      updated++;
+    }
+  }
+
+  req.log.info('upload_external_rooms_done', { utsavid, created, updated });
+  return res.status(200).json({
+    success: true,
+    message: `External rooms processed: ${created} added, ${updated} updated.`,
+    data: { created, updated }
+  });
+};
+
+/**
+ * POST /api/v1/admin/utsav/run-smart-allocation
+ * Dry-run the full allocation engine. Returns suggestions without persisting.
+ * Frontend shows results for review before applying.
+ */
+export const runSmartAllocationController = async (req, res) => {
+  const {
+    utsavid,
+    seniorAge = 65,
+    splitDate = null
+  } = req.body;
+
+  if (!utsavid) throw new ApiError(400, 'utsavid is required');
+
+  req.log.info('run_smart_allocation_start', { utsavid, seniorAge, splitDate });
+
+  const utsav = await UtsavDb.findByPk(utsavid);
+  if (!utsav) throw new ApiError(404, 'Utsav event not found');
+
+  const statusToInclude = [STATUS_CONFIRMED, STATUS_CASH_COMPLETED, ROOM_STATUS_CHECKEDIN];
+
+  // Fetch all confirmed participants
+  const participants = await database.query(
+    `SELECT 
+      t1.bookingid, t1.cardno, t1.utsavid, t1.packageid, t1.roomno, t1.status,
+      t1.other,
+      t2.issuedto AS name, t2.mobno, t2.gender, t2.center, t2.country,
+      t2.res_status, t2.dob,
+      TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
+      t4.name AS package_name,
+      t4.start_date AS checkin, t4.end_date AS checkout
+    FROM utsav_booking AS t1
+    LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
+    LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
+    WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
+    ORDER BY t1.createdAt ASC`,
+    {
+      replacements: { utsavid, status: statusToInclude },
+      type: QueryTypes.SELECT
+    }
+  );
+
+  // 1. Fetch Flat Owners from flatdb
+  const flats = await FlatDb.findAll({ raw: true });
+  const flatOwnerMap = new Map(); // cardno -> flatno
+  flats.forEach(f => {
+    if (f.owner && f.flatno) {
+      flatOwnerMap.set(String(f.owner).trim(), String(f.flatno).trim());
+    }
+  });
+
+  // 2. Fetch Flat Host Forms & Submissions for this event
+  const flatHostForms = await CustomForm.findAll({
+    where: { event_id: utsavid, status: 'active' },
+    raw: true
+  });
+  const flatHostFormIds = flatHostForms.map(f => f.id);
+
+  const flatFormResponses = flatHostFormIds.length > 0 ? await CustomFormResponse.findAll({
+    where: { form_id: { [Sequelize.Op.in]: flatHostFormIds } },
+    raw: true
+  }) : [];
+
+  const formGuestMap = new Map(); // cardno / mobno -> flatno
+  flatFormResponses.forEach(r => {
+    const resp = r.responses || {};
+    const flatno = resp.flatno;
+    if (flatno) {
+      if (r.cardno) formGuestMap.set(String(r.cardno).trim(), String(flatno).trim());
+      if (Array.isArray(resp.guests_list)) {
+        resp.guests_list.forEach(g => {
+          if (g.cardno) formGuestMap.set(String(g.cardno).trim(), String(flatno).trim());
+          if (g.mobno) formGuestMap.set(String(g.mobno).trim(), String(flatno).trim());
+        });
+      }
+    }
+  });
+
+  // 3. Pre/Post event room bookings for international guests
+  const internationalParticipants = participants.filter(p => {
+    const c = String(p.country || '').trim().toLowerCase();
+    return c && c !== 'india' && c !== 'ind' && c !== 'null';
+  });
+
+  const internationalCardnos = internationalParticipants.map(p => p.cardno).filter(Boolean);
+
+  let prePostRoomMap = new Map(); // cardno -> { roomno, details }
+  if (internationalCardnos.length > 0 && utsav.start_date && utsav.end_date) {
+    const startDate = moment(utsav.start_date).format('YYYY-MM-DD');
+    const endDate = moment(utsav.end_date).format('YYYY-MM-DD');
+    const searchFromDate = moment(utsav.start_date).subtract(30, 'days').format('YYYY-MM-DD');
+    const searchToDate = moment(utsav.end_date).add(30, 'days').format('YYYY-MM-DD');
+
+    const generalRoomBookings = await RoomBooking.findAll({
+      where: {
+        cardno: { [Sequelize.Op.in]: internationalCardnos },
+        status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled'] },
+        roomno: { [Sequelize.Op.and]: [{ [Sequelize.Op.ne]: null }, { [Sequelize.Op.ne]: '' }] },
+        checkin: { [Sequelize.Op.lte]: searchToDate },
+        checkout: { [Sequelize.Op.gte]: searchFromDate }
+      },
+      raw: true,
+      order: [['checkin', 'ASC']]
+    });
+
+    generalRoomBookings.forEach(rb => {
+      const cin = moment(rb.checkin).format('YYYY-MM-DD');
+      const cout = moment(rb.checkout).format('YYYY-MM-DD');
+      const isPreEvent = cout >= startDate && cin <= startDate;
+      const isPostEvent = cin <= endDate && cout >= endDate;
+      const isOverlapping = (cin <= endDate && cout >= startDate);
+
+      if (isPreEvent || isPostEvent || isOverlapping) {
+        prePostRoomMap.set(String(rb.cardno).trim(), {
+          roomno: rb.roomno,
+          checkin: cin,
+          checkout: cout,
+          type: isPreEvent && isPostEvent ? 'Pre & Post Event' : (isPreEvent ? 'Pre-Event' : (isPostEvent ? 'Post-Event' : 'Adjacent Stay'))
+        });
+      }
+    });
+  }
+
+  const result = await runSmartAllocation({
+    utsavid,
+    participants,
+    seniorAge,
+    utsavStartDate: utsav.start_date,
+    utsavEndDate: utsav.end_date,
+    splitDate,
+    fastTrackData: {
+      flatOwnerMap,
+      formGuestMap,
+      prePostRoomMap
+    }
+  });
+
+  req.log.info('run_smart_allocation_done', result.summary);
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      utsav: {
+        id: utsav.id,
+        name: utsav.name,
+        start_date: utsav.start_date,
+        end_date: utsav.end_date
+      },
+      summary: result.summary,
+      guests: result.guests.map(g => ({
+        bookingid: g.bookingid,
+        cardno: g.cardno,
+        name: g.name,
+        age: g.age,
+        gender: g.gender,
+        mobno: g.mobno,
+        center: g.center,
+        country: g.country,
+        package_name: g.package_name,
+        mumukshu_comments: g.other || '',
+        current_roomno: g.roomno || '',
+        suggested_roomno: g.bedLabel || g.allottedRoom || '',
+        allotted_property: g.allottedProperty || '',
+        isNRI: g.isNRI,
+        isSenior: g.isSenior,
+        needsGF: g.needsGF,
+        isInsideRC: g.isInsideRC,
+        isFullPkg: g.isFullPkg,
+        isFastTracked: g.isFastTracked || false,
+        fastTrackTag: g.fastTrackTag || '',
+        allocated: g.allocated,
+        reviewFlag: g.reviewFlag,
+        unallocated_reason: g.unallocated_reason || ''
+      })),
+      rooms: result.rooms
+    }
   });
 };

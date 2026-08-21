@@ -47,6 +47,7 @@ import CustomForm from './custom_form.model.js';
 import CustomFormResponse from './custom_form_response.model.js';
 import CustomFormDraft from './custom_form_draft.model.js';
 import CustomFormOtpAllowlist from './custom_form_otp_allowlist.model.js';
+import UtsavRoomConfig from './utsav_room_config.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -778,5 +779,6 @@ export {
   CustomForm,
   CustomFormResponse,
   CustomFormDraft,
-  CustomFormOtpAllowlist
+  CustomFormOtpAllowlist,
+  UtsavRoomConfig
 };

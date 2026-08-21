@@ -34,7 +34,12 @@ import {
   addUtsavPackagesBulk,
   fetchUtsavFeedbacks,
   getSystemRoomAllocations,
-  applyRoomAllocations
+  applyRoomAllocations,
+  getRoomInventory,
+  initRoomInventory,
+  updateRoomConfig,
+  uploadExternalRooms,
+  runSmartAllocationController
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
@@ -117,5 +122,12 @@ utsavAdminRouter.get(
 
 utsavAdminRouter.get('/system-room-allocation', CatchAsync(getSystemRoomAllocations));
 utsavAdminRouter.post('/apply-room-allocations', CatchAsync(applyRoomAllocations));
+
+// Smart Room Allocation Engine
+utsavAdminRouter.get('/room-inventory', CatchAsync(getRoomInventory));
+utsavAdminRouter.post('/init-room-inventory', CatchAsync(initRoomInventory));
+utsavAdminRouter.post('/update-room-config', CatchAsync(updateRoomConfig));
+utsavAdminRouter.post('/upload-external-rooms', CatchAsync(uploadExternalRooms));
+utsavAdminRouter.post('/run-smart-allocation', CatchAsync(runSmartAllocationController));
 
 export { utsavPublicRouter, utsavAdminRouter };
