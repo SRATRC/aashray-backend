@@ -49,7 +49,8 @@ import {
     verifyFormOtp,
     saveFormDraft,
     getFormDraft,
-    getMyResponse
+    getMyResponse,
+    validateGuest
 } from '../../controllers/admin/customForm.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -59,6 +60,7 @@ import CatchAsync from '../../utils/CatchAsync.js';
 router.post('/public/otp/send', CatchAsync(sendFormOtp));
 router.post('/public/otp/verify', CatchAsync(verifyFormOtp));
 router.get('/public/resolve-identity', CatchAsync(resolveIdentity));
+router.get('/public/:id/validate-guest', CatchAsync(validateGuest));
 router.get('/public/:id', CatchAsync(getPublicForm));
 router.post('/public/:id/submit', CatchAsync(submitFormResponse));
 router.get('/public/:id/responses/:responseId', CatchAsync(getPublicResponse));

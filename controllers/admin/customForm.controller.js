@@ -1,4 +1,4 @@
-import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments, CustomFormOtpAllowlist, UtsavDb, ShibirDb, UtsavBooking, ShibirBookingDb } from '../../models/associations.js';
+import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments, CustomFormOtpAllowlist, UtsavDb, ShibirDb, UtsavBooking, ShibirBookingDb, FlatDb } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import ShortLink from '../../models/short_link.model.js';
@@ -732,6 +732,18 @@ export const submitFormResponse = async (req, res) => {
     validateDateConstraints(form.fields, responses);
     validateShortAnswerLimits(form.fields, responses);
 
+    // Validate Flat Host Guest Details: If guest capacity > 0, every guest must have a valid mobile & cardno
+    const isFlatHost = (form.event_type === 'flat_host' || (form.title || '').toLowerCase().includes('flat host'));
+    if (isFlatHost) {
+        const guestCap = parseInt(responses.guest_capacity_count, 10) || 0;
+        const guestList = Array.isArray(responses.guests_list) ? responses.guests_list : [];
+        if (guestCap > 0) {
+            if (guestList.length < guestCap || guestList.some(g => !g.mobno || !g.cardno)) {
+                throw new ApiError(400, `Please provide valid, confirmed mobile numbers for all ${guestCap} guest(s)`);
+            }
+        }
+    }
+
     let resolvedCardNo = null;
 
     // Authenticate user if not public
@@ -774,13 +786,28 @@ export const submitFormResponse = async (req, res) => {
     let isUpdate = false;
 
     if (resolvedCardNo) {
-        const existing = await CustomFormResponse.findOne({
-            where: { form_id: parseInt(id), cardno: resolvedCardNo },
-            order: [['submittedAt', 'DESC']]
-        });
+        let existing = null;
+
+        if (isFlatHost && responses.flatno) {
+            const allFormResponses = await CustomFormResponse.findAll({
+                where: { form_id: parseInt(id) },
+                order: [['submittedAt', 'DESC']]
+            });
+            existing = allFormResponses.find(r => {
+                const resp = r.responses || {};
+                return String(resp.flatno || '').trim() === String(responses.flatno).trim();
+            });
+        } else {
+            const existingResponses = await CustomFormResponse.findAll({
+                where: { form_id: parseInt(id), cardno: resolvedCardNo },
+                order: [['submittedAt', 'DESC']]
+            });
+            existing = existingResponses[0] || null;
+        }
 
         if (existing) {
             await existing.update({
+                cardno: resolvedCardNo,
                 responses,
                 email: normalizedEmail !== null ? normalizedEmail : existing.email,
                 submittedAt: new Date()
@@ -1147,7 +1174,7 @@ export const resolveIdentity = async (req, res) => {
     } else {
         card = await CardDb.findOne({
             where: { cardno: value },
-            attributes: ['cardno', 'issuedto', 'center']
+            attributes: ['cardno', 'issuedto', 'center', 'email']
         });
     }
 
@@ -1158,11 +1185,49 @@ export const resolveIdentity = async (req, res) => {
         });
     }
 
+    let flatno = null;
+    let confirmedResidentsCount = 0;
+
     if (formId) {
         try {
             const formObj = await CustomForm.findByPk(formId);
-            if (formObj && formObj.requireRegistration) {
-                await assertEventRegistration(formObj, card.cardno);
+            if (formObj) {
+                const isFlatHost = (formObj.event_type === 'flat_host' || (formObj.title || '').toLowerCase().includes('flat host'));
+                if (isFlatHost) {
+                    const flatRecord = await FlatDb.findOne({ where: { owner: card.cardno } });
+                    if (!flatRecord) {
+                        return res.status(200).json({
+                            success: false,
+                            message: 'Access restricted: Only registered flat owners can fill this form.'
+                        });
+                    }
+                    flatno = flatRecord.flatno;
+
+                    // Calculate permanent residents with confirmed registrations for this utsav
+                    const coOwners = await FlatDb.findAll({ where: { flatno }, attributes: ['owner'] });
+                    const ownerCardNos = coOwners.map(o => o.owner);
+
+                    if (formObj.event_id) {
+                        const bookings = await UtsavBooking.findAll({
+                            where: {
+                                utsavid: formObj.event_id,
+                                cardno: { [Sequelize.Op.in]: ownerCardNos },
+                                status: {
+                                    [Sequelize.Op.in]: [
+                                        'confirmed',
+                                        'completed',
+                                        'cash_completed',
+                                        'checkedin',
+                                        'open'
+                                    ]
+                                }
+                            }
+                        });
+                        confirmedResidentsCount = bookings.length;
+                    }
+                } else if (formObj.requireRegistration) {
+                    await assertEventRegistration(formObj, card.cardno);
+                }
             }
         } catch (err) {
             return res.status(200).json({
@@ -1172,15 +1237,14 @@ export const resolveIdentity = async (req, res) => {
         }
     }
 
-    // If a formId is given and this number is on that form's OTP allowlist, surface
-    // the department it's the head of so the frontend can pre-fill the Department
-    // field before the user even goes through OTP verification.
     let department = null;
+    let departments = [];
     if (formId && cleanMob) {
-        const allowed = await CustomFormOtpAllowlist.findOne({
+        const allowed = await CustomFormOtpAllowlist.findAll({
             where: { form_id: formId, mobno: cleanMob, status: 'active' }
         });
-        department = allowed ? allowed.department : null;
+        departments = [...new Set(allowed.map(a => a.department).filter(Boolean))];
+        department = departments[0] || null;
     }
 
     res.status(200).json({
@@ -1190,19 +1254,85 @@ export const resolveIdentity = async (req, res) => {
             name: card.issuedto,
             center: card.center,
             email: card.email,
-            department
+            department,
+            departments,
+            flatno,
+            confirmed_residents_count: confirmedResidentsCount
         }
     });
 };
 
-/**
- * GET /api/v1/admin/forms/public/:id/my-response
- * Fetch the most recent response submitted by a given mobno/cardno for a form.
- * Used by the frontend to pre-fill the grid on return visits.
- */
+export const validateGuest = async (req, res) => {
+    const { id } = req.params;
+    const { mobno } = req.query;
+
+    if (!mobno) {
+        throw new ApiError(400, 'Mobile number is required');
+    }
+
+    const form = await CustomForm.findByPk(id);
+    if (!form) throw new ApiError(404, 'Form not found');
+
+    const cleanMob = String(mobno).replace(/\D/g, '').slice(-10);
+    if (cleanMob.length !== 10) {
+        return res.status(200).json({ success: false, message: 'Please enter a valid 10-digit mobile number' });
+    }
+
+    const parsedMob = parseInt(cleanMob, 10);
+    const card = await CardDb.findOne({
+        where: { mobno: parsedMob },
+        attributes: ['cardno', 'issuedto', 'center', 'email']
+    });
+
+    if (!card) {
+        return res.status(200).json({
+            success: false,
+            message: 'Mobile number is not registered in Ashram database'
+        });
+    }
+
+    const eventId = form.event_id;
+    const eventName = form.event_name || 'this event';
+
+    if (eventId) {
+        const booking = await UtsavBooking.findOne({
+            where: {
+                utsavid: eventId,
+                cardno: card.cardno,
+                status: {
+                    [Sequelize.Op.in]: [
+                        'confirmed',
+                        'completed',
+                        'cash_completed',
+                        'checkedin',
+                        'open'
+                    ]
+                }
+            }
+        });
+
+        if (!booking) {
+            return res.status(200).json({
+                success: false,
+                message: `${card.issuedto} (${card.center || 'Member'}) does not have a confirmed booking for ${eventName}`
+            });
+        }
+    }
+
+    return res.status(200).json({
+        success: true,
+        data: {
+            cardno: card.cardno,
+            name: card.issuedto,
+            center: card.center,
+            email: card.email
+        }
+    });
+};
+
 export const getMyResponse = async (req, res) => {
     const { id } = req.params;
-    const { type, value } = req.query;
+    const { type, value, department, flatno } = req.query;
 
     if (!type || !value) {
         return res.status(200).json({ success: true, data: null });
@@ -1226,11 +1356,48 @@ export const getMyResponse = async (req, res) => {
         return res.status(200).json({ success: true, data: null });
     }
 
-    const existing = await CustomFormResponse.findOne({
+    if (flatno) {
+        const allFormResponses = await CustomFormResponse.findAll({
+            where: { form_id: parseInt(id) },
+            order: [['submittedAt', 'DESC']],
+            attributes: ['id', 'responses', 'submittedAt']
+        });
+        const matchByFlat = allFormResponses.find(r => {
+            const resp = r.responses || {};
+            return String(resp.flatno || '').trim() === String(flatno).trim();
+        });
+        if (matchByFlat) {
+            return res.status(200).json({
+                success: true,
+                data: {
+                    responseId: matchByFlat.id,
+                    responses: matchByFlat.responses,
+                    submittedAt: matchByFlat.submittedAt
+                }
+            });
+        }
+    }
+
+    const existingResponses = await CustomFormResponse.findAll({
         where: { form_id: parseInt(id), cardno: resolvedCardNo },
         order: [['submittedAt', 'DESC']],
         attributes: ['id', 'responses', 'submittedAt']
     });
+
+    if (!existingResponses || existingResponses.length === 0) {
+        return res.status(200).json({ success: true, data: null });
+    }
+
+    let existing = null;
+    if (department) {
+        const cleanTargetDept = String(department).trim().toLowerCase();
+        existing = existingResponses.find(r => {
+            const resp = r.responses || {};
+            return Object.values(resp).some(v => typeof v === 'string' && v.trim().toLowerCase() === cleanTargetDept);
+        });
+    } else {
+        existing = existingResponses[0];
+    }
 
     if (!existing) {
         return res.status(200).json({ success: true, data: null });

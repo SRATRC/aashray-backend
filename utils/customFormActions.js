@@ -1,29 +1,28 @@
 import FoodDb from '../models/food_db.model.js';
+import UtsavBooking from '../models/utsav_boking.model.js';
+import Sequelize from 'sequelize';
 import logger from '../config/logger.js';
 
-// -- Paryushan Tapascharya meal cancellation map ------------------------------
-// Values: 1 = keep meal, 0 = cancel meal
+// Meal mappings for Tapascharya choices
 const TAPP_MEAL_MAP = {
-    'Upvaas':                         { breakfast: 0, lunch: 0, dinner: 0 },
-    'Upvas':                          { breakfast: 0, lunch: 0, dinner: 0 },
-    'Aayambil':                       { breakfast: 0, lunch: 1, dinner: 0 },
-    'Ayambil':                        { breakfast: 0, lunch: 1, dinner: 0 },
-    'Ekasna (Breakfast)':             { breakfast: 1, lunch: 0, dinner: 0 },
-    'Ekasna (Lunch)':                 { breakfast: 0, lunch: 1, dinner: 0 },
-    'Ekasna (Dinner)':                { breakfast: 0, lunch: 0, dinner: 1 },
-    'Biyasna (Breakfast + Lunch)':    { breakfast: 1, lunch: 1, dinner: 0 },
-    'Biyasna (Breakfast + Dinner)':   { breakfast: 1, lunch: 0, dinner: 1 },
-    'Biyasna (Lunch + Dinner)':       { breakfast: 0, lunch: 1, dinner: 1 },
-    'Only Liquid':                    { breakfast: 0, lunch: 0, dinner: 0 },
-    'None / Regular Meal':            { breakfast: 1, lunch: 1, dinner: 1 },
-    'Regular Meal':                   { breakfast: 1, lunch: 1, dinner: 1 },
-    'None':                           { breakfast: 1, lunch: 1, dinner: 1 },
+    'Upvaas': { breakfast: 'NONE', lunch: 'NONE', dinner: 'NONE' },
+    'Aayambil': { breakfast: 'NONE', lunch: 'REGULAR', dinner: 'NONE' },
+    'Ekasna (Breakfast)': { breakfast: 'REGULAR', lunch: 'NONE', dinner: 'NONE' },
+    'Ekasna (Lunch)': { breakfast: 'NONE', lunch: 'REGULAR', dinner: 'NONE' },
+    'Ekasna (Dinner)': { breakfast: 'NONE', lunch: 'NONE', dinner: 'REGULAR' },
+    'Biyasna (Breakfast + Lunch)': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'NONE' },
+    'Biyasna (Breakfast + Dinner)': { breakfast: 'REGULAR', lunch: 'NONE', dinner: 'REGULAR' },
+    'Biyasna (Lunch + Dinner)': { breakfast: 'NONE', lunch: 'REGULAR', dinner: 'REGULAR' },
+    'Regular Meal': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'REGULAR' }
 };
 
 function normalizeDateString(dateKey, fallbackYear = 2026) {
     if (!dateKey) return null;
     const trimmed = String(dateKey).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        return trimmed;
+    }
 
     const match = trimmed.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)(?:\s+(\d{4}))?$/i);
     if (match) {
@@ -58,6 +57,8 @@ export const handleFormSubmissionActions = async (form, responses, cardno) => {
 
     if (titleLower.includes('tapascharya') || (deptLower === 'food' && titleLower.includes('tapp'))) {
         await handleParyushanTapascharya(form, responses, cardno);
+    } else if (form.event_type === 'flat_host' || titleLower.includes('flat host') || titleLower.includes('anand mahotsav')) {
+        await handleFlatHostAllocation(form, responses, cardno);
     }
 };
 
@@ -87,21 +88,21 @@ async function applyMealChange(cardno, normalizedDate, mealUpdate, tappChoice) {
             spicy: 0,
             updatedBy: 'SYSTEM-TAPASCHARYA'
         });
-        logger.info('[TAPP_HOOK] Created food_db record for tapascharya', { cardno, date: normalizedDate, tappChoice, mealUpdate });
+        logger.info('[TAPP_HOOK] Created new food_db record', { cardno, date: normalizedDate, tappChoice, mealUpdate });
     }
 }
 
 async function handleParyushanTapascharya(form, responses, cardno) {
     const fields = form.fields || [];
 
-    // 1. Check if form uses a Radio Grid (Matrix table of dates vs fasting types)
     const gridField = fields.find(f => f.type === 'grid_radio');
-    if (gridField && responses[gridField.id] && typeof responses[gridField.id] === 'object') {
-        const gridAnswers = responses[gridField.id];
-        const year = form.event_name?.match(/\b(20\d\d)\b/) ? parseInt(RegExp.$1, 10) : new Date().getFullYear();
+    if (gridField && responses[gridField.id]) {
+        const matrixAnswers = responses[gridField.id];
+        const year = form.event_id ? 2026 : new Date().getFullYear();
 
-        for (const [dateLabel, tappChoice] of Object.entries(gridAnswers)) {
+        for (const [dateLabel, tappChoice] of Object.entries(matrixAnswers)) {
             if (!tappChoice) continue;
+
             const normalizedDate = normalizeDateString(dateLabel, year);
             if (!normalizedDate) continue;
 
@@ -118,48 +119,31 @@ async function handleParyushanTapascharya(form, responses, cardno) {
             try {
                 await applyMealChange(cardno, normalizedDate, mealUpdate, tappChoice);
             } catch (err) {
-                logger.error('[TAPP_HOOK] Failed to update food_db for date ' + normalizedDate, {
-                    cardno, error: err.message
+                logger.error('[TAPP_HOOK] Failed to apply meal change', {
+                    cardno, date: normalizedDate, error: err.message
                 });
             }
         }
         return;
     }
 
-    // 2. Fallback: Single Date + Single Fasting Type
     const dateField = fields.find(f => f.type === 'date');
-    const tappField = fields.find(f => {
-        if (f.type === 'date') return false;
-        const lbl = (f.label || '').toLowerCase();
-        return lbl.includes('tapp') || lbl.includes('tapascharya') || lbl.includes('fasting') || ['radio', 'select'].includes(f.type);
-    });
+    const tappField = fields.find(f =>
+        (f.label && f.label.toLowerCase().includes('tapascharya')) ||
+        (f.id && f.id.toLowerCase().includes('tapascharya'))
+    );
 
-    if (!dateField || !tappField) {
-        logger.warn('[TAPP_HOOK] Could not find date or tapp field in form', {
-            formId: form.id, formTitle: form.title
-        });
-        return;
-    }
+    if (!dateField || !tappField) return;
 
-    const selectedDate = responses[dateField.id];
-    const selectedTapp = responses[tappField.id];
+    const rawDate = responses[dateField.id];
+    const rawTapp = responses[tappField.id];
 
-    if (!selectedDate || !selectedTapp) {
-        logger.warn('[TAPP_HOOK] Missing date or tapp value in responses', {
-            formId: form.id, cardno, selectedDate, selectedTapp
-        });
-        return;
-    }
+    if (!rawDate || !rawTapp) return;
 
-    const cleanTapp = String(selectedTapp).trim();
+    const selectedDate = String(rawDate).trim();
+    const cleanTapp = String(rawTapp).trim();
     const mealUpdate = TAPP_MEAL_MAP[cleanTapp];
-
-    if (!mealUpdate) {
-        logger.warn('[TAPP_HOOK] Unknown tapp value – no meal update applied', {
-            formId: form.id, cardno, selectedTapp: cleanTapp
-        });
-        return;
-    }
+    if (!mealUpdate) return;
 
     try {
         await applyMealChange(cardno, selectedDate, mealUpdate, cleanTapp);
@@ -167,5 +151,36 @@ async function handleParyushanTapascharya(form, responses, cardno) {
         logger.error('[TAPP_HOOK] Failed to update food_db', {
             cardno, date: selectedDate, error: err.message
         });
+    }
+}
+
+async function handleFlatHostAllocation(form, responses, cardno) {
+    const flatno = responses.flatno;
+    const eventId = form.event_id;
+    if (!flatno || !eventId) return;
+
+    const guestList = responses.guests_list;
+    if (!guestList || !Array.isArray(guestList) || guestList.length === 0) return;
+
+    const guestCardNos = guestList.map(g => g.cardno).filter(Boolean);
+    if (guestCardNos.length === 0) return;
+
+    try {
+        const roomTitle = `Flat ${flatno}`;
+        await UtsavBooking.update(
+            {
+                roomno: roomTitle,
+                updatedBy: 'SYSTEM-FLAT-HOST'
+            },
+            {
+                where: {
+                    utsavid: eventId,
+                    cardno: { [Sequelize.Op.in]: guestCardNos }
+                }
+            }
+        );
+        logger.info(`[FLAT_HOST_HOOK] Allocated ${roomTitle} to ${guestCardNos.length} guests for utsav ${eventId}`, { guestCardNos });
+    } catch (err) {
+        logger.error('[FLAT_HOST_HOOK] Failed to update guest room allocations', { error: err.message, flatno, eventId });
     }
 }
