@@ -13,6 +13,8 @@ const TAPP_MEAL_MAP = {
     'Biyasna (Breakfast + Lunch)': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'NONE' },
     'Biyasna (Breakfast + Dinner)': { breakfast: 'REGULAR', lunch: 'NONE', dinner: 'REGULAR' },
     'Biyasna (Lunch + Dinner)': { breakfast: 'NONE', lunch: 'REGULAR', dinner: 'REGULAR' },
+    'Only Liquid': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'REGULAR' },
+    'Ras Tyaag': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'REGULAR' },
     'Regular Meal': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'REGULAR' }
 };
 

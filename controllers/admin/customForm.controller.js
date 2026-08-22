@@ -1338,6 +1338,82 @@ export const resolveIdentity = async (req, res) => {
         department = departments[0] || null;
     }
 
+    // Look up Tapascharya / Tapp details for this member if available
+    let tappDetails = null;
+    let isPaarnaEligible = false;
+    try {
+        const allTappForms = await CustomForm.findAll({
+            where: {
+                title: { [Sequelize.Op.like]: '%Tapascharya%' },
+                status: 'active'
+            },
+            attributes: ['id']
+        });
+        const tappFormIds = allTappForms.map(f => f.id);
+        if (tappFormIds.length > 0) {
+            const userTappResp = await CustomFormResponse.findOne({
+                where: {
+                    form_id: { [Sequelize.Op.in]: tappFormIds },
+                    cardno: card.cardno
+                },
+                order: [['submittedAt', 'DESC']]
+            });
+            if (userTappResp && userTappResp.responses) {
+                const matrix = userTappResp.responses.tapascharya_matrix || {};
+                const entries = Object.entries(matrix).filter(([_, v]) => v && v !== 'Regular Meal');
+                if (entries.length > 0) {
+                    const upvaasCount = entries.filter(([_, v]) => v === 'Upvaas').length;
+                    const aayambilCount = entries.filter(([_, v]) => v === 'Aayambil').length;
+                    const ekasnaCount = entries.filter(([_, v]) => String(v).includes('Ekasna')).length;
+                    const biyasnaCount = entries.filter(([_, v]) => String(v).includes('Biyasna')).length;
+                    const liquidCount = entries.filter(([_, v]) => String(v).includes('Liquid')).length;
+                    const rasTyaagCount = entries.filter(([_, v]) => String(v).includes('Ras Tyaag')).length;
+
+                    const totalTappDays = upvaasCount + aayambilCount + ekasnaCount + biyasnaCount + liquidCount + rasTyaagCount;
+
+                    // Check for 3 consecutive Upvaas across the 8 Paryushan dates
+                    const sortedDates = ['8th Sep', '9th Sep', '10th Sep', '11th Sep', '12th Sep', '13th Sep', '14th Sep', '15th Sep'];
+                    let consecutiveUpvaas = 0;
+                    let has3ConsecutiveUpvaas = false;
+                    for (const d of sortedDates) {
+                        if (matrix[d] === 'Upvaas') {
+                            consecutiveUpvaas++;
+                            if (consecutiveUpvaas >= 3) {
+                                has3ConsecutiveUpvaas = true;
+                                break;
+                            }
+                        } else {
+                            consecutiveUpvaas = 0;
+                        }
+                    }
+
+                    isPaarnaEligible = (totalTappDays >= 8 || has3ConsecutiveUpvaas);
+
+                    if (upvaasCount === 8) {
+                        tappDetails = 'Athai (8 Upvaas)';
+                    } else if (upvaasCount === 3 && has3ConsecutiveUpvaas) {
+                        tappDetails = 'Tevle (3 Upvaas)';
+                    } else if (upvaasCount === 2) {
+                        tappDetails = 'Bele (2 Upvaas)';
+                    } else if (upvaasCount > 0 && aayambilCount === 0 && ekasnaCount === 0 && biyasnaCount === 0 && liquidCount === 0 && rasTyaagCount === 0) {
+                        tappDetails = `${upvaasCount} Upvaas`;
+                    } else {
+                        const parts = [];
+                        if (upvaasCount > 0) parts.push(`${upvaasCount} Upvaas`);
+                        if (aayambilCount > 0) parts.push(`${aayambilCount} Aayambil`);
+                        if (ekasnaCount > 0) parts.push(`${ekasnaCount} Ekasna`);
+                        if (biyasnaCount > 0) parts.push(`${biyasnaCount} Biyasna`);
+                        if (liquidCount > 0) parts.push(`${liquidCount} Only Liquid`);
+                        if (rasTyaagCount > 0) parts.push(`${rasTyaagCount} Ras Tyaag`);
+                        tappDetails = parts.join(', ') || entries.map(([d, v]) => `${d}: ${v}`).join(', ');
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        logger.warn('Could not fetch tapp details in resolveIdentity:', e);
+    }
+
     res.status(200).json({
         success: true,
         data: {
@@ -1348,7 +1424,9 @@ export const resolveIdentity = async (req, res) => {
             department,
             departments,
             flatno,
-            confirmed_residents_count: confirmedResidentsCount
+            confirmed_residents_count: confirmedResidentsCount,
+            tapp_details: tappDetails,
+            is_paarna_eligible: isPaarnaEligible
         }
     });
 };
@@ -1442,13 +1520,91 @@ export const validateGuest = async (req, res) => {
         }
     }
 
+    // Look up Tapascharya / Tapp details for this member if available
+    let tappDetails = null;
+    let isPaarnaEligible = false;
+    try {
+        const allTappForms = await CustomForm.findAll({
+            where: {
+                title: { [Sequelize.Op.like]: '%Tapascharya%' },
+                status: 'active'
+            },
+            attributes: ['id']
+        });
+        const tappFormIds = allTappForms.map(f => f.id);
+        if (tappFormIds.length > 0) {
+            const userTappResp = await CustomFormResponse.findOne({
+                where: {
+                    form_id: { [Sequelize.Op.in]: tappFormIds },
+                    cardno: card.cardno
+                },
+                order: [['submittedAt', 'DESC']]
+            });
+            if (userTappResp && userTappResp.responses) {
+                const matrix = userTappResp.responses.tapascharya_matrix || {};
+                const entries = Object.entries(matrix).filter(([_, v]) => v && v !== 'Regular Meal');
+                if (entries.length > 0) {
+                    const upvaasCount = entries.filter(([_, v]) => v === 'Upvaas').length;
+                    const aayambilCount = entries.filter(([_, v]) => v === 'Aayambil').length;
+                    const ekasnaCount = entries.filter(([_, v]) => String(v).includes('Ekasna')).length;
+                    const biyasnaCount = entries.filter(([_, v]) => String(v).includes('Biyasna')).length;
+                    const liquidCount = entries.filter(([_, v]) => String(v).includes('Liquid')).length;
+                    const rasTyaagCount = entries.filter(([_, v]) => String(v).includes('Ras Tyaag')).length;
+
+                    const totalTappDays = upvaasCount + aayambilCount + ekasnaCount + biyasnaCount + liquidCount + rasTyaagCount;
+
+                    // Check for 3 consecutive Upvaas across the 8 Paryushan dates
+                    const sortedDates = ['8th Sep', '9th Sep', '10th Sep', '11th Sep', '12th Sep', '13th Sep', '14th Sep', '15th Sep'];
+                    let consecutiveUpvaas = 0;
+                    let has3ConsecutiveUpvaas = false;
+                    for (const d of sortedDates) {
+                        if (matrix[d] === 'Upvaas') {
+                            consecutiveUpvaas++;
+                            if (consecutiveUpvaas >= 3) {
+                                has3ConsecutiveUpvaas = true;
+                                break;
+                            }
+                        } else {
+                            consecutiveUpvaas = 0;
+                        }
+                    }
+
+                    isPaarnaEligible = (totalTappDays >= 8 || has3ConsecutiveUpvaas);
+
+                    if (upvaasCount === 8) {
+                        tappDetails = 'Athai (8 Upvaas)';
+                    } else if (upvaasCount === 3 && has3ConsecutiveUpvaas) {
+                        tappDetails = 'Tevle (3 Upvaas)';
+                    } else if (upvaasCount === 2) {
+                        tappDetails = 'Bele (2 Upvaas)';
+                    } else if (upvaasCount > 0 && aayambilCount === 0 && ekasnaCount === 0 && biyasnaCount === 0 && liquidCount === 0 && rasTyaagCount === 0) {
+                        tappDetails = `${upvaasCount} Upvaas`;
+                    } else {
+                        const parts = [];
+                        if (upvaasCount > 0) parts.push(`${upvaasCount} Upvaas`);
+                        if (aayambilCount > 0) parts.push(`${aayambilCount} Aayambil`);
+                        if (ekasnaCount > 0) parts.push(`${ekasnaCount} Ekasna`);
+                        if (biyasnaCount > 0) parts.push(`${biyasnaCount} Biyasna`);
+                        if (liquidCount > 0) parts.push(`${liquidCount} Only Liquid`);
+                        if (rasTyaagCount > 0) parts.push(`${rasTyaagCount} Ras Tyaag`);
+                        tappDetails = parts.join(', ') || entries.map(([d, v]) => `${d}: ${v}`).join(', ');
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        logger.warn('Could not fetch tapp details in resolveIdentity:', e);
+    }
+
     return res.status(200).json({
         success: true,
         data: {
             cardno: card.cardno,
             name: card.issuedto,
             center: card.center,
-            email: card.email
+            email: card.email,
+            tapp_details: tappDetails,
+            is_paarna_eligible: isPaarnaEligible
         }
     });
 };

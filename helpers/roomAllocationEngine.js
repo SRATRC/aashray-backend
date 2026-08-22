@@ -159,26 +159,38 @@ export function preprocessGuests(participants, config) {
 
       const isInsideRC = effectiveNRI || isSenior || isFullPkg;
 
+      // Fairness Stay History: Check last 2 events for Inside RC stay
+      const pastHistory = (config.pastHistoryMap && config.pastHistoryMap.get(cardnoClean)) || [];
+      const last2Events = pastHistory.slice(0, 2);
+      const hadRecentRC = last2Events.some(ev => ev.location_type === 'RC');
+      const pastRcCount = pastHistory.filter(ev => ev.location_type === 'RC').length;
+
       let isFastTracked = false;
       let fastTrackRoom = '';
       let fastTrackTag = '';
       let fastTrackReason = '';
 
-      // 1. Flat Owner in flatdb
+      // 1. Flat / Room Owner in flatdb
       if (flatOwnerMap.has(cardnoClean)) {
         const fno = flatOwnerMap.get(cardnoClean);
+        const fNum = parseInt(fno, 10);
+        const isRcRoom = !isNaN(fNum) && fNum >= 1 && fNum <= 60;
+        const prefix = isRcRoom ? 'Room ' : 'Flat ';
         isFastTracked = true;
-        fastTrackRoom = 'Flat ' + fno;
-        fastTrackTag = 'Flat Owner';
-        fastTrackReason = `Flat Owner (Flat ${fno})`;
+        fastTrackRoom = prefix + fno;
+        fastTrackTag = isRcRoom ? 'Room Owner' : 'Flat Owner';
+        fastTrackReason = `${isRcRoom ? 'Room' : 'Flat'} Owner (${prefix}${fno})`;
       }
-      // 2. Flat Host Form Guest (co-owner or verified guest from form)
+      // 2. Flat / Room Host Form Guest (co-owner or verified guest from form)
       else if (formGuestMap.has(cardnoClean) || formGuestMap.has(mobClean)) {
         const fno = formGuestMap.get(cardnoClean) || formGuestMap.get(mobClean);
+        const fNum = parseInt(fno, 10);
+        const isRcRoom = !isNaN(fNum) && fNum >= 1 && fNum <= 60;
+        const prefix = isRcRoom ? 'Room ' : 'Flat ';
         isFastTracked = true;
-        fastTrackRoom = 'Flat ' + fno;
-        fastTrackTag = 'Flat Guest';
-        fastTrackReason = `Flat Host Form (Flat ${fno})`;
+        fastTrackRoom = prefix + fno;
+        fastTrackTag = isRcRoom ? 'Room Guest' : 'Flat Guest';
+        fastTrackReason = `Host Form (${prefix}${fno})`;
       }
       // 3. International Pre/Post booking
       else if (effectiveNRI && prePostRoomMap.has(cardnoClean)) {
@@ -214,13 +226,28 @@ export function preprocessGuests(participants, config) {
         bedLabel: isFastTracked ? fastTrackRoom : null,
         fastTrackTag,
         fastTrackReason,
+        hadRecentRC,
+        pastRcCount,
         unallocated_reason: isFastTracked ? null : null
       };
     })
     .sort((a, b) => {
-      // Fast-tracked first, then sort by age DESC, NRI DESC
+      // 1. Fast-tracked first (Flat Owners, Flat Guests, PR/Seva Kutir, Intl Pre/Post)
       if (a.isFastTracked !== b.isFastTracked) return a.isFastTracked ? -1 : 1;
+
+      // 2. Full Event Package priority for Inside RC
+      if (a.isFullPkg !== b.isFullPkg) return a.isFullPkg ? -1 : 1;
+
+      // 3. Fairness Rule: Those who have NOT had RC in the last 2 events get top priority boost
+      if (a.hadRecentRC !== b.hadRecentRC) return a.hadRecentRC ? 1 : -1;
+
+      // 4. Seniority (Age 65+)
+      if (a.isSenior !== b.isSenior) return a.isSenior ? -1 : 1;
+
+      // 5. Age DESC
       if (b.age !== a.age) return b.age - a.age;
+
+      // 6. NRI DESC
       return (b.isNRI ? 1 : 0) - (a.isNRI ? 1 : 0);
     });
 }
@@ -338,17 +365,15 @@ export function assignBeds(rooms, guests) {
   for (const [, room] of roomMap) {
     if (!room.occupants.length) continue;
 
-    const hasFloorBed = room.addl_capacity > 0;
-
-    // Sort by age ASC — youngest first
-    room.occupants.sort((a, b) => a.age - b.age);
+    // Sort by age DESC — older guests get wood beds (A, B, C, D), youngest get floor beds only if wood beds are full
+    room.occupants.sort((a, b) => (b.age || 0) - (a.age || 0));
 
     room.occupants.forEach((g, idx) => {
-      if (hasFloorBed && idx === 0) {
-        g.bedLabel = `${room.room_group}_FLOOR`;
+      if (idx < room.base_capacity) {
+        g.bedLabel = `Room ${room.room_group}_${ALPHA[idx]}`;
       } else {
-        const bedIdx = hasFloorBed ? idx - 1 : idx;
-        g.bedLabel = `${room.room_group}_${ALPHA[bedIdx]}`;
+        const floorIdx = idx - room.base_capacity + 1;
+        g.bedLabel = floorIdx === 1 ? `Room ${room.room_group}_FLOOR` : `Room ${room.room_group}_FLOOR_${floorIdx}`;
       }
     });
   }
@@ -439,9 +464,9 @@ export async function runSmartAllocation(params) {
     throw new Error('No room inventory found for this event. Please initialize rooms first.');
   }
 
-  // Preprocess & classify guests
+  // Preprocess & classify guests with past stay history fairness
   const guests = preprocessGuests(participants, {
-    seniorAge, utsavStartDate, utsavEndDate, fastTrackData
+    seniorAge, utsavStartDate, utsavEndDate, fastTrackData, pastHistoryMap: params.pastHistoryMap || new Map()
   });
 
   // Auto-detect split date if not explicitly provided

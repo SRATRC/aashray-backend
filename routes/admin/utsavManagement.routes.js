@@ -38,8 +38,15 @@ import {
   getRoomInventory,
   initRoomInventory,
   updateRoomConfig,
+  updateRoomInventoryBulk,
   uploadExternalRooms,
-  runSmartAllocationController
+  runSmartAllocationController,
+  getHousekeepingExtraBedsReport,
+  getUncheckedInBedsReport,
+  reallotBed,
+  getAllottedBedsReport,
+  swapBeds,
+  getParticipantStayHistory
 } from '../../controllers/admin/utsavManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
@@ -127,7 +134,14 @@ utsavAdminRouter.post('/apply-room-allocations', CatchAsync(applyRoomAllocations
 utsavAdminRouter.get('/room-inventory', CatchAsync(getRoomInventory));
 utsavAdminRouter.post('/init-room-inventory', CatchAsync(initRoomInventory));
 utsavAdminRouter.post('/update-room-config', CatchAsync(updateRoomConfig));
+utsavAdminRouter.post('/update-room-inventory-bulk', CatchAsync(updateRoomInventoryBulk));
 utsavAdminRouter.post('/upload-external-rooms', CatchAsync(uploadExternalRooms));
 utsavAdminRouter.post('/run-smart-allocation', CatchAsync(runSmartAllocationController));
+utsavAdminRouter.get('/housekeeping-extra-beds-report', CatchAsync(getHousekeepingExtraBedsReport));
+utsavAdminRouter.get('/uncheckedin-beds-report', CatchAsync(getUncheckedInBedsReport));
+utsavAdminRouter.post('/reallot-bed', CatchAsync(reallotBed));
+utsavAdminRouter.get('/allotted-beds-report', CatchAsync(getAllottedBedsReport));
+utsavAdminRouter.post('/swap-beds', CatchAsync(swapBeds));
+utsavAdminRouter.get('/participant-stay-history', CatchAsync(getParticipantStayHistory));
 
 export { utsavPublicRouter, utsavAdminRouter };
