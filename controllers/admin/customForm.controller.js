@@ -804,6 +804,23 @@ export const submitFormResponse = async (req, res) => {
             }
             resolvedCardNo = card.cardno;
 
+            // Enforce allowlist restriction if configured for this form
+            const configuredAllowlistCount = await CustomFormOtpAllowlist.count({
+                where: {
+                    form_id: form.id,
+                    status: 'active',
+                    mobno: { [Sequelize.Op.ne]: null }
+                }
+            });
+            if (configuredAllowlistCount > 0) {
+                const isAllowed = await CustomFormOtpAllowlist.findOne({
+                    where: { form_id: form.id, mobno: cleanMob, status: 'active' }
+                });
+                if (!isAllowed) {
+                    throw new ApiError(403, 'This mobile number is not authorized to submit this form');
+                }
+            }
+
             // OTP gate — must come AFTER mobno is validated
             if (form.requireOtp) {
                 await assertOtpVerified(String(cleanMob), form);
@@ -839,11 +856,28 @@ export const submitFormResponse = async (req, res) => {
                 return String(resp.flatno || '').trim() === String(responses.flatno).trim();
             });
         } else {
-            const existingResponses = await CustomFormResponse.findAll({
-                where: { form_id: parseInt(id), cardno: resolvedCardNo },
-                order: [['submittedAt', 'DESC']]
-            });
-            existing = existingResponses[0] || null;
+            // Check if this form has a department field (e.g. Vendor / Department Seva form)
+            const deptField = (form.fields || []).find(f => f.vendorRole === 'department' || f.id === 'name_of_department' || (f.label || '').toLowerCase().includes('department'));
+            const targetDept = deptField && responses[deptField.id] 
+                ? String(responses[deptField.id]).trim().toLowerCase() 
+                : (responses.name_of_department ? String(responses.name_of_department).trim().toLowerCase() : (responses.department ? String(responses.department).trim().toLowerCase() : null));
+
+            if (targetDept) {
+                const allFormResponses = await CustomFormResponse.findAll({
+                    where: { form_id: parseInt(id) },
+                    order: [['submittedAt', 'DESC']]
+                });
+                existing = allFormResponses.find(r => {
+                    const resp = r.responses || {};
+                    return Object.values(resp).some(v => typeof v === 'string' && v.trim().toLowerCase() === targetDept);
+                }) || null;
+            } else {
+                const existingResponses = await CustomFormResponse.findAll({
+                    where: { form_id: parseInt(id), cardno: resolvedCardNo },
+                    order: [['submittedAt', 'DESC']]
+                });
+                existing = existingResponses[0] || null;
+            }
         }
 
         if (existing) {
@@ -1281,9 +1315,25 @@ export const resolveIdentity = async (req, res) => {
     let department = null;
     let departments = [];
     if (formId && cleanMob) {
+        const configuredCount = await CustomFormOtpAllowlist.count({
+            where: {
+                form_id: formId,
+                status: 'active',
+                mobno: { [Sequelize.Op.ne]: null }
+            }
+        });
+
         const allowed = await CustomFormOtpAllowlist.findAll({
             where: { form_id: formId, mobno: cleanMob, status: 'active' }
         });
+
+        if (configuredCount > 0 && (!allowed || allowed.length === 0)) {
+            return res.status(200).json({
+                success: false,
+                message: 'Access restricted: This mobile number is not authorized to fill out this form.'
+            });
+        }
+
         departments = [...new Set(allowed.map(a => a.department).filter(Boolean))];
         department = departments[0] || null;
     }
@@ -1433,47 +1483,80 @@ export const getMyResponse = async (req, res) => {
         const allFormResponses = await CustomFormResponse.findAll({
             where: { form_id: parseInt(id) },
             order: [['submittedAt', 'DESC']],
-            attributes: ['id', 'responses', 'submittedAt']
+            attributes: ['id', 'cardno', 'responses', 'submittedAt']
         });
         const matchByFlat = allFormResponses.find(r => {
             const resp = r.responses || {};
             return String(resp.flatno || '').trim() === String(flatno).trim();
         });
         if (matchByFlat) {
+            let submittedByName = null;
+            if (matchByFlat.cardno) {
+                const subCard = await CardDb.findOne({ where: { cardno: matchByFlat.cardno }, attributes: ['issuedto'] });
+                if (subCard) submittedByName = subCard.issuedto;
+            }
             return res.status(200).json({
                 success: true,
                 data: {
                     responseId: matchByFlat.id,
                     responses: matchByFlat.responses,
-                    submittedAt: matchByFlat.submittedAt
+                    submittedAt: matchByFlat.submittedAt,
+                    cardno: matchByFlat.cardno,
+                    submittedByName,
+                    flatno
                 }
             });
         }
+        return res.status(200).json({ success: true, data: null });
+    }
+
+    if (department) {
+        const cleanTargetDept = String(department).trim().toLowerCase();
+        const allFormResponses = await CustomFormResponse.findAll({
+            where: { form_id: parseInt(id) },
+            order: [['submittedAt', 'DESC']],
+            attributes: ['id', 'cardno', 'responses', 'submittedAt']
+        });
+        const matchByDept = allFormResponses.find(r => {
+            const resp = r.responses || {};
+            return Object.values(resp).some(v => typeof v === 'string' && v.trim().toLowerCase() === cleanTargetDept);
+        });
+        if (matchByDept) {
+            let submittedByName = null;
+            if (matchByDept.cardno) {
+                const subCard = await CardDb.findOne({ where: { cardno: matchByDept.cardno }, attributes: ['issuedto'] });
+                if (subCard) submittedByName = subCard.issuedto;
+            }
+            return res.status(200).json({
+                success: true,
+                data: {
+                    responseId: matchByDept.id,
+                    responses: matchByDept.responses,
+                    submittedAt: matchByDept.submittedAt,
+                    cardno: matchByDept.cardno,
+                    submittedByName,
+                    department
+                }
+            });
+        }
+        return res.status(200).json({ success: true, data: null });
     }
 
     const existingResponses = await CustomFormResponse.findAll({
         where: { form_id: parseInt(id), cardno: resolvedCardNo },
         order: [['submittedAt', 'DESC']],
-        attributes: ['id', 'responses', 'submittedAt']
+        attributes: ['id', 'cardno', 'responses', 'submittedAt']
     });
 
     if (!existingResponses || existingResponses.length === 0) {
         return res.status(200).json({ success: true, data: null });
     }
 
-    let existing = null;
-    if (department) {
-        const cleanTargetDept = String(department).trim().toLowerCase();
-        existing = existingResponses.find(r => {
-            const resp = r.responses || {};
-            return Object.values(resp).some(v => typeof v === 'string' && v.trim().toLowerCase() === cleanTargetDept);
-        });
-    } else {
-        existing = existingResponses[0];
-    }
-
-    if (!existing) {
-        return res.status(200).json({ success: true, data: null });
+    const existing = existingResponses[0];
+    let submittedByName = null;
+    if (existing.cardno) {
+        const subCard = await CardDb.findOne({ where: { cardno: existing.cardno }, attributes: ['issuedto'] });
+        if (subCard) submittedByName = subCard.issuedto;
     }
 
     res.status(200).json({
@@ -1481,7 +1564,9 @@ export const getMyResponse = async (req, res) => {
         data: {
             responseId: existing.id,
             responses: existing.responses,
-            submittedAt: existing.submittedAt
+            submittedAt: existing.submittedAt,
+            cardno: existing.cardno,
+            submittedByName
         }
     });
 };
