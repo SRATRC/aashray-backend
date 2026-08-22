@@ -1,24 +1,4 @@
 
-function normalizeRoomLabel(roomStr) {
-  if (!roomStr) return '';
-  const str = String(roomStr).trim();
-  const numMatch = str.match(/\d+/);
-  const num = numMatch ? parseInt(numMatch[0], 10) : 0;
-
-  if (num >= 1 && num <= 60) {
-    // Inside RC Room (OAG / NAG)
-    if (str.includes('_')) {
-      const suffix = str.substring(str.indexOf('_'));
-      return `Room ${num}${suffix}`;
-    }
-    return `Room ${num}`;
-  } else if (num >= 200 || str.toLowerCase().startsWith('flat')) {
-    // Resident Flat
-    return str.toLowerCase().startsWith('flat') ? str : `Flat ${num}`;
-  }
-  return str;
-}
-
 import {
   UtsavDb,
   UtsavPackagesDb,
@@ -83,6 +63,26 @@ import {
 } from '../../helpers/roomAllocationEngine.js';
 import { sendUtsavStatusChangeWhatsApp, sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { issueFoodPlate } from '../../helpers/foodBooking.helper.js';
+
+function normalizeRoomLabel(roomStr) {
+  if (!roomStr) return '';
+  const str = String(roomStr).trim();
+  const numMatch = str.match(/\d+/);
+  const num = numMatch ? parseInt(numMatch[0], 10) : 0;
+
+  if (num >= 1 && num <= 60) {
+    // Inside RC Room (OAG / NAG)
+    if (str.includes('_')) {
+      const suffix = str.substring(str.indexOf('_'));
+      return `Room ${num}${suffix}`;
+    }
+    return `Room ${num}`;
+  } else if (num >= 200 || str.toLowerCase().startsWith('flat')) {
+    // Resident Flat
+    return str.toLowerCase().startsWith('flat') ? str : `Flat ${num}`;
+  }
+  return str;
+}
 
 export const createUtsavBookingByAdmin = async (req, res) => {
   const { utsavid, mumukshus } = req.body;
@@ -2509,18 +2509,21 @@ export const runSmartAllocationController = async (req, res) => {
     if (rawRoom && rawRoom !== 'null' && rawRoom !== '-') {
       const numMatch = rawRoom.match(/\d+/);
       const num = numMatch ? parseInt(numMatch[0], 10) : 0;
-      if (num > 0 && num < 200) {
-        type = 'RC';
-        label = rawRoom.toLowerCase().startsWith('room') ? rawRoom : (rawRoom.includes('_') ? `Room ${rawRoom}` : `Room ${num}`);
-      } else if (num >= 200) {
-        type = 'FLAT';
-        label = `Flat ${num}`;
-      } else if (rawRoom.toLowerCase().includes('hotel') || rawRoom.toLowerCase().includes('leaf') || rawRoom.toLowerCase().includes('residency')) {
+      const lower = rawRoom.toLowerCase();
+
+      if (lower.includes('hotel') || lower.includes('leaf') || lower.includes('residency') || lower.includes('palace') || lower.includes('inn') || lower.includes('regal')) {
         type = 'EXTERNAL';
         label = rawRoom;
-      } else {
+      } else if (num >= 1 && num <= 60) {
         type = 'RC';
-        label = `Room ${rawRoom}`;
+        label = lower.startsWith('room') ? rawRoom : (rawRoom.includes('_') ? `Room ${rawRoom}` : `Room ${num}`);
+      } else if (num >= 200 || lower.startsWith('flat')) {
+        type = 'FLAT';
+        label = lower.startsWith('flat') ? rawRoom : `Flat ${num}`;
+      } else {
+        // Room 61-199 or other external rooms
+        type = 'EXTERNAL';
+        label = lower.startsWith('room') ? rawRoom : `Room ${num}`;
       }
     }
 
@@ -2632,13 +2635,7 @@ export const getHousekeepingExtraBedsReport = async (req, res) => {
   // 2. Fetch Flats requiring extra beddings from Flat Host forms
   const flatHostForms = await CustomForm.findAll({
     where: {
-      [Sequelize.Op.or]: [
-        { event_id: utsavid },
-        { event_type: 'flat_host' },
-        { title: { [Sequelize.Op.like]: '%flat host%' } },
-        { title: { [Sequelize.Op.like]: '%flat accomodation%' } },
-        { title: { [Sequelize.Op.like]: '%flat accommodation%' } }
-      ],
+      event_id: utsavid,
       status: 'active'
     },
     attributes: ['id']
@@ -2865,53 +2862,97 @@ export const reallotBed = async (req, res) => {
   }
 
   const cleanTargetCard = String(to_cardno).trim();
+  const cleanRoom = String(roomno).trim();
+  const nowStr = new Date().toLocaleString();
+  const updatedBy = req.user?.username || 'admin';
 
-  // 1. Fetch current occupant booking
-  const fromBooking = await UtsavBooking.findOne({
-    where: { bookingid: from_booking_id, utsavid }
-  });
-  if (!fromBooking) {
-    throw new ApiError(404, 'Original booking not found');
-  }
+  const t = await database.transaction();
 
-  // 2. Fetch new recipient booking for this event
-  const toBooking = await UtsavBooking.findOne({
-    where: {
-      utsavid,
-      cardno: cleanTargetCard,
-      status: { [Sequelize.Op.in]: ['confirmed', 'completed', 'cash_completed', 'checkedin'] }
+  try {
+    // 1. Fetch current occupant booking
+    const fromBooking = await UtsavBooking.findOne({
+      where: { bookingid: from_booking_id, utsavid },
+      transaction: t
+    });
+    if (!fromBooking) {
+      await t.rollback();
+      throw new ApiError(404, 'Original booking not found');
     }
-  });
-  if (!toBooking) {
-    throw new ApiError(400, `Participant (${cleanTargetCard}) does not have a confirmed booking for this event`);
+
+    // 2. Fetch new recipient booking for this event
+    const toBooking = await UtsavBooking.findOne({
+      where: {
+        utsavid,
+        cardno: cleanTargetCard,
+        status: { [Sequelize.Op.in]: ['confirmed', 'completed', 'cash_completed', 'checkedin'] }
+      },
+      transaction: t
+    });
+    if (!toBooking) {
+      await t.rollback();
+      throw new ApiError(400, `Participant (${cleanTargetCard}) does not have a confirmed booking for this event`);
+    }
+
+    // 3. Check if recipient already has a room assigned
+    if (toBooking.roomno && String(toBooking.roomno).trim() !== '' && String(toBooking.roomno).trim() !== 'null') {
+      await t.rollback();
+      throw new ApiError(400, `Recipient already has room ${toBooking.roomno} assigned. Please use bed swap instead, or clear their current room first.`);
+    }
+
+    // 4. Check no other booking already occupies this bed
+    const existingOccupant = await UtsavBooking.findOne({
+      where: {
+        utsavid,
+        roomno: cleanRoom,
+        bookingid: { [Sequelize.Op.ne]: from_booking_id },
+        status: { [Sequelize.Op.in]: ['confirmed', 'completed', 'cash_completed', 'checkedin'] }
+      },
+      transaction: t
+    });
+    if (existingOccupant) {
+      await t.rollback();
+      throw new ApiError(400, `Bed ${cleanRoom} is already occupied by another participant (${existingOccupant.cardno})`);
+    }
+
+    const fromCard = await CardDb.findOne({ where: { cardno: fromBooking.cardno }, attributes: ['issuedto'] });
+    const toCard = await CardDb.findOne({ where: { cardno: cleanTargetCard }, attributes: ['issuedto'] });
+
+    const fromName = fromCard?.issuedto || fromBooking.cardno;
+    const toName = toCard?.issuedto || cleanTargetCard;
+
+    // 5. Release bed from previous occupant
+    await fromBooking.update({
+      roomno: null,
+      updatedBy,
+      other: fromBooking.other
+        ? `${fromBooking.other} | Bed ${cleanRoom} re-allotted to ${toName} on ${nowStr}`
+        : `Bed ${cleanRoom} re-allotted to ${toName} on ${nowStr}`
+    }, { transaction: t });
+
+    // 6. Assign bed to new recipient (with audit trail)
+    const targetUpdates = {
+      roomno: cleanRoom,
+      updatedBy,
+      other: toBooking.other
+        ? `${toBooking.other} | Received bed ${cleanRoom} (re-allotted from ${fromName}) on ${nowStr}`
+        : `Received bed ${cleanRoom} (re-allotted from ${fromName}) on ${nowStr}`
+    };
+    if (checkin_immediately) {
+      targetUpdates.status = 'checkedin';
+    }
+
+    await toBooking.update(targetUpdates, { transaction: t });
+
+    await t.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: `Bed ${cleanRoom} successfully re-allotted from ${fromName} to ${toName}${checkin_immediately ? ' (Checked-In)' : ''}`
+    });
+  } catch (err) {
+    if (!t.finished) await t.rollback();
+    throw err;
   }
-
-  const fromCard = await CardDb.findOne({ where: { cardno: fromBooking.cardno }, attributes: ['issuedto'] });
-  const toCard = await CardDb.findOne({ where: { cardno: cleanTargetCard }, attributes: ['issuedto'] });
-
-  const fromName = fromCard?.issuedto || fromBooking.cardno;
-  const toName = toCard?.issuedto || cleanTargetCard;
-
-  // 3. Release bed from previous occupant
-  await fromBooking.update({
-    roomno: null,
-    other: fromBooking.other ? `${fromBooking.other} | Bed ${roomno} re-allotted to ${toName} on ${new Date().toLocaleDateString()}` : `Bed ${roomno} re-allotted to ${toName}`
-  });
-
-  // 4. Assign bed to new recipient
-  const targetUpdates = {
-    roomno: roomno
-  };
-  if (checkin_immediately) {
-    targetUpdates.status = 'checkedin';
-  }
-
-  await toBooking.update(targetUpdates);
-
-  return res.status(200).json({
-    success: true,
-    message: `Bed ${roomno} successfully re-allotted from ${fromName} to ${toName}${checkin_immediately ? ' (Checked-In)' : ''}`
-  });
 };
 /**
  * GET /api/v1/admin/utsav/allotted-beds-report?utsavid=...
@@ -3072,71 +3113,127 @@ export const swapBeds = async (req, res) => {
     throw new ApiError(400, 'utsavid and person_a_booking_id are required');
   }
 
-  const bookingA = await UtsavBooking.findOne({ where: { bookingid: person_a_booking_id, utsavid } });
-  if (!bookingA) {
-    throw new ApiError(404, 'Booking for Person A not found');
+  if (!action_type || !['swap', 'move'].includes(String(action_type).trim())) {
+    throw new ApiError(400, 'Invalid action_type. Must be "swap" or "move"');
   }
 
-  const cardA = await CardDb.findOne({ where: { cardno: bookingA.cardno }, attributes: ['issuedto', 'gender'] });
-  const nameA = cardA?.issuedto || bookingA.cardno;
-  const roomA = bookingA.roomno;
+  const updatedBy = req.user?.username || 'admin';
+  const t = await database.transaction();
 
-  if (action_type === 'swap') {
-    if (!person_b_booking_id) {
-      throw new ApiError(400, 'person_b_booking_id is required for a mutual 2-way swap');
+  try {
+    const bookingA = await UtsavBooking.findOne({
+      where: { bookingid: person_a_booking_id, utsavid },
+      transaction: t
+    });
+    if (!bookingA) {
+      await t.rollback();
+      throw new ApiError(404, 'Booking for Person A not found');
     }
 
-    const bookingB = await UtsavBooking.findOne({ where: { bookingid: person_b_booking_id, utsavid } });
-    if (!bookingB) {
-      throw new ApiError(404, 'Booking for Person B not found');
+    const cardA = await CardDb.findOne({ where: { cardno: bookingA.cardno }, attributes: ['issuedto', 'gender'] });
+    const nameA = cardA?.issuedto || bookingA.cardno;
+    const genderA = cardA?.gender || 'M';
+    const roomA = bookingA.roomno;
+
+    if (action_type === 'swap') {
+      if (!person_b_booking_id) {
+        await t.rollback();
+        throw new ApiError(400, 'person_b_booking_id is required for a mutual 2-way swap');
+      }
+
+      const bookingB = await UtsavBooking.findOne({
+        where: { bookingid: person_b_booking_id, utsavid },
+        transaction: t
+      });
+      if (!bookingB) {
+        await t.rollback();
+        throw new ApiError(404, 'Booking for Person B not found');
+      }
+
+      const cardB = await CardDb.findOne({ where: { cardno: bookingB.cardno }, attributes: ['issuedto', 'gender'] });
+      const nameB = cardB?.issuedto || bookingB.cardno;
+      const genderB = cardB?.gender || 'M';
+      const roomB = bookingB.roomno;
+
+      if (!roomA || !roomB) {
+        await t.rollback();
+        throw new ApiError(400, 'Both participants must currently have an allotted room to perform a mutual swap');
+      }
+
+      // Server-side gender validation
+      if (genderA !== genderB) {
+        await t.rollback();
+        throw new ApiError(400, `Cannot swap beds between different genders (${nameA}: ${genderA}, ${nameB}: ${genderB})`);
+      }
+
+      const nowStr = new Date().toLocaleString();
+
+      // Perform the mutual swap atomically
+      await bookingA.update({
+        roomno: roomB,
+        updatedBy,
+        other: bookingA.other
+          ? `${bookingA.other} | Swapped bed from ${roomA} to ${roomB} with ${nameB} on ${nowStr}`
+          : `Swapped bed with ${nameB} (${roomB}) on ${nowStr}`
+      }, { transaction: t });
+
+      await bookingB.update({
+        roomno: roomA,
+        updatedBy,
+        other: bookingB.other
+          ? `${bookingB.other} | Swapped bed from ${roomB} to ${roomA} with ${nameA} on ${nowStr}`
+          : `Swapped bed with ${nameA} (${roomA}) on ${nowStr}`
+      }, { transaction: t });
+
+      await t.commit();
+
+      return res.status(200).json({
+        success: true,
+        message: `Successfully swapped beds: ${nameA} is now in ${roomB}, and ${nameB} is now in ${roomA}`
+      });
+
+    } else if (action_type === 'move') {
+      if (!target_roomno || !String(target_roomno).trim()) {
+        await t.rollback();
+        throw new ApiError(400, 'target_roomno is required to move participant');
+      }
+
+      const cleanTargetRoom = String(target_roomno).trim();
+      const nowStr = new Date().toLocaleString();
+
+      // Vacancy check: ensure no other confirmed booking already occupies this bed
+      const existingOccupant = await UtsavBooking.findOne({
+        where: {
+          utsavid,
+          roomno: cleanTargetRoom,
+          bookingid: { [Sequelize.Op.ne]: person_a_booking_id },
+          status: { [Sequelize.Op.in]: ['confirmed', 'completed', 'cash_completed', 'checkedin'] }
+        },
+        transaction: t
+      });
+      if (existingOccupant) {
+        await t.rollback();
+        throw new ApiError(400, `Bed ${cleanTargetRoom} is already occupied by another participant (${existingOccupant.cardno})`);
+      }
+
+      await bookingA.update({
+        roomno: cleanTargetRoom,
+        updatedBy,
+        other: bookingA.other
+          ? `${bookingA.other} | Moved bed from ${roomA || 'None'} to ${cleanTargetRoom} on ${nowStr}`
+          : `Moved bed to ${cleanTargetRoom} on ${nowStr}`
+      }, { transaction: t });
+
+      await t.commit();
+
+      return res.status(200).json({
+        success: true,
+        message: `Successfully moved ${nameA} to ${cleanTargetRoom}`
+      });
     }
-
-    const cardB = await CardDb.findOne({ where: { cardno: bookingB.cardno }, attributes: ['issuedto', 'gender'] });
-    const nameB = cardB?.issuedto || bookingB.cardno;
-    const roomB = bookingB.roomno;
-
-    if (!roomA || !roomB) {
-      throw new ApiError(400, 'Both participants must currently have an allotted room to perform a mutual swap');
-    }
-
-    const nowStr = new Date().toLocaleString();
-
-    // Perform the mutual swap
-    await bookingA.update({
-      roomno: roomB,
-      other: bookingA.other ? `${bookingA.other} | Swapped bed from ${roomA} to ${roomB} with ${nameB} on ${nowStr}` : `Swapped bed with ${nameB} (${roomB}) on ${nowStr}`
-    });
-
-    await bookingB.update({
-      roomno: roomA,
-      other: bookingB.other ? `${bookingB.other} | Swapped bed from ${roomB} to ${roomA} with ${nameA} on ${nowStr}` : `Swapped bed with ${nameA} (${roomA}) on ${nowStr}`
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: `Successfully swapped beds: ${nameA} is now in ${roomB}, and ${nameB} is now in ${roomA}`
-    });
-
-  } else if (action_type === 'move') {
-    if (!target_roomno || !String(target_roomno).trim()) {
-      throw new ApiError(400, 'target_roomno is required to move participant');
-    }
-
-    const cleanTargetRoom = String(target_roomno).trim();
-    const nowStr = new Date().toLocaleString();
-
-    await bookingA.update({
-      roomno: cleanTargetRoom,
-      other: bookingA.other ? `${bookingA.other} | Moved bed from ${roomA || 'None'} to ${cleanTargetRoom} on ${nowStr}` : `Moved bed to ${cleanTargetRoom} on ${nowStr}`
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: `Successfully moved ${nameA} to ${cleanTargetRoom}`
-    });
-
-  } else {
-    throw new ApiError(400, 'Invalid action_type. Must be "swap" or "move"');
+  } catch (err) {
+    if (!t.finished) await t.rollback();
+    throw err;
   }
 };
 

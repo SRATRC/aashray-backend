@@ -893,6 +893,12 @@ export const submitFormResponse = async (req, res) => {
     }
 
     if (!submission) {
+        if (form.maxResponses) {
+            const freshCount = await CustomFormResponse.count({ where: { form_id: parseInt(id) } });
+            if (freshCount >= form.maxResponses) {
+                throw new ApiError(403, form.closeMessage || 'This form has reached its response limit and is no longer accepting responses');
+            }
+        }
         submission = await CustomFormResponse.create({
             form_id: parseInt(id),
             cardno: resolvedCardNo || null,
@@ -1209,6 +1215,10 @@ export const cloneForm = async (req, res) => {
             closeMessage: sourceForm.closeMessage,
             maxResponses: sourceForm.maxResponses,
             requireOtp: sourceForm.requireOtp,
+            requireRegistration: sourceForm.requireRegistration,
+            event_id: sourceForm.event_id,
+            event_name: sourceForm.event_name,
+            event_type: sourceForm.event_type,
             createdBy: req.user?.username
         }, { transaction: t });
 
@@ -1958,7 +1968,7 @@ async function assertEventRegistration(form, cardno) {
     }
 }
 
-async function assertOtpVerified(mobno) {
+async function assertOtpVerified(mobno, form) {
     // Look for a verified OTP created in the last 10 minutes
     const record = await CoordinatorOtp.findOne({
         where: {
@@ -1973,6 +1983,29 @@ async function assertOtpVerified(mobno) {
 
     if (!record) {
         throw new ApiError(403, 'OTP verification required. Please verify your mobile number before submitting.');
+    }
+
+    if (form) {
+        const configuredCount = await CustomFormOtpAllowlist.count({
+            where: {
+                form_id: form.id,
+                status: 'active',
+                mobno: { [Sequelize.Op.ne]: null }
+            }
+        });
+
+        if (configuredCount > 0) {
+            const allowed = await CustomFormOtpAllowlist.findOne({
+                where: {
+                    form_id: form.id,
+                    mobno,
+                    status: 'active'
+                }
+            });
+            if (!allowed) {
+                throw new ApiError(403, 'This mobile number is not authorized to submit this form.');
+            }
+        }
     }
 }
 
@@ -2110,6 +2143,11 @@ export const getFormAllowlist = async (req, res) => {
     const form = await CustomForm.findByPk(id);
     if (!form) throw new ApiError(404, 'Form not found');
 
+    const userRoles = req.roles || [];
+    if (!hasAccessToDept(userRoles, form.dept_name)) {
+        throw new ApiError(403, 'You do not have access to this form');
+    }
+
     const allowlist = await CustomFormOtpAllowlist.findAll({
         where: { form_id: id, status: 'active' },
         order: [['createdAt', 'DESC']]
@@ -2148,48 +2186,70 @@ export const saveFormAllowlist = async (req, res) => {
     const form = await CustomForm.findByPk(id);
     if (!form) throw new ApiError(404, 'Form not found');
 
-    if (Array.isArray(entries)) {
-        await CustomFormOtpAllowlist.destroy({ where: { form_id: id } });
-        for (const e of entries) {
-            const clean = e.mobno ? String(e.mobno).replace(/\D/g, '').slice(-10) : null;
-            let resolvedCardno = e.cardno || null;
+    const userRoles = req.roles || [];
+    if (!hasAccessToDept(userRoles, form.dept_name)) {
+        throw new ApiError(403, 'You do not have access to this form');
+    }
+
+    const t = await database.transaction();
+
+    try {
+        if (Array.isArray(entries)) {
+            await CustomFormOtpAllowlist.destroy({ where: { form_id: id }, transaction: t });
+            for (const e of entries) {
+                const clean = e.mobno ? String(e.mobno).replace(/\D/g, '').slice(-10) : null;
+                let resolvedCardno = e.cardno || null;
+                if (clean && clean.length === 10 && !resolvedCardno) {
+                    const card = await CardDb.findOne({
+                        where: { mobno: parseInt(clean, 10) },
+                        attributes: ['cardno'],
+                        transaction: t
+                    });
+                    if (card) resolvedCardno = card.cardno;
+                }
+                const dept = e.department ? String(e.department).trim() : null;
+                if (dept || (clean && clean.length === 10)) {
+                    await CustomFormOtpAllowlist.create({
+                        form_id: parseInt(id, 10),
+                        mobno: (clean && clean.length === 10) ? clean : null,
+                        cardno: resolvedCardno || null,
+                        department: dept,
+                        status: 'active',
+                        createdBy: req.user?.username || 'admin'
+                    }, { transaction: t });
+                }
+            }
+            await t.commit();
+            return res.status(200).json({ success: true, message: 'Allowlist synchronized successfully' });
+        }
+
+        if (mobno || department) {
+            const clean = mobno ? String(mobno).replace(/\D/g, '').slice(-10) : null;
+            let resolvedCardno = cardno || null;
             if (clean && clean.length === 10 && !resolvedCardno) {
-                const card = await CardDb.findOne({ where: { mobno: parseInt(clean, 10) }, attributes: ['cardno'] });
+                const card = await CardDb.findOne({
+                    where: { mobno: parseInt(clean, 10) },
+                    attributes: ['cardno'],
+                    transaction: t
+                });
                 if (card) resolvedCardno = card.cardno;
             }
-            const dept = e.department ? String(e.department).trim() : null;
-            if (dept || (clean && clean.length === 10)) {
-                await CustomFormOtpAllowlist.create({
-                    form_id: parseInt(id, 10),
-                    mobno: (clean && clean.length === 10) ? clean : null,
-                    cardno: resolvedCardno || null,
-                    department: dept,
-                    status: 'active',
-                    createdBy: req.user?.username || 'admin'
-                });
-            }
+            await CustomFormOtpAllowlist.create({
+                form_id: parseInt(id, 10),
+                mobno: (clean && clean.length === 10) ? clean : null,
+                cardno: resolvedCardno || null,
+                department: department ? String(department).trim() : null,
+                status: 'active',
+                createdBy: req.user?.username || 'admin'
+            }, { transaction: t });
         }
-        return res.status(200).json({ success: true, message: 'Allowlist synchronized successfully' });
-    }
 
-    if (mobno || department) {
-        const clean = mobno ? String(mobno).replace(/\D/g, '').slice(-10) : null;
-        let resolvedCardno = cardno || null;
-        if (clean && clean.length === 10 && !resolvedCardno) {
-            const card = await CardDb.findOne({ where: { mobno: parseInt(clean, 10) }, attributes: ['cardno'] });
-            if (card) resolvedCardno = card.cardno;
-        }
-        await CustomFormOtpAllowlist.create({
-            form_id: parseInt(id, 10),
-            mobno: (clean && clean.length === 10) ? clean : null,
-            cardno: resolvedCardno || null,
-            department: department ? String(department).trim() : null,
-            status: 'active',
-            createdBy: req.user?.username || 'admin'
-        });
+        await t.commit();
+        res.status(200).json({ success: true, message: 'Allowlist updated successfully' });
+    } catch (err) {
+        if (!t.finished) await t.rollback();
+        throw err;
     }
-
-    res.status(200).json({ success: true, message: 'Allowlist updated successfully' });
 };
 
 /**
@@ -2198,6 +2258,14 @@ export const saveFormAllowlist = async (req, res) => {
  */
 export const deleteFormAllowlistEntry = async (req, res) => {
     const { id, entryId } = req.params;
+    const form = await CustomForm.findByPk(id);
+    if (!form) throw new ApiError(404, 'Form not found');
+
+    const userRoles = req.roles || [];
+    if (!hasAccessToDept(userRoles, form.dept_name)) {
+        throw new ApiError(403, 'You do not have access to this form');
+    }
+
     const entry = await CustomFormOtpAllowlist.findOne({
         where: { id: entryId, form_id: id }
     });
@@ -2218,6 +2286,11 @@ export const getDepartmentEvents = async (req, res) => {
     }
 
     const cleanDept = String(dept).trim().toLowerCase();
+    const userRoles = req.roles || [];
+    if (!hasAccessToDept(userRoles, cleanDept)) {
+        throw new ApiError(403, 'You do not have access to this department');
+    }
+
     const today = new Date().toISOString().split('T')[0];
 
     if (cleanDept.includes('utsav')) {

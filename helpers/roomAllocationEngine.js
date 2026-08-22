@@ -153,8 +153,15 @@ export function preprocessGuests(participants, config) {
       // Full-event package: checkin <= event start AND checkout >= event end
       let isFullPkg = false;
       if (utsavStartDate && utsavEndDate && p.checkin && p.checkout) {
-        isFullPkg =
-          p.checkin <= utsavStartDate && p.checkout >= utsavEndDate;
+        const uStart = new Date(utsavStartDate).getTime();
+        const uEnd = new Date(utsavEndDate).getTime();
+        const pCin = new Date(p.checkin).getTime();
+        const pCout = new Date(p.checkout).getTime();
+        if (!isNaN(uStart) && !isNaN(uEnd) && !isNaN(pCin) && !isNaN(pCout)) {
+          isFullPkg = pCin <= uStart && pCout >= uEnd;
+        } else {
+          isFullPkg = p.checkin <= utsavStartDate && p.checkout >= utsavEndDate;
+        }
       }
 
       const isInsideRC = effectiveNRI || isSenior || isFullPkg;
