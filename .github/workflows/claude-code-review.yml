@@ -31,10 +31,6 @@ jobs:
           # Posts a progress/summary tracking comment as the review runs.
           track_progress: true
 
-          # Prints Claude's full conversation to the job log instead of
-          # hiding it, so failures show the actual error.
-          show_full_output: true
-
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
