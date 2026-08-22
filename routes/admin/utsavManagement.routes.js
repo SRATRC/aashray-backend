@@ -46,7 +46,7 @@ import {
   reallotBed,
   getAllottedBedsReport,
   swapBeds,
-  getParticipantStayHistory
+  getParticipantStayHistory,
   utsavParticipantHistoryReport,
   utsavGroupAudit,
   sendUtsavGroupReminder

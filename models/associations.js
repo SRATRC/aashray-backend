@@ -732,6 +732,8 @@ CustomForm.hasMany(CustomFormOtpAllowlist, {
 CustomFormOtpAllowlist.belongsTo(CustomForm, {
   foreignKey: 'form_id',
   as: 'form'
+});
+
 WaSession.hasMany(WaSessionKey, {
   foreignKey: 'session_id',
   sourceKey: 'id',
@@ -794,7 +796,7 @@ export {
   CustomFormResponse,
   CustomFormDraft,
   CustomFormOtpAllowlist,
-  UtsavRoomConfig
+  UtsavRoomConfig,
   WaGroupJob,
   WaSession,
   WaSessionKey,

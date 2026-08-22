@@ -3269,6 +3269,8 @@ export const getParticipantStayHistory = async (req, res) => {
     }
   });
 };
+
+/**
  * Audit Utsav confirmed participants against WhatsApp Group shortlink clicks
  */
 export const utsavGroupAudit = async (req, res) => {
