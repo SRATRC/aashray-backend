@@ -164,7 +164,13 @@ export const verifyPayment = async (req, res) => {
           break;
 
         case STATUS_PAYMENT_FAILED:
-          transactionStatus = STATUS_PAYMENT_FAILED;
+          // Preserve cash pending status: international users' transactions are
+          // created as cash pending (no 24h expiry). A failed online retry must
+          // not strip that status, otherwise the booking instantly "expires".
+          transactionStatus =
+            transaction.status === STATUS_CASH_PENDING
+              ? STATUS_CASH_PENDING
+              : STATUS_PAYMENT_FAILED;
           break;
 
         default:

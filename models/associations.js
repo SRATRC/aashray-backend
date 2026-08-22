@@ -48,6 +48,10 @@ import CustomFormResponse from './custom_form_response.model.js';
 import CustomFormDraft from './custom_form_draft.model.js';
 import CustomFormOtpAllowlist from './custom_form_otp_allowlist.model.js';
 import UtsavRoomConfig from './utsav_room_config.model.js';
+import WaGroupJob from './waGroupJob.model.js';
+import WaSession from './waSession.model.js';
+import WaSessionKey from './waSessionKey.model.js';
+import WaTemplate from './waTemplate.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -728,6 +732,16 @@ CustomForm.hasMany(CustomFormOtpAllowlist, {
 CustomFormOtpAllowlist.belongsTo(CustomForm, {
   foreignKey: 'form_id',
   as: 'form'
+WaSession.hasMany(WaSessionKey, {
+  foreignKey: 'session_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+WaSessionKey.belongsTo(WaSession, {
+  foreignKey: 'session_id',
+  targetKey: 'id'
 });
 
 export {
@@ -781,4 +795,8 @@ export {
   CustomFormDraft,
   CustomFormOtpAllowlist,
   UtsavRoomConfig
+  WaGroupJob,
+  WaSession,
+  WaSessionKey,
+  WaTemplate
 };
