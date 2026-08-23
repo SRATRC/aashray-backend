@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{formTitle}} - Your Response</title>
+    {{> styles }}
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://i.imgur.com/SkOGGbd.png" alt="Vitraag Vigyaan Aashray Logo">
+        </div>
+        <div class="content">
+            <h1>{{formTitle}}</h1>
+            <p class="intro">Here is a copy of the response you submitted on {{submittedAt}}.</p>
+
+            <div class="details">
+                <table>
+                    <tbody>
+                        {{#each qa}}
+                        <tr>
+                            <td>
+                                <strong>{{label}}</strong><br>
+                                {{answer}}
+                            </td>
+                        </tr>
+                        {{/each}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {{> _footer}}
+    </div>
+  </body>
+</html>
