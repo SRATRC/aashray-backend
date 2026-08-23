@@ -1370,7 +1370,7 @@ export const resolveIdentity = async (req, res) => {
             });
             if (userTappResp && userTappResp.responses) {
                 const matrix = userTappResp.responses.tapascharya_matrix || {};
-                const entries = Object.entries(matrix).filter(([_, v]) => v && v !== 'Regular Meal');
+                const entries = Object.entries(matrix).filter(([_, v]) => v && v !== 'Regular Meal' && v !== 'Regular Meals' && v !== 'Regular' && !String(v).toLowerCase().includes('regular'));
                 if (entries.length > 0) {
                     const upvaasCount = entries.filter(([_, v]) => v === 'Upvaas').length;
                     const aayambilCount = entries.filter(([_, v]) => v === 'Aayambil').length;
@@ -1552,7 +1552,7 @@ export const validateGuest = async (req, res) => {
             });
             if (userTappResp && userTappResp.responses) {
                 const matrix = userTappResp.responses.tapascharya_matrix || {};
-                const entries = Object.entries(matrix).filter(([_, v]) => v && v !== 'Regular Meal');
+                const entries = Object.entries(matrix).filter(([_, v]) => v && v !== 'Regular Meal' && v !== 'Regular Meals' && v !== 'Regular' && !String(v).toLowerCase().includes('regular'));
                 if (entries.length > 0) {
                     const upvaasCount = entries.filter(([_, v]) => v === 'Upvaas').length;
                     const aayambilCount = entries.filter(([_, v]) => v === 'Aayambil').length;

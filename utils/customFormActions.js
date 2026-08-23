@@ -3,20 +3,36 @@ import UtsavBooking from '../models/utsav_boking.model.js';
 import Sequelize from 'sequelize';
 import logger from '../config/logger.js';
 
-// Meal mappings for Tapascharya choices
+// Meal mappings for Tapascharya choices (0 = NONE / no meal, 1 = REGULAR / meal booked)
 const TAPP_MEAL_MAP = {
-    'Upvaas': { breakfast: 'NONE', lunch: 'NONE', dinner: 'NONE' },
-    'Aayambil': { breakfast: 'NONE', lunch: 'REGULAR', dinner: 'NONE' },
-    'Ekasna (Breakfast)': { breakfast: 'REGULAR', lunch: 'NONE', dinner: 'NONE' },
-    'Ekasna (Lunch)': { breakfast: 'NONE', lunch: 'REGULAR', dinner: 'NONE' },
-    'Ekasna (Dinner)': { breakfast: 'NONE', lunch: 'NONE', dinner: 'REGULAR' },
-    'Biyasna (Breakfast + Lunch)': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'NONE' },
-    'Biyasna (Breakfast + Dinner)': { breakfast: 'REGULAR', lunch: 'NONE', dinner: 'REGULAR' },
-    'Biyasna (Lunch + Dinner)': { breakfast: 'NONE', lunch: 'REGULAR', dinner: 'REGULAR' },
-    'Only Liquid': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'REGULAR' },
-    'Ras Tyaag': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'REGULAR' },
-    'Regular Meal': { breakfast: 'REGULAR', lunch: 'REGULAR', dinner: 'REGULAR' }
+    'Upvaas': { breakfast: 0, lunch: 0, dinner: 0 },
+    'Aayambil': { breakfast: 0, lunch: 1, dinner: 0 },
+    'Ekasna (Breakfast)': { breakfast: 1, lunch: 0, dinner: 0 },
+    'Ekasna (Lunch)': { breakfast: 0, lunch: 1, dinner: 0 },
+    'Ekasna (Dinner)': { breakfast: 0, lunch: 0, dinner: 1 },
+    'Biyasna (Breakfast + Lunch)': { breakfast: 1, lunch: 1, dinner: 0 },
+    'Biyasna (Breakfast + Dinner)': { breakfast: 1, lunch: 0, dinner: 1 },
+    'Biyasna (Lunch + Dinner)': { breakfast: 0, lunch: 1, dinner: 1 },
+    'Only Liquid': { breakfast: 1, lunch: 1, dinner: 1 },
+    'Ras Tyaag': { breakfast: 1, lunch: 1, dinner: 1 },
+    'Regular Meal': { breakfast: 1, lunch: 1, dinner: 1 },
+    'Regular Meals': { breakfast: 1, lunch: 1, dinner: 1 },
+    'Regular': { breakfast: 1, lunch: 1, dinner: 1 }
 };
+
+export function getTappMealMapping(choice) {
+    if (!choice) return null;
+    const clean = String(choice).trim();
+    if (TAPP_MEAL_MAP[clean]) return TAPP_MEAL_MAP[clean];
+    const lower = clean.toLowerCase();
+    for (const [key, val] of Object.entries(TAPP_MEAL_MAP)) {
+        if (key.toLowerCase() === lower) return val;
+    }
+    if (lower.includes('regular')) {
+        return { breakfast: 1, lunch: 1, dinner: 1 };
+    }
+    return null;
+}
 
 function normalizeDateString(dateKey, fallbackYear = 2026) {
     if (!dateKey) return null;
@@ -115,7 +131,7 @@ async function handleParyushanTapascharya(form, responses, cardno) {
                 continue;
             }
 
-            const mealUpdate = TAPP_MEAL_MAP[String(tappChoice).trim()];
+            const mealUpdate = getTappMealMapping(tappChoice);
             if (!mealUpdate) continue;
 
             try {
@@ -144,7 +160,7 @@ async function handleParyushanTapascharya(form, responses, cardno) {
 
     const selectedDate = String(rawDate).trim();
     const cleanTapp = String(rawTapp).trim();
-    const mealUpdate = TAPP_MEAL_MAP[cleanTapp];
+    const mealUpdate = getTappMealMapping(cleanTapp);
     if (!mealUpdate) return;
 
     try {
