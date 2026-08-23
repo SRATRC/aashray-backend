@@ -1,5 +1,7 @@
 import FoodDb from '../models/food_db.model.js';
 import UtsavBooking from '../models/utsav_boking.model.js';
+import CustomForm from '../models/custom_form.model.js';
+import CustomFormResponse from '../models/custom_form_response.model.js';
 import Sequelize from 'sequelize';
 import logger from '../config/logger.js';
 
@@ -13,7 +15,7 @@ const TAPP_MEAL_MAP = {
     'Biyasna (Breakfast + Lunch)': { breakfast: 1, lunch: 1, dinner: 0 },
     'Biyasna (Breakfast + Dinner)': { breakfast: 1, lunch: 0, dinner: 1 },
     'Biyasna (Lunch + Dinner)': { breakfast: 0, lunch: 1, dinner: 1 },
-    'Only Liquid': { breakfast: 1, lunch: 1, dinner: 1 },
+    'Only Liquid': { breakfast: 0, lunch: 0, dinner: 0 },
     'Ras Tyaag': { breakfast: 1, lunch: 1, dinner: 1 },
     'Regular Meal': { breakfast: 1, lunch: 1, dinner: 1 },
     'Regular Meals': { breakfast: 1, lunch: 1, dinner: 1 },
@@ -34,7 +36,7 @@ export function getTappMealMapping(choice) {
     return null;
 }
 
-function normalizeDateString(dateKey, fallbackYear = 2026) {
+export function normalizeDateString(dateKey, fallbackYear = 2026) {
     if (!dateKey) return null;
     const trimmed = String(dateKey).trim();
 
@@ -57,6 +59,117 @@ function normalizeDateString(dateKey, fallbackYear = 2026) {
         }
     }
     return null;
+}
+
+/**
+ * Checks if a target date has passed the cutoff (8:00 PM IST of the previous day).
+ * E.g. for 12th Sept, cutoff is 11th Sept at 8:00 PM (20:00) IST.
+ */
+export function isDatePastCutoff(targetDateStr, cutoffHour = 20) {
+    if (!targetDateStr) return false;
+    const parts = String(targetDateStr).trim().split('-').map(Number);
+    if (parts.length < 3) return false;
+    const [y, m, d] = parts;
+    const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const cutoffIST = new Date(y, m - 1, d - 1, cutoffHour, 0, 0);
+    return nowIST >= cutoffIST;
+}
+
+/**
+ * Calculates daily Aayambil counts (Direct Aayambil + Ras Tyaag) across all active Tapascharya forms.
+ */
+export async function getTappDailyAayambilCounts(startDate, endDate) {
+    try {
+        const tappForms = await CustomForm.findAll({
+            where: {
+                title: { [Sequelize.Op.like]: '%Tapascharya%' },
+                status: 'active'
+            },
+            attributes: ['id', 'fields']
+        });
+        if (!tappForms.length) return {};
+
+        const formIds = [];
+        const gridFieldIds = new Set(['tapascharya_matrix']);
+        for (const f of tappForms) {
+            formIds.push(f.id);
+            const grid = (f.fields || []).find(fld => fld.type === 'grid_radio');
+            if (grid && grid.id) gridFieldIds.add(grid.id);
+        }
+
+        const responses = await CustomFormResponse.findAll({
+            where: { form_id: { [Sequelize.Op.in]: formIds } },
+            attributes: ['id', 'cardno', 'responses', 'submittedAt'],
+            order: [['submittedAt', 'ASC']]
+        });
+
+        // Group by cardno (or response id if cardno is not present) so latest response per member is used
+        const latestByUser = new Map();
+        for (const r of responses) {
+            const key = r.cardno || r.id;
+            latestByUser.set(key, r.responses);
+        }
+
+        const countsByDate = {};
+        for (const resp of latestByUser.values()) {
+            if (!resp) continue;
+
+            let matrix = null;
+            for (const fieldId of gridFieldIds) {
+                if (resp[fieldId] && typeof resp[fieldId] === 'object' && !Array.isArray(resp[fieldId])) {
+                    matrix = resp[fieldId];
+                    break;
+                }
+            }
+
+            // Fallback heuristic: find object-valued field whose entries match tapascharya choices
+            if (!matrix) {
+                for (const v of Object.values(resp)) {
+                    if (v && typeof v === 'object' && !Array.isArray(v)) {
+                        const hasTappChoice = Object.values(v).some(val =>
+                            typeof val === 'string' && (
+                                val.toLowerCase().includes('aayambil') ||
+                                val.toLowerCase().includes('upvaas') ||
+                                val.toLowerCase().includes('ras tyaag') ||
+                                val.toLowerCase().includes('ekasna') ||
+                                val.toLowerCase().includes('biyasna')
+                            )
+                        );
+                        if (hasTappChoice) {
+                            matrix = v;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!matrix) continue;
+
+            for (const [dateLabel, choice] of Object.entries(matrix)) {
+                if (!choice) continue;
+                const normDate = normalizeDateString(dateLabel);
+                if (!normDate) continue;
+                if (startDate && normDate < startDate) continue;
+                if (endDate && normDate > endDate) continue;
+
+                if (!countsByDate[normDate]) {
+                    countsByDate[normDate] = { aayambil: 0, rasTyaag: 0, totalAayambil: 0 };
+                }
+                const ch = String(choice).toLowerCase().trim();
+                if (ch === 'aayambil') {
+                    countsByDate[normDate].aayambil++;
+                    countsByDate[normDate].totalAayambil++;
+                } else if (ch.includes('ras tyaag')) {
+                    countsByDate[normDate].rasTyaag++;
+                    countsByDate[normDate].totalAayambil++;
+                }
+            }
+        }
+        return countsByDate;
+    } catch (err) {
+        logger.error('[TAPP_HOOK] Error fetching tapp daily aayambil counts:', err);
+        return {};
+    }
 }
 
 /**
@@ -124,10 +237,9 @@ async function handleParyushanTapascharya(form, responses, cardno) {
             const normalizedDate = normalizeDateString(dateLabel, year);
             if (!normalizedDate) continue;
 
-            // Skip past dates — meals already served, don't modify food_db
-            const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-            if (normalizedDate < todayIST) {
-                logger.info('[TAPP_HOOK] Skipping past date — meal already served', { cardno, date: normalizedDate });
+            // Skip past dates & dates past cutoff (8:00 PM previous day in IST)
+            if (isDatePastCutoff(normalizedDate, 20)) {
+                logger.info('[TAPP_HOOK] Skipping date past 8:00 PM previous-day cutoff', { cardno, date: normalizedDate });
                 continue;
             }
 
@@ -159,6 +271,10 @@ async function handleParyushanTapascharya(form, responses, cardno) {
     if (!rawDate || !rawTapp) return;
 
     const selectedDate = String(rawDate).trim();
+    if (isDatePastCutoff(selectedDate, 20)) {
+        logger.info('[TAPP_HOOK] Skipping single date field past 8:00 PM previous-day cutoff', { cardno, date: selectedDate });
+        return;
+    }
     const cleanTapp = String(rawTapp).trim();
     const mealUpdate = getTappMealMapping(cleanTapp);
     if (!mealUpdate) return;
