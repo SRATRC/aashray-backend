@@ -765,23 +765,6 @@ export const submitFormResponse = async (req, res) => {
             if (uniqueCardNos.size !== guestCardNos.length) {
                 throw new ApiError(400, 'Duplicate guests found in your guest list. Each guest can only be listed once.');
             }
-
-            // Check if any guest is already a Flat Owner in flatdb
-            const flatOwners = await FlatDb.findAll({
-                where: { owner: { [Sequelize.Op.in]: guestCardNos } },
-                raw: true
-            });
-
-            if (flatOwners.length > 0) {
-                const currentFlat = String(responses.flatno || '').trim();
-                for (const fo of flatOwners) {
-                    if (String(fo.flatno).trim() === currentFlat) {
-                        throw new ApiError(400, `Card #${fo.owner} is already a registered owner/resident of Flat ${fo.flatno}.`);
-                    } else {
-                        throw new ApiError(400, `Card #${fo.owner} is already an owner of Flat ${fo.flatno} and cannot be added as a guest.`);
-                    }
-                }
-            }
         }
     }
 
@@ -1472,38 +1455,6 @@ export const validateGuest = async (req, res) => {
 
     const eventId = form.event_id;
     const eventName = form.event_name || 'this event';
-    const isFlatHost = (form.event_type === 'flat_host' || (form.title || '').toLowerCase().includes('flat host'));
-
-    // Check if submitter is trying to add themselves
-    const submitter = req.query.submitterCardno || req.query.submitterMobno;
-    if (submitter) {
-        const cleanSubmitter = String(submitter).replace(/\D/g, '').slice(-10);
-        if (String(card.cardno).trim() === String(submitter).trim() || (cleanSubmitter.length === 10 && cleanMob === cleanSubmitter)) {
-            return res.status(200).json({
-                success: false,
-                message: 'You cannot add yourself as a guest.'
-            });
-        }
-    }
-
-    // Check if guest is already a Flat Owner (in same flat or another flat)
-    if (isFlatHost || req.query.flatno) {
-        const flatRecord = await FlatDb.findOne({ where: { owner: card.cardno } });
-        if (flatRecord) {
-            const hostFlatNo = String(req.query.flatno || '').trim();
-            if (hostFlatNo && String(flatRecord.flatno).trim() === hostFlatNo) {
-                return res.status(200).json({
-                    success: false,
-                    message: `${card.issuedto} is already a registered owner/resident of Flat ${flatRecord.flatno}.`
-                });
-            } else {
-                return res.status(200).json({
-                    success: false,
-                    message: `${card.issuedto} is already an owner of Flat ${flatRecord.flatno} and cannot be added as a guest.`
-                });
-            }
-        }
-    }
 
     if (eventId) {
         const booking = await UtsavBooking.findOne({
