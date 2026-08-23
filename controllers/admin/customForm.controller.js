@@ -174,7 +174,7 @@ export const createForm = async (req, res) => {
             event_id: event_id ? parseInt(event_id, 10) : null,
             event_name: event_name || null,
             event_type: event_type || null,
-            
+
             createdBy: req.user?.username
         }, { transaction: t });
 
@@ -363,7 +363,7 @@ export const updateForm = async (req, res) => {
         if (req.body.event_id !== undefined) updateData.event_id = req.body.event_id ? parseInt(req.body.event_id, 10) : null;
         if (req.body.event_name !== undefined) updateData.event_name = req.body.event_name || null;
         if (req.body.event_type !== undefined) updateData.event_type = req.body.event_type || null;
-        
+
 
         // If slug is updated
         if (slug !== undefined) {
@@ -841,8 +841,8 @@ export const submitFormResponse = async (req, res) => {
         } else {
             // Check if this form has a department field (e.g. Vendor / Department Seva form)
             const deptField = (form.fields || []).find(f => f.vendorRole === 'department' || f.id === 'name_of_department' || (f.label || '').toLowerCase().includes('department'));
-            const targetDept = deptField && responses[deptField.id] 
-                ? String(responses[deptField.id]).trim().toLowerCase() 
+            const targetDept = deptField && responses[deptField.id]
+                ? String(responses[deptField.id]).trim().toLowerCase()
                 : (responses.name_of_department ? String(responses.name_of_department).trim().toLowerCase() : (responses.department ? String(responses.department).trim().toLowerCase() : null));
 
             if (targetDept) {
@@ -1090,22 +1090,52 @@ export const updatePublicResponse = async (req, res) => {
     });
 };
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 /**
  * Formats a single field's answer for display in the "email me my response" email.
  */
 function formatAnswerForEmail(answer) {
     if (answer === undefined || answer === null || answer === '') {
-        return '(no answer)';
+        return '<span style="color:#888;">(no answer)</span>';
     }
+    // Guest list or array of objects
     if (Array.isArray(answer)) {
-        return answer.length ? answer.join(', ') : '(no answer)';
+        if (!answer.length) return '<span style="color:#888;">(no answer)</span>';
+        if (typeof answer[0] === 'object' && answer[0] !== null) {
+            return '<div style="margin-top:4px;">' + answer.map((g, idx) => {
+                const name = g.name || `Mumukshu #${idx + 1}`;
+                const mob = g.mobno ? ` (${g.mobno})` : '';
+                const center = g.center ? ` [${g.center}]` : '';
+                return `<div style="margin:2px 0;"><strong>${idx + 1}. ${escapeHtml(name)}</strong>${escapeHtml(mob)}${escapeHtml(center)}</div>`;
+            }).join('') + '</div>';
+        }
+        return escapeHtml(answer.join(', '));
     }
     if (typeof answer === 'object') {
-        return Object.entries(answer)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join('; ');
+        const entries = Object.entries(answer);
+        if (!entries.length) return '<span style="color:#888;">(no answer)</span>';
+        return '<div style="margin-top:4px;">' + entries.map(([key, val]) => {
+            if (val === null || val === undefined) return `<div><strong>${escapeHtml(key)}:</strong> —</div>`;
+            if (typeof val === 'object' && !Array.isArray(val)) {
+                const sub = Object.entries(val).map(([k, v]) => `${k} (${v})`).join(', ');
+                return `<div><strong>${escapeHtml(key)}:</strong> ${escapeHtml(sub)}</div>`;
+            }
+            if (Array.isArray(val)) {
+                return `<div><strong>${escapeHtml(key)}:</strong> ${escapeHtml(val.join(', '))}</div>`;
+            }
+            return `<div><strong>${escapeHtml(key)}:</strong> ${escapeHtml(String(val))}</div>`;
+        }).join('') + '</div>';
     }
-    return String(answer);
+    return escapeHtml(String(answer)).replace(/\n/g, '<br>');
 }
 
 /**
@@ -1362,7 +1392,8 @@ export const resolveIdentity = async (req, res) => {
                     const liquidCount = entries.filter(([_, v]) => String(v).includes('Liquid')).length;
                     const rasTyaagCount = entries.filter(([_, v]) => String(v).includes('Ras Tyaag')).length;
 
-                    const totalTappDays = upvaasCount + aayambilCount + ekasnaCount + biyasnaCount + liquidCount + rasTyaagCount;
+                    // Paarna eligible tap days: Upvaas, Aayambil, Ekasna, Only Liquid (excludes Biyasna & Ras Tyaag)
+                    const eligibleTappDays = upvaasCount + aayambilCount + ekasnaCount + liquidCount;
 
                     // Check for 3 consecutive Upvaas across the 8 Paryushan dates
                     const sortedDates = ['8th Sep', '9th Sep', '10th Sep', '11th Sep', '12th Sep', '13th Sep', '14th Sep', '15th Sep'];
@@ -1380,26 +1411,16 @@ export const resolveIdentity = async (req, res) => {
                         }
                     }
 
-                    isPaarnaEligible = (totalTappDays >= 8 || has3ConsecutiveUpvaas);
+                    isPaarnaEligible = (eligibleTappDays >= 8 || has3ConsecutiveUpvaas);
 
-                    if (upvaasCount === 8) {
-                        tappDetails = 'Athai (8 Upvaas)';
-                    } else if (upvaasCount === 3 && has3ConsecutiveUpvaas) {
-                        tappDetails = 'Tevle (3 Upvaas)';
-                    } else if (upvaasCount === 2) {
-                        tappDetails = 'Bele (2 Upvaas)';
-                    } else if (upvaasCount > 0 && aayambilCount === 0 && ekasnaCount === 0 && biyasnaCount === 0 && liquidCount === 0 && rasTyaagCount === 0) {
-                        tappDetails = `${upvaasCount} Upvaas`;
-                    } else {
-                        const parts = [];
-                        if (upvaasCount > 0) parts.push(`${upvaasCount} Upvaas`);
-                        if (aayambilCount > 0) parts.push(`${aayambilCount} Aayambil`);
-                        if (ekasnaCount > 0) parts.push(`${ekasnaCount} Ekasna`);
-                        if (biyasnaCount > 0) parts.push(`${biyasnaCount} Biyasna`);
-                        if (liquidCount > 0) parts.push(`${liquidCount} Only Liquid`);
-                        if (rasTyaagCount > 0) parts.push(`${rasTyaagCount} Ras Tyaag`);
-                        tappDetails = parts.join(', ') || entries.map(([d, v]) => `${d}: ${v}`).join(', ');
-                    }
+                    const parts = [];
+                    if (upvaasCount > 0) parts.push(`${upvaasCount} Upvaas`);
+                    if (aayambilCount > 0) parts.push(`${aayambilCount} Aayambil`);
+                    if (ekasnaCount > 0) parts.push(`${ekasnaCount} Ekasna`);
+                    if (biyasnaCount > 0) parts.push(`${biyasnaCount} Biyasna`);
+                    if (liquidCount > 0) parts.push(`${liquidCount} Only Liquid`);
+                    if (rasTyaagCount > 0) parts.push(`${rasTyaagCount} Ras Tyaag`);
+                    tappDetails = parts.join(', ') || entries.map(([d, v]) => `${d}: ${v}`).join(', ');
                 }
             }
         }
@@ -1512,7 +1533,8 @@ export const validateGuest = async (req, res) => {
                     const liquidCount = entries.filter(([_, v]) => String(v).includes('Liquid')).length;
                     const rasTyaagCount = entries.filter(([_, v]) => String(v).includes('Ras Tyaag')).length;
 
-                    const totalTappDays = upvaasCount + aayambilCount + ekasnaCount + biyasnaCount + liquidCount + rasTyaagCount;
+                    // Paarna eligible tap days: Upvaas, Aayambil, Ekasna, Only Liquid (excludes Biyasna & Ras Tyaag)
+                    const eligibleTappDays = upvaasCount + aayambilCount + ekasnaCount + liquidCount;
 
                     // Check for 3 consecutive Upvaas across the 8 Paryushan dates
                     const sortedDates = ['8th Sep', '9th Sep', '10th Sep', '11th Sep', '12th Sep', '13th Sep', '14th Sep', '15th Sep'];
@@ -1530,26 +1552,16 @@ export const validateGuest = async (req, res) => {
                         }
                     }
 
-                    isPaarnaEligible = (totalTappDays >= 8 || has3ConsecutiveUpvaas);
+                    isPaarnaEligible = (eligibleTappDays >= 8 || has3ConsecutiveUpvaas);
 
-                    if (upvaasCount === 8) {
-                        tappDetails = 'Athai (8 Upvaas)';
-                    } else if (upvaasCount === 3 && has3ConsecutiveUpvaas) {
-                        tappDetails = 'Tevle (3 Upvaas)';
-                    } else if (upvaasCount === 2) {
-                        tappDetails = 'Bele (2 Upvaas)';
-                    } else if (upvaasCount > 0 && aayambilCount === 0 && ekasnaCount === 0 && biyasnaCount === 0 && liquidCount === 0 && rasTyaagCount === 0) {
-                        tappDetails = `${upvaasCount} Upvaas`;
-                    } else {
-                        const parts = [];
-                        if (upvaasCount > 0) parts.push(`${upvaasCount} Upvaas`);
-                        if (aayambilCount > 0) parts.push(`${aayambilCount} Aayambil`);
-                        if (ekasnaCount > 0) parts.push(`${ekasnaCount} Ekasna`);
-                        if (biyasnaCount > 0) parts.push(`${biyasnaCount} Biyasna`);
-                        if (liquidCount > 0) parts.push(`${liquidCount} Only Liquid`);
-                        if (rasTyaagCount > 0) parts.push(`${rasTyaagCount} Ras Tyaag`);
-                        tappDetails = parts.join(', ') || entries.map(([d, v]) => `${d}: ${v}`).join(', ');
-                    }
+                    const parts = [];
+                    if (upvaasCount > 0) parts.push(`${upvaasCount} Upvaas`);
+                    if (aayambilCount > 0) parts.push(`${aayambilCount} Aayambil`);
+                    if (ekasnaCount > 0) parts.push(`${ekasnaCount} Ekasna`);
+                    if (biyasnaCount > 0) parts.push(`${biyasnaCount} Biyasna`);
+                    if (liquidCount > 0) parts.push(`${liquidCount} Only Liquid`);
+                    if (rasTyaagCount > 0) parts.push(`${rasTyaagCount} Ras Tyaag`);
+                    tappDetails = parts.join(', ') || entries.map(([d, v]) => `${d}: ${v}`).join(', ');
                 }
             }
         }

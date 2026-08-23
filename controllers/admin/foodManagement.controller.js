@@ -30,6 +30,7 @@ import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import { getTappDailyAayambilCounts } from '../../utils/customFormActions.js';
 
 
 export const issuePlate = async (req, res) => {
@@ -877,6 +878,25 @@ export const foodReport = async (req, res) => {
     }).filter(Boolean);
   }
   // ─────────────────────────────────────────────────────────────────────────
+
+  // Attach daily Tapascharya Aayambil counts (Direct Aayambil + Ras Tyaag)
+  try {
+    const aayambilCounts = await getTappDailyAayambilCounts(start_date, end_date);
+    filteredReport = filteredReport.map(row => {
+      const dStr = moment(row.date).format('YYYY-MM-DD');
+      const aCounts = aayambilCounts[dStr] || { aayambil: 0, rasTyaag: 0, totalAayambil: 0 };
+      const lunchCount = row.lunch || 0;
+      return {
+        ...row,
+        lunch_aayambil: aCounts.totalAayambil,
+        lunch_aayambil_direct: aCounts.aayambil,
+        lunch_ras_tyaag: aCounts.rasTyaag,
+        lunch_regular: Math.max(0, lunchCount - aCounts.totalAayambil)
+      };
+    });
+  } catch (err) {
+    req.log.warn('Could not enrich food report with aayambil counts:', err);
+  }
 
   req.log.info('food_report_success', { start_date, end_date, count: filteredReport.length });
   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: filteredReport });
