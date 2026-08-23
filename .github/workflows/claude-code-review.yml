@@ -4,6 +4,12 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
 
+# Cancel an in-progress review for a PR when a new push arrives, so two
+# reviews never run at once and pile duplicate comments onto the same PR.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   claude-review:
     # Never review a PR while it is a draft. synchronize/reopened can fire on
