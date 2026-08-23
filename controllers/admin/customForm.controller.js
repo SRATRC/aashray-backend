@@ -765,7 +765,6 @@ export const submitFormResponse = async (req, res) => {
             if (uniqueCardNos.size !== guestCardNos.length) {
                 throw new ApiError(400, 'Duplicate guests found in your guest list. Each guest can only be listed once.');
             }
-
         }
     }
 
@@ -1456,11 +1455,6 @@ export const validateGuest = async (req, res) => {
 
     const eventId = form.event_id;
     const eventName = form.event_name || 'this event';
-    const isFlatHost = (form.event_type === 'flat_host' || (form.title || '').toLowerCase().includes('flat host'));
-
-
-
-
 
     if (eventId) {
         const booking = await UtsavBooking.findOne({
