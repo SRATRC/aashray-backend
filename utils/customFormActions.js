@@ -85,17 +85,25 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
                 title: { [Sequelize.Op.like]: '%Tapascharya%' },
                 status: 'active'
             },
-            attributes: ['id']
+            attributes: ['id', 'fields']
         });
         if (!tappForms.length) return {};
-        const formIds = tappForms.map(f => f.id);
+
+        const formIds = [];
+        const gridFieldIds = new Set(['tapascharya_matrix']);
+        for (const f of tappForms) {
+            formIds.push(f.id);
+            const grid = (f.fields || []).find(fld => fld.type === 'grid_radio');
+            if (grid && grid.id) gridFieldIds.add(grid.id);
+        }
+
         const responses = await CustomFormResponse.findAll({
             where: { form_id: { [Sequelize.Op.in]: formIds } },
-            attributes: ['cardno', 'responses', 'submittedAt'],
+            attributes: ['id', 'cardno', 'responses', 'submittedAt'],
             order: [['submittedAt', 'ASC']]
         });
 
-        // Group by cardno so latest response per member is used
+        // Group by cardno (or response id if cardno is not present) so latest response per member is used
         const latestByUser = new Map();
         for (const r of responses) {
             const key = r.cardno || r.id;
@@ -105,15 +113,36 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
         const countsByDate = {};
         for (const resp of latestByUser.values()) {
             if (!resp) continue;
-            let matrix = resp.tapascharya_matrix;
+
+            let matrix = null;
+            for (const fieldId of gridFieldIds) {
+                if (resp[fieldId] && typeof resp[fieldId] === 'object' && !Array.isArray(resp[fieldId])) {
+                    matrix = resp[fieldId];
+                    break;
+                }
+            }
+
+            // Fallback heuristic: find object-valued field whose entries match tapascharya choices
             if (!matrix) {
                 for (const v of Object.values(resp)) {
                     if (v && typeof v === 'object' && !Array.isArray(v)) {
-                        matrix = v;
-                        break;
+                        const hasTappChoice = Object.values(v).some(val =>
+                            typeof val === 'string' && (
+                                val.toLowerCase().includes('aayambil') ||
+                                val.toLowerCase().includes('upvaas') ||
+                                val.toLowerCase().includes('ras tyaag') ||
+                                val.toLowerCase().includes('ekasna') ||
+                                val.toLowerCase().includes('biyasna')
+                            )
+                        );
+                        if (hasTappChoice) {
+                            matrix = v;
+                            break;
+                        }
                     }
                 }
             }
+
             if (!matrix) continue;
 
             for (const [dateLabel, choice] of Object.entries(matrix)) {

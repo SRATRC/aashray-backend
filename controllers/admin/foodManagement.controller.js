@@ -895,7 +895,7 @@ export const foodReport = async (req, res) => {
       };
     });
   } catch (err) {
-    req.log.warn('Could not enrich food report with aayambil counts:', err);
+    req.log.warn('food_report_aayambil_enrich_failed', { start_date, end_date, error: err.message });
   }
 
   req.log.info('food_report_success', { start_date, end_date, count: filteredReport.length });
