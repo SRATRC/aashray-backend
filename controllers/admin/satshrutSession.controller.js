@@ -521,7 +521,13 @@ export const getConfig = async (req, res) => {
  * PUT /api/v1/admin/satshrut/config
  */
 export const updateConfig = async (req, res) => {
-  const { default_audio1_youtube_url, default_audio2_youtube_url, no_session_days, bhakti_videos } = req.body;
+  const {
+    default_audio1_youtube_url,
+    default_audio2_youtube_url,
+    no_session_days,
+    bhakti_videos,
+    bhakti_offset
+  } = req.body;
 
   const config = await getOrCreateConfig();
 
@@ -632,10 +638,10 @@ export const get17thConfig = async (req, res) => {
       fixed: raw.fixed || {
         intro_youtube_url: null,
         intro_youtube_id: null,
-        pause_youtube_url: null,
-        pause_youtube_id: null,
-        conclusion_youtube_url: null,
-        conclusion_youtube_id: null
+        pause1_youtube_url: null,
+        pause1_youtube_id: null,
+        pause2_youtube_url: null,
+        pause2_youtube_id: null
       },
       monthly: raw.monthly || {}
     }
@@ -645,7 +651,7 @@ export const get17thConfig = async (req, res) => {
 /**
  * PUT /api/v1/admin/satshrut/17th-config
  * Body: {
- *   fixed?: { intro_youtube_url, pause_youtube_url, conclusion_youtube_url },
+ *   fixed?: { intro_youtube_url, pause1_youtube_url, pause2_youtube_url },
  *   month?: 'YYYY-MM',
  *   monthly_entry?: { bhakti_youtube_url, clip1_youtube_url, clip2_youtube_url }
  * }
@@ -664,17 +670,45 @@ export const update17thConfig = async (req, res) => {
       current.fixed.intro_youtube_id = url ? extractYouTubeId(url) : null;
       if (url && !current.fixed.intro_youtube_id) throw new ApiError(400, 'Invalid Intro YouTube URL');
     }
-    if (fixed.pause_youtube_url !== undefined) {
-      const url = fixed.pause_youtube_url ? fixed.pause_youtube_url.trim() : null;
-      current.fixed.pause_youtube_url = url;
-      current.fixed.pause_youtube_id = url ? extractYouTubeId(url) : null;
-      if (url && !current.fixed.pause_youtube_id) throw new ApiError(400, 'Invalid Pause YouTube URL');
+    if (fixed.pause1_youtube_url !== undefined) {
+      const url = fixed.pause1_youtube_url ? fixed.pause1_youtube_url.trim() : null;
+      current.fixed.pause1_youtube_url = url;
+      current.fixed.pause1_youtube_id = url ? extractYouTubeId(url) : null;
+      if (url && !current.fixed.pause1_youtube_id) throw new ApiError(400, 'Invalid Pause 1 YouTube URL');
     }
-    if (fixed.conclusion_youtube_url !== undefined) {
-      const url = fixed.conclusion_youtube_url ? fixed.conclusion_youtube_url.trim() : null;
-      current.fixed.conclusion_youtube_url = url;
-      current.fixed.conclusion_youtube_id = url ? extractYouTubeId(url) : null;
-      if (url && !current.fixed.conclusion_youtube_id) throw new ApiError(400, 'Invalid Conclusion YouTube URL');
+    if (fixed.pause2_youtube_url !== undefined) {
+      const url = fixed.pause2_youtube_url ? fixed.pause2_youtube_url.trim() : null;
+      current.fixed.pause2_youtube_url = url;
+      current.fixed.pause2_youtube_id = url ? extractYouTubeId(url) : null;
+      if (url && !current.fixed.pause2_youtube_id) throw new ApiError(400, 'Invalid Pause 2 / Conclusion YouTube URL');
+    }
+  }
+
+  if (req.body.monthly !== undefined && typeof req.body.monthly === 'object') {
+    for (const [mKey, entry] of Object.entries(req.body.monthly)) {
+      if (!/^\d{4}-\d{2}$/.test(mKey) || !entry) continue;
+
+      const prev = current.monthly[mKey] || {};
+      const bUrl = entry.bhakti_youtube_url !== undefined ? (entry.bhakti_youtube_url ? entry.bhakti_youtube_url.trim() : null) : (prev.bhakti_youtube_url || null);
+      const c1Url = entry.clip1_youtube_url !== undefined ? (entry.clip1_youtube_url ? entry.clip1_youtube_url.trim() : null) : (prev.clip1_youtube_url || null);
+      const c2Url = entry.clip2_youtube_url !== undefined ? (entry.clip2_youtube_url ? entry.clip2_youtube_url.trim() : null) : (prev.clip2_youtube_url || null);
+
+      const bId = bUrl ? extractYouTubeId(bUrl) : null;
+      const c1Id = c1Url ? extractYouTubeId(c1Url) : null;
+      const c2Id = c2Url ? extractYouTubeId(c2Url) : null;
+
+      if (bUrl && !bId) throw new ApiError(400, `Invalid Bhakti song YouTube URL for month ${mKey}`);
+      if (c1Url && !c1Id) throw new ApiError(400, `Invalid Clip 1 YouTube URL for month ${mKey}`);
+      if (c2Url && !c2Id) throw new ApiError(400, `Invalid Clip 2 YouTube URL for month ${mKey}`);
+
+      current.monthly[mKey] = {
+        bhakti_youtube_url: bUrl,
+        bhakti_youtube_id: bId,
+        clip1_youtube_url: c1Url,
+        clip1_youtube_id: c1Id,
+        clip2_youtube_url: c2Url,
+        clip2_youtube_id: c2Id
+      };
     }
   }
 
@@ -682,9 +716,10 @@ export const update17thConfig = async (req, res) => {
     if (!/^\d{4}-\d{2}$/.test(month)) {
       throw new ApiError(400, 'Month must be in YYYY-MM format');
     }
-    const bUrl = monthly_entry.bhakti_youtube_url ? monthly_entry.bhakti_youtube_url.trim() : null;
-    const c1Url = monthly_entry.clip1_youtube_url ? monthly_entry.clip1_youtube_url.trim() : null;
-    const c2Url = monthly_entry.clip2_youtube_url ? monthly_entry.clip2_youtube_url.trim() : null;
+    const prev = current.monthly[month] || {};
+    const bUrl = monthly_entry.bhakti_youtube_url !== undefined ? (monthly_entry.bhakti_youtube_url ? monthly_entry.bhakti_youtube_url.trim() : null) : (prev.bhakti_youtube_url || null);
+    const c1Url = monthly_entry.clip1_youtube_url !== undefined ? (monthly_entry.clip1_youtube_url ? monthly_entry.clip1_youtube_url.trim() : null) : (prev.clip1_youtube_url || null);
+    const c2Url = monthly_entry.clip2_youtube_url !== undefined ? (monthly_entry.clip2_youtube_url ? monthly_entry.clip2_youtube_url.trim() : null) : (prev.clip2_youtube_url || null);
 
     const bId = bUrl ? extractYouTubeId(bUrl) : null;
     const c1Id = c1Url ? extractYouTubeId(c1Url) : null;
@@ -743,10 +778,9 @@ export const getTodaySession = async (req, res) => {
           { phase: 0, type: 'intro', label: 'Intro', youtube_id: fixed.intro_youtube_id, youtube_url: fixed.intro_youtube_url, repeat: 1 },
           { phase: 1, type: 'bhakti', label: 'Bhakti Song', youtube_id: monthly.bhakti_youtube_id, youtube_url: monthly.bhakti_youtube_url, repeat: 1 },
           { phase: 2, type: 'clip1', label: 'Clip 1 (2x)', youtube_id: monthly.clip1_youtube_id, youtube_url: monthly.clip1_youtube_url, repeat: 2 },
-          { phase: 3, type: 'pause1', label: '5-Min Pause', youtube_id: fixed.pause_youtube_id, youtube_url: fixed.pause_youtube_url, repeat: 1 },
+          { phase: 3, type: 'pause1', label: '5-Min Pause 1', youtube_id: fixed.pause1_youtube_id, youtube_url: fixed.pause1_youtube_url, repeat: 1 },
           { phase: 4, type: 'clip2', label: 'Clip 2 (2x)', youtube_id: monthly.clip2_youtube_id, youtube_url: monthly.clip2_youtube_url, repeat: 2 },
-          { phase: 5, type: 'pause2', label: '5-Min Pause', youtube_id: fixed.pause_youtube_id, youtube_url: fixed.pause_youtube_url, repeat: 1 },
-          { phase: 6, type: 'conclusion', label: 'Conclusion', youtube_id: fixed.conclusion_youtube_id, youtube_url: fixed.conclusion_youtube_url, repeat: 1 }
+          { phase: 5, type: 'pause2', label: '5-Min Pause 2', youtube_id: fixed.pause2_youtube_id, youtube_url: fixed.pause2_youtube_url, repeat: 1 }
         ]
       }
     });
