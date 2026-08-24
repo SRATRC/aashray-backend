@@ -12,6 +12,9 @@ import {
   shiftSessions,
   getConfig,
   updateConfig,
+  shiftBhaktiOffset,
+  get17thConfig,
+  update17thConfig,
   getTodaySession
 } from '../../controllers/admin/satshrutSession.controller.js';
 
@@ -30,9 +33,14 @@ router.get('/sessions', CatchAsync(listSessions));
 router.patch('/session/:id', CatchAsync(updateSession));
 router.delete('/session/:id', CatchAsync(deleteSession));
 
-// Global audio config
+// Global audio & bhakti config
 router.get('/config', CatchAsync(getConfig));
 router.put('/config', CatchAsync(updateConfig));
+router.post('/bhakti/shift', CatchAsync(shiftBhaktiOffset));
+
+// 17th Monthly Morning Session config
+router.get('/17th-config', CatchAsync(get17thConfig));
+router.put('/17th-config', CatchAsync(update17thConfig));
 
 // Player endpoint — get today's (or a specific date's) session with merged audio config
 router.get('/today', CatchAsync(getTodaySession));

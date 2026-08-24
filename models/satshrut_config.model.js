@@ -32,6 +32,19 @@ const SatshrutConfig = sequelize.define(
       type: DataTypes.JSON,
       allowNull: true,
       defaultValue: null
+    },
+    // Optional offset (0-3) to manually shift the Bhakti sequence forward/backward
+    bhakti_offset: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    // 17th Monthly Morning Session Configuration:
+    //   { fixed: { intro, pause, conclusion }, monthly: { "YYYY-MM": { bhakti, clip1, clip2 } } }
+    seventeenth_config: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null
     }
   },
   {
