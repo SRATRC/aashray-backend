@@ -521,7 +521,7 @@ export const getConfig = async (req, res) => {
  * PUT /api/v1/admin/satshrut/config
  */
 export const updateConfig = async (req, res) => {
-  const { default_audio1_youtube_url, default_audio2_youtube_url, no_session_days } = req.body;
+  const { default_audio1_youtube_url, default_audio2_youtube_url, no_session_days, bhakti_videos } = req.body;
 
   const config = await getOrCreateConfig();
 
@@ -554,6 +554,42 @@ export const updateConfig = async (req, res) => {
     updateData.no_session_days = no_session_days;
   }
 
+  if (bhakti_videos !== undefined) {
+    if (!Array.isArray(bhakti_videos) || bhakti_videos.length !== 4) {
+      throw new ApiError(400, 'bhakti_videos must be an array of exactly 4 video objects');
+    }
+    const processed = bhakti_videos.map((v, i) => {
+      // Allow empty/null slots — admin can clear a week
+      if (!v || !v.youtube_url || !v.youtube_url.trim()) {
+        return { youtube_id: null, youtube_url: null, start_seconds: 0, end_seconds: 0 };
+      }
+      const trimmedUrl = v.youtube_url.trim();
+      const vid = extractYouTubeId(trimmedUrl);
+      if (!vid) throw new ApiError(400, `Bhakti video for Week ${i + 1} has an invalid YouTube URL`);
+
+      const start = parseInt(v.start_seconds) || 0;
+      const end = parseInt(v.end_seconds) || 0;
+
+      if (start < 0) {
+        throw new ApiError(400, `Bhakti video for Week ${i + 1} start time cannot be negative`);
+      }
+      if (end < 0) {
+        throw new ApiError(400, `Bhakti video for Week ${i + 1} end time cannot be negative`);
+      }
+      if (end > 0 && end <= start) {
+        throw new ApiError(400, `Bhakti video for Week ${i + 1} end time must be greater than start time`);
+      }
+
+      return {
+        youtube_id: vid,
+        youtube_url: trimmedUrl,
+        start_seconds: start,
+        end_seconds: end
+      };
+    });
+    updateData.bhakti_videos = processed;
+  }
+
   await config.update(updateData);
 
   return res.status(200).json({ success: true, data: config });
@@ -565,13 +601,56 @@ export const getTodaySession = async (req, res) => {
   const dateParam = req.query.date;
   const targetDate = dateParam || new Date().toISOString().split('T')[0];
 
+  // 1. Check for an explicitly scheduled active session first
   const session = await SatshrutSession.findOne({
     where: { session_date: targetDate, status: STATUS_ACTIVE }
   });
 
   const config = await getOrCreateConfig();
 
+  // 2. If no explicit session is scheduled, check for Monday Bhakti virtual session
   if (!session) {
+    const targetD = new Date(targetDate + 'T12:00:00Z');
+    const jsDay = targetD.getUTCDay();
+    const noSessionDays = config.no_session_days || [1, 4];
+
+    // Only serve virtual Bhakti if Monday (1) is configured as a no-session day
+    if (jsDay === 1 && noSessionDays.includes(1)) {
+      const bhaktiVideos = config.bhakti_videos;
+
+      if (Array.isArray(bhaktiVideos) && bhaktiVideos.length > 0) {
+        // Continuous rolling 4-week cycle across month boundaries (Anchor: 2026-08-03 is Monday, Week 1)
+        const BHAKTI_EPOCH_MONDAY_UTC = Date.UTC(2026, 7, 3);
+        const weeksDiff = Math.floor((targetD.getTime() - BHAKTI_EPOCH_MONDAY_UTC) / (7 * 24 * 3600 * 1000));
+        const videoIndex = ((weeksDiff % 4) + 4) % 4; // 0–3
+        const bhaktiVideo = bhaktiVideos[videoIndex];
+
+        if (bhaktiVideo && bhaktiVideo.youtube_id) {
+          const vidDur = (bhaktiVideo.end_seconds && bhaktiVideo.start_seconds !== undefined && bhaktiVideo.end_seconds > bhaktiVideo.start_seconds)
+            ? (bhaktiVideo.end_seconds - bhaktiVideo.start_seconds)
+            : 0;
+
+          return res.status(200).json({
+            success: true,
+            data: {
+              session_date: targetDate,
+              session_type: 'bhakti',
+              youtube_video_id: bhaktiVideo.youtube_id,
+              youtube_url: bhaktiVideo.youtube_url,
+              video_start_seconds: bhaktiVideo.start_seconds || 0,
+              video_end_seconds: bhaktiVideo.end_seconds || 0,
+              video_duration_seconds: vidDur,
+              video1_duration_seconds: vidDur,
+              video2_duration_seconds: 0,
+              notes: `Bhakti — Week ${videoIndex + 1}`,
+              week_index: videoIndex,
+              week_number: videoIndex + 1
+            }
+          });
+        }
+      }
+    }
+
     return res.status(200).json({
       success: true,
       data: null,
