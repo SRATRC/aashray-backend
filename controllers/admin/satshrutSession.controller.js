@@ -680,7 +680,7 @@ export const update17thConfig = async (req, res) => {
       const url = fixed.pause2_youtube_url ? fixed.pause2_youtube_url.trim() : null;
       current.fixed.pause2_youtube_url = url;
       current.fixed.pause2_youtube_id = url ? extractYouTubeId(url) : null;
-      if (url && !current.fixed.pause2_youtube_id) throw new ApiError(400, 'Invalid Pause 2 / Conclusion YouTube URL');
+      if (url && !current.fixed.pause2_youtube_id) throw new ApiError(400, 'Invalid Pause 2 YouTube URL');
     }
   }
 

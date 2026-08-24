@@ -40,7 +40,7 @@ const SatshrutConfig = sequelize.define(
       defaultValue: 0
     },
     // 17th Monthly Morning Session Configuration:
-    //   { fixed: { intro, pause, conclusion }, monthly: { "YYYY-MM": { bhakti, clip1, clip2 } } }
+    //   { fixed: { intro, pause1, pause2 }, monthly: { "YYYY-MM": { bhakti, clip1, clip2 } } }
     seventeenth_config: {
       type: DataTypes.JSON,
       allowNull: true,
