@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, Sequelize } from 'sequelize';
 import SatshrutSession from '../../models/satshrut_sessions.model.js';
 import SatshrutConfig from '../../models/satshrut_config.model.js';
 import UtsavDb from '../../models/utsav_db.model.js';
@@ -810,26 +810,28 @@ export const getTodaySession = async (req, res) => {
 
       if (Array.isArray(bhaktiVideos) && bhaktiVideos.length > 0) {
         // Sequential 4-video queue shifted by manual overrides (Anchor: 2026-08-03 is Monday, Week 1)
-        const priorMondays = [];
-        const curr = new Date(Date.UTC(2026, 7, 3, 12, 0, 0));
+        const anchorTime = Date.UTC(2026, 7, 3, 12, 0, 0);
         const targetTime = targetD.getTime();
-
-        while (curr.getTime() < targetTime) {
-          priorMondays.push(curr.toISOString().split('T')[0]);
-          curr.setUTCDate(curr.getUTCDate() + 7);
-        }
+        const totalMondays = Math.floor((targetTime - anchorTime) / (7 * 24 * 3600 * 1000));
 
         let overriddenCount = 0;
-        if (priorMondays.length > 0) {
+        if (totalMondays > 0) {
           overriddenCount = await SatshrutSession.count({
             where: {
-              session_date: { [Op.in]: priorMondays },
-              status: STATUS_ACTIVE
+              session_date: {
+                [Op.gte]: '2026-08-03',
+                [Op.lt]: targetDate
+              },
+              status: STATUS_ACTIVE,
+              [Op.and]: Sequelize.where(
+                Sequelize.fn('WEEKDAY', Sequelize.col('session_date')),
+                0
+              )
             }
           });
         }
 
-        const actualBhaktiPlayed = priorMondays.length - overriddenCount;
+        const actualBhaktiPlayed = totalMondays - overriddenCount;
         const offset = config.bhakti_offset || 0;
         const videoIndex = (((actualBhaktiPlayed + offset) % 4) + 4) % 4; // 0–3
         const bhaktiVideo = bhaktiVideos[videoIndex];
