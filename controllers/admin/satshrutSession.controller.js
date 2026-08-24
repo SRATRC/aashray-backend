@@ -611,7 +611,10 @@ export const updateConfig = async (req, res) => {
  * Body: { shift: 1 } (defaults to +1)
  */
 export const shiftBhaktiOffset = async (req, res) => {
-  const shift = parseInt(req.body?.shift !== undefined ? req.body.shift : 1);
+  const rawShift = req.body?.shift !== undefined ? req.body.shift : 1;
+  const shift = parseInt(rawShift);
+  if (isNaN(shift)) throw new ApiError(400, 'shift must be a valid integer');
+
   const config = await getOrCreateConfig();
   const newOffset = (((config.bhakti_offset || 0) + shift) % 4 + 4) % 4;
   await config.update({ bhakti_offset: newOffset });
@@ -652,6 +655,7 @@ export const get17thConfig = async (req, res) => {
  * PUT /api/v1/admin/satshrut/17th-config
  * Body: {
  *   fixed?: { intro_youtube_url, pause1_youtube_url, pause2_youtube_url },
+ *   monthly?: { 'YYYY-MM': { bhakti_youtube_url, clip1_youtube_url, clip2_youtube_url } },
  *   month?: 'YYYY-MM',
  *   monthly_entry?: { bhakti_youtube_url, clip1_youtube_url, clip2_youtube_url }
  * }
@@ -686,7 +690,7 @@ export const update17thConfig = async (req, res) => {
 
   if (req.body.monthly !== undefined && typeof req.body.monthly === 'object') {
     for (const [mKey, entry] of Object.entries(req.body.monthly)) {
-      if (!/^\d{4}-\d{2}$/.test(mKey) || !entry) continue;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mKey) || !entry) continue;
 
       const prev = current.monthly[mKey] || {};
       const bUrl = entry.bhakti_youtube_url !== undefined ? (entry.bhakti_youtube_url ? entry.bhakti_youtube_url.trim() : null) : (prev.bhakti_youtube_url || null);
@@ -713,8 +717,8 @@ export const update17thConfig = async (req, res) => {
   }
 
   if (month && monthly_entry !== undefined) {
-    if (!/^\d{4}-\d{2}$/.test(month)) {
-      throw new ApiError(400, 'Month must be in YYYY-MM format');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new ApiError(400, 'Month must be in YYYY-MM format (01-12)');
     }
     const prev = current.monthly[month] || {};
     const bUrl = monthly_entry.bhakti_youtube_url !== undefined ? (monthly_entry.bhakti_youtube_url ? monthly_entry.bhakti_youtube_url.trim() : null) : (prev.bhakti_youtube_url || null);

@@ -9,7 +9,7 @@ module.exports = {
       defaultValue: null,
       comment:
         'Configuration for 17th monthly morning session: ' +
-        '{ fixed: { intro_youtube_url, intro_youtube_id, pause_youtube_url, pause_youtube_id, conclusion_youtube_url, conclusion_youtube_id }, ' +
+        '{ fixed: { intro_youtube_url, intro_youtube_id, pause1_youtube_url, pause1_youtube_id, pause2_youtube_url, pause2_youtube_id }, ' +
         'monthly: { "YYYY-MM": { bhakti_youtube_url, bhakti_youtube_id, clip1_youtube_url, clip1_youtube_id, clip2_youtube_url, clip2_youtube_id } } }'
     });
   },
