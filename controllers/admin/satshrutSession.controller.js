@@ -1,4 +1,4 @@
-import { Op } from 'sequelize';
+import { Op, Sequelize } from 'sequelize';
 import SatshrutSession from '../../models/satshrut_sessions.model.js';
 import SatshrutConfig from '../../models/satshrut_config.model.js';
 import UtsavDb from '../../models/utsav_db.model.js';
@@ -521,7 +521,13 @@ export const getConfig = async (req, res) => {
  * PUT /api/v1/admin/satshrut/config
  */
 export const updateConfig = async (req, res) => {
-  const { default_audio1_youtube_url, default_audio2_youtube_url, no_session_days, bhakti_videos } = req.body;
+  const {
+    default_audio1_youtube_url,
+    default_audio2_youtube_url,
+    no_session_days,
+    bhakti_videos,
+    bhakti_offset
+  } = req.body;
 
   const config = await getOrCreateConfig();
 
@@ -590,9 +596,155 @@ export const updateConfig = async (req, res) => {
     updateData.bhakti_videos = processed;
   }
 
+  if (bhakti_offset !== undefined) {
+    const off = parseInt(bhakti_offset) || 0;
+    updateData.bhakti_offset = ((off % 4) + 4) % 4;
+  }
+
   await config.update(updateData);
 
   return res.status(200).json({ success: true, data: config });
+};
+
+/**
+ * POST /api/v1/admin/satshrut/bhakti/shift
+ * Body: { shift: 1 } (defaults to +1)
+ */
+export const shiftBhaktiOffset = async (req, res) => {
+  const rawShift = req.body?.shift !== undefined ? req.body.shift : 1;
+  const shift = parseInt(rawShift);
+  if (isNaN(shift)) throw new ApiError(400, 'shift must be a valid integer');
+
+  const config = await getOrCreateConfig();
+  const newOffset = (((config.bhakti_offset || 0) + shift) % 4 + 4) % 4;
+  await config.update({ bhakti_offset: newOffset });
+  return res.status(200).json({
+    success: true,
+    data: {
+      bhakti_offset: newOffset,
+      message: `Bhakti rotation shifted by ${shift > 0 ? `+${shift}` : shift} week(s)`
+    }
+  });
+};
+
+// ─── 17th Monthly Morning Session Config ────────────────────────────────────────
+
+/**
+ * GET /api/v1/admin/satshrut/17th-config
+ */
+export const get17thConfig = async (req, res) => {
+  const config = await getOrCreateConfig();
+  const raw = config.seventeenth_config || {};
+  return res.status(200).json({
+    success: true,
+    data: {
+      fixed: raw.fixed || {
+        intro_youtube_url: null,
+        intro_youtube_id: null,
+        pause1_youtube_url: null,
+        pause1_youtube_id: null,
+        pause2_youtube_url: null,
+        pause2_youtube_id: null
+      },
+      monthly: raw.monthly || {}
+    }
+  });
+};
+
+/**
+ * PUT /api/v1/admin/satshrut/17th-config
+ * Body: {
+ *   fixed?: { intro_youtube_url, pause1_youtube_url, pause2_youtube_url },
+ *   monthly?: { 'YYYY-MM': { bhakti_youtube_url, clip1_youtube_url, clip2_youtube_url } },
+ *   month?: 'YYYY-MM',
+ *   monthly_entry?: { bhakti_youtube_url, clip1_youtube_url, clip2_youtube_url }
+ * }
+ */
+export const update17thConfig = async (req, res) => {
+  const { fixed, month, monthly_entry } = req.body;
+  const config = await getOrCreateConfig();
+  const current = config.seventeenth_config ? JSON.parse(JSON.stringify(config.seventeenth_config)) : { fixed: {}, monthly: {} };
+  if (!current.fixed) current.fixed = {};
+  if (!current.monthly) current.monthly = {};
+
+  if (fixed !== undefined) {
+    if (fixed.intro_youtube_url !== undefined) {
+      const url = fixed.intro_youtube_url ? fixed.intro_youtube_url.trim() : null;
+      current.fixed.intro_youtube_url = url;
+      current.fixed.intro_youtube_id = url ? extractYouTubeId(url) : null;
+      if (url && !current.fixed.intro_youtube_id) throw new ApiError(400, 'Invalid Intro YouTube URL');
+    }
+    if (fixed.pause1_youtube_url !== undefined) {
+      const url = fixed.pause1_youtube_url ? fixed.pause1_youtube_url.trim() : null;
+      current.fixed.pause1_youtube_url = url;
+      current.fixed.pause1_youtube_id = url ? extractYouTubeId(url) : null;
+      if (url && !current.fixed.pause1_youtube_id) throw new ApiError(400, 'Invalid Pause 1 YouTube URL');
+    }
+    if (fixed.pause2_youtube_url !== undefined) {
+      const url = fixed.pause2_youtube_url ? fixed.pause2_youtube_url.trim() : null;
+      current.fixed.pause2_youtube_url = url;
+      current.fixed.pause2_youtube_id = url ? extractYouTubeId(url) : null;
+      if (url && !current.fixed.pause2_youtube_id) throw new ApiError(400, 'Invalid Pause 2 YouTube URL');
+    }
+  }
+
+  if (req.body.monthly !== undefined && typeof req.body.monthly === 'object') {
+    for (const [mKey, entry] of Object.entries(req.body.monthly)) {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mKey) || !entry) continue;
+
+      const prev = current.monthly[mKey] || {};
+      const bUrl = entry.bhakti_youtube_url !== undefined ? (entry.bhakti_youtube_url ? entry.bhakti_youtube_url.trim() : null) : (prev.bhakti_youtube_url || null);
+      const c1Url = entry.clip1_youtube_url !== undefined ? (entry.clip1_youtube_url ? entry.clip1_youtube_url.trim() : null) : (prev.clip1_youtube_url || null);
+      const c2Url = entry.clip2_youtube_url !== undefined ? (entry.clip2_youtube_url ? entry.clip2_youtube_url.trim() : null) : (prev.clip2_youtube_url || null);
+
+      const bId = bUrl ? extractYouTubeId(bUrl) : null;
+      const c1Id = c1Url ? extractYouTubeId(c1Url) : null;
+      const c2Id = c2Url ? extractYouTubeId(c2Url) : null;
+
+      if (bUrl && !bId) throw new ApiError(400, `Invalid Bhakti song YouTube URL for month ${mKey}`);
+      if (c1Url && !c1Id) throw new ApiError(400, `Invalid Clip 1 YouTube URL for month ${mKey}`);
+      if (c2Url && !c2Id) throw new ApiError(400, `Invalid Clip 2 YouTube URL for month ${mKey}`);
+
+      current.monthly[mKey] = {
+        bhakti_youtube_url: bUrl,
+        bhakti_youtube_id: bId,
+        clip1_youtube_url: c1Url,
+        clip1_youtube_id: c1Id,
+        clip2_youtube_url: c2Url,
+        clip2_youtube_id: c2Id
+      };
+    }
+  }
+
+  if (month && monthly_entry !== undefined) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new ApiError(400, 'Month must be in YYYY-MM format (01-12)');
+    }
+    const prev = current.monthly[month] || {};
+    const bUrl = monthly_entry.bhakti_youtube_url !== undefined ? (monthly_entry.bhakti_youtube_url ? monthly_entry.bhakti_youtube_url.trim() : null) : (prev.bhakti_youtube_url || null);
+    const c1Url = monthly_entry.clip1_youtube_url !== undefined ? (monthly_entry.clip1_youtube_url ? monthly_entry.clip1_youtube_url.trim() : null) : (prev.clip1_youtube_url || null);
+    const c2Url = monthly_entry.clip2_youtube_url !== undefined ? (monthly_entry.clip2_youtube_url ? monthly_entry.clip2_youtube_url.trim() : null) : (prev.clip2_youtube_url || null);
+
+    const bId = bUrl ? extractYouTubeId(bUrl) : null;
+    const c1Id = c1Url ? extractYouTubeId(c1Url) : null;
+    const c2Id = c2Url ? extractYouTubeId(c2Url) : null;
+
+    if (bUrl && !bId) throw new ApiError(400, 'Invalid Bhakti song YouTube URL');
+    if (c1Url && !c1Id) throw new ApiError(400, 'Invalid Clip 1 YouTube URL');
+    if (c2Url && !c2Id) throw new ApiError(400, 'Invalid Clip 2 YouTube URL');
+
+    current.monthly[month] = {
+      bhakti_youtube_url: bUrl,
+      bhakti_youtube_id: bId,
+      clip1_youtube_url: c1Url,
+      clip1_youtube_id: c1Id,
+      clip2_youtube_url: c2Url,
+      clip2_youtube_id: c2Id
+    };
+  }
+
+  await config.update({ seventeenth_config: current });
+  return res.status(200).json({ success: true, data: current });
 };
 
 // ─── Player Endpoint ───────────────────────────────────────────────────────────
@@ -600,6 +752,44 @@ export const updateConfig = async (req, res) => {
 export const getTodaySession = async (req, res) => {
   const dateParam = req.query.date;
   const targetDate = dateParam || new Date().toISOString().split('T')[0];
+  const slot = req.query.slot;
+
+  // ── 0. Handle 17th Monthly Morning Session ──────────────────────────────────
+  if (slot === 'morning') {
+    const config = await getOrCreateConfig();
+    const raw = config.seventeenth_config || {};
+    const fixed = raw.fixed || {};
+    const monthKey = targetDate.substring(0, 7); // 'YYYY-MM'
+    const monthly = (raw.monthly && raw.monthly[monthKey]) || {};
+
+    if (!fixed.intro_youtube_id && !monthly.bhakti_youtube_id && !monthly.clip1_youtube_id) {
+      return res.status(200).json({
+        success: true,
+        data: null,
+        config: config.toJSON(),
+        message: 'No 17th Morning session configured for this month'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        session_date: targetDate,
+        session_type: '17th_morning',
+        notes: '17th Monthly Morning Sadhana',
+        month: monthKey,
+        steps: [
+          { phase: 0, type: 'intro', label: 'Intro', youtube_id: fixed.intro_youtube_id, youtube_url: fixed.intro_youtube_url, repeat: 1 },
+          { phase: 1, type: 'bhakti', label: 'Bhakti Song', youtube_id: monthly.bhakti_youtube_id, youtube_url: monthly.bhakti_youtube_url, repeat: 1 },
+          { phase: 2, type: 'clip1', label: 'Clip 1 (2x)', youtube_id: monthly.clip1_youtube_id, youtube_url: monthly.clip1_youtube_url, repeat: 2 },
+          { phase: 3, type: 'pause1', label: '5-Min Pause 1', youtube_id: fixed.pause1_youtube_id, youtube_url: fixed.pause1_youtube_url, repeat: 1 },
+          { phase: 4, type: 'clip2', label: 'Clip 2 (2x)', youtube_id: monthly.clip2_youtube_id, youtube_url: monthly.clip2_youtube_url, repeat: 2 },
+          { phase: 5, type: 'pause2', label: '5-Min Pause 2', youtube_id: fixed.pause2_youtube_id, youtube_url: fixed.pause2_youtube_url, repeat: 1 }
+        ]
+      }
+    });
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   // 1. Check for an explicitly scheduled active session first
   const session = await SatshrutSession.findOne({
@@ -619,10 +809,31 @@ export const getTodaySession = async (req, res) => {
       const bhaktiVideos = config.bhakti_videos;
 
       if (Array.isArray(bhaktiVideos) && bhaktiVideos.length > 0) {
-        // Continuous rolling 4-week cycle across month boundaries (Anchor: 2026-08-03 is Monday, Week 1)
-        const BHAKTI_EPOCH_MONDAY_UTC = Date.UTC(2026, 7, 3);
-        const weeksDiff = Math.floor((targetD.getTime() - BHAKTI_EPOCH_MONDAY_UTC) / (7 * 24 * 3600 * 1000));
-        const videoIndex = ((weeksDiff % 4) + 4) % 4; // 0–3
+        // Sequential 4-video queue shifted by manual overrides (Anchor: 2026-08-03 is Monday, Week 1)
+        const anchorTime = Date.UTC(2026, 7, 3, 12, 0, 0);
+        const targetTime = targetD.getTime();
+        const totalMondays = Math.floor((targetTime - anchorTime) / (7 * 24 * 3600 * 1000));
+
+        let overriddenCount = 0;
+        if (totalMondays > 0) {
+          overriddenCount = await SatshrutSession.count({
+            where: {
+              session_date: {
+                [Op.gte]: '2026-08-03',
+                [Op.lt]: targetDate
+              },
+              status: STATUS_ACTIVE,
+              [Op.and]: Sequelize.where(
+                Sequelize.fn('WEEKDAY', Sequelize.col('session_date')),
+                0
+              )
+            }
+          });
+        }
+
+        const actualBhaktiPlayed = totalMondays - overriddenCount;
+        const offset = config.bhakti_offset || 0;
+        const videoIndex = (((actualBhaktiPlayed + offset) % 4) + 4) % 4; // 0–3
         const bhaktiVideo = bhaktiVideos[videoIndex];
 
         if (bhaktiVideo && bhaktiVideo.youtube_id) {
