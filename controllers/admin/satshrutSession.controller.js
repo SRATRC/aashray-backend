@@ -643,7 +643,8 @@ export const getTodaySession = async (req, res) => {
               video1_duration_seconds: vidDur,
               video2_duration_seconds: 0,
               notes: `Bhakti — Week ${videoIndex + 1}`,
-              week_index: videoIndex + 1
+              week_index: videoIndex,
+              week_number: videoIndex + 1
             }
           });
         }
