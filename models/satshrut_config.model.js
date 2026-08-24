@@ -24,6 +24,14 @@ const SatshrutConfig = sequelize.define(
       type: DataTypes.JSON,
       allowNull: false,
       defaultValue: [1, 4] // Monday and Thursday
+    },
+    // 4-video weekly Monday rotation:
+    //   [{youtube_id, youtube_url, start_seconds, end_seconds}, …]
+    //   Week 1 Monday → index 0, Week 2 → index 1, … 5th Monday wraps back to index 0
+    bhakti_videos: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null
     }
   },
   {

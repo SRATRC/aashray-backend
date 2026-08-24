@@ -521,7 +521,7 @@ export const getConfig = async (req, res) => {
  * PUT /api/v1/admin/satshrut/config
  */
 export const updateConfig = async (req, res) => {
-  const { default_audio1_youtube_url, default_audio2_youtube_url, no_session_days } = req.body;
+  const { default_audio1_youtube_url, default_audio2_youtube_url, no_session_days, bhakti_videos } = req.body;
 
   const config = await getOrCreateConfig();
 
@@ -554,6 +554,27 @@ export const updateConfig = async (req, res) => {
     updateData.no_session_days = no_session_days;
   }
 
+  if (bhakti_videos !== undefined) {
+    if (!Array.isArray(bhakti_videos) || bhakti_videos.length !== 4) {
+      throw new ApiError(400, 'bhakti_videos must be an array of exactly 4 video objects');
+    }
+    const processed = bhakti_videos.map((v, i) => {
+      // Allow empty/null slots — admin can clear a week
+      if (!v || !v.youtube_url) {
+        return { youtube_id: null, youtube_url: null, start_seconds: 0, end_seconds: 0 };
+      }
+      const vid = extractYouTubeId(v.youtube_url);
+      if (!vid) throw new ApiError(400, `bhakti_videos[${i}] has an invalid YouTube URL`);
+      return {
+        youtube_id: vid,
+        youtube_url: v.youtube_url,
+        start_seconds: parseInt(v.start_seconds) || 0,
+        end_seconds: parseInt(v.end_seconds) || 0
+      };
+    });
+    updateData.bhakti_videos = processed;
+  }
+
   await config.update(updateData);
 
   return res.status(200).json({ success: true, data: config });
@@ -564,6 +585,48 @@ export const updateConfig = async (req, res) => {
 export const getTodaySession = async (req, res) => {
   const dateParam = req.query.date;
   const targetDate = dateParam || new Date().toISOString().split('T')[0];
+
+  // ── Monday Bhakti: return a virtual session if configured ───────────────────
+  const targetD = new Date(targetDate + 'T12:00:00Z');
+  const jsDay = targetD.getUTCDay();
+
+  if (jsDay === 1) { // Monday
+    const config = await getOrCreateConfig();
+    const bhaktiVideos = config.bhakti_videos;
+
+    if (Array.isArray(bhaktiVideos) && bhaktiVideos.length > 0) {
+      // Which occurrence of Monday in this month? Day 1-7 → week 1, 8-14 → week 2, etc.
+      const occurrence = Math.ceil(targetD.getUTCDate() / 7); // 1–5
+      const videoIndex = (occurrence - 1) % 4;                // 0–3, 5th wraps to 0
+      const bhaktiVideo = bhaktiVideos[videoIndex];
+
+      if (bhaktiVideo && bhaktiVideo.youtube_id) {
+        const vidDur = (bhaktiVideo.end_seconds && bhaktiVideo.start_seconds !== undefined)
+          ? Math.max(0, bhaktiVideo.end_seconds - bhaktiVideo.start_seconds)
+          : 0;
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            session_date: targetDate,
+            session_type: 'bhakti',
+            youtube_video_id: bhaktiVideo.youtube_id,
+            youtube_url: bhaktiVideo.youtube_url,
+            video_start_seconds: bhaktiVideo.start_seconds || 0,
+            video_end_seconds: bhaktiVideo.end_seconds || 0,
+            video_duration_seconds: vidDur,
+            video1_duration_seconds: vidDur,
+            video2_duration_seconds: 0,
+            notes: `Bhakti — Week ${occurrence <= 4 ? occurrence : 1}`,
+            week_index: videoIndex + 1
+          }
+        });
+      }
+    }
+
+    // Monday but no bhakti configured — fall through to regular session lookup
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   const session = await SatshrutSession.findOne({
     where: { session_date: targetDate, status: STATUS_ACTIVE }
