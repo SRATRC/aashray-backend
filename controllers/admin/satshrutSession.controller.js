@@ -573,6 +573,9 @@ export const updateConfig = async (req, res) => {
       if (start < 0) {
         throw new ApiError(400, `Bhakti video for Week ${i + 1} start time cannot be negative`);
       }
+      if (end < 0) {
+        throw new ApiError(400, `Bhakti video for Week ${i + 1} end time cannot be negative`);
+      }
       if (end > 0 && end <= start) {
         throw new ApiError(400, `Bhakti video for Week ${i + 1} end time must be greater than start time`);
       }

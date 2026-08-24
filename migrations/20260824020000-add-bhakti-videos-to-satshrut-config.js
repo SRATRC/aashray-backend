@@ -9,7 +9,7 @@ module.exports = {
       defaultValue: null,
       comment:
         'Array of 4 Bhakti video objects [{youtube_id, youtube_url, start_seconds, end_seconds}] ' +
-        'played on Mondays in weekly rotation (Week 1 → index 0, Week 2 → index 1, … 5th Monday wraps to index 0)'
+        'played on Mondays in continuous rolling 4-week rotation across month boundaries.'
     });
   },
 

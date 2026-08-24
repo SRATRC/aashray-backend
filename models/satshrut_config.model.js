@@ -25,9 +25,9 @@ const SatshrutConfig = sequelize.define(
       allowNull: false,
       defaultValue: [1, 4] // Monday and Thursday
     },
-    // 4-video weekly Monday rotation:
+    // Continuous rolling 4-week Monday rotation:
     //   [{youtube_id, youtube_url, start_seconds, end_seconds}, …]
-    //   Week 1 Monday → index 0, Week 2 → index 1, … 5th Monday wraps back to index 0
+    //   Rotates through 4 videos week after week continuously across month boundaries.
     bhakti_videos: {
       type: DataTypes.JSON,
       allowNull: true,
