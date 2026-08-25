@@ -68,6 +68,10 @@ import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
+import {
+  bookTravelDispatch,
+  checkTravelAvailability
+} from '../../helpers/travelBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
@@ -419,6 +423,17 @@ async function book(
       setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
       break;
 
+    case TYPE_TRAVEL:
+      const travelResult = await bookTravelGuest(data, t, user);
+      setBookingIdMap(userBookingIdMap, TYPE_TRAVEL, travelResult.userBookingIds);
+      setWaitingBookingCountMap(
+        waitingBookingCountMap,
+        TYPE_TRAVEL,
+        travelResult.waitingBookingCount,
+        travelResult.userBookingIds
+      );
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
@@ -479,6 +494,13 @@ async function validate(body, user, data, utsav, response) {
       );
       break;
 
+    case TYPE_TRAVEL:
+      response.travelDetails = await checkTravelAvailability(
+        normalizeGuestTravelDetails(data.details)
+      );
+      totalCharge += response.travelDetails.charge;
+      break;
+
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
@@ -504,6 +526,36 @@ async function bookUtsav(data, t, user) {
   const { utsavid, guests } = data.details;
   const result = await bookUtsavForMumukshus(utsavid, guests, t, user);
   return result;
+}
+
+// Guest travel details use `guestGroup`; the shared travel helper expects
+// `mumukshuGroup` whose groups carry a `mumukshus` array of cardnos. Normalize.
+function normalizeGuestTravelDetails(details) {
+  const toLeg = (group) =>
+    (group || []).map((g) => ({
+      ...g,
+      mumukshus: g.mumukshus || g.guests
+    }));
+  return {
+    date: details.date,
+    mumukshuGroup: toLeg(details.guestGroup),
+    return_date: details.return_date,
+    returnMumukshuGroup: details.returnGuestGroup
+      ? toLeg(details.returnGuestGroup)
+      : undefined
+  };
+}
+
+async function bookTravelGuest(data, t, user) {
+  const norm = normalizeGuestTravelDetails(data.details);
+  return bookTravelDispatch(
+    norm.date,
+    norm.mumukshuGroup,
+    norm.return_date,
+    norm.returnMumukshuGroup,
+    t,
+    user
+  );
 }
 
 async function bookRoom(data, t, user, utsav) {

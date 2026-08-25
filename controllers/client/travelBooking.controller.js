@@ -40,6 +40,7 @@ export const FetchUpcoming = async (req, res) => {
 
   const data = await database.query(
     `SELECT t1.bookingid,
+       t1.trip_group_id,
        t1.cardno,
        t1.bookedBy,
        t3.issuedto AS user_name,

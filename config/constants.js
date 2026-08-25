@@ -142,6 +142,12 @@ export const ERR_TRANSACTION_NOT_FOUND = 'Booking transaction not found';
 
 export const ERR_FOOD_ALREADY_BOOKED = 'Food already booked';
 export const ERR_TRAVEL_ALREADY_BOOKED = 'Travel already booked';
+export const ERR_TRAVEL_INVALID_DIRECTION =
+  'Travel must be either to or from Research Centre';
+export const ERR_TRAVEL_RETURN_BEFORE_ONWARD =
+  'Return date cannot be before the onward date';
+export const ERR_TRAVEL_PARTIAL_ROUND_TRIP =
+  'return_date and returnMumukshuGroup must be provided together';
 export const ERR_FLAT_ALREADY_BOOKED =
   'Flat already booked for one or more mumukshus during selected dates';
 export const ERR_UTSAV_ALREADY_BOOKED = 'Utsav already booked';

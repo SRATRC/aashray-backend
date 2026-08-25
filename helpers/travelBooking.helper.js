@@ -1,6 +1,9 @@
 import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
+  ERR_TRAVEL_INVALID_DIRECTION,
+  ERR_TRAVEL_RETURN_BEFORE_ONWARD,
+  ERR_TRAVEL_PARTIAL_ROUND_TRIP,
   RESEARCH_CENTRE,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
@@ -12,13 +15,11 @@ import {
 } from '../config/constants.js';
 import { CardDb, TravelDb } from '../models/associations.js';
 import { validateCards } from './card.helper.js';
-import { checkAdhyayanParamGyanSabhaOrUtsav } from './adhyayanBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
 import ApiError from '../utils/ApiError.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
-import { createPendingTransaction } from './transactions.helper.js';
 import logger from '../config/logger.js';
 
 export async function checkTravelAlreadyBooked(
@@ -136,7 +137,8 @@ export async function bookTravelForMumukshus(
   mumukshuGroup,
   t,
   user,
-  log = logger
+  log = logger,
+  tripGroupIdByCardno = null
 ) {
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) {
@@ -171,7 +173,6 @@ export async function bookTravelForMumukshus(
       type,
       mumukshus,
       arrival_time,
-      leaving_post_adhyayan,
       total_people = 1
     } = group;
 
@@ -188,15 +189,118 @@ export async function bookTravelForMumukshus(
         drop_point,
         luggage,
         arrival_time,
-        leaving_post_adhyayan,
         total_people,
         comments,
+        trip_group_id: tripGroupIdByCardno ? tripGroupIdByCardno[mumukshu] : null,
         updatedBy: user.cardno
       });
-      userBookingIds[mumukshu] = [bookingId];
+      (userBookingIds[mumukshu] ??= []).push(bookingId);
     }
   }
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   log.info('travel_booking_result', { count: bookingsToCreate.length, date });
   return { userBookingIds, waitingBookingCount: 0 };
+}
+
+export async function bookRoundTripTravel(
+  onwardDate,
+  onwardGroup,
+  returnDate,
+  returnGroup,
+  t,
+  user,
+  log = logger
+) {
+  if (returnDate < onwardDate) {
+    throw new ApiError(400, ERR_TRAVEL_RETURN_BEFORE_ONWARD);
+  }
+  // Link only travelers present in BOTH legs; a cardno in a single leg is a one-way
+  // traveler and must not receive a dangling trip_group_id.
+  const returnCardnos = new Set(returnGroup.flatMap((g) => g.mumukshus));
+  const tripGroupIdByCardno = {};
+  for (const cardno of new Set(onwardGroup.flatMap((g) => g.mumukshus))) {
+    if (returnCardnos.has(cardno)) tripGroupIdByCardno[cardno] = uuidv4();
+  }
+
+  const onward = await bookTravelForMumukshus(
+    onwardDate,
+    onwardGroup,
+    t,
+    user,
+    log,
+    tripGroupIdByCardno
+  );
+  const ret = await bookTravelForMumukshus(
+    returnDate,
+    returnGroup,
+    t,
+    user,
+    log,
+    tripGroupIdByCardno
+  );
+
+  const userBookingIds = { ...onward.userBookingIds };
+  for (const cardno in ret.userBookingIds) {
+    userBookingIds[cardno] = [
+      ...(userBookingIds[cardno] || []),
+      ...ret.userBookingIds[cardno]
+    ];
+  }
+  return { userBookingIds, waitingBookingCount: 0 };
+}
+
+// Shared one-way vs round-trip dispatch used by both the mumukshu and guest controllers.
+export async function bookTravelDispatch(
+  date,
+  mumukshuGroup,
+  return_date,
+  returnMumukshuGroup,
+  t,
+  user
+) {
+  if (Boolean(return_date) !== Boolean(returnMumukshuGroup)) {
+    throw new ApiError(400, ERR_TRAVEL_PARTIAL_ROUND_TRIP);
+  }
+  return return_date && returnMumukshuGroup
+    ? bookRoundTripTravel(date, mumukshuGroup, return_date, returnMumukshuGroup, t, user)
+    : bookTravelForMumukshus(date, mumukshuGroup, t, user);
+}
+
+export async function checkTravelAvailability(details) {
+  const { date, mumukshuGroup, return_date, returnMumukshuGroup } = details;
+  if (Boolean(return_date) !== Boolean(returnMumukshuGroup)) {
+    throw new ApiError(400, ERR_TRAVEL_PARTIAL_ROUND_TRIP);
+  }
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  if (date < today) throw new ApiError(400, ERR_INVALID_DATE);
+  if (return_date && returnMumukshuGroup && return_date < date) {
+    throw new ApiError(400, ERR_TRAVEL_RETURN_BEFORE_ONWARD);
+  }
+
+  // Validate every traveler across both legs in a single query.
+  const allCardnos = [
+    ...new Set(
+      [...mumukshuGroup, ...(returnMumukshuGroup || [])].flatMap((g) => g.mumukshus)
+    )
+  ];
+  await validateCards(allCardnos);
+
+  const validateLeg = async (legDate, group) => {
+    for (const g of group) {
+      if (g.pickup_point !== RESEARCH_CENTRE && g.drop_point !== RESEARCH_CENTRE) {
+        throw new ApiError(400, ERR_TRAVEL_INVALID_DIRECTION);
+      }
+      await checkTravelAlreadyBooked(legDate, {
+        mumukshus: g.mumukshus,
+        drop_point: g.drop_point
+      });
+    }
+  };
+
+  await validateLeg(date, mumukshuGroup);
+  if (return_date && returnMumukshuGroup) {
+    await validateLeg(return_date, returnMumukshuGroup);
+  }
+
+  return { status: STATUS_AWAITING_CONFIRMATION, charge: 0 };
 }
