@@ -593,6 +593,8 @@ export const flatCheckout = async (req, res) => {
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const originalStatus = booking.status;
 
+  let creditPayerCard = null;
+
   if (today < booking.checkout) {
     // Early Checkout
     const nights = await calculateNights(booking.checkin, today);
@@ -607,6 +609,13 @@ export const flatCheckout = async (req, res) => {
       const card = await validateCard(cardno);
       const newAmount = roomCharge('nac') * nights;
       const originalAmount = transaction.amount + transaction.discount;
+
+      if (newAmount > originalAmount) {
+        throw new ApiError(
+          400,
+          'New amount is more than previously paid. This does not seem right.'
+        );
+      }
 
       if (newAmount < originalAmount) {
         // Cancel the original transaction (issues room credits to payer)
@@ -625,14 +634,7 @@ export const flatCheckout = async (req, res) => {
           );
         }
 
-        sendDualUserNotifications({
-          primary: {
-            token: card.token,
-            title: 'Flat early checkout',
-            body: "We noticed your guest checked out early. Adjustment amount has been credited to your account as room credits."
-          },
-          screen: '/bookings'
-        });
+        creditPayerCard = card;
       }
     }
 
@@ -658,6 +660,17 @@ export const flatCheckout = async (req, res) => {
 
   await t.commit();
   req.log.info('flat_checkout_success', { bookingid: booking.bookingid, cardno: booking.cardno, today });
+
+  if (creditPayerCard) {
+    sendDualUserNotifications({
+      primary: {
+        token: creditPayerCard.token,
+        title: 'Flat early checkout',
+        body: "We noticed your guest checked out early. Adjustment amount has been credited to your account as room credits."
+      },
+      screen: '/bookings'
+    });
+  }
 
   try {
     await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
