@@ -185,12 +185,13 @@ const handleEarlyCheckout = async ({
   user
 }) => {
   const nights = await calculateNights(booking.checkin, today);
-  const card = await validateCard(transaction.cardno);
+  const cardno = transaction?.cardno || booking.bookedBy || booking.cardno;
+  const card = await validateCard(cardno);
 
   const newAmount = roomCharge(booking.roomtype) * nights;
-  const originalAmount = transaction.amount + transaction.discount;
+  const originalAmount = transaction ? (transaction.amount + transaction.discount) : 0;
 
-  if (newAmount > originalAmount) {
+  if (transaction && newAmount > originalAmount) {
     throw new ApiError(
       400,
       'New amount is more than previously paid. This does not seem right.'
@@ -208,7 +209,9 @@ const handleEarlyCheckout = async ({
     { transaction: t }
   );
 
-  await adminCancelTransaction(user, card, transaction, t);
+  if (transaction) {
+    await adminCancelTransaction(user, card, transaction, t);
+  }
 
   // create a new booking with the new booking dates
   let bookingId = uuidv4();
@@ -233,18 +236,20 @@ const handleEarlyCheckout = async ({
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const newTransaction = await createPendingTransaction(
-    card,
-    newBooking,
-    TYPE_ROOM,
-    newAmount,
-    user.username,
-    t,
-    true
-  );
+  if (transaction) {
+    const newTransaction = await createPendingTransaction(
+      card,
+      newBooking,
+      TYPE_ROOM,
+      newAmount,
+      user.username,
+      t,
+      true
+    );
 
-  if (!newTransaction) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+    if (!newTransaction) {
+      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+    }
   }
 
   // need to commit the transaction before
@@ -586,28 +591,70 @@ export const flatCheckout = async (req, res) => {
   }
 
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
-
-  if (today > booking.checkout) {
-    req.log.warn('flat_checkout_overstay', { bookingid: booking.bookingid, plannedCheckout: booking.checkout, today });
-    throw new ApiError(
-      404,
-      `Original check-out date was ${booking.checkout}. Please create ` +
-      `a new booking for the guest for the remaining days and collect the difference.`
-    );
-  }
-
-  const nights = await calculateNights(booking.checkin, today);
   const originalStatus = booking.status;
 
-  await booking.update(
-    {
-      nights,
-      checkout: today,
-      status: ROOM_STATUS_CHECKEDOUT,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
+  if (today < booking.checkout) {
+    // Early Checkout
+    const nights = await calculateNights(booking.checkin, today);
+
+    // Handle early checkout credit adjustment if a paid transaction exists
+    const transaction = await Transactions.findOne({
+      where: { bookingid: booking.bookingid, category: TYPE_FLAT }
+    });
+
+    if (transaction) {
+      const cardno = transaction.cardno || booking.bookedBy || booking.cardno;
+      const card = await validateCard(cardno);
+      const newAmount = roomCharge('nac') * nights;
+      const originalAmount = transaction.amount + transaction.discount;
+
+      if (newAmount < originalAmount) {
+        // Cancel the original transaction (issues room credits to payer)
+        await adminCancelTransaction(req.user, card, transaction, t);
+
+        // Create new transaction for the actual nights stayed if nights > 0
+        if (newAmount > 0) {
+          await createPendingTransaction(
+            card,
+            booking,
+            TYPE_FLAT,
+            newAmount,
+            req.user.username,
+            t,
+            true
+          );
+        }
+
+        sendDualUserNotifications({
+          primary: {
+            token: card.token,
+            title: 'Flat early checkout',
+            body: "We noticed your guest checked out early. Adjustment amount has been credited to your account as room credits."
+          },
+          screen: '/bookings'
+        });
+      }
+    }
+
+    await booking.update(
+      {
+        nights,
+        checkout: today,
+        status: ROOM_STATUS_CHECKEDOUT,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  } else {
+    // Same-day or Late/Past Checkout (today >= booking.checkout)
+    await booking.update(
+      {
+        status: ROOM_STATUS_CHECKEDOUT,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  }
 
   await t.commit();
   req.log.info('flat_checkout_success', { bookingid: booking.bookingid, cardno: booking.cardno, today });

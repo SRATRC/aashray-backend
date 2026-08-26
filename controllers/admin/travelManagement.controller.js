@@ -87,7 +87,7 @@ function getAdditionalConditions(
   let additionalWhereClause = '';
 
   if (Array.isArray(whereClauses) && whereClauses.length > 0) {
-    additionalWhereClause += ` AND ${whereClauses.join(' AND ')}`;
+    additionalWhereClause += ` AND (${whereClauses.join(' OR ')})`;
   }
 
   if (pickupRC === 'true') {
@@ -142,7 +142,7 @@ export const fetchSummary = async (req, res) => {
     // Build WHERE clause
     let whereClause = '';
     if (conditions.length > 0) {
-      whereClause += ' AND ' + conditions.join(' AND ');
+      whereClause += ' AND (' + conditions.join(' OR ') + ')';
     }
     if (pickupRC === 'true') {
       whereClause += " AND t1.pickup_point = 'RC'";
@@ -300,7 +300,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   END AS drop_point`;
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date,
+    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.createdAt,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
 tbp.bus_group_id,
@@ -318,7 +318,7 @@ LEFT JOIN travel_bus_group tbg
     ON tbp.bus_group_id = tbg.id
      WHERE t1.date >= :startDate AND t1.date <= :endDate
      ${additionalWhereClause}
-     ORDER BY date ASC`,
+     ORDER BY t1.createdAt ASC`,
     {
       replacements: replacementMap,
       type: Sequelize.QueryTypes.SELECT
