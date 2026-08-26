@@ -13,7 +13,6 @@ import {
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
   STATUS_SEVA_KUTIR,
-  TYPE_FOOD,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
   TYPE_GUEST_LUNCH,
@@ -35,7 +34,7 @@ import {
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { cancelTransactions, usableCredits } from './transactions.helper.js';
+import { cancelTransactions } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment-timezone';
@@ -226,6 +225,15 @@ export async function bookFoodForMumukshus(
   return { amount, userBookingIds, transactionIds };
 }
 
+/**
+ * Quotes the meal charge for a set of cards.
+ *
+ * The quote reads `res_status` exactly as `bookFoodForMumukshus` does, so the
+ * figure shown before booking is the figure the Razorpay order is built from.
+ * An earlier `isGuestBooking` flag decided this per calling flow instead: the
+ * /guest flow quoted meals, the /mumukshu flow quoted zero, and a GUEST card
+ * booking through /mumukshu was charged for meals it had been quoted free.
+ */
 export async function checkFoodAvailabilityForMumumkshus(
   start_date,
   end_date,
@@ -233,8 +241,7 @@ export async function checkFoodAvailabilityForMumumkshus(
   primary_booking,
   addons,
   utsav,
-  user,
-  isGuestBooking = false
+  user
 ) {
   if (!end_date) {
     end_date = start_date;
@@ -250,51 +257,41 @@ export async function checkFoodAvailabilityForMumumkshus(
     await validateFood(start_date, end_date, primary_booking, addons, card);
   }
 
+  const cardsByCardno = new Map(cards.map((card) => [card.cardno, card]));
+
+  const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
+  const bookings = await getFoodBookings(allDates, mumukshus);
+
   var charge = 0;
-  var availableCredits = 0;
 
-  if (isGuestBooking) {
-    // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
-    const tempUser = { ...user, credits: { ...user.credits } };
+  for (const group of mumukshuGroup) {
+    const { meals } = group;
+    const groupMumukshus = group.mumukshus || group.guests;
 
-    const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
-    const bookings = await getFoodBookings(allDates, mumukshus);
-
-    for (const group of mumukshuGroup) {
-      const meals = group.meals;
-      const mumukshus = group.mumukshus || group.guests;
+    for (const mumukshu of groupMumukshus) {
+      // Only guests pay for meals.
+      if (cardsByCardno.get(mumukshu)?.res_status != STATUS_GUEST) continue;
 
       for (const date of allDates) {
-        for (const mumukshu of mumukshus) {
-          const booking = bookings[mumukshu] && bookings[mumukshu][date];
+        const booking = bookings[mumukshu] && bookings[mumukshu][date];
 
-          if (booking) {
-            // Only charge for meals that weren't previously booked
-            charge +=
-              meals.includes('breakfast') && !booking.breakfast
-                ? BREAKFAST_PRICE
-                : 0;
-            charge +=
-              meals.includes('lunch') && !booking.lunch ? LUNCH_PRICE : 0;
-            charge +=
-              meals.includes('dinner') && !booking.dinner ? DINNER_PRICE : 0;
-          } else {
-            // Charge for all new meals
-            charge += meals.includes('breakfast') ? BREAKFAST_PRICE : 0;
-            charge += meals.includes('lunch') ? LUNCH_PRICE : 0;
-            charge += meals.includes('dinner') ? DINNER_PRICE : 0;
+        for (const meal of MEALS) {
+          // A meal already on the booking was paid for the first time round.
+          if (meals.includes(meal.type) && !(booking && booking[meal.type])) {
+            charge += meal.price;
           }
         }
       }
     }
-
-    availableCredits = usableCredits(tempUser, TYPE_FOOD, charge);
   }
 
   return {
     status: STATUS_AVAILABLE,
     charge,
-    availableCredits
+    // bookFoodForMumukshus writes meal transactions at full price and never
+    // calls useCredit, so no food credit is ever spent. Reporting a credit here
+    // would show a "pay now" figure below what Razorpay actually collects.
+    availableCredits: 0
   };
 }
 
