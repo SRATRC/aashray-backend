@@ -318,7 +318,7 @@ LEFT JOIN travel_bus_group tbg
     ON tbp.bus_group_id = tbg.id
      WHERE t1.date >= :startDate AND t1.date <= :endDate
      ${additionalWhereClause}
-     ORDER BY t1.createdAt ASC`,
+     ORDER BY t1.date ASC, t1.createdAt ASC`,
     {
       replacements: replacementMap,
       type: Sequelize.QueryTypes.SELECT
