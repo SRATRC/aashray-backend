@@ -9,12 +9,16 @@ import {
 import {
   BREAKFAST_PRICE,
   LUNCH_PRICE,
-  DINNER_PRICE
+  DINNER_PRICE,
+  TYPE_GUEST_BREAKFAST,
+  TYPE_GUEST_LUNCH,
+  TYPE_GUEST_DINNER
 } from '../../../config/constants.js';
 
 jest.mock('../../../utils/sendMail.js');
 
 const GUEST_1 = 'Guest_1';
+const MEALS = [TYPE_GUEST_BREAKFAST, TYPE_GUEST_LUNCH, TYPE_GUEST_DINNER];
 const MEAL_PRICE_PER_DAY = BREAKFAST_PRICE + LUNCH_PRICE + DINNER_PRICE;
 
 const day = (n) => moment().add(n, 'days').format('YYYY-MM-DD');
@@ -39,7 +43,7 @@ function foodAddon(cardno, start, end) {
       mumukshuGroup: [
         {
           mumukshus: [cardno],
-          meals: ['breakfast', 'lunch', 'dinner'],
+          meals: MEALS,
           spicy: 1,
           high_tea: 'TEA'
         }
@@ -56,7 +60,7 @@ function foodAddon(cardno, start, end) {
 describe('Mumukshu booking — guest meal charges', () => {
   const checkin = day(10);
   const checkout = day(11);
-  const nights = 2; // meals are booked for both the checkin and checkout date
+  const mealDays = 2; // meals cover both the checkin and the checkout date
 
   const payload = {
     cardno: GUEST_1,
@@ -85,32 +89,30 @@ describe('Mumukshu booking — guest meal charges', () => {
 
     const stampedTotal = stamped.reduce((sum, txn) => sum + txn.amount, 0);
     const foodTotal = stamped
-      .filter((txn) => ['breakfast', 'lunch', 'dinner'].includes(txn.category))
+      .filter((txn) => MEALS.includes(txn.category))
       .reduce((sum, txn) => sum + txn.amount, 0);
 
     // The meals were charged, so they must be part of what the member pays.
-    expect(foodTotal).toBe(nights * MEAL_PRICE_PER_DAY);
+    expect(foodTotal).toBe(mealDays * MEAL_PRICE_PER_DAY);
     expect(res.body.order.amount).toBe(stampedTotal * 100);
   });
 
   it('quotes the same total from /validate as /booking charges', async () => {
+    // One body for both calls: the point of the test is that the quote and the
+    // charge agree on identical input, so the two must not drift.
+    const body = {
+      cardno: GUEST_1,
+      primary_booking: roomAddon(GUEST_1, day(13), day(14)),
+      addons: [foodAddon(GUEST_1, day(13), day(14))]
+    };
+
     const validateRes = await request(app)
       .post('/api/v1/mumukshu/validate')
-      .send({
-        cardno: GUEST_1,
-        primary_booking: roomAddon(GUEST_1, day(13), day(14)),
-        addons: [foodAddon(GUEST_1, day(13), day(14))]
-      });
+      .send(body);
 
     expect(validateRes.status).toBe(200);
 
-    const bookRes = await request(app)
-      .post('/api/v1/mumukshu/booking')
-      .send({
-        cardno: GUEST_1,
-        primary_booking: roomAddon(GUEST_1, day(13), day(14)),
-        addons: [foodAddon(GUEST_1, day(13), day(14))]
-      });
+    const bookRes = await request(app).post('/api/v1/mumukshu/booking').send(body);
 
     expect(bookRes.status).toBe(200);
     expect(validateRes.body.data.totalCharge).toBe(bookRes.body.order.amount / 100);

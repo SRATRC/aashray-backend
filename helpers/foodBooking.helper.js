@@ -228,11 +228,8 @@ export async function bookFoodForMumukshus(
 /**
  * Quotes the meal charge for a set of cards.
  *
- * The quote reads `res_status` exactly as `bookFoodForMumukshus` does, so the
- * figure shown before booking is the figure the Razorpay order is built from.
- * An earlier `isGuestBooking` flag decided this per calling flow instead: the
- * /guest flow quoted meals, the /mumukshu flow quoted zero, and a GUEST card
- * booking through /mumukshu was charged for meals it had been quoted free.
+ * Reads `res_status` exactly as `bookFoodForMumukshus` does, so the figure
+ * shown before booking is the figure the Razorpay order is built from.
  */
 export async function checkFoodAvailabilityForMumumkshus(
   start_date,
@@ -240,8 +237,7 @@ export async function checkFoodAvailabilityForMumumkshus(
   mumukshuGroup,
   primary_booking,
   addons,
-  utsav,
-  user
+  utsav
 ) {
   if (!end_date) {
     end_date = start_date;
@@ -257,23 +253,30 @@ export async function checkFoodAvailabilityForMumumkshus(
     await validateFood(start_date, end_date, primary_booking, addons, card);
   }
 
-  const cardsByCardno = new Map(cards.map((card) => [card.cardno, card]));
+  // Only guests pay for meals, so only their existing bookings matter. A group
+  // of mumukshus needs no lookup at all.
+  const guestCardnos = cards
+    .filter((card) => card.res_status == STATUS_GUEST)
+    .map((card) => card.cardno);
+
+  if (guestCardnos.length === 0) {
+    return { status: STATUS_AVAILABLE, charge: 0, availableCredits: 0 };
+  }
 
   const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
-  const bookings = await getFoodBookings(allDates, mumukshus);
+  const bookings = await getFoodBookings(allDates, guestCardnos);
 
   var charge = 0;
 
   for (const group of mumukshuGroup) {
     const { meals } = group;
-    const groupMumukshus = group.mumukshus || group.guests;
+    const groupGuests = (group.mumukshus || group.guests).filter((cardno) =>
+      guestCardnos.includes(cardno)
+    );
 
-    for (const mumukshu of groupMumukshus) {
-      // Only guests pay for meals.
-      if (cardsByCardno.get(mumukshu)?.res_status != STATUS_GUEST) continue;
-
+    for (const cardno of groupGuests) {
       for (const date of allDates) {
-        const booking = bookings[mumukshu] && bookings[mumukshu][date];
+        const booking = bookings[cardno] && bookings[cardno][date];
 
         for (const meal of MEALS) {
           // A meal already on the booking was paid for the first time round.

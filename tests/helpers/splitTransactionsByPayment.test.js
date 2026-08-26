@@ -1,4 +1,4 @@
-import { splitTransactionsByPayment } from '../../../controllers/client/payment.controller.js';
+import { splitTransactionsByPayment } from '../../helpers/transactions.helper.js';
 
 const txn = (id, amount) => ({ id, amount });
 
@@ -38,12 +38,11 @@ describe('splitTransactionsByPayment', () => {
       txn(30165, 120)
     ];
 
-    const { covered, uncovered, owedInPaise } = splitTransactionsByPayment(
+    const { covered, uncovered } = splitTransactionsByPayment(
       transactions,
       110000
     );
 
-    expect(owedInPaise).toBe(170000);
     expect(covered.map((t) => t.id)).toEqual([30159]);
     expect(uncovered.map((t) => t.id)).toEqual([
       30160, 30161, 30162, 30163, 30164, 30165
@@ -60,14 +59,16 @@ describe('splitTransactionsByPayment', () => {
     expect(uncovered.map((t) => t.id)).toEqual([3]);
   });
 
-  it('skips a transaction too big for the remainder but still takes a smaller one', () => {
+  // Settling a later, smaller transaction while an earlier one goes unpaid is
+  // not explicable to the member. The payment stops where the money runs out.
+  it('stops at the first transaction the remainder cannot cover', () => {
     const { covered, uncovered } = splitTransactionsByPayment(
       [txn(1, 100), txn(2, 500), txn(3, 100)],
       20000
     );
 
-    expect(covered.map((t) => t.id)).toEqual([1, 3]);
-    expect(uncovered.map((t) => t.id)).toEqual([2]);
+    expect(covered.map((t) => t.id)).toEqual([1]);
+    expect(uncovered.map((t) => t.id)).toEqual([2, 3]);
   });
 
   // order_TKp4lCuDbgtvZD got `captured` and then `authorized` for the same

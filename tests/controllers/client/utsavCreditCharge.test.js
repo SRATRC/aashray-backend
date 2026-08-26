@@ -60,11 +60,11 @@ const bookingBody = (utsav, pkg) => ({
   }
 });
 
-const setCredits = (utsavCredits) =>
-  CardDb.update(
-    { credits: utsavCredits === null ? null : { utsav: utsavCredits } },
-    { where: { cardno: MUMUKSHU_1 } }
-  );
+const setCredits = (utsav) =>
+  CardDb.update({ credits: { utsav } }, { where: { cardno: MUMUKSHU_1 } });
+
+const clearCredits = () =>
+  CardDb.update({ credits: null }, { where: { cardno: MUMUKSHU_1 } });
 
 /**
  * Utsav credit is spent when the transaction is created, so the Razorpay order
@@ -80,7 +80,7 @@ describe('Utsav booking — credits already spent must not be charged again', ()
   });
 
   afterEach(async () => {
-    await setCredits(null);
+    await clearCredits();
   });
 
   it('bills only the balance when credit covers part of the package', async () => {

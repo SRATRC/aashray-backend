@@ -112,7 +112,6 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       { transaction: t }
     );
     
-    // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
       status === STATUS_PAYMENT_PENDING &&

@@ -24,8 +24,16 @@ const STALE_CREATED_AT = moment
   .subtract(MAX_APP_PAYMENT_DURATION_MINUTES + 60, 'minutes')
   .toDate();
 
+// resolveOrderForTransactions now sums `amount` itself, so the fixture has to
+// carry one. 100 keeps the order total the tests were written against.
 function txn(overrides) {
-  return { id: 1, cardno: 'TESTCARD1', razorpay_order_id: null, ...overrides };
+  return {
+    id: 1,
+    cardno: 'TESTCARD1',
+    amount: 100,
+    razorpay_order_id: null,
+    ...overrides
+  };
 }
 
 const originalNodeEnv = process.env.NODE_ENV;
@@ -48,7 +56,7 @@ test('rejects a stale pending transaction with no existing order as expired (400
   ];
 
   await expect(
-    resolveOrderForTransactions(transactions, 100, t)
+    resolveOrderForTransactions(transactions, t)
   ).rejects.toMatchObject({ statusCode: 400 });
 });
 
@@ -57,7 +65,7 @@ test('does not reject a stale cash-pending transaction', async () => {
     txn({ status: STATUS_CASH_PENDING, createdAt: STALE_CREATED_AT })
   ];
 
-  const order = await resolveOrderForTransactions(transactions, 100, t);
+  const order = await resolveOrderForTransactions(transactions, t);
   expect(order).toBeDefined();
 });
 
@@ -74,7 +82,7 @@ test('reconciles a stale transaction whose Razorpay order was already paid (409,
   ];
 
   await expect(
-    resolveOrderForTransactions(transactions, 100, t)
+    resolveOrderForTransactions(transactions, t)
   ).rejects.toMatchObject({ statusCode: 409 });
   expect(mockRazorpayFetch).toHaveBeenCalledWith('order_stale_paid');
 });
@@ -92,6 +100,6 @@ test('still rejects a stale transaction as expired when its existing order is un
   ];
 
   await expect(
-    resolveOrderForTransactions(transactions, 100, t)
+    resolveOrderForTransactions(transactions, t)
   ).rejects.toMatchObject({ statusCode: 400 });
 });

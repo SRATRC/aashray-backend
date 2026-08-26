@@ -499,12 +499,19 @@ export async function getPendingTransactions(timeFilter) {
 
 // Statuses a transaction can still be paid from. Anything else is settled or
 // dead, and stamping a new order id on it would let a later webhook reopen it.
-const PAYABLE_TRANSACTION_STATUSES = [
+// verifyPayment acts on the same list, so keep it shared: if the two drift, the
+// webhook and the order stamp disagree about the same transaction.
+export const PAYABLE_TRANSACTION_STATUSES = [
   STATUS_PAYMENT_PENDING,
   STATUS_CASH_PENDING,
   STATUS_PAYMENT_FAILED,
   STATUS_PAYMENT_AUTHORIZED
 ];
+
+// Amounts are DECIMAL, so they reach us as floats. Round when converting to
+// paise, the unit Razorpay works in, or a fraction of a paise of drift decides
+// a comparison.
+export const toPaise = (amount) => Math.round(amount * 100);
 
 export async function updateRazorpayTransactions(
   bookingIds,
@@ -512,8 +519,21 @@ export async function updateRazorpayTransactions(
   razorpay_order_id,
   t
 ) {
+  // MySQL cannot use an index through `id IN (NULL) OR ...`, so an empty side
+  // turns a 3-row primary-key lookup into a full scan - and the UPDATE below
+  // then holds a table-wide write lock for its duration. Build the clause from
+  // the arrays that actually have entries.
+  const idClauses = [
+    bookingIds?.length && { bookingid: bookingIds },
+    transactionIds?.length && { id: transactionIds }
+  ].filter(Boolean);
+
+  if (idClauses.length === 0) return;
+
   const where = {
-    [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }],
+    ...(idClauses.length === 1
+      ? idClauses[0]
+      : { [Sequelize.Op.or]: idClauses }),
     status: PAYABLE_TRANSACTION_STATUSES
   };
 
@@ -535,6 +555,49 @@ export async function updateRazorpayTransactions(
     }
   );
 }
+
+/**
+ * Splits unsettled transactions into the ones a payment still covers and the
+ * ones it does not, settling them in creation order until the money runs out.
+ *
+ * A booking flow that builds its order from a subtotal leaves transactions
+ * stamped with an order id worth less than they cost, and settling all of them
+ * hands out bookings nobody paid for.
+ *
+ * `remainingInPaise` is what the payment has left after the transactions it
+ * already settled. Razorpay delivers the same payment more than once - order
+ * order_TKp4lCuDbgtvZD saw `captured` and then `authorized` a second apart -
+ * and each delivery only reads the still-unsettled rows, so a budget measured
+ * against the payment total would hand the leftover rows a second, free pass.
+ *
+ * @param {Array} transactions - unsettled transactions sharing one order id
+ * @param {number} remainingInPaise - payment amount minus what it already settled
+ */
+export const splitTransactionsByPayment = (transactions, remainingInPaise) => {
+  const ordered = [...transactions].sort((a, b) => a.id - b.id);
+
+  // Nothing to reconcile against without a usable amount. Fall back to the old
+  // behaviour rather than stall every confirmation.
+  if (!Number.isFinite(remainingInPaise)) {
+    return { covered: ordered, uncovered: [] };
+  }
+
+  let runningInPaise = 0;
+  const firstUnaffordable = ordered.findIndex((txn) => {
+    runningInPaise += toPaise(txn.amount);
+    return runningInPaise > remainingInPaise;
+  });
+
+  return firstUnaffordable === -1
+    ? { covered: ordered, uncovered: [] }
+    : {
+        covered: ordered.slice(0, firstUnaffordable),
+        uncovered: ordered.slice(firstUnaffordable)
+      };
+};
+
+export const owedInPaise = (transactions) =>
+  transactions.reduce((sum, txn) => sum + toPaise(txn.amount), 0);
 
 // Razorpay order statuses that are still payable, so the order can be reused.
 const REUSABLE_RAZORPAY_ORDER_STATUSES = ['created', 'attempted'];
@@ -562,7 +625,7 @@ export const getSharedRazorpayOrderId = (transactions) => {
  * so a payable stub is reconstructed instead of calling Razorpay.
  */
 export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
-  const expectedAmount = Math.round(amount * 100);
+  const expectedAmount = toPaise(amount);
   const payableStub = {
     order: { id: razorpay_order_id, amount: expectedAmount, currency: 'INR' }
   };
@@ -628,7 +691,11 @@ export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
  * @throws ApiError(400) when an online pending/failed transaction is older
  *   than the 24-hour window. Cash pending transactions never expire.
  */
-export const resolveOrderForTransactions = async (transactions, amount, t) => {
+export const resolveOrderForTransactions = async (transactions, t) => {
+  // Derive the amount from the rows rather than take it as an argument. A
+  // caller-supplied total is a second copy of a number this function can read,
+  // so it can only ever differ by mistake - which is the defect this guards.
+  const amount = transactions.reduce((sum, txn) => sum + txn.amount, 0);
   const existingOrderId = getSharedRazorpayOrderId(transactions);
   const existing = existingOrderId
     ? await inspectRazorpayOrder(existingOrderId, amount)
@@ -670,10 +737,10 @@ export const resolveOrderForTransactions = async (transactions, amount, t) => {
   }
 
   const order = await generateOrderId(amount);
-  // Stamp exactly the transactions whose amounts went into `amount`. Passing
-  // the caller's booking ids instead widened the update to every transaction on
-  // those bookings - including ones belonging to another card, which the
-  // request body can name - so paying this order completed them too.
+  // Stamp exactly the transactions the amount came from. Passing the caller's
+  // booking ids instead widened the update to every transaction on those
+  // bookings - including ones belonging to another card, which the request body
+  // can name - so paying this order completed them too.
   await updateRazorpayTransactions(
     [],
     transactions.map((txn) => txn.id),
