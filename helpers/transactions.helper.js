@@ -497,17 +497,29 @@ export async function getPendingTransactions(timeFilter) {
   return transactions;
 }
 
+// Statuses a transaction can still be paid from. Anything else is settled or
+// dead, and stamping a new order id on it would let a later webhook reopen it.
+const PAYABLE_TRANSACTION_STATUSES = [
+  STATUS_PAYMENT_PENDING,
+  STATUS_CASH_PENDING,
+  STATUS_PAYMENT_FAILED,
+  STATUS_PAYMENT_AUTHORIZED
+];
+
 export async function updateRazorpayTransactions(
   bookingIds,
   transactionIds,
   razorpay_order_id,
   t
 ) {
+  const where = {
+    [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }],
+    status: PAYABLE_TRANSACTION_STATUSES
+  };
+
   // I know i am running this query twice but for logging purposes it is better to do it this way
   const transactionsToUpdate = await Transactions.findAll({
-    where: {
-      [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }]
-    },
+    where,
     transaction: t
   });
 
@@ -518,9 +530,7 @@ export async function updateRazorpayTransactions(
       razorpay_order_id: razorpay_order_id
     },
     {
-      where: {
-        [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }]
-      },
+      where,
       transaction: t
     }
   );
@@ -618,13 +628,7 @@ export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
  * @throws ApiError(400) when an online pending/failed transaction is older
  *   than the 24-hour window. Cash pending transactions never expire.
  */
-export const resolveOrderForTransactions = async (
-  transactions,
-  amount,
-  bookingIds,
-  transactionIds,
-  t
-) => {
+export const resolveOrderForTransactions = async (transactions, amount, t) => {
   const existingOrderId = getSharedRazorpayOrderId(transactions);
   const existing = existingOrderId
     ? await inspectRazorpayOrder(existingOrderId, amount)
@@ -666,6 +670,15 @@ export const resolveOrderForTransactions = async (
   }
 
   const order = await generateOrderId(amount);
-  await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
+  // Stamp exactly the transactions whose amounts went into `amount`. Passing
+  // the caller's booking ids instead widened the update to every transaction on
+  // those bookings - including ones belonging to another card, which the
+  // request body can name - so paying this order completed them too.
+  await updateRazorpayTransactions(
+    [],
+    transactions.map((txn) => txn.id),
+    order.id,
+    t
+  );
   return order;
 };

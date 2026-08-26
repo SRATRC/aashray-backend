@@ -48,7 +48,7 @@ test('rejects a stale pending transaction with no existing order as expired (400
   ];
 
   await expect(
-    resolveOrderForTransactions(transactions, 100, ['b1'], [], t)
+    resolveOrderForTransactions(transactions, 100, t)
   ).rejects.toMatchObject({ statusCode: 400 });
 });
 
@@ -57,7 +57,7 @@ test('does not reject a stale cash-pending transaction', async () => {
     txn({ status: STATUS_CASH_PENDING, createdAt: STALE_CREATED_AT })
   ];
 
-  const order = await resolveOrderForTransactions(transactions, 100, ['b2'], [], t);
+  const order = await resolveOrderForTransactions(transactions, 100, t);
   expect(order).toBeDefined();
 });
 
@@ -74,7 +74,7 @@ test('reconciles a stale transaction whose Razorpay order was already paid (409,
   ];
 
   await expect(
-    resolveOrderForTransactions(transactions, 100, ['b3'], [], t)
+    resolveOrderForTransactions(transactions, 100, t)
   ).rejects.toMatchObject({ statusCode: 409 });
   expect(mockRazorpayFetch).toHaveBeenCalledWith('order_stale_paid');
 });
@@ -92,6 +92,6 @@ test('still rejects a stale transaction as expired when its existing order is un
   ];
 
   await expect(
-    resolveOrderForTransactions(transactions, 100, ['b4'], [], t)
+    resolveOrderForTransactions(transactions, 100, t)
   ).rejects.toMatchObject({ statusCode: 400 });
 });

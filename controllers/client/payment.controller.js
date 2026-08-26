@@ -14,7 +14,8 @@ import {
   TYPE_TRAVEL,
   TYPE_UTSAV,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CASH_COMPLETED
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -26,10 +27,61 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
+/**
+ * Splits unsettled transactions into the ones a payment still covers and the
+ * ones it does not.
+ *
+ * A booking flow that builds its order from a subtotal leaves transactions
+ * stamped with an order id worth less than they cost, and settling all of them
+ * hands out bookings nobody paid for. Ordering by id keeps the split
+ * deterministic and settles the earliest-created transactions first.
+ *
+ * `remainingInPaise` is what the payment has left after the transactions it
+ * already settled. Razorpay delivers the same payment more than once - this
+ * order saw `captured` and then `authorized` a second apart - and each delivery
+ * only reads the still-unsettled rows, so a budget measured against the payment
+ * total would hand the leftover rows a second, free pass.
+ *
+ * Amounts are in paise, the unit Razorpay reports, so no rounding is introduced.
+ *
+ * @param {Array} transactions - unsettled transactions sharing one order id
+ * @param {number} remainingInPaise - payment amount minus what it already settled
+ */
+export function splitTransactionsByPayment(transactions, remainingInPaise) {
+  const ordered = [...transactions].sort((a, b) => a.id - b.id);
+  const owedInPaise = ordered.reduce((sum, txn) => sum + txn.amount * 100, 0);
+
+  // No usable amount in the payload leaves nothing to reconcile against.
+  // Fall back to the old behaviour rather than stall every confirmation.
+  if (!Number.isFinite(remainingInPaise)) {
+    return { covered: ordered, uncovered: [], owedInPaise };
+  }
+
+  if (owedInPaise <= remainingInPaise) {
+    return { covered: ordered, uncovered: [], owedInPaise };
+  }
+
+  const covered = [];
+  const uncovered = [];
+  let runningInPaise = 0;
+
+  for (const txn of ordered) {
+    if (runningInPaise + txn.amount * 100 <= remainingInPaise) {
+      runningInPaise += txn.amount * 100;
+      covered.push(txn);
+    } else {
+      uncovered.push(txn);
+    }
+  }
+
+  return { covered, uncovered, owedInPaise };
+}
+
 export const verifyPayment = async (req, res) => {
   const razorpay_order_id = req.body.payload.payment.entity.order_id;
   const razorpay_payment_id = req.body.payload.payment.entity.id;
   const razorpay_status = req.body.payload.payment.entity.status;
+  const razorpay_amount = Number(req.body.payload.payment.entity.amount);
 
   req.log.info('razorpay_webhook_received', {
     orderId: razorpay_order_id,
@@ -91,9 +143,53 @@ export const verifyPayment = async (req, res) => {
 
     const userBookingIdMap = {};
 
+    // What this payment already paid for. A redelivery of the same payment
+    // must not spend that money a second time on the rows it did not cover.
+    const settledTransactions = await Transactions.findAll({
+      where: {
+        razorpay_order_id,
+        status: [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED]
+      },
+      transaction: t
+    });
+    const settledInPaise = settledTransactions.reduce(
+      (sum, txn) => sum + txn.amount * 100,
+      0
+    );
+
+    // Never settle more than the payment collected. Anything left uncovered
+    // keeps the status it had, so it still expires through the pending-payment
+    // cron or gets reconciled, instead of being given away.
+    const { covered, uncovered, owedInPaise } = splitTransactionsByPayment(
+      transactions,
+      razorpay_amount - settledInPaise
+    );
+    const uncoveredIds = new Set(uncovered.map((txn) => txn.id));
+    let processedCount = 0;
+
+    if (uncovered.length > 0) {
+      req.log.error('razorpay_underpaid_order', {
+        orderId: razorpay_order_id,
+        paymentId: razorpay_payment_id,
+        razorpayStatus: razorpay_status,
+        cardno: transactions[0].cardno,
+        paidInPaise: razorpay_amount,
+        alreadySettledInPaise: settledInPaise,
+        owedInPaise,
+        settledTransactionIds: covered.map((txn) => txn.id),
+        leftUntouchedTransactionIds: uncovered.map((txn) => txn.id)
+      });
+    }
+
     for (const transaction of transactions) {
       var transactionStatus;
       var bookingStatus;
+
+      // Advancing a transaction this payment does not reach would strand it:
+      // 'authorized' is in neither the retry list nor the expiry cron's.
+      if (uncoveredIds.has(transaction.id)) {
+        continue;
+      }
 
       switch (razorpay_status) {
         case STATUS_PAYMENT_AUTHORIZED:
@@ -185,6 +281,7 @@ export const verifyPayment = async (req, res) => {
         },
         { transaction: t }
       );
+      processedCount += 1;
 
       req.log.info('razorpay_transaction_updated', {
         orderId: razorpay_order_id,
@@ -199,7 +296,8 @@ export const verifyPayment = async (req, res) => {
     await t.commit();
     req.log.info('razorpay_webhook_committed', {
       orderId: razorpay_order_id,
-      transactionCount: transactions.length
+      transactionCount: processedCount,
+      leftPendingCount: transactions.length - processedCount
     });
 
     // Trigger Room status change WhatsApp messages
@@ -317,13 +415,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
   req.log.info('create_order_total_amount', { cardno: req.user.cardno, totalAmount, transactionCount: transactions.length });
 
   if (totalAmount > 0) {
-    const order = await resolveOrderForTransactions(
-      transactions,
-      totalAmount,
-      bookingids,
-      [],
-      t
-    );
+    const order = await resolveOrderForTransactions(transactions, totalAmount, t);
     req.log.info('create_order_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
     await t.commit();
     req.log.info('create_order_success', { cardno: req.user.cardno, orderId: order.id });
@@ -398,8 +490,6 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
     const order = await resolveOrderForTransactions(
       validTransactions,
       totalAmount,
-      [],
-      validTransactionIds,
       t
     );
     req.log.info('create_order_v2_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
