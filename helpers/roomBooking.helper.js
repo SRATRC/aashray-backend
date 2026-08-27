@@ -50,6 +50,14 @@ import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import logger from '../config/logger.js';
 
+// A room booking always names who is staying — reject early with a clear 400
+// instead of crashing on `undefined.flatMap` deeper in the booking flow.
+function requireMumukshuGroup(mumukshuGroup) {
+  if (!Array.isArray(mumukshuGroup) || mumukshuGroup.length === 0) {
+    throw new ApiError(400, 'mumukshuGroup is required for a room booking');
+  }
+}
+
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
   const result = await RoomBooking.findAll({
     where: {
@@ -321,6 +329,7 @@ export async function bookRoomForMumukshus(
   utsav,
   log = logger
 ) {
+  requireMumukshuGroup(mumukshuGroup);
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
   );
@@ -684,6 +693,7 @@ export async function checkRoomAvailabilityForMumukshus(
   t = null
 ) {
   validateDate(checkin_date, checkout_date);
+  requireMumukshuGroup(mumukshuGroup);
 
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests

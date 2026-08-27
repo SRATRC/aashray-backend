@@ -11,7 +11,11 @@ jest.mock('../../../utils/sendMail.js');
 
 describe('Adhyayan Booking Controller', () => {
   beforeEach(async () => {
+    // shibir_attendance_records FKs to this table — truncate must run with
+    // checks off, same as every other suite's cross-table truncate.
+    await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
     await ShibirBookingDb.truncate();
+    await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
   });
 
   describe('Cancel Shibir', () => {

@@ -173,6 +173,7 @@ export const validateBooking = async (req, res) => {
   // selected more than once for the same person across primary + addons, so the
   // user is blocked here before proceeding to payment.
   validateNoDuplicateUtsavBooking(primary_booking, addons);
+  validateFlatBookingConstraints(primary_booking, addons);
 
   req.log.info('validate_mumukshu_booking_start', {
     cardno: req.user.cardno,
@@ -218,6 +219,7 @@ export const mumukshuBooking = async (req, res, next) => {
   let t;
   try {
     const { primary_booking, addons } = req.body;
+    validateFlatBookingConstraints(primary_booking, addons);
     t = await database.transaction();
     req.transaction = t;
 
