@@ -399,6 +399,11 @@ async function book(
 
     case TYPE_FOOD:
       const foodResult = await bookFood(body, data, t, user);
+      // Meals cost money when the card is a GUEST. Leaving this out of `amount`
+      // built a Razorpay order for the other bookings only, while
+      // updateRazorpayTransactions still stamped that order id on the meal
+      // transactions - so the webhook completed meals nobody paid for.
+      amount += foodResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
@@ -477,6 +482,7 @@ async function validate(body, user, data, utsav, response) {
         user,
         utsav
       );
+      totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
@@ -592,8 +598,7 @@ async function checkFoodAvailability(body, data, user, utsav) {
     mumukshuGroup,
     body.primary_booking,
     body.addons,
-    utsav,
-    user
+    utsav
   );
 
   return result;
