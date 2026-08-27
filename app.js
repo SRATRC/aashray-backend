@@ -107,8 +107,25 @@ const corsOptions = {
 };
 
 const app = express();
+
+// The app runs behind a local reverse proxy, so every request arrives from
+// 127.0.0.1 and req.ip recorded that instead of the caller - for real Razorpay
+// deliveries as much as for anything else. 'loopback' trusts X-Forwarded-For
+// only when the immediate peer is loopback, so a request that ever reached the
+// app directly could not forge its own address.
+app.set('trust proxy', 'loopback');
+
 app.use(urlencoded({ extended: true }));
-app.use(json());
+// Keep the raw bytes: the Razorpay webhook signature is an HMAC over exactly
+// what was sent, and re-serialising the parsed body would not reproduce it.
+// See middleware/verifyRazorpayWebhook.js.
+app.use(
+  json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
 app.use(cors(corsOptions));
 app.use(httpLogger);
 
