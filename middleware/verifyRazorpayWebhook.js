@@ -38,20 +38,24 @@ const signatureMatches = (rawBody, signature, secret) => {
  * not even the razorpay_webhook audit row.
  */
 export const verifyRazorpayWebhook = catchAsync(async (req, _res, next) => {
+  // httpLogger sets req.log with this request's correlationId, so a rejection
+  // ties back to the delivery that caused it. The fallback matches
+  // middleware/Error.js, for the case where this runs before httpLogger has.
+  const log = req.log || logger;
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.get(SIGNATURE_HEADER);
 
   // No secret means nothing can be verified. Reject rather than wave requests
   // through: a missing env var must not silently reopen the endpoint.
   if (!secret) {
-    logger.error('razorpay_webhook_secret_missing');
+    log.error('razorpay_webhook_secret_missing');
     throw new ApiError(401, 'Webhook signature verification unavailable');
   }
 
   // app.js keeps the raw bytes on req.rawBody, because the HMAC covers exactly
   // what Razorpay sent - re-serialising the parsed body would not reproduce it.
   if (!req.rawBody || !signature) {
-    logger.warn('razorpay_webhook_signature_absent', {
+    log.warn('razorpay_webhook_signature_absent', {
       hasBody: Boolean(req.rawBody),
       hasSignature: Boolean(signature)
     });
@@ -59,7 +63,7 @@ export const verifyRazorpayWebhook = catchAsync(async (req, _res, next) => {
   }
 
   if (!signatureMatches(req.rawBody, signature, secret)) {
-    logger.error('razorpay_webhook_signature_invalid', { ip: req.ip });
+    log.error('razorpay_webhook_signature_invalid', { ip: req.ip });
     throw new ApiError(401, 'Invalid webhook signature');
   }
 
