@@ -576,10 +576,13 @@ export async function updateRazorpayTransactions(
 export const splitTransactionsByPayment = (transactions, remainingInPaise) => {
   const ordered = [...transactions].sort((a, b) => a.id - b.id);
 
-  // Nothing to reconcile against without a usable amount. Fall back to the old
-  // behaviour rather than stall every confirmation.
+  // The amount is the only evidence of what was collected, and verifyPayment
+  // reads it out of an unauthenticated request body. Settle nothing without a
+  // usable one: omitting the field must not buy what a real payment could not.
+  // Razorpay has sent it on all 26,329 webhooks so far, so this costs nothing
+  // in practice, and razorpay_underpaid_order logs every time it fires.
   if (!Number.isFinite(remainingInPaise)) {
-    return { covered: ordered, uncovered: [] };
+    return { covered: [], uncovered: ordered };
   }
 
   let runningInPaise = 0;

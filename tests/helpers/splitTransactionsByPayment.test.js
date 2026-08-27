@@ -98,14 +98,16 @@ describe('splitTransactionsByPayment', () => {
     ]);
   });
 
-  it('covers everything when the payload carries no usable amount', () => {
+  // verifyPayment reads the amount from an unauthenticated request body, so a
+  // payload that simply omits it must not settle more than a real payment does.
+  it('settles nothing when the payload carries no usable amount', () => {
     const { covered, uncovered } = splitTransactionsByPayment(
       [txn(1, 1100), txn(2, 600)],
       Number(undefined)
     );
 
-    expect(covered.map((t) => t.id)).toEqual([1, 2]);
-    expect(uncovered).toEqual([]);
+    expect(covered).toEqual([]);
+    expect(uncovered.map((t) => t.id)).toEqual([1, 2]);
   });
 
   it('does not mutate the array it is given', () => {
