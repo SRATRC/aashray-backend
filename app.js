@@ -108,7 +108,16 @@ const corsOptions = {
 
 const app = express();
 app.use(urlencoded({ extended: true }));
-app.use(json());
+// Keep the raw bytes: the Razorpay webhook signature is an HMAC over exactly
+// what was sent, and re-serialising the parsed body would not reproduce it.
+// See middleware/verifyRazorpayWebhook.js.
+app.use(
+  json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
 app.use(cors(corsOptions));
 app.use(httpLogger);
 
