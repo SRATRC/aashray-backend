@@ -13,10 +13,9 @@
 // validation entirely, so a day visit onto a blocked date was never checked.
 import request from 'supertest';
 import moment from 'moment';
-import { app, sequelize } from '../../../app.js';
+import { app } from '../../../app.js';
 import {
   CardDb,
-  RoomBooking,
   UtsavDb,
   UtsavBooking,
   UtsavPackagesDb
@@ -68,9 +67,9 @@ let pkg;
 
 describe('room stay inside an event span is blocked for everyone', () => {
   beforeAll(async () => {
-    await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
-    await RoomBooking.truncate();
-    await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
+    // No truncate here: every case below is refused by the blocked-date check
+    // before any room is searched, so this suite needs nothing cleared, and
+    // clearing shared tables only destabilises the suites that run after it.
     await CardFactory.create(ATTENDEE);
     await CardFactory.create(OUTSIDER);
 
