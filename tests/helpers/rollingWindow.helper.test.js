@@ -17,7 +17,7 @@ beforeEach(() => {
 test('room nights + requested exceed → exceeds true', async () => {
   jest
     .spyOn(RoomBooking, 'findAll')
-    .mockResolvedValue([{ checkin: '2026-03-01', checkout: '2026-03-08' }]); // 7 nights
+    .mockResolvedValue([{ cardno: 'C1', checkin: '2026-03-01', checkout: '2026-03-08' }]); // 7 nights
   jest.spyOn(FlatBooking, 'findAll').mockResolvedValue([]);
   const res = await checkRollingWindowLimit({
     card: nonResident,
@@ -33,7 +33,7 @@ test('non-resident: flat nights are counted', async () => {
   jest.spyOn(RoomBooking, 'findAll').mockResolvedValue([]);
   jest
     .spyOn(FlatBooking, 'findAll')
-    .mockResolvedValue([{ checkin: '2026-03-01', checkout: '2026-03-09' }]); // 8 nights
+    .mockResolvedValue([{ cardno: 'C1', checkin: '2026-03-01', checkout: '2026-03-09' }]); // 8 nights
   const res = await checkRollingWindowLimit({
     card: nonResident,
     ranges: [{ checkin: '2026-03-10', checkout: '2026-03-13' }], // +3 = 11
@@ -70,7 +70,7 @@ test('all day-visits (0 nights) short-circuit to not-exceeded', async () => {
 test('a far pre-existing over-cap cluster does not waitlist a clean new booking', async () => {
   jest
     .spyOn(RoomBooking, 'findAll')
-    .mockResolvedValue([{ checkin: '2026-03-01', checkout: '2026-03-13' }]); // 12 committed nights
+    .mockResolvedValue([{ cardno: 'C1', checkin: '2026-03-01', checkout: '2026-03-13' }]); // 12 committed nights
   jest.spyOn(FlatBooking, 'findAll').mockResolvedValue([]);
   const res = await checkRollingWindowLimit({
     card: nonResident,

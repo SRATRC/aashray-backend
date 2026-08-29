@@ -1448,6 +1448,15 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
         if (templateName) {
           const sanitizedParams = parameters.map(p => sanitizeParamText(p));
           const components = buildBodyComponents(sanitizedParams);
+          const shibirIdVal = adhyayan?.id || booking.shibir_id || "";
+          if (templateName === "bk_adh_s_b_ppg2cnf" && shibirIdVal) {
+            components.push({
+              type: "button",
+              sub_type: "url",
+              index: "1",
+              parameters: [{ type: "text", text: `a${shibirIdVal}` }]
+            });
+          }
           console.log(`WA SENDING ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee cardno=${booking.cardno})`);
           const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
           if (!result || !result.ok) {
@@ -2144,18 +2153,43 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
     }
 
     // 3. Load utsav details
+    let utsav = null;
     let utsavName = "";
     if (booking.utsavid) {
-      const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
+      utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
       utsavName = utsav?.name || "";
     }
 
     // 4. Load package details
+    let pkg = null;
     let packageName = "";
     if (booking.packageid) {
-      const pkg = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
+      pkg = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
       packageName = pkg?.name || "";
     }
+
+    // Calculate meal details for confirmed templates
+    const isRC = utsav?.location === RESEARCH_CENTRE || utsav?.location === "Research Centre";
+    const pkgStart = pkg?.start_date ? moment(pkg.start_date).format("DD/MM/YYYY") : (utsav?.start_date ? moment(utsav.start_date).format("DD/MM/YYYY") : "");
+    const pkgEnd = pkg?.end_date ? moment(pkg.end_date).format("DD/MM/YYYY") : (utsav?.end_date ? moment(utsav.end_date).format("DD/MM/YYYY") : "");
+
+    const getFirstMeal = (arr, defaultVal) => {
+      if (!Array.isArray(arr) || !arr.length) return defaultVal;
+      const m = arr[0];
+      return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+    };
+
+    const getLastMeal = (arr, defaultVal) => {
+      if (!Array.isArray(arr) || !arr.length) return defaultVal;
+      const m = arr[arr.length - 1];
+      return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+    };
+
+    const startMeals = getFirstMeal(utsav?.starting_meal, "Breakfast");
+    const endMeals = getLastMeal(utsav?.ending_meal, "Dinner");
+
+    const startingMealText = isRC && pkgStart ? `${pkgStart} (${startMeals})` : "N/A";
+    const endingMealText = isRC && pkgEnd ? `${pkgEnd} (${endMeals})` : "N/A";
 
     // 5. Determine credit refunds
     let creditsRefunded = options.credits || 0;
@@ -2203,7 +2237,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           parameters = [attendeeName, utsavName, packageName, "payment pending"];
         } else if (isConfirmedStatus(newStatus)) {
           templateName = "bk_usv_s_b_ppg2cf";
-          parameters = [attendeeName, utsavName, packageName, paymentId];
+          parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2218,7 +2252,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           parameters = [attendeeName, utsavName, packageName, "admin cancelled"];
         } else if (isConfirmedStatus(newStatus)) {
           templateName = "bk_usv_s_b_ppg2cf";
-          parameters = [attendeeName, utsavName, packageName, paymentId];
+          parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
         }
       } else if (isConfirmedStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2246,6 +2280,15 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
       if (templateName) {
         const sanitizedParams = parameters.map(p => sanitizeParamText(p));
         const components = buildBodyComponents(sanitizedParams);
+        const utsavIdVal = booking.utsavid || utsav?.id || "";
+        if (templateName === "bk_usv_s_b_ppg2cf" && utsavIdVal) {
+          components.push({
+            type: "button",
+            sub_type: "url",
+            index: "1",
+            parameters: [{ type: "text", text: `u${utsavIdVal}` }]
+          });
+        }
         console.log(`WA UTSAV STATUS ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee name=${attendeeName})`);
         const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
         if (!result || !result.ok) {
@@ -2274,8 +2317,8 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           templateName = "bk_usv_gu_b_w2ppg";
           parameters = [bookerName, utsavName, packageName, "payment pending", attendeeName];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_ppg2cf";
-          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName];
+          templateName = "bk_usv_gu_b_ppg2cf_wl";
+          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2289,8 +2332,8 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           }
           parameters = [bookerName, utsavName, packageName, "admin cancelled", attendeeName];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_ppg2cf";
-          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName];
+          templateName = "bk_usv_gu_b_ppg2cf_wl";
+          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
         }
       } else if (isConfirmedStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2315,6 +2358,15 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
       if (templateName) {
         const sanitizedParams = parameters.map(p => sanitizeParamText(p));
         const components = buildBodyComponents(sanitizedParams);
+        const utsavIdVal = booking.utsavid || utsav?.id || "";
+        if (templateName === "bk_usv_gu_b_ppg2cf_wl" && utsavIdVal) {
+          components.push({
+            type: "button",
+            sub_type: "url",
+            index: "1",
+            parameters: [{ type: "text", text: `u${utsavIdVal}` }]
+          });
+        }
         console.log(`WA UTSAV STATUS BOOKER: template=${templateName} to phone=${bookerPhone} (Booker name=${bookerName})`);
         const result = await sendWithTemplateFallback(bookerPhone, templateName, components);
         if (!result || !result.ok) {

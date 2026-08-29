@@ -112,13 +112,18 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       { transaction: t }
     );
     
-    // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
       status === STATUS_PAYMENT_PENDING &&
       package_info.amount > 0
     ) {
-      await createPendingTransaction(
+      // createPendingTransaction spends any utsav credit the card holds and
+      // returns what is left to pay. Adding the package price instead billed
+      // the member for credit they had already given up: Razorpay collected the
+      // full price while the transaction row showed the discounted one. Where
+      // credit covered the package outright the booking was already complete,
+      // and the app still opened a payment sheet for the whole amount.
+      const { discountedAmount } = await createPendingTransaction(
         user,
         booking,
         TYPE_UTSAV,
@@ -126,10 +131,8 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-      
-      total_amount += package_info.amount;
-      
-      
+
+      total_amount += discountedAmount;
     }
     // Only provision food for non-waitlisted bookings
     if (booking.status !== STATUS_WAITING) {

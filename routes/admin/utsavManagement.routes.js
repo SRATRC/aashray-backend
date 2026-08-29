@@ -5,7 +5,8 @@ import {
   ROLE_PRA_ACCOUNTS_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
   ROLE_UTSAV_READ_ONLY,
-  ROLE_UTSAV_ADMIN_RAJ
+  ROLE_UTSAV_ADMIN_RAJ,
+  ROLE_OFFICE_ADMIN
 } from '../../config/constants.js';
 import {
   createUtsav,
@@ -33,6 +34,20 @@ import {
   createUtsavBookingByAdmin,
   addUtsavPackagesBulk,
   fetchUtsavFeedbacks,
+  getSystemRoomAllocations,
+  applyRoomAllocations,
+  getRoomInventory,
+  initRoomInventory,
+  updateRoomConfig,
+  updateRoomInventoryBulk,
+  uploadExternalRooms,
+  runSmartAllocationController,
+  getHousekeepingExtraBedsReport,
+  getUncheckedInBedsReport,
+  reallotBed,
+  getAllottedBedsReport,
+  swapBeds,
+  getParticipantStayHistory,
   utsavParticipantHistoryReport,
   utsavGroupAudit,
   sendUtsavGroupReminder
@@ -120,6 +135,28 @@ utsavAdminRouter.get(
   CatchAsync(fetchUtsavFeedbacks)
 );
 utsavAdminRouter.get('/group-audit', CatchAsync(utsavGroupAudit));
-utsavAdminRouter.post('/send-group-reminder', CatchAsync(sendUtsavGroupReminder));
+utsavAdminRouter.post(
+  '/send-group-reminder',
+  authorizeRoles(ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN, ROLE_OFFICE_ADMIN),
+  CatchAsync(sendUtsavGroupReminder)
+);
+
+
+utsavAdminRouter.get('/system-room-allocation', CatchAsync(getSystemRoomAllocations));
+utsavAdminRouter.post('/apply-room-allocations', CatchAsync(applyRoomAllocations));
+
+// Smart Room Allocation Engine
+utsavAdminRouter.get('/room-inventory', CatchAsync(getRoomInventory));
+utsavAdminRouter.post('/init-room-inventory', CatchAsync(initRoomInventory));
+utsavAdminRouter.post('/update-room-config', CatchAsync(updateRoomConfig));
+utsavAdminRouter.post('/update-room-inventory-bulk', CatchAsync(updateRoomInventoryBulk));
+utsavAdminRouter.post('/upload-external-rooms', CatchAsync(uploadExternalRooms));
+utsavAdminRouter.post('/run-smart-allocation', CatchAsync(runSmartAllocationController));
+utsavAdminRouter.get('/housekeeping-extra-beds-report', CatchAsync(getHousekeepingExtraBedsReport));
+utsavAdminRouter.get('/uncheckedin-beds-report', CatchAsync(getUncheckedInBedsReport));
+utsavAdminRouter.post('/reallot-bed', CatchAsync(reallotBed));
+utsavAdminRouter.get('/allotted-beds-report', CatchAsync(getAllottedBedsReport));
+utsavAdminRouter.post('/swap-beds', CatchAsync(swapBeds));
+utsavAdminRouter.get('/participant-stay-history', CatchAsync(getParticipantStayHistory));
 
 export { utsavPublicRouter, utsavAdminRouter };

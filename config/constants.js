@@ -106,6 +106,7 @@ export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
 export const ROLE_UTSAV_ADMIN_RAJ = 'utsavAdminRaj';
+export const ROLE_SATSHRUT_ADMIN = 'satshrutAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

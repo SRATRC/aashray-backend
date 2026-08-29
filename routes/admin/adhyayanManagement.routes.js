@@ -68,7 +68,11 @@ router.get('/bookings', CatchAsync(fetchAdhyayanBookings));
 router.put('/status', CatchAsync(adhyayanStatusUpdate));
 router.put('/attendance/toggle', CatchAsync(toggleAttendance));
 router.post('/attendance/bulk-toggle', CatchAsync(bulkToggleAttendance));
-router.post('/send-group-reminder', CatchAsync(sendAdhyayanGroupReminder));
+router.post(
+  '/send-group-reminder',
+  authorizeRoles(ROLE_SUPER_ADMIN, ROLE_ADHYAYAN_ADMIN, ROLE_OFFICE_ADMIN),
+  CatchAsync(sendAdhyayanGroupReminder)
+);
 router.put('/:id/:activate', CatchAsync(activateAdhyayan));
 router.get('/fetchList', CatchAsync(fetchAllAdhyayanList));
 router.delete('/:id', CatchAsync(softDeleteShibir));
