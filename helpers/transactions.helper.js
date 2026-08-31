@@ -443,6 +443,43 @@ const withRazorpayTimeout = async (promise, label) => {
   }
 };
 
+export const fetchRazorpayPayment = async (paymentId) => {
+  if (!paymentId) {
+    throw new ApiError(400, 'Razorpay payment id is required');
+  }
+
+  try {
+    return await withRazorpayTimeout(
+      getRazorpayClient().payments.fetch(paymentId),
+      'razorpay_payment_fetch_timeout'
+    );
+  } catch (err) {
+    const statusCode =
+      Number(err?.statusCode ?? err?.error?.statusCode) || undefined;
+
+    // Split the log event so on-call can tell a caller sending a payment id we
+    // cannot read apart from Razorpay being down. The route is unauthenticated
+    // while the secret is missing, so the first is expected noise and the
+    // second is an incident.
+    //
+    // Both still answer 503, which Razorpay retries. A 4xx here is not proof
+    // the payment is fake: Razorpay delivers within a second of capture, so a
+    // genuine payment can briefly read back as unknown. Answering 400 would
+    // spend our only retry on that race and lose the payment.
+    logger.error(
+      statusCode && statusCode < 500
+        ? 'razorpay_payment_fetch_rejected'
+        : 'razorpay_payment_fetch_failed',
+      {
+        paymentId,
+        statusCode,
+        error: err?.message ?? err?.error?.description
+      }
+    );
+    throw new ApiError(503, 'Unable to verify payment with Razorpay');
+  }
+};
+
 export const generateOrderId = async (amount) => {
   const razorpay = getRazorpayClient();
 
