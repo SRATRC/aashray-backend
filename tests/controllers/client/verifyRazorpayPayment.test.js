@@ -95,11 +95,30 @@ describe('Razorpay webhook API verification fallback', () => {
   it('returns a retryable error when Razorpay cannot verify the payment', async () => {
     mockPaymentFetch.mockRejectedValue(new Error('Razorpay unavailable'));
 
-    const before = await RazorpayWebhook.count();
     const res = await request(app).post(ENDPOINT).send(payload());
 
     expect(res.status).toBe(503);
-    expect(await RazorpayWebhook.count()).toBe(before);
+  });
+
+  // An empty audit table is what hid the August 2026 outage. Every delivery has
+  // to leave a row, even the ones we then refuse to settle.
+  it('audits a delivery Razorpay could not verify', async () => {
+    mockPaymentFetch.mockRejectedValue(new Error('Razorpay unavailable'));
+
+    const before = await RazorpayWebhook.count();
+    await request(app).post(ENDPOINT).send(payload());
+
+    expect(await RazorpayWebhook.count()).toBe(before + 1);
+  });
+
+  it('audits a delivery whose fields do not match Razorpay', async () => {
+    const before = await RazorpayWebhook.count();
+    const res = await request(app)
+      .post(ENDPOINT)
+      .send(payload({ order_id: 'order_forged' }));
+
+    expect(res.status).toBe(401);
+    expect(await RazorpayWebhook.count()).toBe(before + 1);
   });
 
   it('rejects a payload without a payment id', async () => {

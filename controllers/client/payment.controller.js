@@ -39,6 +39,25 @@ export const verifyPayment = async (req, res) => {
     throw new ApiError(400, 'Razorpay payment payload is required');
   }
 
+  // Record the delivery before anything can reject it. An empty audit table is
+  // how the August 2026 outage stayed invisible for two days: the signature
+  // middleware rejected every delivery before this insert, so nothing showed
+  // that Razorpay had even called. Rows written here are a log of what arrived,
+  // not evidence that it was genuine - settlement below reads only the fields
+  // fetched from Razorpay.
+  req.log.info('razorpay_webhook_received', {
+    orderId: webhookPayment.order_id,
+    paymentId: webhookPayment.id,
+    status: webhookPayment.status
+  });
+
+  await RazorpayWebhook.create({
+    order_id: webhookPayment.order_id,
+    payment_id: webhookPayment.id,
+    status: webhookPayment.status,
+    json: req.body
+  });
+
   // Temporary production fallback while the webhook secret is unavailable.
   // Do not trust the unsigned request fields. Fetch the payment from Razorpay
   // and use only the server-to-server response for settlement.
@@ -68,19 +87,6 @@ export const verifyPayment = async (req, res) => {
     orderId: razorpay_order_id,
     paymentId: razorpay_payment_id,
     status: razorpay_status
-  });
-
-  req.log.info('razorpay_webhook_received', {
-    orderId: razorpay_order_id,
-    paymentId: razorpay_payment_id,
-    status: razorpay_status
-  });
-
-  await RazorpayWebhook.create({
-    order_id: razorpay_order_id,
-    payment_id: razorpay_payment_id,
-    status: razorpay_status,
-    json: req.body
   });
 
   var message;
