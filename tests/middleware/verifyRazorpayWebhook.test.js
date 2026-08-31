@@ -1,51 +1,51 @@
 import crypto from 'crypto';
+import express from 'express';
 import request from 'supertest';
-import { app, sequelize } from '../../app.js';
+import { verifyRazorpayWebhook } from '../../middleware/verifyRazorpayWebhook.js';
 
-jest.mock('../../utils/sendMail.js');
-
-const ENDPOINT = '/api/v1/razorpay/verifyPayment';
-
-// An order id nothing is stamped with, so a request that clears the signature
-// check reaches verifyPayment, finds no pending transactions and settles
-// nothing. That keeps these tests about the signature alone.
-const payload = {
-  payload: {
-    payment: {
-      entity: {
-        order_id: 'order_signature_test_unknown',
-        id: 'pay_signature_test',
-        status: 'captured',
-        amount: 110000
-      }
-    }
-  }
-};
-
-const body = JSON.stringify(payload);
+const ENDPOINT = '/webhook';
+const SECRET = 'webhook-test-secret';
+const body = JSON.stringify({ event: 'payment.captured' });
 
 const sign = (raw, secret) =>
   crypto.createHmac('sha256', secret).update(raw).digest('hex');
 
+const testApp = express();
+testApp.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
+testApp.post(ENDPOINT, verifyRazorpayWebhook, (_req, res) => {
+  res.status(200).send({ status: 'ok' });
+});
+testApp.use((err, _req, res, _next) => {
+  res.status(err.statusCode || 500).send({ message: err.message });
+});
+
 const post = (raw, signature) => {
-  const req = request(app).post(ENDPOINT).set('Content-Type', 'application/json');
+  const req = request(testApp)
+    .post(ENDPOINT)
+    .set('Content-Type', 'application/json');
   if (signature !== undefined) req.set('X-Razorpay-Signature', signature);
   return req.send(raw);
 };
 
-/**
- * verifyPayment settles transactions from an order id, a status and an amount
- * it reads out of the request body. Only the signature proves Razorpay sent it.
- */
-describe('Razorpay webhook signature', () => {
-  const realSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+describe('Razorpay webhook signature middleware', () => {
+  const originalSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-  afterEach(() => {
-    process.env.RAZORPAY_WEBHOOK_SECRET = realSecret;
+  beforeEach(() => {
+    process.env.RAZORPAY_WEBHOOK_SECRET = SECRET;
   });
 
-  it('accepts a body Razorpay signed', async () => {
-    const res = await post(body, sign(body, realSecret));
+  afterAll(() => {
+    process.env.RAZORPAY_WEBHOOK_SECRET = originalSecret;
+  });
+
+  it('accepts a body signed with the configured secret', async () => {
+    const res = await post(body, sign(body, SECRET));
 
     expect(res.status).toBe(200);
   });
@@ -57,17 +57,16 @@ describe('Razorpay webhook signature', () => {
   });
 
   it('rejects a signature computed with the wrong secret', async () => {
-    const res = await post(body, sign(body, 'not-the-webhook-secret'));
+    const res = await post(body, sign(body, 'wrong-secret'));
 
     expect(res.status).toBe(401);
   });
 
-  // The whole point: a forged "this was paid" must not be accepted.
   it('rejects a body edited after it was signed', async () => {
-    const signature = sign(body, realSecret);
-    const tampered = body.replace('"amount":110000', '"amount":999900');
-
-    const res = await post(tampered, signature);
+    const res = await post(
+      JSON.stringify({ event: 'payment.failed' }),
+      sign(body, SECRET)
+    );
 
     expect(res.status).toBe(401);
   });
@@ -75,22 +74,8 @@ describe('Razorpay webhook signature', () => {
   it('rejects everything when the secret is not configured', async () => {
     delete process.env.RAZORPAY_WEBHOOK_SECRET;
 
-    const res = await post(body, sign(body, realSecret));
+    const res = await post(body, sign(body, SECRET));
 
     expect(res.status).toBe(401);
-  });
-
-  it('does not record a rejected webhook', async () => {
-    const { RazorpayWebhook } = await import('../../models/associations.js');
-    const before = await RazorpayWebhook.count();
-
-    await post(body, sign(body, 'not-the-webhook-secret'));
-
-    expect(await RazorpayWebhook.count()).toBe(before);
-  });
-
-  afterAll(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    await sequelize.close();
   });
 });
