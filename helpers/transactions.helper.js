@@ -443,6 +443,26 @@ const withRazorpayTimeout = async (promise, label) => {
   }
 };
 
+export const fetchRazorpayPayment = async (paymentId) => {
+  if (!paymentId) {
+    throw new ApiError(400, 'Razorpay payment id is required');
+  }
+
+  try {
+    return await withRazorpayTimeout(
+      getRazorpayClient().payments.fetch(paymentId),
+      'razorpay_payment_fetch_timeout'
+    );
+  } catch (err) {
+    logger.error('razorpay_payment_fetch_failed', {
+      paymentId,
+      statusCode: Number(err?.statusCode ?? err?.error?.statusCode) || undefined,
+      error: err?.message ?? err?.error?.description
+    });
+    throw new ApiError(503, 'Unable to verify payment with Razorpay');
+  }
+};
+
 export const generateOrderId = async (amount) => {
   const razorpay = getRazorpayClient();
 

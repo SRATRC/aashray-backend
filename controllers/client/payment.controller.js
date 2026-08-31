@@ -21,6 +21,7 @@ import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
 import {
   PAYABLE_TRANSACTION_STATUSES,
+  fetchRazorpayPayment,
   owedInPaise,
   resolveOrderForTransactions,
   splitTransactionsByPayment
@@ -33,11 +34,41 @@ import ApiError from '../../utils/ApiError.js';
 import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 export const verifyPayment = async (req, res) => {
-  const razorpay_order_id = req.body.payload.payment.entity.order_id;
-  const razorpay_payment_id = req.body.payload.payment.entity.id;
-  const razorpay_status = req.body.payload.payment.entity.status;
+  const webhookPayment = req.body?.payload?.payment?.entity;
+  if (!webhookPayment?.id) {
+    throw new ApiError(400, 'Razorpay payment payload is required');
+  }
+
+  // Temporary production fallback while the webhook secret is unavailable.
+  // Do not trust the unsigned request fields. Fetch the payment from Razorpay
+  // and use only the server-to-server response for settlement.
+  const verifiedPayment = await fetchRazorpayPayment(webhookPayment.id);
+  const razorpay_order_id = verifiedPayment.order_id;
+  const razorpay_payment_id = verifiedPayment.id;
+  const razorpay_status = verifiedPayment.status;
   // Razorpay reports the amount in paise already.
-  const razorpay_amount = Number(req.body.payload.payment.entity.amount);
+  const razorpay_amount = Number(verifiedPayment.amount);
+
+  const paymentMatchesWebhook =
+    razorpay_payment_id === webhookPayment.id &&
+    razorpay_order_id === webhookPayment.order_id &&
+    razorpay_amount === Number(webhookPayment.amount) &&
+    verifiedPayment.currency === webhookPayment.currency;
+
+  if (!paymentMatchesWebhook) {
+    req.log.error('razorpay_webhook_api_verification_failed', {
+      paymentId: webhookPayment.id,
+      webhookOrderId: webhookPayment.order_id,
+      verifiedOrderId: razorpay_order_id
+    });
+    throw new ApiError(401, 'Razorpay payment verification failed');
+  }
+
+  req.log.info('razorpay_webhook_api_verified', {
+    orderId: razorpay_order_id,
+    paymentId: razorpay_payment_id,
+    status: razorpay_status
+  });
 
   req.log.info('razorpay_webhook_received', {
     orderId: razorpay_order_id,
