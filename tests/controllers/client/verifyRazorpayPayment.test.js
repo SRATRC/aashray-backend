@@ -121,6 +121,18 @@ describe('Razorpay webhook API verification fallback', () => {
     expect(await RazorpayWebhook.count()).toBe(before + 1);
   });
 
+  // The audit columns are NOT NULL and the route is unauthenticated, so a
+  // partial payload used to fail the insert and answer 500 with a stack trace.
+  it('audits a partial payload instead of returning a server error', async () => {
+    const before = await RazorpayWebhook.count();
+    const res = await request(app)
+      .post(ENDPOINT)
+      .send(payload({ order_id: null, status: null }));
+
+    expect(res.status).not.toBe(500);
+    expect(await RazorpayWebhook.count()).toBe(before + 1);
+  });
+
   it('rejects a payload without a payment id', async () => {
     const res = await request(app).post(ENDPOINT).send(payload({ id: null }));
 

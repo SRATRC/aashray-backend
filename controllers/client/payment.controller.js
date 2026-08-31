@@ -33,6 +33,10 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
+// Stands in for an audit column the delivery did not carry. The columns are
+// NOT NULL, and a row that says the field was missing beats no row at all.
+const UNKNOWN_WEBHOOK_FIELD = 'unknown';
+
 export const verifyPayment = async (req, res) => {
   const webhookPayment = req.body?.payload?.payment?.entity;
   if (!webhookPayment?.id) {
@@ -51,12 +55,32 @@ export const verifyPayment = async (req, res) => {
     status: webhookPayment.status
   });
 
-  await RazorpayWebhook.create({
-    order_id: webhookPayment.order_id,
-    payment_id: webhookPayment.id,
-    status: webhookPayment.status,
-    json: req.body
-  });
+  // order_id and status are NOT NULL, and the route is unauthenticated while the
+  // secret is missing, so a partial payload would otherwise fail the insert and
+  // return a 500 with a stack trace. Record what arrived and mark what did not.
+  if (!webhookPayment.order_id || !webhookPayment.status) {
+    req.log.warn('razorpay_webhook_fields_absent', {
+      paymentId: webhookPayment.id,
+      hasOrderId: Boolean(webhookPayment.order_id),
+      hasStatus: Boolean(webhookPayment.status)
+    });
+  }
+
+  // Losing the audit row must not lose the payment. The row is a diagnostic,
+  // and settlement below stands on its own.
+  try {
+    await RazorpayWebhook.create({
+      order_id: webhookPayment.order_id || UNKNOWN_WEBHOOK_FIELD,
+      payment_id: webhookPayment.id,
+      status: webhookPayment.status || UNKNOWN_WEBHOOK_FIELD,
+      json: req.body
+    });
+  } catch (err) {
+    req.log.error('razorpay_webhook_audit_failed', {
+      paymentId: webhookPayment.id,
+      error: err?.message
+    });
+  }
 
   // Temporary production fallback while the webhook secret is unavailable.
   // Do not trust the unsigned request fields. Fetch the payment from Razorpay
