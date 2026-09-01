@@ -2158,7 +2158,7 @@ export const applyRoomAllocations = async (req, res) => {
   }
 
   let updatedCount = 0;
-  const defaultAdmin = req.user?.cardno ? String(req.user.cardno) : 'SYSTEM-ROOM-ALLOCATION';
+  const defaultAdmin = req.user?.username || (req.user?.cardno ? String(req.user.cardno) : 'SYSTEM-ROOM-ALLOCATION');
 
   for (const item of allocations) {
     if ((item.bookingid || item.cardno) && item.roomno !== undefined) {
@@ -2167,7 +2167,7 @@ export const applyRoomAllocations = async (req, res) => {
       if (item.bookingid) whereClause.bookingid = item.bookingid;
       else if (item.cardno) whereClause.cardno = String(item.cardno).trim();
 
-      const recordUpdatedBy = item.updatedBy || (item.source === 'manual' ? defaultAdmin : 'SYSTEM-ROOM-ALLOCATION');
+      const recordUpdatedBy = item.source === 'system' ? 'SYSTEM-ROOM-ALLOCATION' : (item.updatedBy || defaultAdmin);
 
       const [count] = await UtsavBooking.update(
         { roomno: cleanRoom || null, updatedBy: recordUpdatedBy },
