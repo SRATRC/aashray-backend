@@ -243,8 +243,6 @@ export async function cancelTransaction(
 
   await transaction.update(
     {
-      discount: 0,
-      amount: totalAmount,
       description,
       status,
       updatedBy: user.username
