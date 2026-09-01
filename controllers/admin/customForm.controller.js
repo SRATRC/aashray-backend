@@ -1306,9 +1306,10 @@ export const resolveIdentity = async (req, res) => {
                     const ownerCardNos = coOwners.map(o => o.owner);
 
                     if (formObj.event_id) {
+                        const utsavIds = (parseInt(formObj.event_id, 10) === 24 || parseInt(formObj.event_id, 10) === 25) ? [24, 25] : [formObj.event_id];
                         const bookings = await UtsavBooking.findAll({
                             where: {
-                                utsavid: formObj.event_id,
+                                utsavid: { [Sequelize.Op.in]: utsavIds },
                                 cardno: { [Sequelize.Op.in]: ownerCardNos },
                                 status: {
                                     [Sequelize.Op.in]: [
@@ -1478,9 +1479,10 @@ export const validateGuest = async (req, res) => {
     const eventName = form.event_name || 'this event';
 
     if (eventId) {
+        const utsavIds = (parseInt(eventId, 10) === 24 || parseInt(eventId, 10) === 25) ? [24, 25] : [eventId];
         const booking = await UtsavBooking.findOne({
             where: {
-                utsavid: eventId,
+                utsavid: { [Sequelize.Op.in]: utsavIds },
                 cardno: card.cardno,
                 status: {
                     [Sequelize.Op.in]: [
@@ -1893,9 +1895,10 @@ async function assertEventRegistration(form, cardno) {
     const eventName = form.event_name || 'this event';
 
     if (eventType.includes('utsav')) {
+        const utsavIds = (eventId === 24 || eventId === 25) ? [24, 25] : [eventId];
         const booking = await UtsavBooking.findOne({
             where: {
-                utsavid: eventId,
+                utsavid: { [Sequelize.Op.in]: utsavIds },
                 cardno,
                 status: {
                     [Sequelize.Op.in]: [
