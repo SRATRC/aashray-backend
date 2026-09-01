@@ -2126,7 +2126,7 @@ export const applyRoomAllocations = async (req, res) => {
   }
 
   let updatedCount = 0;
-  const adminCardno = req.user?.cardno || 'SYSTEM-ROOM-ALLOCATION';
+  const adminCardno = 'SYSTEM-ROOM-ALLOCATION';
 
   for (const item of allocations) {
     if ((item.bookingid || item.cardno) && item.roomno !== undefined) {
@@ -2158,177 +2158,163 @@ export const applyRoomAllocations = async (req, res) => {
 
 /**
  * GET /api/v1/admin/utsav/room-inventory?utsavid=<id>
- * Fetch utsav_room_config rows for an event (room inventory state).
+ * Fetches configured rooms for an event with available beds.
  */
 export const getRoomInventory = async (req, res) => {
   const { utsavid } = req.query;
-  if (!utsavid) throw new ApiError(400, 'utsavid is required');
+  if (!utsavid) {
+    throw new ApiError(400, 'utsavid query parameter is required');
+  }
 
-  const rooms = await UtsavRoomConfig.findAll({
-    where: { utsavid },
-    order: [
-      ['is_inside_rc', 'DESC'],
-      ['floor', 'ASC'],
-      [Sequelize.literal('CAST(room_group AS UNSIGNED)'), 'ASC'],
-      ['room_group', 'ASC']
-    ]
+  const rooms = await getEventRooms(parseInt(utsavid, 10));
+  return res.status(200).json({
+    success: true,
+    data: rooms
   });
-
-  // Fetch default gender and roomtype from roomdb
-  const allBeds = await RoomDb.findAll({ raw: true });
-  const roomMetaMap = new Map();
-  allBeds.forEach(b => {
-    const m = String(b.roomno).match(/^(\d+)/);
-    if (m && !roomMetaMap.has(m[1])) {
-      roomMetaMap.set(m[1], { default_gender: b.gender, roomtype: b.roomtype });
-    }
-  });
-
-  const enrichedRooms = rooms.map(r => {
-    const raw = r.toJSON();
-    const meta = roomMetaMap.get(r.room_group) || {};
-    return {
-      ...raw,
-      default_gender: meta.default_gender || 'Any',
-      roomtype: meta.roomtype || ''
-    };
-  });
-
-  return res.status(200).json({ success: true, data: enrichedRooms });
 };
 
 /**
  * POST /api/v1/admin/utsav/init-room-inventory
- * Auto-seed utsav_room_config from roomdb for the given event.
- * Safe to re-run — skips existing rows.
+ * Initializes utsav_room_config for an event from roomdb.
+ * Auto-proportions gender_override on RC rooms based on confirmed registration ratio.
  */
 export const initRoomInventory = async (req, res) => {
-  const { utsavid } = req.body;
-  if (!utsavid) throw new ApiError(400, 'utsavid is required');
+  const { utsavid, defaultCapacity = 4 } = req.body;
+  if (!utsavid) {
+    throw new ApiError(400, 'utsavid is required in request body');
+  }
 
-  req.log.info('init_room_inventory_start', { utsavid });
-  const result = await initializeEventRooms(utsavid);
-  req.log.info('init_room_inventory_done', result);
+  const result = await initializeEventRooms(parseInt(utsavid, 10), parseInt(defaultCapacity, 10));
 
-  // ── Auto Gender Proportioning ──────────────────────────────────────────
-  // 1. Count confirmed registrations by gender
-  const genderCounts = await database.query(
-    `SELECT c.gender, COUNT(*) AS cnt
-     FROM utsav_booking AS ub
-     INNER JOIN card_db AS c ON ub.cardno = c.cardno
-     WHERE ub.utsavid = :utsavid AND ub.status IN ('confirmed', 'cash_completed', 'checkedin')
-     GROUP BY c.gender`,
-    { replacements: { utsavid }, type: QueryTypes.SELECT }
-  );
-
-  const maleCount = genderCounts.find(r => r.gender === 'M')?.cnt || 0;
-  const femaleCount = genderCounts.find(r => r.gender === 'F')?.cnt || 0;
-  const totalReg = maleCount + femaleCount;
-
-  if (totalReg > 0) {
-    // 2. Fetch all RC rooms in utsav_room_config for this event (not blocked, has capacity)
-    const rcRooms = await UtsavRoomConfig.findAll({
+  // Auto-proportion gender_override for RC rooms based on confirmed registrations
+  try {
+    // 1. Get confirmed/checkedin registration counts by gender
+    const genderCounts = await UtsavBooking.findAll({
+      attributes: [
+        [Sequelize.col('card_db.gender'), 'gender'],
+        [Sequelize.fn('COUNT', Sequelize.col('utsav_booking.id')), 'count']
+      ],
+      include: [{
+        model: CardDb,
+        attributes: [],
+        required: true
+      }],
       where: {
         utsavid,
-        is_inside_rc: 1,
-        is_blocked: 0,
-        avail_capacity: { [Sequelize.Op.gt]: 0 }
+        status: { [Sequelize.Op.in]: ['confirmed', 'cash_completed', 'checkedin'] }
       },
+      group: [Sequelize.col('card_db.gender')],
       raw: true
     });
 
-    // 3. Fetch pre-event room occupancy (5 days before event start)
-    const utsavRecord = await UtsavDb.findOne({ where: { id: utsavid }, attributes: ['start_date', 'end_date'], raw: true });
-    const preOccupancyGenderMap = new Map(); // roomno -> 'M' | 'F'
+    const maleCount = parseInt(genderCounts.find(g => g.gender === 'M')?.count || 0, 10);
+    const femaleCount = parseInt(genderCounts.find(g => g.gender === 'F')?.count || 0, 10);
+    const totalReg = maleCount + femaleCount;
 
-    if (utsavRecord) {
-      const eventStart = moment(utsavRecord.start_date);
-      const preStart = eventStart.clone().subtract(5, 'days').format('YYYY-MM-DD');
-      const preEnd = eventStart.format('YYYY-MM-DD');
+    // 2. Fetch all active RC rooms for this utsav
+    const rcRooms = await UtsavRoomConfig.findAll({
+      where: { utsavid, is_inside_rc: 1, is_blocked: 0, avail_capacity: { [Sequelize.Op.gt]: 0 } },
+      order: [['floor', 'ASC'], ['alloc_rank', 'ASC'], ['room_group', 'ASC']],
+      raw: true
+    });
 
-      const preBookings = await database.query(
-        `SELECT rb.roomno, c.gender
-         FROM room_booking AS rb
-         INNER JOIN card_db AS c ON rb.cardno = c.cardno
-         WHERE rb.status NOT IN ('cancelled', 'admin cancelled')
-           AND rb.roomno IS NOT NULL AND rb.roomno != ''
-           AND rb.checkin >= :preStart AND rb.checkin <= :preEnd`,
-        { replacements: { preStart, preEnd }, type: QueryTypes.SELECT }
-      );
+    if (totalReg > 0 && rcRooms.length > 0) {
+      // 3. Check pre-occupancy from pre-event room bookings and already-occupied rooms (gender_staying)
+      const utsav = await UtsavDb.findOne({ where: { id: utsavid }, raw: true });
+      const preOccupancyGenderMap = new Map();
 
-      preBookings.forEach(b => {
-        if (b.roomno && b.gender) {
-          // RC rooms only (room number 1-60)
-          const num = parseInt(b.roomno, 10);
-          if (num >= 1 && num <= 60) {
-            preOccupancyGenderMap.set(String(num), b.gender);
+      // Seed with already occupied rooms in this event
+      rcRooms.forEach(r => {
+        if (r.gender_staying) {
+          preOccupancyGenderMap.set(r.room_group, r.gender_staying);
+        }
+      });
+
+      if (utsav && utsav.start_date) {
+        const preEventBookings = await RoomBooking.findAll({
+          attributes: ['roomno', 'gender'],
+          where: {
+            checkin: { [Sequelize.Op.lt]: utsav.start_date },
+            checkout: { [Sequelize.Op.gt]: utsav.start_date },
+            status: { [Sequelize.Op.in]: ['checkedin', 'confirmed'] }
+          },
+          raw: true
+        });
+
+        preEventBookings.forEach(b => {
+          if (b.roomno && b.gender) {
+            const num = parseInt(b.roomno, 10);
+            if (num >= 1 && num <= 60) {
+              preOccupancyGenderMap.set(String(num), b.gender);
+            }
+          }
+        });
+      }
+
+      // 4. Calculate target room counts
+      const totalRooms = rcRooms.length;
+      const targetMaleRooms = Math.round((maleCount / totalReg) * totalRooms);
+      const targetFemaleRooms = totalRooms - targetMaleRooms;
+
+      // 5. Assign gender_override — respect pre-occupancy first, then fill freely
+      const lockedMale = rcRooms.filter(r => preOccupancyGenderMap.get(r.room_group) === 'M');
+      const lockedFemale = rcRooms.filter(r => preOccupancyGenderMap.get(r.room_group) === 'F');
+      const freeRooms = rcRooms.filter(r => !preOccupancyGenderMap.has(r.room_group));
+
+      const maleRooms = [...lockedMale];
+      const femaleRooms = [...lockedFemale];
+
+      for (const room of freeRooms) {
+        if (maleRooms.length < targetMaleRooms) {
+          maleRooms.push(room);
+        } else {
+          femaleRooms.push(room);
+        }
+      }
+
+      // 6. Write gender_override to utsav_room_config in parallel
+      const updates = [
+        ...maleRooms.map(r => ({ room_group: r.room_group, gender: 'M' })),
+        ...femaleRooms.map(r => ({ room_group: r.room_group, gender: 'F' }))
+      ];
+
+      const updatePromises = [];
+      for (const u of updates) {
+        const existing = rcRooms.find(r => r.room_group === u.room_group);
+        if (existing && existing.gender_override !== u.gender) {
+          updatePromises.push(
+            UtsavRoomConfig.update(
+              { gender_override: u.gender },
+              { where: { utsavid, room_group: u.room_group, is_inside_rc: 1 } }
+            )
+          );
+        }
+      }
+      await Promise.all(updatePromises);
+      const autoReassigned = updatePromises.length;
+
+      req.log.info('init_room_inventory_gender_proportioned', {
+        utsavid, maleCount, femaleCount, targetMaleRooms, targetFemaleRooms,
+        lockedMale: lockedMale.length, lockedFemale: lockedFemale.length, autoReassigned
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Initialized ${result.created} RC rooms (${result.total} total in RoomDB). ${result.skipped} already configured. Auto-proportioned gender: ${targetMaleRooms}M / ${targetFemaleRooms}F rooms (${autoReassigned} reassigned).`,
+        data: {
+          ...result,
+          genderProportioning: {
+            registrations: { male: maleCount, female: femaleCount },
+            rooms: { targetMale: targetMaleRooms, targetFemale: targetFemaleRooms },
+            maleRooms: maleRooms.map(r => r.room_group),
+            femaleRooms: femaleRooms.map(r => r.room_group),
+            autoReassigned
           }
         }
       });
     }
-
-    // 4. Calculate target room counts
-    const totalRooms = rcRooms.length;
-    const targetMaleRooms = Math.round((maleCount / totalReg) * totalRooms);
-    const targetFemaleRooms = totalRooms - targetMaleRooms;
-
-    // 5. Assign gender_override — respect pre-occupancy first, then fill freely
-    // Sort: locked rooms first, then free rooms
-    const lockedMale = rcRooms.filter(r => preOccupancyGenderMap.get(r.room_group) === 'M');
-    const lockedFemale = rcRooms.filter(r => preOccupancyGenderMap.get(r.room_group) === 'F');
-    const freeRooms = rcRooms.filter(r => !preOccupancyGenderMap.has(r.room_group));
-
-    const maleRooms = [...lockedMale];
-    const femaleRooms = [...lockedFemale];
-
-    // Distribute free rooms to hit targets
-    for (const room of freeRooms) {
-      if (maleRooms.length < targetMaleRooms) {
-        maleRooms.push(room);
-      } else {
-        femaleRooms.push(room);
-      }
-    }
-
-    // 6. Write gender_override to utsav_room_config
-    const updates = [
-      ...maleRooms.map(r => ({ room_group: r.room_group, gender: 'M' })),
-      ...femaleRooms.map(r => ({ room_group: r.room_group, gender: 'F' }))
-    ];
-
-    let autoReassigned = 0;
-    for (const u of updates) {
-      const existing = rcRooms.find(r => r.room_group === u.room_group);
-      if (existing && existing.gender_override !== u.gender) {
-        await UtsavRoomConfig.update(
-          { gender_override: u.gender },
-          { where: { utsavid, room_group: u.room_group, is_inside_rc: 1 } }
-        );
-        autoReassigned++;
-      }
-    }
-
-    req.log.info('init_room_inventory_gender_proportioned', {
-      utsavid, maleCount, femaleCount, targetMaleRooms, targetFemaleRooms,
-      lockedMale: lockedMale.length, lockedFemale: lockedFemale.length, autoReassigned
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: `Initialized ${result.created} RC rooms (${result.total} total in RoomDB). ${result.skipped} already configured. Auto-proportioned gender: ${targetMaleRooms}M / ${targetFemaleRooms}F rooms (${autoReassigned} reassigned).`,
-      data: {
-        ...result,
-        genderProportioning: {
-          registrations: { male: maleCount, female: femaleCount },
-          rooms: { targetMale: targetMaleRooms, targetFemale: targetFemaleRooms },
-          maleRooms: maleRooms.map(r => r.room_group),
-          femaleRooms: femaleRooms.map(r => r.room_group),
-          preOccupiedMale: lockedMale.map(r => r.room_group),
-          preOccupiedFemale: lockedFemale.map(r => r.room_group),
-          autoReassigned
-        }
-      }
-    });
+  } catch (propErr) {
+    req.log.warn('gender_proportioning_failed', { error: propErr.message });
   }
 
   return res.status(200).json({
@@ -2665,7 +2651,7 @@ export const runSmartAllocationController = async (req, res) => {
   const utsavStartStr = moment(utsav.start_date).format('YYYY-MM-DD');
   const confirmedStatuses = ['confirmed', 'cash_completed', 'checkedin'];
 
-  const [engStayDays, engSingleDay, engPgs, engNonPgs] = await Promise.all([
+  const [engStayDays, engSingleDay, engPgs, engNonPgs] = allCardnos.length ? await Promise.all([
     // A. RC stay nights in last 1 year
     database.query(
       `SELECT cardno, SUM(nights) AS stay_days FROM room_booking
@@ -2711,7 +2697,7 @@ export const runSmartAllocationController = async (req, res) => {
        GROUP BY sb.cardno`,
       { replacements: { allCardnos, oneYearAgo, utsavStartStr }, type: QueryTypes.SELECT }
     )
-  ]);
+  ]) : [[], [], [], []];
 
   // Build engagementMap: cardno -> boolean (any threshold met)
   const engagementMap = new Map();
