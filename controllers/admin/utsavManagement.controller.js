@@ -1990,8 +1990,8 @@ export const getSystemRoomAllocations = async (req, res) => {
     const generalRoomBookings = await RoomBooking.findAll({
       where: {
         cardno: { [Sequelize.Op.in]: internationalCardnos },
-        status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled'] },
-        roomno: { [Sequelize.Op.and]: [{ [Sequelize.Op.ne]: null }, { [Sequelize.Op.ne]: '' }] },
+        status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled', 'waiting'] },
+        roomno: { [Sequelize.Op.and]: [{ [Sequelize.Op.ne]: null }, { [Sequelize.Op.ne]: '' }, { [Sequelize.Op.ne]: 'NA' }, { [Sequelize.Op.ne]: '-' }] },
         checkin: { [Sequelize.Op.lte]: searchToDate },
         checkout: { [Sequelize.Op.gte]: searchFromDate }
       },
@@ -2000,6 +2000,9 @@ export const getSystemRoomAllocations = async (req, res) => {
     });
 
     generalRoomBookings.forEach(rb => {
+      const rawRoom = String(rb.roomno || '').trim();
+      if (!rawRoom || rawRoom === 'NA' || rawRoom === '-' || rawRoom === 'null') return;
+
       const cin = moment(rb.checkin).format('YYYY-MM-DD');
       const cout = moment(rb.checkout).format('YYYY-MM-DD');
       const isPreEvent = cout >= startDate && cin <= startDate;
@@ -2008,7 +2011,7 @@ export const getSystemRoomAllocations = async (req, res) => {
 
       if (isPreEvent || isPostEvent || isOverlapping) {
         prePostRoomMap.set(String(rb.cardno).trim(), {
-          roomno: rb.roomno,
+          roomno: rawRoom,
           checkin: cin,
           checkout: cout,
           type: isPreEvent && isPostEvent ? 'Pre & Post Event' : (isPreEvent ? 'Pre-Event' : (isPostEvent ? 'Post-Event' : 'Adjacent Stay'))
@@ -2207,6 +2210,127 @@ export const initRoomInventory = async (req, res) => {
   const result = await initializeEventRooms(utsavid);
   req.log.info('init_room_inventory_done', result);
 
+  // ── Auto Gender Proportioning ──────────────────────────────────────────
+  // 1. Count confirmed registrations by gender
+  const genderCounts = await database.query(
+    `SELECT c.gender, COUNT(*) AS cnt
+     FROM utsav_booking AS ub
+     INNER JOIN card_db AS c ON ub.cardno = c.cardno
+     WHERE ub.utsavid = :utsavid AND ub.status IN ('confirmed', 'cash_completed', 'checkedin')
+     GROUP BY c.gender`,
+    { replacements: { utsavid }, type: QueryTypes.SELECT }
+  );
+
+  const maleCount = genderCounts.find(r => r.gender === 'M')?.cnt || 0;
+  const femaleCount = genderCounts.find(r => r.gender === 'F')?.cnt || 0;
+  const totalReg = maleCount + femaleCount;
+
+  if (totalReg > 0) {
+    // 2. Fetch all RC rooms in utsav_room_config for this event (not blocked, has capacity)
+    const rcRooms = await UtsavRoomConfig.findAll({
+      where: {
+        utsavid,
+        is_inside_rc: 1,
+        is_blocked: 0,
+        avail_capacity: { [Sequelize.Op.gt]: 0 }
+      },
+      raw: true
+    });
+
+    // 3. Fetch pre-event room occupancy (5 days before event start)
+    const utsavRecord = await UtsavDb.findOne({ where: { id: utsavid }, attributes: ['start_date', 'end_date'], raw: true });
+    const preOccupancyGenderMap = new Map(); // roomno -> 'M' | 'F'
+
+    if (utsavRecord) {
+      const eventStart = moment(utsavRecord.start_date);
+      const preStart = eventStart.clone().subtract(5, 'days').format('YYYY-MM-DD');
+      const preEnd = eventStart.format('YYYY-MM-DD');
+
+      const preBookings = await database.query(
+        `SELECT rb.roomno, c.gender
+         FROM room_booking AS rb
+         INNER JOIN card_db AS c ON rb.cardno = c.cardno
+         WHERE rb.status NOT IN ('cancelled', 'admin cancelled')
+           AND rb.roomno IS NOT NULL AND rb.roomno != ''
+           AND rb.checkin >= :preStart AND rb.checkin <= :preEnd`,
+        { replacements: { preStart, preEnd }, type: QueryTypes.SELECT }
+      );
+
+      preBookings.forEach(b => {
+        if (b.roomno && b.gender) {
+          // RC rooms only (room number 1-60)
+          const num = parseInt(b.roomno, 10);
+          if (num >= 1 && num <= 60) {
+            preOccupancyGenderMap.set(String(num), b.gender);
+          }
+        }
+      });
+    }
+
+    // 4. Calculate target room counts
+    const totalRooms = rcRooms.length;
+    const targetMaleRooms = Math.round((maleCount / totalReg) * totalRooms);
+    const targetFemaleRooms = totalRooms - targetMaleRooms;
+
+    // 5. Assign gender_override — respect pre-occupancy first, then fill freely
+    // Sort: locked rooms first, then free rooms
+    const lockedMale = rcRooms.filter(r => preOccupancyGenderMap.get(r.room_group) === 'M');
+    const lockedFemale = rcRooms.filter(r => preOccupancyGenderMap.get(r.room_group) === 'F');
+    const freeRooms = rcRooms.filter(r => !preOccupancyGenderMap.has(r.room_group));
+
+    const maleRooms = [...lockedMale];
+    const femaleRooms = [...lockedFemale];
+
+    // Distribute free rooms to hit targets
+    for (const room of freeRooms) {
+      if (maleRooms.length < targetMaleRooms) {
+        maleRooms.push(room);
+      } else {
+        femaleRooms.push(room);
+      }
+    }
+
+    // 6. Write gender_override to utsav_room_config
+    const updates = [
+      ...maleRooms.map(r => ({ room_group: r.room_group, gender: 'M' })),
+      ...femaleRooms.map(r => ({ room_group: r.room_group, gender: 'F' }))
+    ];
+
+    let autoReassigned = 0;
+    for (const u of updates) {
+      const existing = rcRooms.find(r => r.room_group === u.room_group);
+      if (existing && existing.gender_override !== u.gender) {
+        await UtsavRoomConfig.update(
+          { gender_override: u.gender },
+          { where: { utsavid, room_group: u.room_group, is_inside_rc: 1 } }
+        );
+        autoReassigned++;
+      }
+    }
+
+    req.log.info('init_room_inventory_gender_proportioned', {
+      utsavid, maleCount, femaleCount, targetMaleRooms, targetFemaleRooms,
+      lockedMale: lockedMale.length, lockedFemale: lockedFemale.length, autoReassigned
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Initialized ${result.created} RC rooms (${result.total} total in RoomDB). ${result.skipped} already configured. Auto-proportioned gender: ${targetMaleRooms}M / ${targetFemaleRooms}F rooms (${autoReassigned} reassigned).`,
+      data: {
+        ...result,
+        genderProportioning: {
+          registrations: { male: maleCount, female: femaleCount },
+          rooms: { targetMale: targetMaleRooms, targetFemale: targetFemaleRooms },
+          maleRooms: maleRooms.map(r => r.room_group),
+          femaleRooms: femaleRooms.map(r => r.room_group),
+          preOccupiedMale: lockedMale.map(r => r.room_group),
+          preOccupiedFemale: lockedFemale.map(r => r.room_group),
+          autoReassigned
+        }
+      }
+    });
+  }
+
   return res.status(200).json({
     success: true,
     message: `Initialized ${result.created} RC rooms (${result.total} total in RoomDB). ${result.skipped} already configured.`,
@@ -2382,7 +2506,7 @@ export const runSmartAllocationController = async (req, res) => {
   const participants = await database.query(
     `SELECT 
       t1.bookingid, t1.cardno, t1.utsavid, t1.packageid, t1.roomno, t1.status,
-      t1.other,
+      t1.other, t1.updatedBy,
       t2.issuedto AS name, t2.mobno, t2.gender, t2.center, t2.country,
       t2.res_status, t2.dob,
       TIMESTAMPDIFF(YEAR, t2.dob, CURDATE()) AS age,
@@ -2435,16 +2559,12 @@ export const runSmartAllocationController = async (req, res) => {
     }
   });
 
-  // 3. Pre/Post event room bookings for international guests
-  const internationalParticipants = participants.filter(p => {
-    const c = String(p.country || '').trim().toLowerCase();
-    return c && c !== 'india' && c !== 'ind' && c !== 'null';
-  });
+  // Build allCardnos early — needed for pre-event room lookup and later queries
+  const allCardnos = participants.map(p => String(p.cardno).trim()).filter(Boolean);
 
-  const internationalCardnos = internationalParticipants.map(p => p.cardno).filter(Boolean);
-
+  // 3. Pre/Post event room bookings for ALL participants (not just international)
   let prePostRoomMap = new Map(); // cardno -> { roomno, details }
-  if (internationalCardnos.length > 0 && utsav.start_date && utsav.end_date) {
+  if (allCardnos.length > 0 && utsav.start_date && utsav.end_date) {
     const startDate = moment(utsav.start_date).format('YYYY-MM-DD');
     const endDate = moment(utsav.end_date).format('YYYY-MM-DD');
     const searchFromDate = moment(utsav.start_date).subtract(30, 'days').format('YYYY-MM-DD');
@@ -2452,9 +2572,9 @@ export const runSmartAllocationController = async (req, res) => {
 
     const generalRoomBookings = await RoomBooking.findAll({
       where: {
-        cardno: { [Sequelize.Op.in]: internationalCardnos },
-        status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled'] },
-        roomno: { [Sequelize.Op.and]: [{ [Sequelize.Op.ne]: null }, { [Sequelize.Op.ne]: '' }] },
+        cardno: { [Sequelize.Op.in]: allCardnos },
+        status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled', 'waiting'] },
+        roomno: { [Sequelize.Op.and]: [{ [Sequelize.Op.ne]: null }, { [Sequelize.Op.ne]: '' }, { [Sequelize.Op.ne]: 'NA' }, { [Sequelize.Op.ne]: '-' }] },
         checkin: { [Sequelize.Op.lte]: searchToDate },
         checkout: { [Sequelize.Op.gte]: searchFromDate }
       },
@@ -2463,6 +2583,9 @@ export const runSmartAllocationController = async (req, res) => {
     });
 
     generalRoomBookings.forEach(rb => {
+      const rawRoom = String(rb.roomno || '').trim();
+      if (!rawRoom || rawRoom === 'NA' || rawRoom === '-' || rawRoom === 'null') return;
+
       const cin = moment(rb.checkin).format('YYYY-MM-DD');
       const cout = moment(rb.checkout).format('YYYY-MM-DD');
       const isPreEvent = cout >= startDate && cin <= startDate;
@@ -2471,7 +2594,7 @@ export const runSmartAllocationController = async (req, res) => {
 
       if (isPreEvent || isPostEvent || isOverlapping) {
         prePostRoomMap.set(String(rb.cardno).trim(), {
-          roomno: rb.roomno,
+          roomno: rawRoom,
           checkin: cin,
           checkout: cout,
           type: isPreEvent && isPostEvent ? 'Pre & Post Event' : (isPreEvent ? 'Pre-Event' : (isPostEvent ? 'Post-Event' : 'Adjacent Stay'))
@@ -2481,7 +2604,7 @@ export const runSmartAllocationController = async (req, res) => {
   }
 
   // Fetch 2-year past Utsav stay history for all participants
-  const allCardnos = participants.map(p => String(p.cardno).trim()).filter(Boolean);
+  // (allCardnos is already defined above)
   const pastBookings = allCardnos.length ? await database.query(
     `SELECT 
       t1.cardno, t1.utsavid, t1.roomno, t1.status,
@@ -2537,6 +2660,73 @@ export const runSmartAllocationController = async (req, res) => {
     });
   });
 
+  // 5. Engagement Score — 4 queries reused from utsavParticipantHistoryReport
+  const oneYearAgo = moment(utsav.start_date).subtract(1, 'year').format('YYYY-MM-DD');
+  const utsavStartStr = moment(utsav.start_date).format('YYYY-MM-DD');
+  const confirmedStatuses = ['confirmed', 'cash_completed', 'checkedin'];
+
+  const [engStayDays, engSingleDay, engPgs, engNonPgs] = await Promise.all([
+    // A. RC stay nights in last 1 year
+    database.query(
+      `SELECT cardno, SUM(nights) AS stay_days FROM room_booking
+       WHERE cardno IN (:allCardnos) AND status IN ('checkedin','checkedout')
+         AND checkin >= :oneYearAgo AND checkin < :utsavStartStr
+       GROUP BY cardno`,
+      { replacements: { allCardnos, oneYearAgo, utsavStartStr }, type: QueryTypes.SELECT }
+    ),
+    // B. Single-day visits in last 1 year
+    database.query(
+      `SELECT cardno, COUNT(*) AS single_day_visits FROM room_booking
+       WHERE cardno IN (:allCardnos) AND status IN ('pending checkin','checkedin','checkedout')
+         AND (nights = 0 OR nights IS NULL)
+         AND checkin >= :oneYearAgo AND checkin < :utsavStartStr
+       GROUP BY cardno`,
+      { replacements: { allCardnos, oneYearAgo, utsavStartStr }, type: QueryTypes.SELECT }
+    ),
+    // C. PGS attendance in last 1 year
+    database.query(
+      `SELECT sb.cardno, COUNT(DISTINCT s.id) AS pgs_count
+       FROM shibir_booking_db AS sb
+       INNER JOIN shibir_db AS s ON sb.shibir_id = s.id
+       WHERE sb.cardno IN (:allCardnos) AND sb.status IN (:confirmedStatuses)
+         AND s.name LIKE 'Param Gyaan Sabha%'
+         AND s.start_date >= :oneYearAgo AND s.start_date < :utsavStartStr
+       GROUP BY sb.cardno`,
+      { replacements: { allCardnos, confirmedStatuses, oneYearAgo, utsavStartStr }, type: QueryTypes.SELECT }
+    ),
+    // D. Non-PGS adhyayan attendance in last 1 year
+    database.query(
+      `SELECT sb.cardno, COUNT(DISTINCT s.id) AS non_pgs_count
+       FROM shibir_booking_db AS sb
+       INNER JOIN shibir_db AS s ON sb.shibir_id = s.id
+       LEFT JOIN shibir_attendance_records AS sar ON sb.bookingid = sar.bookingid AND sar.attended = 1
+       LEFT JOIN shibir_attendance_db AS sa ON sb.bookingid = sa.bookingid
+       WHERE sb.cardno IN (:allCardnos)
+         AND s.name NOT LIKE 'Param Gyaan Sabha%'
+         AND s.start_date >= :oneYearAgo AND s.start_date < :utsavStartStr
+         AND (sar.id IS NOT NULL OR sa.session_1_attendance = 1 OR sa.session_2_attendance = 1
+           OR sa.session_3_attendance = 1 OR sa.session_4_attendance = 1 OR sa.session_5_attendance = 1
+           OR sa.session_6_attendance = 1 OR sa.session_7_attendance = 1 OR sa.session_8_attendance = 1
+           OR sa.session_9_attendance = 1)
+       GROUP BY sb.cardno`,
+      { replacements: { allCardnos, oneYearAgo, utsavStartStr }, type: QueryTypes.SELECT }
+    )
+  ]);
+
+  // Build engagementMap: cardno -> boolean (any threshold met)
+  const engagementMap = new Map();
+  const stayDaysMap = Object.fromEntries(engStayDays.map(r => [r.cardno, parseInt(r.stay_days, 10) || 0]));
+  const singleDayMap = Object.fromEntries(engSingleDay.map(r => [r.cardno, parseInt(r.single_day_visits, 10) || 0]));
+  const pgsMap = Object.fromEntries(engPgs.map(r => [r.cardno, parseInt(r.pgs_count, 10) || 0]));
+  const nonPgsMap = Object.fromEntries(engNonPgs.map(r => [r.cardno, parseInt(r.non_pgs_count, 10) || 0]));
+  allCardnos.forEach(cno => {
+    const engaged = (stayDaysMap[cno] || 0) >= 18
+      || (singleDayMap[cno] || 0) >= 10
+      || (pgsMap[cno] || 0) >= 9
+      || (nonPgsMap[cno] || 0) >= 6;
+    if (engaged) engagementMap.set(cno, true);
+  });
+
   const result = await runSmartAllocation({
     utsavid,
     participants,
@@ -2549,10 +2739,18 @@ export const runSmartAllocationController = async (req, res) => {
       formGuestMap,
       prePostRoomMap
     },
-    pastHistoryMap
+    pastHistoryMap,
+    engagementMap
   });
 
   req.log.info('run_smart_allocation_done', result.summary);
+
+  // Compute gender room split from result.rooms (based on gender_override set during proportioning or gender_staying)
+  const rcRoomsInResult = result.rooms.filter(r => r.is_inside_rc);
+  const maleRCRooms = rcRoomsInResult.filter(r => (r.gender_override === 'M' || (!r.gender_override && r.gender_staying === 'M')));
+  const femaleRCRooms = rcRoomsInResult.filter(r => (r.gender_override === 'F' || (!r.gender_override && r.gender_staying === 'F')));
+  const maleReg = participants.filter(p => p.gender === 'M').length;
+  const femaleReg = participants.filter(p => p.gender === 'F').length;
 
   return res.status(200).json({
     success: true,
@@ -2564,6 +2762,17 @@ export const runSmartAllocationController = async (req, res) => {
         end_date: utsav.end_date
       },
       summary: result.summary,
+      genderRoomSplit: {
+        note: `Based on ${maleReg} male and ${femaleReg} female registrations (${Math.round(maleReg * 100 / (maleReg + femaleReg) || 0)}% M / ${Math.round(femaleReg * 100 / (maleReg + femaleReg) || 0)}% F), RC rooms were proportioned as follows:`,
+        registrations: { male: maleReg, female: femaleReg, total: maleReg + femaleReg },
+        rcRooms: {
+          total: rcRoomsInResult.length,
+          male: maleRCRooms.length,
+          female: femaleRCRooms.length,
+          maleRoomNumbers: maleRCRooms.map(r => r.room_group).sort((a, b) => parseInt(a) - parseInt(b)),
+          femaleRoomNumbers: femaleRCRooms.map(r => r.room_group).sort((a, b) => parseInt(a) - parseInt(b))
+        }
+      },
       guests: result.guests.map(g => ({
         bookingid: g.bookingid,
         cardno: g.cardno,
