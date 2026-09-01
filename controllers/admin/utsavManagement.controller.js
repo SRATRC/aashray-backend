@@ -3878,6 +3878,31 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       utsavAttendedMap[row.cardno] = parseInt(row.utsav_count, 10) || 0;
     });
 
+    // (E) Total Events Held Counts
+    const [[totalPgsResult], [totalNonPgsResult], [totalPastUtsavsResult]] = await Promise.all([
+      database.query(
+        `SELECT COUNT(*) AS count FROM shibir_db
+         WHERE name LIKE 'Param Gyaan Sabha%'
+           AND start_date >= :oneYearAgo AND start_date < :utsavStart`,
+        { replacements: { oneYearAgo, utsavStart }, type: QueryTypes.SELECT }
+      ),
+      database.query(
+        `SELECT COUNT(*) AS count FROM shibir_db
+         WHERE name NOT LIKE 'Param Gyaan Sabha%'
+           AND start_date >= :oneYearAgo AND start_date < :utsavStart`,
+        { replacements: { oneYearAgo, utsavStart }, type: QueryTypes.SELECT }
+      ),
+      database.query(
+        `SELECT COUNT(*) AS count FROM utsav_db
+         WHERE id != :currentUtsavid AND start_date < :utsavStart`,
+        { replacements: { currentUtsavid: utsavid, utsavStart }, type: QueryTypes.SELECT }
+      )
+    ]);
+
+    const totalPgsInYear = parseInt(totalPgsResult?.count, 10) || 0;
+    const totalNonPgsInYear = parseInt(totalNonPgsResult?.count, 10) || 0;
+    const totalPastUtsavsAllTime = parseInt(totalPastUtsavsResult?.count, 10) || 0;
+
     // 4. Combine Participant Profile + 1-Yr History + Engagement Tags
     let reportData = participants.map((p) => {
       const stay_days = stayDaysMap[p.cardno] || 0;
@@ -4021,9 +4046,9 @@ export const utsavParticipantHistoryReport = async (req, res) => {
         'Room No': item.roomno || '',
         'RC Stay Days (1Yr)': item.history_1yr.stay_days,
         '1-Day Visits (1Yr)': item.history_1yr.single_day_visits,
-        'PGS Adhyayans (1Yr)': item.history_1yr.pgs_adhyayan_count,
-        'Non-PGS Adhyayans (1Yr)': item.history_1yr.non_pgs_adhyayan_count,
-        'Past Utsavs Attended': item.history_1yr.utsav_count,
+        [`PGS (Attended / ${totalPgsInYear} in 1Yr)`]: item.history_1yr.pgs_adhyayan_count,
+        [`Adhyayans (Attended / ${totalNonPgsInYear} in 1Yr)`]: item.history_1yr.non_pgs_adhyayan_count,
+        [`Past Utsavs (Attended / ${totalPastUtsavsAllTime} All-Time)`]: item.history_1yr.utsav_count,
         'Engagement Tags': item.tags.join(', ')
       }));
 
@@ -4043,9 +4068,9 @@ export const utsavParticipantHistoryReport = async (req, res) => {
         { wch: 12 },
         { wch: 20 },
         { wch: 22 },
-        { wch: 24 },
-        { wch: 25 },
-        { wch: 25 },
+        { wch: 28 },
+        { wch: 30 },
+        { wch: 30 },
         { wch: 30 }
       ];
 
@@ -4083,6 +4108,11 @@ export const utsavParticipantHistoryReport = async (req, res) => {
         one_year_ago_date: oneYearAgo,
         total_participants: totalCount,
         package_breakdown: packageBreakdown,
+        event_totals: {
+          total_pgs_in_year: totalPgsInYear,
+          total_non_pgs_in_year: totalNonPgsInYear,
+          total_past_utsavs_all_time: totalPastUtsavsAllTime
+        },
         page: page ? Math.max(1, parseInt(page, 10) || 1) : 1,
         page_size: page_size ? Math.max(1, parseInt(page_size, 10) || 10) : totalCount
       }
