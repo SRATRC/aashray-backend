@@ -58,7 +58,6 @@ import XLSX from 'xlsx';
 import {
   initializeEventRooms,
   preprocessGuests,
-  getEventRooms,
   runSmartAllocation
 } from '../../helpers/roomAllocationEngine.js';
 import { sendUtsavStatusChangeWhatsApp, sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -2126,7 +2125,7 @@ export const applyRoomAllocations = async (req, res) => {
   }
 
   let updatedCount = 0;
-  const adminCardno = 'SYSTEM-ROOM-ALLOCATION';
+  const defaultAdmin = req.user?.cardno ? String(req.user.cardno) : 'SYSTEM-ROOM-ALLOCATION';
 
   for (const item of allocations) {
     if ((item.bookingid || item.cardno) && item.roomno !== undefined) {
@@ -2135,8 +2134,10 @@ export const applyRoomAllocations = async (req, res) => {
       if (item.bookingid) whereClause.bookingid = item.bookingid;
       else if (item.cardno) whereClause.cardno = String(item.cardno).trim();
 
+      const recordUpdatedBy = item.updatedBy || (item.source === 'manual' ? defaultAdmin : 'SYSTEM-ROOM-ALLOCATION');
+
       const [count] = await UtsavBooking.update(
-        { roomno: cleanRoom || null, updatedBy: adminCardno },
+        { roomno: cleanRoom || null, updatedBy: recordUpdatedBy },
         { where: whereClause }
       );
       if (count > 0) updatedCount += count;
@@ -2208,33 +2209,30 @@ export const getRoomInventory = async (req, res) => {
  * Auto-proportions gender_override on RC rooms based on confirmed registration ratio.
  */
 export const initRoomInventory = async (req, res) => {
-  const { utsavid, defaultCapacity = 4 } = req.body;
+  const { utsavid } = req.body;
   if (!utsavid) {
     throw new ApiError(400, 'utsavid is required in request body');
   }
 
-  const result = await initializeEventRooms(parseInt(utsavid, 10), parseInt(defaultCapacity, 10));
+  const result = await initializeEventRooms(parseInt(utsavid, 10));
 
   // Auto-proportion gender_override for RC rooms based on confirmed registrations
   try {
-    // 1. Get confirmed/checkedin registration counts by gender
-    const genderCounts = await UtsavBooking.findAll({
-      attributes: [
-        [Sequelize.col('card_db.gender'), 'gender'],
-        [Sequelize.fn('COUNT', Sequelize.col('utsav_booking.id')), 'count']
-      ],
-      include: [{
-        model: CardDb,
-        attributes: [],
-        required: true
-      }],
-      where: {
-        utsavid,
-        status: { [Sequelize.Op.in]: ['confirmed', 'cash_completed', 'checkedin'] }
-      },
-      group: [Sequelize.col('card_db.gender')],
-      raw: true
-    });
+    // 1. Get confirmed/checkedin registration counts by gender using raw query
+    const genderCounts = await database.query(
+      `SELECT c.gender, COUNT(*) AS count
+       FROM utsav_booking AS ub
+       INNER JOIN card_db AS c ON ub.cardno = c.cardno
+       WHERE ub.utsavid = :utsavid AND ub.status IN (:statuses)
+       GROUP BY c.gender`,
+      {
+        replacements: {
+          utsavid: parseInt(utsavid, 10),
+          statuses: ['confirmed', 'cash_completed', 'checkedin']
+        },
+        type: QueryTypes.SELECT
+      }
+    );
 
     const maleCount = parseInt(genderCounts.find(g => g.gender === 'M')?.count || 0, 10);
     const femaleCount = parseInt(genderCounts.find(g => g.gender === 'F')?.count || 0, 10);
