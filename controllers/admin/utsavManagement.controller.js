@@ -2158,7 +2158,7 @@ export const applyRoomAllocations = async (req, res) => {
 
 /**
  * GET /api/v1/admin/utsav/room-inventory?utsavid=<id>
- * Fetches configured rooms for an event with available beds.
+ * Fetches all configured rooms for an event (including blocked rooms) for the Room Inventory dashboard.
  */
 export const getRoomInventory = async (req, res) => {
   const { utsavid } = req.query;
@@ -2166,10 +2166,39 @@ export const getRoomInventory = async (req, res) => {
     throw new ApiError(400, 'utsavid query parameter is required');
   }
 
-  const rooms = await getEventRooms(parseInt(utsavid, 10));
+  const rooms = await UtsavRoomConfig.findAll({
+    where: { utsavid: parseInt(utsavid, 10) },
+    order: [
+      ['is_inside_rc', 'DESC'],
+      ['floor', 'ASC'],
+      [Sequelize.literal('CAST(room_group AS UNSIGNED)'), 'ASC'],
+      ['room_group', 'ASC']
+    ],
+    raw: true
+  });
+
+  // Enrich with default gender and roomtype from roomdb
+  const allBeds = await RoomDb.findAll({ raw: true });
+  const roomMetaMap = new Map();
+  allBeds.forEach(b => {
+    const m = String(b.roomno).match(/^(\d+)/);
+    if (m && !roomMetaMap.has(m[1])) {
+      roomMetaMap.set(m[1], { default_gender: b.gender, roomtype: b.roomtype });
+    }
+  });
+
+  const enrichedRooms = rooms.map(r => {
+    const meta = roomMetaMap.get(r.room_group) || {};
+    return {
+      ...r,
+      default_gender: meta.default_gender || 'Any',
+      roomtype: meta.roomtype || ''
+    };
+  });
+
   return res.status(200).json({
     success: true,
-    data: rooms
+    data: enrichedRooms
   });
 };
 
