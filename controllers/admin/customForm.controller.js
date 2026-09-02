@@ -1669,9 +1669,10 @@ export const validateGuest = async (req, res) => {
     const eventName = form.event_name || 'this event';
 
     if (eventId) {
+        const utsavIds = (parseInt(eventId, 10) === 24 || parseInt(eventId, 10) === 25) ? [24, 25] : [eventId];
         const booking = await UtsavBooking.findOne({
             where: {
-                utsavid: eventId,
+                utsavid: { [Sequelize.Op.in]: utsavIds },
                 cardno: card.cardno,
                 status: {
                     [Sequelize.Op.in]: [
@@ -2090,6 +2091,7 @@ async function assertEventRegistration(form, cardno) {
     const eventName = form.event_name || 'this event';
 
     if (eventType.includes('utsav')) {
+        const utsavIds = (eventId === 24 || eventId === 25) ? [24, 25] : [eventId];
         const booking = await UtsavBooking.findOne({
             where: {
                 utsavid: { [Sequelize.Op.in]: allowedEventIds },

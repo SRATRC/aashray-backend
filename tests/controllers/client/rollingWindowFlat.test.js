@@ -10,11 +10,13 @@ jest.mock('../../../utils/sendMail.js');
 
 const fmt = (m) => m.format('YYYY-MM-DD');
 
-// NOTE: reconcile this payload with tests/controllers/client/flatBooking.controller.test.js
-// (reuse its createFlatBookingJson helper if the shape differs).
 const flatBookingJson = (checkin, checkout) => ({
   booking_type: 'flat',
-  details: { checkin_date: checkin, checkout_date: checkout }
+  details: {
+    checkin_date: checkin,
+    checkout_date: checkout,
+    mumukshus: [MUMUKSHU_1]
+  }
 });
 
 describe('Flat rolling-window cap (client, non-resident)', () => {

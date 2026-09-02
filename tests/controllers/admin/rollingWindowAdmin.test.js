@@ -71,7 +71,7 @@ describe('Admin rolling-window warning (non-blocking: create + warn)', () => {
     const checkout = fmt(moment().add(12, 'day')); // 11 nights
 
     const res = await request(app)
-      .post('/api/v1/admin/bookForMumukshu')
+      .post('/api/v1/admin/stay/bookForMumukshu')
       .set(ADMIN_AUTH)
       .send({ cardno: MUMUKSHU_1, checkin_date: checkin, checkout_date: checkout, room_type: 'ac', floor_pref: '' });
 
@@ -87,7 +87,7 @@ describe('Admin rolling-window warning (non-blocking: create + warn)', () => {
     const checkout = fmt(moment().add(6, 'day')); // 5 nights
 
     const res = await request(app)
-      .post('/api/v1/admin/bookForMumukshu')
+      .post('/api/v1/admin/stay/bookForMumukshu')
       .set(ADMIN_AUTH)
       .send({ cardno: MUMUKSHU_1, checkin_date: checkin, checkout_date: checkout, room_type: 'ac', floor_pref: '' });
 

@@ -173,6 +173,7 @@ export const validateBooking = async (req, res) => {
   // selected more than once for the same person across primary + addons, so the
   // user is blocked here before proceeding to payment.
   validateNoDuplicateUtsavBooking(primary_booking, addons);
+  validateFlatBookingConstraints(primary_booking, addons);
 
   req.log.info('validate_mumukshu_booking_start', {
     cardno: req.user.cardno,
@@ -218,6 +219,7 @@ export const mumukshuBooking = async (req, res, next) => {
   let t;
   try {
     const { primary_booking, addons } = req.body;
+    validateFlatBookingConstraints(primary_booking, addons);
     t = await database.transaction();
     req.transaction = t;
 
@@ -399,6 +401,11 @@ async function book(
 
     case TYPE_FOOD:
       const foodResult = await bookFood(body, data, t, user);
+      // Meals cost money when the card is a GUEST. Leaving this out of `amount`
+      // built a Razorpay order for the other bookings only, while
+      // updateRazorpayTransactions still stamped that order id on the meal
+      // transactions - so the webhook completed meals nobody paid for.
+      amount += foodResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
@@ -477,6 +484,7 @@ async function validate(body, user, data, utsav, response) {
         user,
         utsav
       );
+      totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
@@ -592,8 +600,7 @@ async function checkFoodAvailability(body, data, user, utsav) {
     mumukshuGroup,
     body.primary_booking,
     body.addons,
-    utsav,
-    user
+    utsav
   );
 
   return result;

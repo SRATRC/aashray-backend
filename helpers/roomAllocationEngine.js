@@ -861,6 +861,16 @@ export async function runSmartAllocation(params) {
   // Re-sort occupants inside each room by age DESC so oldest always get cots (A, B, C, D) and youngsters (18-40) get floor beds
   allGuests = assignSplitBeds(rooms, allGuests, effectiveSplitDate);
   allGuests = rebalanceFloorBeds(rooms, allGuests);
+
+  // Re-run allocation pass for any guest displaced from floor beds in final rebalance
+  const finalDisplaced = allGuests.filter(g => !g.allocated && !g.reviewFlag && !g.isFastTracked);
+  if (finalDisplaced.length) {
+    for (let pass = 1; pass <= 3; pass++) {
+      const result = runAllocationPass(rooms, finalDisplaced, roomDbGenders, pass);
+      rooms = result.rooms;
+    }
+  }
+
   allGuests = assignSplitBeds(rooms, allGuests, effectiveSplitDate);
 
   // Diagnose reason for each unallocated guest

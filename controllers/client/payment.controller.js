@@ -14,11 +14,18 @@ import {
   TYPE_TRAVEL,
   TYPE_UTSAV,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CASH_COMPLETED
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
-import { resolveOrderForTransactions } from '../../helpers/transactions.helper.js';
+import {
+  PAYABLE_TRANSACTION_STATUSES,
+  fetchRazorpayPayment,
+  owedInPaise,
+  resolveOrderForTransactions,
+  splitTransactionsByPayment
+} from '../../helpers/transactions.helper.js';
 import { getBooking, getBookingType } from '../../helpers/booking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
@@ -26,22 +33,84 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { sendRoomStatusChangeWhatsApp, sendTravelStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 
-export const verifyPayment = async (req, res) => {
-  const razorpay_order_id = req.body.payload.payment.entity.order_id;
-  const razorpay_payment_id = req.body.payload.payment.entity.id;
-  const razorpay_status = req.body.payload.payment.entity.status;
+// Stands in for an audit column the delivery did not carry. The columns are
+// NOT NULL, and a row that says the field was missing beats no row at all.
+const UNKNOWN_WEBHOOK_FIELD = 'unknown';
 
+export const verifyPayment = async (req, res) => {
+  const webhookPayment = req.body?.payload?.payment?.entity;
+  if (!webhookPayment?.id) {
+    throw new ApiError(400, 'Razorpay payment payload is required');
+  }
+
+  // Record the delivery before anything can reject it. An empty audit table is
+  // how the August 2026 outage stayed invisible for two days: the signature
+  // middleware rejected every delivery before this insert, so nothing showed
+  // that Razorpay had even called. Rows written here are a log of what arrived,
+  // not evidence that it was genuine - settlement below reads only the fields
+  // fetched from Razorpay.
   req.log.info('razorpay_webhook_received', {
+    orderId: webhookPayment.order_id,
+    paymentId: webhookPayment.id,
+    status: webhookPayment.status
+  });
+
+  // order_id and status are NOT NULL, and the route is unauthenticated while the
+  // secret is missing, so a partial payload would otherwise fail the insert and
+  // return a 500 with a stack trace. Record what arrived and mark what did not.
+  if (!webhookPayment.order_id || !webhookPayment.status) {
+    req.log.warn('razorpay_webhook_fields_absent', {
+      paymentId: webhookPayment.id,
+      hasOrderId: Boolean(webhookPayment.order_id),
+      hasStatus: Boolean(webhookPayment.status)
+    });
+  }
+
+  // Losing the audit row must not lose the payment. The row is a diagnostic,
+  // and settlement below stands on its own.
+  try {
+    await RazorpayWebhook.create({
+      order_id: webhookPayment.order_id || UNKNOWN_WEBHOOK_FIELD,
+      payment_id: webhookPayment.id,
+      status: webhookPayment.status || UNKNOWN_WEBHOOK_FIELD,
+      json: req.body
+    });
+  } catch (err) {
+    req.log.error('razorpay_webhook_audit_failed', {
+      paymentId: webhookPayment.id,
+      error: err?.message
+    });
+  }
+
+  // Temporary production fallback while the webhook secret is unavailable.
+  // Do not trust the unsigned request fields. Fetch the payment from Razorpay
+  // and use only the server-to-server response for settlement.
+  const verifiedPayment = await fetchRazorpayPayment(webhookPayment.id);
+  const razorpay_order_id = verifiedPayment.order_id;
+  const razorpay_payment_id = verifiedPayment.id;
+  const razorpay_status = verifiedPayment.status;
+  // Razorpay reports the amount in paise already.
+  const razorpay_amount = Number(verifiedPayment.amount);
+
+  const paymentMatchesWebhook =
+    razorpay_payment_id === webhookPayment.id &&
+    razorpay_order_id === webhookPayment.order_id &&
+    razorpay_amount === Number(webhookPayment.amount) &&
+    verifiedPayment.currency === webhookPayment.currency;
+
+  if (!paymentMatchesWebhook) {
+    req.log.error('razorpay_webhook_api_verification_failed', {
+      paymentId: webhookPayment.id,
+      webhookOrderId: webhookPayment.order_id,
+      verifiedOrderId: razorpay_order_id
+    });
+    throw new ApiError(401, 'Razorpay payment verification failed');
+  }
+
+  req.log.info('razorpay_webhook_api_verified', {
     orderId: razorpay_order_id,
     paymentId: razorpay_payment_id,
     status: razorpay_status
-  });
-
-  await RazorpayWebhook.create({
-    order_id: razorpay_order_id,
-    payment_id: razorpay_payment_id,
-    status: razorpay_status,
-    json: req.body
   });
 
   var message;
@@ -71,19 +140,20 @@ export const verifyPayment = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const transactions = await Transactions.findAll({
-    where: {
-      razorpay_order_id,
-      status: [
-        STATUS_PAYMENT_PENDING,
-        STATUS_CASH_PENDING,
-        STATUS_PAYMENT_FAILED,
-        STATUS_PAYMENT_AUTHORIZED
-      ]
-    },
+  // One scan for the whole order, partitioned below. razorpay_order_id is
+  // unindexed, so each query is a full scan holding next-key locks on every row
+  // it touches - and Razorpay redelivers the same payment within a second, so
+  // that lock window is contended. The settled rows fall inside this scan
+  // anyway, so reading them here costs no extra locking.
+  const orderTransactions = await Transactions.findAll({
+    where: { razorpay_order_id },
     lock: true,
     transaction: t
   });
+
+  const transactions = orderTransactions.filter((txn) =>
+    PAYABLE_TRANSACTION_STATUSES.includes(txn.status)
+  );
 
   if (transactions && transactions.length > 0) {
     const bookedBy = await validateCard(transactions[0].cardno);
@@ -91,7 +161,38 @@ export const verifyPayment = async (req, res) => {
 
     const userBookingIdMap = {};
 
-    for (const transaction of transactions) {
+    // What this payment already settled. A redelivery must not spend that money
+    // a second time on the rows it did not cover the first time.
+    const settledInPaise = owedInPaise(
+      orderTransactions.filter((txn) =>
+        [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(txn.status)
+      )
+    );
+
+    // Never settle more than the payment collected. Anything left uncovered
+    // keeps the status it had, so it still expires through the pending-payment
+    // cron or gets reconciled, instead of being given away. Advancing it here
+    // would strand it: 'authorized' is in neither the retry list nor the cron's.
+    const { covered, uncovered } = splitTransactionsByPayment(
+      transactions,
+      razorpay_amount - settledInPaise
+    );
+
+    if (uncovered.length > 0) {
+      req.log.error('razorpay_underpaid_order', {
+        orderId: razorpay_order_id,
+        paymentId: razorpay_payment_id,
+        razorpayStatus: razorpay_status,
+        cardno: transactions[0].cardno,
+        paidInPaise: razorpay_amount,
+        alreadySettledInPaise: settledInPaise,
+        owedInPaise: owedInPaise(transactions),
+        settledTransactionIds: covered.map((txn) => txn.id),
+        leftUntouchedTransactionIds: uncovered.map((txn) => txn.id)
+      });
+    }
+
+    for (const transaction of covered) {
       var transactionStatus;
       var bookingStatus;
 
@@ -199,7 +300,8 @@ export const verifyPayment = async (req, res) => {
     await t.commit();
     req.log.info('razorpay_webhook_committed', {
       orderId: razorpay_order_id,
-      transactionCount: transactions.length
+      transactionCount: covered.length,
+      leftPendingCount: uncovered.length
     });
 
     // Trigger Room status change WhatsApp messages
@@ -317,13 +419,7 @@ export const createOrderIdForPendingPayments = async (req, res) => {
   req.log.info('create_order_total_amount', { cardno: req.user.cardno, totalAmount, transactionCount: transactions.length });
 
   if (totalAmount > 0) {
-    const order = await resolveOrderForTransactions(
-      transactions,
-      totalAmount,
-      bookingids,
-      [],
-      t
-    );
+    const order = await resolveOrderForTransactions(transactions, t);
     req.log.info('create_order_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
     await t.commit();
     req.log.info('create_order_success', { cardno: req.user.cardno, orderId: order.id });
@@ -395,13 +491,7 @@ export const createOrderIdForPendingPaymentsV2 = async (req, res) => {
   });
 
   if (totalAmount > 0) {
-    const order = await resolveOrderForTransactions(
-      validTransactions,
-      totalAmount,
-      [],
-      validTransactionIds,
-      t
-    );
+    const order = await resolveOrderForTransactions(validTransactions, t);
     req.log.info('create_order_v2_generated', { cardno: req.user.cardno, orderId: order.id, amount: totalAmount });
     await t.commit();
     req.log.info('create_order_v2_success', { cardno: req.user.cardno, orderId: order.id });

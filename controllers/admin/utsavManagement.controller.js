@@ -12,6 +12,7 @@ import {
   UtsavRoomConfig
 } from '../../models/associations.js';
 import ShortLink from '../../models/short_link.model.js';
+import WaGroupJob from '../../models/waGroupJob.model.js';
 import BlockDates from '../../models/block_dates.model.js';
 import {
   validateUtsavBooking,
@@ -316,6 +317,23 @@ export const createUtsav = async (req, res) => {
       },
       { transaction: t }
     );
+
+    const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
+    if (inviteMatch && inviteMatch[1]) {
+      await WaGroupJob.create(
+        {
+          action: 'resolve_invite_link',
+          status: 'pending',
+          priority: 'high',
+          payload: {
+            inviteCode: inviteMatch[1],
+            type: 'utsav',
+            eventId: utsavDetails.id
+          }
+        },
+        { transaction: t }
+      );
+    }
   }
 
   await t.commit();
@@ -565,6 +583,7 @@ export const updateUtsav = async (req, res) => {
     newAvailableSeats = utsav.available_seats;
   }
 
+  const previousWhatsappLink = utsav.whatsapp_link;
   await utsav.update({
     name,
     start_date,
@@ -591,6 +610,20 @@ export const updateUtsav = async (req, res) => {
       active: true,
       createdBy: req.user.username
     });
+
+    const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
+    if (inviteMatch && inviteMatch[1] && whatsapp_link !== previousWhatsappLink) {
+      await WaGroupJob.create({
+        action: 'resolve_invite_link',
+        status: 'pending',
+        priority: 'high',
+        payload: {
+          inviteCode: inviteMatch[1],
+          type: 'utsav',
+          eventId: utsavId
+        }
+      });
+    }
   }
 
   req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
@@ -2125,7 +2158,7 @@ export const applyRoomAllocations = async (req, res) => {
   }
 
   let updatedCount = 0;
-  const defaultAdmin = req.user?.cardno ? String(req.user.cardno) : 'SYSTEM-ROOM-ALLOCATION';
+  const defaultAdmin = req.user?.username || (req.user?.cardno ? String(req.user.cardno) : 'SYSTEM-ROOM-ALLOCATION');
 
   for (const item of allocations) {
     if ((item.bookingid || item.cardno) && item.roomno !== undefined) {
@@ -2134,7 +2167,7 @@ export const applyRoomAllocations = async (req, res) => {
       if (item.bookingid) whereClause.bookingid = item.bookingid;
       else if (item.cardno) whereClause.cardno = String(item.cardno).trim();
 
-      const recordUpdatedBy = item.updatedBy || (item.source === 'manual' ? defaultAdmin : 'SYSTEM-ROOM-ALLOCATION');
+      const recordUpdatedBy = item.source === 'system' ? 'SYSTEM-ROOM-ALLOCATION' : (item.updatedBy || defaultAdmin);
 
       const [count] = await UtsavBooking.update(
         { roomno: cleanRoom || null, updatedBy: recordUpdatedBy },

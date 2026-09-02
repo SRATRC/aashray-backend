@@ -112,13 +112,18 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
       { transaction: t }
     );
     
-    // 🟢 UPDATED CONDITIONAL
     if (
       utsav.status === STATUS_OPEN &&
       status === STATUS_PAYMENT_PENDING &&
       package_info.amount > 0
     ) {
-      await createPendingTransaction(
+      // createPendingTransaction spends any utsav credit the card holds and
+      // returns what is left to pay. Adding the package price instead billed
+      // the member for credit they had already given up: Razorpay collected the
+      // full price while the transaction row showed the discounted one. Where
+      // credit covered the package outright the booking was already complete,
+      // and the app still opened a payment sheet for the whole amount.
+      const { discountedAmount } = await createPendingTransaction(
         user,
         booking,
         TYPE_UTSAV,
@@ -126,10 +131,8 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
         user.cardno,
         t
       );
-      
-      total_amount += package_info.amount;
-      
-      
+
+      total_amount += discountedAmount;
     }
     // Only provision food for non-waitlisted bookings
     if (booking.status !== STATUS_WAITING) {
@@ -547,31 +550,52 @@ export async function getDateRangesDuringUtsav(
   for (const mumukshu of mumukshus) {
     const isDayVisit = startDate === endDate;
 
-if (isDayVisit) {
-  dateRangesByMumukshu[mumukshu] = [
-    {
-      start: startDate,
-      end: endDate,
-      overlappingWithUtsav: false
+    const dateRanges = [];
+
+    // A day visit is one whole range and is never split around an utsav. It used
+    // to return here, BEFORE the blocked-date validation below, so a day visit
+    // onto a blocked date was never checked for anyone. It now falls through to
+    // the same validation as every other stay.
+    if (isDayVisit) {
+      dateRanges.push({
+        start: startDate,
+        end: endDate,
+        overlappingWithUtsav: false
+      });
+      validateBlockedDates(blockedDates, dateRanges);
+      dateRangesByMumukshu[mumukshu] = dateRanges;
+      continue;
     }
-  ];
-  continue;
-}
 
     const utsavBooking = inProgressUtsavOverlapping
       ? utsav
       : existingUtsavBookings[mumukshu]?.UtsavDb;
 
-    const dateRanges = [];
     if (utsavBooking) {
-      dateRanges.push(
-        ...splitDateRanges(
-          utsavBooking.start_date,
-          utsavBooking.end_date,
-          startDate,
-          endDate
-        )
+      const splitRanges = splitDateRanges(
+        utsavBooking.start_date,
+        utsavBooking.end_date,
+        startDate,
+        endDate
       );
+
+      if (splitRanges.length > 0) {
+        dateRanges.push(...splitRanges);
+      } else {
+        // The whole requested stay sits INSIDE the utsav this member attends, so
+        // the split leaves nothing to book. The empty range list then made every
+        // check below vacuous — nothing to validate, nothing to reject — and the
+        // request came back a silent success, while the identical request from a
+        // non-attendee was correctly rejected. Attending an utsav never unblocks
+        // its dates: those nights belong to the utsav (its package covers them),
+        // so refuse the stay outright.
+        throw new ApiError(
+          400,
+          `These dates are part of ${
+            utsavBooking.name || 'the Utsav'
+          }, which you are attending. Those nights belong to the Utsav, not to your stay, so a room cannot be booked for them.`
+        );
+      }
     } else {
       // In case, utsav booking is not found for this mumukshu, check if there is any
       // utsav starts on checkout or ends on checkin date

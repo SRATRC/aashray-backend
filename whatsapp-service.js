@@ -324,6 +324,13 @@ async function processQueue(sock) {
         const groupJid = groupInfo.id;
         console.log(`[WA Queue] Successfully resolved group JID: ${groupJid}`);
 
+        const { type, eventId } = job.payload || {};
+        if (type === 'utsav' && eventId) {
+          await UtsavDb.update({ whatsapp_group_jid: groupJid }, { where: { id: eventId } });
+        } else if (type === 'shibir' && eventId) {
+          await ShibirDb.update({ whatsapp_group_jid: groupJid }, { where: { id: eventId } });
+        }
+
         await job.update({
           status: 'success',
           payload: { ...job.payload, groupJid, subject: groupInfo.subject, size: groupInfo.size }
