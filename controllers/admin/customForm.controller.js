@@ -168,7 +168,6 @@ export const createForm = async (req, res) => {
             title,
             description: description || null,
             dept_name,
-            secondary_depts: Array.isArray(secondary_depts) ? secondary_depts : null,
             fields,
             isPublic: isPublic !== undefined ? isPublic : true,
             authType: authType || 'cardno',
@@ -1490,12 +1489,9 @@ export const resolveIdentity = async (req, res) => {
                             const bookedCardNos = [...new Set(bookings.map(b => b.cardno))];
                             const residentCards = await CardDb.findAll({
                                 where: { cardno: { [Sequelize.Op.in]: bookedCardNos } },
-                                attributes: ['cardno', 'issuedto']
+                                attributes: ['issuedto']
                             });
-                            confirmedResidents = residentCards.map(c => ({
-                                cardno: c.cardno,
-                                name: c.issuedto
-                            }));
+                            confirmedResidents = residentCards.map(c => c.issuedto);
                         }
                     }
                 } else if (formObj.requireRegistration) {
