@@ -728,7 +728,7 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null, scann
   // ── Auto Check-In on First Meal Plate during Active Utsav ──
   let autoCheckin = null;
   try {
-    const activeUtsav = await UtsavDb.findOne({
+    const activeUtsavs = await UtsavDb.findAll({
       where: {
         start_date: { [Op.lte]: targetDate },
         end_date: { [Op.gte]: targetDate }
@@ -737,41 +737,54 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null, scann
       raw: true
     });
 
-    if (activeUtsav) {
+    if (activeUtsavs && activeUtsavs.length > 0) {
+      const utsavIds = activeUtsavs.map(u => u.id);
       const utsavBooking = await UtsavBooking.findOne({
         where: {
           cardno: cardno,
-          utsavid: activeUtsav.id,
+          utsavid: { [Op.in]: utsavIds },
           status: { [Op.in]: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED] }
         },
         transaction: t
       });
 
       if (utsavBooking) {
+        const matchedUtsav = activeUtsavs.find(u => u.id === utsavBooking.utsavid) || activeUtsavs[0];
         const prevStatus = utsavBooking.status;
-        const checkinUpdate = { status: ROOM_STATUS_CHECKEDIN };
+        const checkinUpdate = {
+          status: ROOM_STATUS_CHECKEDIN,
+          updatedBy: 'SYSTEM-MEAL-CHECKIN'
+        };
         if (scannedAt && moment(scannedAt).isValid()) {
           checkinUpdate.updatedAt = new Date(scannedAt);
         }
         await utsavBooking.update(checkinUpdate, { transaction: t });
 
-        // Trigger WhatsApp confirmation asynchronously in background
-        sendUtsavStatusChangeWhatsApp(utsavBooking, prevStatus, { updatedBy: 'SYSTEM-MEAL-CHECKIN' }).catch(err => {
-          logger.error('Error sending auto-checkin WhatsApp in issueFoodPlate:', { error: err.message, cardno, utsavid: activeUtsav.id });
-        });
+        // Trigger WhatsApp confirmation only after transaction successfully commits
+        if (t && typeof t.afterCommit === 'function') {
+          t.afterCommit(() => {
+            sendUtsavStatusChangeWhatsApp(utsavBooking, prevStatus, { updatedBy: 'SYSTEM-MEAL-CHECKIN' }).catch(err => {
+              logger.error('Error sending auto-checkin WhatsApp in issueFoodPlate:', { error: err.message, cardno, utsavid: matchedUtsav.id });
+            });
+          });
+        } else {
+          sendUtsavStatusChangeWhatsApp(utsavBooking, prevStatus, { updatedBy: 'SYSTEM-MEAL-CHECKIN' }).catch(err => {
+            logger.error('Error sending auto-checkin WhatsApp in issueFoodPlate:', { error: err.message, cardno, utsavid: matchedUtsav.id });
+          });
+        }
 
         logger.info('utsav_auto_checkin_on_meal_scan', {
           cardno,
-          utsavid: activeUtsav.id,
-          utsavName: activeUtsav.name,
+          utsavid: matchedUtsav.id,
+          utsavName: matchedUtsav.name,
           bookingid: utsavBooking.bookingid,
           meal: currentMeal
         });
 
         autoCheckin = {
           performed: true,
-          utsav_id: activeUtsav.id,
-          utsav_name: activeUtsav.name,
+          utsav_id: matchedUtsav.id,
+          utsav_name: matchedUtsav.name,
           roomno: utsavBooking.roomno || null
         };
       }

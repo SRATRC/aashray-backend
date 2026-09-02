@@ -177,7 +177,7 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
                     countsByDate[normDate].ekasna++;
                 } else if (ch.includes('biyasna') || ch.includes('biyasnu') || ch.includes('biyasana')) {
                     countsByDate[normDate].biyasna++;
-                } else if (ch.includes('liquid') || ch.includes('only liquid')) {
+                } else if (ch.includes('liquid')) {
                     countsByDate[normDate].onlyLiquid++;
                 } else if (ch.includes('regular')) {
                     countsByDate[normDate].regular++;
