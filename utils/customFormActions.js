@@ -267,6 +267,7 @@ async function handleParyushanTapascharya(form, responses, cardno) {
                         [Sequelize.Op.in]: [
                             'confirmed',
                             'completed',
+                            'cash completed',
                             'cash_completed',
                             'checkedin',
                             'open'

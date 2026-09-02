@@ -1475,6 +1475,7 @@ export const resolveIdentity = async (req, res) => {
                                     [Sequelize.Op.in]: [
                                         'confirmed',
                                         'completed',
+                                        'cash completed',
                                         'cash_completed',
                                         'checkedin',
                                         'open'
@@ -1509,6 +1510,7 @@ export const resolveIdentity = async (req, res) => {
                                     [Sequelize.Op.in]: [
                                         'confirmed',
                                         'completed',
+                                        'cash completed',
                                         'cash_completed',
                                         'checkedin',
                                         'open'
@@ -1694,6 +1696,7 @@ export const validateGuest = async (req, res) => {
                     [Sequelize.Op.in]: [
                         'confirmed',
                         'completed',
+                        'cash completed',
                         'cash_completed',
                         'checkedin',
                         'open'
@@ -2106,7 +2109,6 @@ async function assertEventRegistration(form, cardno) {
     const eventName = form.event_name || 'this event';
 
     if (eventType.includes('utsav')) {
-        const utsavIds = (eventId === 24 || eventId === 25) ? [24, 25] : [eventId];
         const booking = await UtsavBooking.findOne({
             where: {
                 utsavid: { [Sequelize.Op.in]: allowedEventIds },
@@ -2115,6 +2117,7 @@ async function assertEventRegistration(form, cardno) {
                     [Sequelize.Op.in]: [
                         'confirmed',
                         'completed',
+                        'cash completed',
                         'cash_completed',
                         'checkedin',
                         'open'
