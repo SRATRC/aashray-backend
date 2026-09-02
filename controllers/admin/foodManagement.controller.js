@@ -39,7 +39,7 @@ export const issuePlate = async (req, res) => {
 
   req.log.info('issue_plate_start', { cardno: req.params.cardno, meal: req.body.meal });
 
-  const { message, issuedto } = await issueFoodPlate(
+  const { message, issuedto, auto_checkin } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
     t,
@@ -48,8 +48,8 @@ export const issuePlate = async (req, res) => {
   );
 
   await t.commit();
-  req.log.info('issue_plate_success', { cardno: req.params.cardno, meal: req.body.meal, issuedto });
-  return res.status(200).send({ message, issuedto });
+  req.log.info('issue_plate_success', { cardno: req.params.cardno, meal: req.body.meal, issuedto, auto_checkin });
+  return res.status(200).send({ message, issuedto, auto_checkin });
 };
 
 

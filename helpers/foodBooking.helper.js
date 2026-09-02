@@ -7,8 +7,11 @@ import {
   LUNCH_PRICE,
   ROLE_FOOD_ADMIN,
   ROLE_SUPER_ADMIN,
+  ROOM_STATUS_CHECKEDIN,
   STATUS_AVAILABLE,
+  STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
+  STATUS_CONFIRMED,
   STATUS_GUEST,
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
@@ -30,8 +33,11 @@ import {
   CardDb,
   FoodDb,
   Transactions,
+  UtsavBooking,
   UtsavDb
 } from '../models/associations.js';
+import { Op } from 'sequelize';
+import { sendUtsavStatusChangeWhatsApp } from './whatsapp.helper.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -719,8 +725,64 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null, scann
 
   logger.info('food_plate_issued', { cardno, meal: currentMeal, targetDate });
 
+  // ── Auto Check-In on First Meal Plate during Active Utsav ──
+  let autoCheckin = null;
+  try {
+    const activeUtsav = await UtsavDb.findOne({
+      where: {
+        start_date: { [Op.lte]: targetDate },
+        end_date: { [Op.gte]: targetDate }
+      },
+      transaction: t,
+      raw: true
+    });
+
+    if (activeUtsav) {
+      const utsavBooking = await UtsavBooking.findOne({
+        where: {
+          cardno: cardno,
+          utsavid: activeUtsav.id,
+          status: { [Op.in]: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED] }
+        },
+        transaction: t
+      });
+
+      if (utsavBooking) {
+        const prevStatus = utsavBooking.status;
+        const checkinUpdate = { status: ROOM_STATUS_CHECKEDIN };
+        if (scannedAt && moment(scannedAt).isValid()) {
+          checkinUpdate.updatedAt = new Date(scannedAt);
+        }
+        await utsavBooking.update(checkinUpdate, { transaction: t });
+
+        // Trigger WhatsApp confirmation asynchronously in background
+        sendUtsavStatusChangeWhatsApp(utsavBooking, prevStatus, { updatedBy: 'SYSTEM-MEAL-CHECKIN' }).catch(err => {
+          logger.error('Error sending auto-checkin WhatsApp in issueFoodPlate:', { error: err.message, cardno, utsavid: activeUtsav.id });
+        });
+
+        logger.info('utsav_auto_checkin_on_meal_scan', {
+          cardno,
+          utsavid: activeUtsav.id,
+          utsavName: activeUtsav.name,
+          bookingid: utsavBooking.bookingid,
+          meal: currentMeal
+        });
+
+        autoCheckin = {
+          performed: true,
+          utsav_id: activeUtsav.id,
+          utsav_name: activeUtsav.name,
+          roomno: utsavBooking.roomno || null
+        };
+      }
+    }
+  } catch (checkinErr) {
+    logger.warn('utsav_auto_checkin_error', { cardno, error: checkinErr.message });
+  }
+
   return {
     message: `Plate for ${currentMeal} issued successfully`,
-    issuedto: card.issuedto
+    issuedto: card.issuedto,
+    auto_checkin: autoCheckin
   };
 }
