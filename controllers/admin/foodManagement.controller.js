@@ -879,19 +879,29 @@ export const foodReport = async (req, res) => {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Attach daily Tapascharya Aayambil counts (Direct Aayambil + Ras Tyaag)
+  // Attach daily Tapascharya Aayambil counts & full Tapp breakdown
   try {
     const aayambilCounts = await getTappDailyAayambilCounts(start_date, end_date);
     filteredReport = filteredReport.map(row => {
       const dStr = moment(row.date).format('YYYY-MM-DD');
-      const aCounts = aayambilCounts[dStr] || { aayambil: 0, rasTyaag: 0, totalAayambil: 0 };
+      const aCounts = aayambilCounts[dStr] || {
+        upvaas: 0,
+        aayambil: 0,
+        rasTyaag: 0,
+        totalAayambil: 0,
+        ekasna: 0,
+        biyasna: 0,
+        onlyLiquid: 0,
+        regular: 0
+      };
       const lunchCount = row.lunch || 0;
       return {
         ...row,
-        lunch_aayambil: aCounts.totalAayambil,
-        lunch_aayambil_direct: aCounts.aayambil,
-        lunch_ras_tyaag: aCounts.rasTyaag,
-        lunch_regular: Math.max(0, lunchCount - aCounts.totalAayambil)
+        lunch_aayambil: aCounts.totalAayambil || 0,
+        lunch_aayambil_direct: aCounts.aayambil || 0,
+        lunch_ras_tyaag: aCounts.rasTyaag || 0,
+        lunch_regular: Math.max(0, lunchCount - (aCounts.totalAayambil || 0)),
+        tapp: aCounts
       };
     });
   } catch (err) {

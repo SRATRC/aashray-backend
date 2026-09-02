@@ -153,15 +153,34 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
                 if (endDate && normDate > endDate) continue;
 
                 if (!countsByDate[normDate]) {
-                    countsByDate[normDate] = { aayambil: 0, rasTyaag: 0, totalAayambil: 0 };
+                    countsByDate[normDate] = {
+                        upvaas: 0,
+                        aayambil: 0,
+                        rasTyaag: 0,
+                        totalAayambil: 0,
+                        ekasna: 0,
+                        biyasna: 0,
+                        onlyLiquid: 0,
+                        regular: 0
+                    };
                 }
                 const ch = String(choice).toLowerCase().trim();
-                if (ch === 'aayambil') {
+                if (ch === 'upvaas' || ch.includes('upvaas') || ch.includes('upvas')) {
+                    countsByDate[normDate].upvaas++;
+                } else if (ch === 'aayambil') {
                     countsByDate[normDate].aayambil++;
                     countsByDate[normDate].totalAayambil++;
                 } else if (ch.includes('ras tyaag')) {
                     countsByDate[normDate].rasTyaag++;
                     countsByDate[normDate].totalAayambil++;
+                } else if (ch.includes('ekasna') || ch.includes('ekasnu') || ch.includes('ekasana')) {
+                    countsByDate[normDate].ekasna++;
+                } else if (ch.includes('biyasna') || ch.includes('biyasnu') || ch.includes('biyasana')) {
+                    countsByDate[normDate].biyasna++;
+                } else if (ch.includes('liquid') || ch.includes('only liquid')) {
+                    countsByDate[normDate].onlyLiquid++;
+                } else if (ch.includes('regular')) {
+                    countsByDate[normDate].regular++;
                 }
             }
         }
