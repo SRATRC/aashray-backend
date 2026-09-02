@@ -1,4 +1,4 @@
-import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments, CustomFormOtpAllowlist, UtsavDb, ShibirDb, UtsavBooking, ShibirBookingDb, FlatDb } from '../../models/associations.js';
+import { CustomForm, CustomFormResponse, CustomFormDraft, CardDb, Departments, CustomFormOtpAllowlist, UtsavDb, ShibirDb, UtsavBooking, UtsavPackagesDb, ShibirBookingDb, FlatDb } from '../../models/associations.js';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import ShortLink from '../../models/short_link.model.js';
@@ -76,12 +76,25 @@ const DEPT_ROLE_MAP = {
  * Checks if a user (based on their roles) has access to manage forms for a given department.
  * superAdmin always has access.
  */
-function hasAccessToDept(userRoles, deptName) {
+function hasAccessToDept(userRoles, deptName, secondaryDepts = null) {
     if (userRoles.includes(ROLE_SUPER_ADMIN)) return true;
-    const key = deptName.toLowerCase();
-    const allowedRoles = DEPT_ROLE_MAP[key];
-    if (!allowedRoles) return false;
-    return allowedRoles.some((role) => userRoles.includes(role));
+    const allDepts = [];
+    if (deptName) {
+        String(deptName).split(',').forEach((d) => {
+            const tr = d.trim().toLowerCase();
+            if (tr) allDepts.push(tr);
+        });
+    }
+    if (Array.isArray(secondaryDepts)) {
+        secondaryDepts.forEach((d) => {
+            const tr = String(d).trim().toLowerCase();
+            if (tr) allDepts.push(tr);
+        });
+    }
+    return allDepts.some((d) => {
+        const allowedRoles = DEPT_ROLE_MAP[d];
+        return allowedRoles && allowedRoles.some((role) => userRoles.includes(role));
+    });
 }
 
 /**
@@ -105,7 +118,7 @@ function getAccessibleDepts(userRoles) {
  * Create a new form.
  */
 export const createForm = async (req, res) => {
-    const { title, description, dept_name, fields, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp, requireRegistration, event_id, event_name, event_type } = req.body;
+    const { title, description, dept_name, secondary_depts, fields, isPublic, authType, slug, limitOneResponse, allowEdit, showProgressBar, confirmationMessage, showSubmitAnother, section1Action, themeColor, expiresAt, closeMessage, maxResponses, requireOtp, requireRegistration, event_id, event_ids, event_name, event_type } = req.body;
 
     if (!title || !dept_name || !fields) {
         throw new ApiError(400, 'title, dept_name, and fields are required');
@@ -155,6 +168,7 @@ export const createForm = async (req, res) => {
             title,
             description: description || null,
             dept_name,
+            secondary_depts: Array.isArray(secondary_depts) ? secondary_depts : null,
             fields,
             isPublic: isPublic !== undefined ? isPublic : true,
             authType: authType || 'cardno',
@@ -171,7 +185,8 @@ export const createForm = async (req, res) => {
             maxResponses: maxResponses ? parseInt(maxResponses) : null,
             requireOtp: requireOtp !== undefined ? requireOtp : false,
             requireRegistration: requireRegistration !== undefined ? requireRegistration : false,
-            event_id: event_id ? parseInt(event_id, 10) : null,
+            event_id: (Array.isArray(event_ids) && event_ids.length > 0) ? parseInt(event_ids[0], 10) : (event_id ? parseInt(event_id, 10) : null),
+            event_ids: (Array.isArray(event_ids) && event_ids.length > 0) ? event_ids.map(Number).filter(n => !isNaN(n)) : (event_id ? [parseInt(event_id, 10)] : null),
             event_name: event_name || null,
             event_type: event_type || null,
 
@@ -215,12 +230,10 @@ export const getForms = async (req, res) => {
         if (accessibleDepts.length === 0) {
             return res.status(200).json({ success: true, data: [] });
         }
-        whereClause[sequelize.Sequelize.Op.or] = accessibleDepts.map((d) =>
-            sequelize.where(
-                sequelize.fn('LOWER', sequelize.col('custom_forms.dept_name')),
-                d.toLowerCase()
-            )
-        );
+        whereClause[sequelize.Sequelize.Op.or] = accessibleDepts.map((d) => {
+            const escaped = d.replace(/'/g, "\\'").toLowerCase();
+            return sequelize.Sequelize.literal(`(LOWER(custom_forms.dept_name) = '${escaped}' OR (custom_forms.secondary_depts IS NOT NULL AND JSON_CONTAINS(LOWER(custom_forms.secondary_depts), '"${escaped}"')) )`);
+        });
     }
 
     const forms = await CustomForm.findAll({
@@ -257,7 +270,7 @@ export const getFormById = async (req, res) => {
     }
 
     const userRoles = req.roles || [];
-    if (!hasAccessToDept(userRoles, form.dept_name)) {
+    if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
         throw new ApiError(403, 'You do not have access to this form');
     }
 
@@ -314,7 +327,7 @@ export const updateForm = async (req, res) => {
         }
 
         const userRoles = req.roles || [];
-        if (!hasAccessToDept(userRoles, form.dept_name)) {
+        if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
             throw new ApiError(403, 'You do not have access to this form');
         }
 
@@ -360,9 +373,19 @@ export const updateForm = async (req, res) => {
         if (maxResponses !== undefined) updateData.maxResponses = maxResponses ? parseInt(maxResponses) : null;
         if (requireOtp !== undefined) updateData.requireOtp = requireOtp;
         if (req.body.requireRegistration !== undefined) updateData.requireRegistration = req.body.requireRegistration;
-        if (req.body.event_id !== undefined) updateData.event_id = req.body.event_id ? parseInt(req.body.event_id, 10) : null;
+        if (req.body.event_ids !== undefined) {
+            const arr = Array.isArray(req.body.event_ids) ? req.body.event_ids.map(Number).filter(n => !isNaN(n)) : [];
+            updateData.event_ids = arr.length > 0 ? arr : null;
+            updateData.event_id = arr.length > 0 ? arr[0] : null;
+        } else if (req.body.event_id !== undefined) {
+            updateData.event_id = req.body.event_id ? parseInt(req.body.event_id, 10) : null;
+            updateData.event_ids = updateData.event_id ? [updateData.event_id] : null;
+        }
         if (req.body.event_name !== undefined) updateData.event_name = req.body.event_name || null;
         if (req.body.event_type !== undefined) updateData.event_type = req.body.event_type || null;
+        if (req.body.secondary_depts !== undefined) {
+            updateData.secondary_depts = Array.isArray(req.body.secondary_depts) ? req.body.secondary_depts : null;
+        }
 
 
         // If slug is updated
@@ -458,7 +481,7 @@ export const deleteForm = async (req, res) => {
         }
 
         const userRoles = req.roles || [];
-        if (!hasAccessToDept(userRoles, form.dept_name)) {
+        if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
             throw new ApiError(403, 'You do not have access to this form');
         }
 
@@ -508,7 +531,7 @@ export const getFormResponses = async (req, res) => {
     }
 
     const userRoles = req.roles || [];
-    if (!hasAccessToDept(userRoles, form.dept_name)) {
+    if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
         throw new ApiError(403, 'You do not have access to this form');
     }
 
@@ -605,6 +628,133 @@ export const getFormResponses = async (req, res) => {
 };
 
 /**
+ * GET /api/v1/admin/forms/:id/pending-flat-owners
+ * List of flat owners who haven't submitted the form yet (for Flat Host forms).
+ */
+export const getPendingFlatOwners = async (req, res) => {
+    const { id } = req.params;
+    const form = await CustomForm.findByPk(id);
+    if (!form) throw new ApiError(404, 'Form not found');
+
+    const userRoles = req.roles || (req.user && req.user.roles) || [];
+    if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
+        throw new ApiError(403, 'You do not have permission to view responses for this department');
+    }
+
+    const isFlatHost = (form.event_type === 'flat_host' || (form.title || '').toLowerCase().includes('flat host') || (form.title || '').toLowerCase().includes('flat accommodation'));
+    if (!isFlatHost) {
+        return res.status(200).json({
+            success: true,
+            is_flat_host: false,
+            data: {
+                total_flats: 0,
+                submitted_flats: 0,
+                pending_count: 0,
+                pending_flats: []
+            }
+        });
+    }
+
+    // 1. Fetch all flats from FlatDb
+    const allFlats = await FlatDb.findAll({ raw: true });
+
+    // 2. Fetch all responses for this form
+    const responses = await CustomFormResponse.findAll({
+        where: { form_id: id },
+        attributes: ['cardno', 'responses', 'submittedAt'],
+        raw: true
+    });
+
+    const submittedCardNos = new Set(responses.map(r => r.cardno).filter(Boolean));
+    const submittedFlatNos = new Set();
+    responses.forEach(r => {
+        if (r.responses && r.responses.flatno) {
+            submittedFlatNos.add(String(r.responses.flatno).trim());
+        }
+    });
+
+    // Group flats by flatno
+    const flatsMap = new Map();
+    allFlats.forEach(f => {
+        const fNo = String(f.flatno).trim();
+        if (!flatsMap.has(fNo)) {
+            flatsMap.set(fNo, { flatno: f.flatno, owners: [] });
+        }
+        if (f.owner) {
+            flatsMap.get(fNo).owners.push(String(f.owner).trim());
+        }
+    });
+
+    // Find pending flats
+    const pendingFlatsRaw = [];
+    const pendingCardNos = new Set();
+
+    flatsMap.forEach((flatObj, fNo) => {
+        const isFlatSubmitted = submittedFlatNos.has(fNo);
+        const isOwnerSubmitted = flatObj.owners.some(o => submittedCardNos.has(o));
+        if (!isFlatSubmitted && !isOwnerSubmitted) {
+            pendingFlatsRaw.push(flatObj);
+            flatObj.owners.forEach(o => pendingCardNos.add(o));
+        }
+    });
+
+    // Fetch CardDb info for all pending owners
+    let cardsMap = new Map();
+    if (pendingCardNos.size > 0) {
+        const cards = await CardDb.findAll({
+            where: {
+                cardno: { [Sequelize.Op.in]: Array.from(pendingCardNos) }
+            },
+            attributes: ['cardno', 'issuedto', 'mobno', 'center', 'email', 'res_status'],
+            raw: true
+        });
+        cards.forEach(c => cardsMap.set(c.cardno, c));
+    }
+
+    // Format pending flats
+    const pendingFlats = pendingFlatsRaw.map(flatObj => {
+        const ownersDetails = flatObj.owners.map(cardno => {
+            const card = cardsMap.get(cardno);
+            return {
+                cardno,
+                name: card ? card.issuedto : 'Unknown Owner',
+                mobno: card ? card.mobno : null,
+                center: card ? card.center : null,
+                email: card ? card.email : null,
+                res_status: card ? card.res_status : null
+            };
+        });
+
+        return {
+            flatno: flatObj.flatno,
+            owners: ownersDetails
+        };
+    });
+
+    // Sort numerically by flatno
+    pendingFlats.sort((a, b) => {
+        const numA = parseInt(a.flatno, 10) || 0;
+        const numB = parseInt(b.flatno, 10) || 0;
+        return numA - numB;
+    });
+
+    const totalFlats = flatsMap.size;
+    const pendingCount = pendingFlats.length;
+    const submittedCount = totalFlats - pendingCount;
+
+    return res.status(200).json({
+        success: true,
+        is_flat_host: true,
+        data: {
+            total_flats: totalFlats,
+            submitted_flats: submittedCount,
+            pending_count: pendingCount,
+            pending_flats: pendingFlats
+        }
+    });
+};
+
+/**
  * DELETE /api/v1/admin/forms/:id/responses/:responseId
  * Delete a single response to a form.
  */
@@ -617,7 +767,7 @@ export const deleteFormResponse = async (req, res) => {
     }
 
     const userRoles = req.roles || [];
-    if (!hasAccessToDept(userRoles, form.dept_name)) {
+    if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
         throw new ApiError(403, 'You do not have access to this form');
     }
 
@@ -648,7 +798,7 @@ export const getPublicForm = async (req, res) => {
 
     const form = await CustomForm.findOne({
         where: { id, status: 'active' },
-        attributes: ['id', 'title', 'description', 'fields', 'isPublic', 'authType', 'dept_name', 'slug', 'limitOneResponse', 'allowEdit', 'showProgressBar', 'confirmationMessage', 'showSubmitAnother', 'section1Action', 'themeColor', 'expiresAt', 'closeMessage', 'maxResponses', 'requireOtp']
+        attributes: ['id', 'title', 'description', 'fields', 'isPublic', 'authType', 'dept_name', 'slug', 'limitOneResponse', 'allowEdit', 'showProgressBar', 'confirmationMessage', 'showSubmitAnother', 'section1Action', 'themeColor', 'expiresAt', 'closeMessage', 'maxResponses', 'requireOtp', 'requireRegistration', 'event_id', 'event_ids', 'event_name', 'event_type']
     });
 
     if (!form) {
@@ -1285,11 +1435,13 @@ export const resolveIdentity = async (req, res) => {
 
     let flatno = null;
     let confirmedResidentsCount = 0;
+    let packageInfo = null;
 
     if (formId) {
         try {
             const formObj = await CustomForm.findByPk(formId);
             if (formObj) {
+                let eventBooking = null;
                 const isFlatHost = (formObj.event_type === 'flat_host' || (formObj.title || '').toLowerCase().includes('flat host'));
                 if (isFlatHost) {
                     const flatRecord = await FlatDb.findOne({ where: { owner: card.cardno } });
@@ -1305,10 +1457,14 @@ export const resolveIdentity = async (req, res) => {
                     const coOwners = await FlatDb.findAll({ where: { flatno }, attributes: ['owner'] });
                     const ownerCardNos = coOwners.map(o => o.owner);
 
-                    if (formObj.event_id) {
+                    const allowedUtsavIds = (Array.isArray(formObj.event_ids) && formObj.event_ids.length > 0)
+                        ? formObj.event_ids.map(Number).filter(n => !isNaN(n))
+                        : (formObj.event_id ? [parseInt(formObj.event_id, 10)] : []);
+
+                    if (allowedUtsavIds.length > 0) {
                         const bookings = await UtsavBooking.findAll({
                             where: {
-                                utsavid: formObj.event_id,
+                                utsavid: { [Sequelize.Op.in]: allowedUtsavIds },
                                 cardno: { [Sequelize.Op.in]: ownerCardNos },
                                 status: {
                                     [Sequelize.Op.in]: [
@@ -1324,7 +1480,41 @@ export const resolveIdentity = async (req, res) => {
                         confirmedResidentsCount = bookings.length;
                     }
                 } else if (formObj.requireRegistration) {
-                    await assertEventRegistration(formObj, card.cardno);
+                    eventBooking = await assertEventRegistration(formObj, card.cardno);
+                } else if (formObj.event_id || (Array.isArray(formObj.event_ids) && formObj.event_ids.length > 0)) {
+                    const allowedUtsavIds = (Array.isArray(formObj.event_ids) && formObj.event_ids.length > 0)
+                        ? formObj.event_ids.map(Number).filter(n => !isNaN(n))
+                        : (formObj.event_id ? [parseInt(formObj.event_id, 10)] : []);
+                    if (allowedUtsavIds.length > 0) {
+                        eventBooking = await UtsavBooking.findOne({
+                            where: {
+                                utsavid: { [Sequelize.Op.in]: allowedUtsavIds },
+                                cardno: card.cardno,
+                                status: {
+                                    [Sequelize.Op.in]: [
+                                        'confirmed',
+                                        'completed',
+                                        'cash_completed',
+                                        'checkedin',
+                                        'open'
+                                    ]
+                                }
+                            }
+                        });
+                    }
+                }
+
+                // Look up devotee's package details if available
+                if (eventBooking && eventBooking.packageid) {
+                    const pkg = await UtsavPackagesDb.findByPk(eventBooking.packageid, { raw: true });
+                    if (pkg) {
+                        packageInfo = {
+                            id: pkg.id,
+                            name: pkg.name,
+                            start_date: pkg.start_date,
+                            end_date: pkg.end_date
+                        };
+                    }
                 }
             }
         } catch (err) {
@@ -1440,7 +1630,8 @@ export const resolveIdentity = async (req, res) => {
             flatno,
             confirmed_residents_count: confirmedResidentsCount,
             tapp_details: tappDetails,
-            is_paarna_eligible: isPaarnaEligible
+            is_paarna_eligible: isPaarnaEligible,
+            package_info: packageInfo
         }
     });
 };
@@ -1577,7 +1768,8 @@ export const validateGuest = async (req, res) => {
             center: card.center,
             email: card.email,
             tapp_details: tappDetails,
-            is_paarna_eligible: isPaarnaEligible
+            is_paarna_eligible: isPaarnaEligible,
+            package_info: packageInfo
         }
     });
 };
@@ -1886,16 +2078,21 @@ function validateShortAnswerLimits(fields, responses) {
  * Internal helper to verify that a card is registered for the event if requireRegistration is enabled.
  */
 async function assertEventRegistration(form, cardno) {
-    if (!form || !form.requireRegistration || !form.event_id || !cardno) return;
+    if (!form || !form.requireRegistration || !cardno) return null;
 
     const eventType = (form.event_type || form.dept_name || '').toLowerCase();
-    const eventId = parseInt(form.event_id, 10);
+    const allowedEventIds = (Array.isArray(form.event_ids) && form.event_ids.length > 0)
+        ? form.event_ids.map(Number).filter(n => !isNaN(n))
+        : (form.event_id ? [parseInt(form.event_id, 10)] : []);
+
+    if (allowedEventIds.length === 0) return null;
+
     const eventName = form.event_name || 'this event';
 
     if (eventType.includes('utsav')) {
         const booking = await UtsavBooking.findOne({
             where: {
-                utsavid: eventId,
+                utsavid: { [Sequelize.Op.in]: allowedEventIds },
                 cardno,
                 status: {
                     [Sequelize.Op.in]: [
@@ -1911,10 +2108,11 @@ async function assertEventRegistration(form, cardno) {
         if (!booking) {
             throw new ApiError(403, `You are not registered for ${eventName}. Access is restricted to registered participants only.`);
         }
+        return booking;
     } else if (eventType.includes('adhyay') || eventType.includes('shibir')) {
         const booking = await ShibirBookingDb.findOne({
             where: {
-                shibir_id: eventId,
+                shibir_id: { [Sequelize.Op.in]: allowedEventIds },
                 cardno,
                 status: {
                     [Sequelize.Op.in]: [
@@ -1928,7 +2126,9 @@ async function assertEventRegistration(form, cardno) {
         if (!booking) {
             throw new ApiError(403, `You are not registered for ${eventName}. Access is restricted to registered participants only.`);
         }
+        return booking;
     }
+    return null;
 }
 
 async function assertOtpVerified(mobno, form) {
@@ -2107,7 +2307,7 @@ export const getFormAllowlist = async (req, res) => {
     if (!form) throw new ApiError(404, 'Form not found');
 
     const userRoles = req.roles || [];
-    if (!hasAccessToDept(userRoles, form.dept_name)) {
+    if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
         throw new ApiError(403, 'You do not have access to this form');
     }
 
@@ -2150,7 +2350,7 @@ export const saveFormAllowlist = async (req, res) => {
     if (!form) throw new ApiError(404, 'Form not found');
 
     const userRoles = req.roles || [];
-    if (!hasAccessToDept(userRoles, form.dept_name)) {
+    if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
         throw new ApiError(403, 'You do not have access to this form');
     }
 
@@ -2225,7 +2425,7 @@ export const deleteFormAllowlistEntry = async (req, res) => {
     if (!form) throw new ApiError(404, 'Form not found');
 
     const userRoles = req.roles || [];
-    if (!hasAccessToDept(userRoles, form.dept_name)) {
+    if (!hasAccessToDept(userRoles, form.dept_name, form.secondary_depts)) {
         throw new ApiError(403, 'You do not have access to this form');
     }
 
