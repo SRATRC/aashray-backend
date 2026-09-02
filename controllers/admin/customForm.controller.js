@@ -185,10 +185,13 @@ export const createForm = async (req, res) => {
             maxResponses: maxResponses ? parseInt(maxResponses) : null,
             requireOtp: requireOtp !== undefined ? requireOtp : false,
             requireRegistration: requireRegistration !== undefined ? requireRegistration : false,
-            event_id: (Array.isArray(event_ids) && event_ids.length > 0) ? parseInt(event_ids[0], 10) : (event_id ? parseInt(event_id, 10) : null),
+            event_id: (Array.isArray(event_ids) && event_ids.map(Number).filter(n => !isNaN(n)).length > 0)
+                ? event_ids.map(Number).filter(n => !isNaN(n))[0]
+                : (event_id ? parseInt(event_id, 10) : null),
             event_ids: (Array.isArray(event_ids) && event_ids.length > 0) ? event_ids.map(Number).filter(n => !isNaN(n)) : (event_id ? [parseInt(event_id, 10)] : null),
             event_name: event_name || null,
             event_type: event_type || null,
+            secondary_depts: Array.isArray(secondary_depts) ? secondary_depts.map(d => String(d).trim().toLowerCase()).filter(Boolean) : null,
 
             createdBy: req.user?.username
         }, { transaction: t });
@@ -232,7 +235,7 @@ export const getForms = async (req, res) => {
         }
         whereClause[sequelize.Sequelize.Op.or] = accessibleDepts.map((d) => {
             const escaped = d.replace(/'/g, "\\'").toLowerCase();
-            return sequelize.Sequelize.literal(`(LOWER(custom_forms.dept_name) = '${escaped}' OR (custom_forms.secondary_depts IS NOT NULL AND JSON_CONTAINS(LOWER(custom_forms.secondary_depts), '"${escaped}"')) )`);
+            return sequelize.Sequelize.literal(`(LOWER(custom_forms.dept_name) = '${escaped}' OR (custom_forms.secondary_depts IS NOT NULL AND JSON_CONTAINS(custom_forms.secondary_depts, '"${escaped}"')) )`);
         });
     }
 
@@ -384,7 +387,9 @@ export const updateForm = async (req, res) => {
         if (req.body.event_name !== undefined) updateData.event_name = req.body.event_name || null;
         if (req.body.event_type !== undefined) updateData.event_type = req.body.event_type || null;
         if (req.body.secondary_depts !== undefined) {
-            updateData.secondary_depts = Array.isArray(req.body.secondary_depts) ? req.body.secondary_depts : null;
+            updateData.secondary_depts = Array.isArray(req.body.secondary_depts)
+                ? req.body.secondary_depts.map(d => String(d).trim().toLowerCase()).filter(Boolean)
+                : null;
         }
 
 
@@ -1435,6 +1440,7 @@ export const resolveIdentity = async (req, res) => {
 
     let flatno = null;
     let confirmedResidentsCount = 0;
+    let confirmedResidents = [];
     let packageInfo = null;
 
     if (formId) {
@@ -1475,9 +1481,22 @@ export const resolveIdentity = async (req, res) => {
                                         'open'
                                     ]
                                 }
-                            }
+                            },
+                            attributes: ['cardno']
                         });
                         confirmedResidentsCount = bookings.length;
+
+                        if (bookings.length > 0) {
+                            const bookedCardNos = [...new Set(bookings.map(b => b.cardno))];
+                            const residentCards = await CardDb.findAll({
+                                where: { cardno: { [Sequelize.Op.in]: bookedCardNos } },
+                                attributes: ['cardno', 'issuedto']
+                            });
+                            confirmedResidents = residentCards.map(c => ({
+                                cardno: c.cardno,
+                                name: c.issuedto
+                            }));
+                        }
                     }
                 } else if (formObj.requireRegistration) {
                     eventBooking = await assertEventRegistration(formObj, card.cardno);
@@ -1629,6 +1648,7 @@ export const resolveIdentity = async (req, res) => {
             departments,
             flatno,
             confirmed_residents_count: confirmedResidentsCount,
+            confirmed_residents: confirmedResidents,
             tapp_details: tappDetails,
             is_paarna_eligible: isPaarnaEligible,
             package_info: packageInfo
@@ -1769,8 +1789,7 @@ export const validateGuest = async (req, res) => {
             center: card.center,
             email: card.email,
             tapp_details: tappDetails,
-            is_paarna_eligible: isPaarnaEligible,
-            package_info: packageInfo
+            is_paarna_eligible: isPaarnaEligible
         }
     });
 };
