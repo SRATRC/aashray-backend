@@ -2,6 +2,8 @@ import FoodDb from '../models/food_db.model.js';
 import UtsavBooking from '../models/utsav_boking.model.js';
 import CustomForm from '../models/custom_form.model.js';
 import CustomFormResponse from '../models/custom_form_response.model.js';
+import UtsavPackagesDb from '../models/utsav_packages.model.js';
+import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import logger from '../config/logger.js';
 
@@ -153,15 +155,34 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
                 if (endDate && normDate > endDate) continue;
 
                 if (!countsByDate[normDate]) {
-                    countsByDate[normDate] = { aayambil: 0, rasTyaag: 0, totalAayambil: 0 };
+                    countsByDate[normDate] = {
+                        upvaas: 0,
+                        aayambil: 0,
+                        rasTyaag: 0,
+                        totalAayambil: 0,
+                        ekasna: 0,
+                        biyasna: 0,
+                        onlyLiquid: 0,
+                        regular: 0
+                    };
                 }
                 const ch = String(choice).toLowerCase().trim();
-                if (ch === 'aayambil') {
+                if (ch === 'upvaas' || ch.includes('upvaas') || ch.includes('upvas')) {
+                    countsByDate[normDate].upvaas++;
+                } else if (ch === 'aayambil') {
                     countsByDate[normDate].aayambil++;
                     countsByDate[normDate].totalAayambil++;
                 } else if (ch.includes('ras tyaag')) {
                     countsByDate[normDate].rasTyaag++;
                     countsByDate[normDate].totalAayambil++;
+                } else if (ch.includes('ekasna') || ch.includes('ekasnu') || ch.includes('ekasana')) {
+                    countsByDate[normDate].ekasna++;
+                } else if (ch.includes('biyasna') || ch.includes('biyasnu') || ch.includes('biyasana')) {
+                    countsByDate[normDate].biyasna++;
+                } else if (ch.includes('liquid')) {
+                    countsByDate[normDate].onlyLiquid++;
+                } else if (ch.includes('regular')) {
+                    countsByDate[normDate].regular++;
                 }
             }
         }
@@ -231,11 +252,57 @@ async function handleParyushanTapascharya(form, responses, cardno) {
         const matrixAnswers = responses[gridField.id];
         const year = form.event_id ? 2026 : new Date().getFullYear();
 
+        // Retrieve devotee's confirmed package date boundaries
+        const allowedEventIds = (Array.isArray(form.event_ids) && form.event_ids.length > 0)
+            ? form.event_ids.map(Number).filter(n => !isNaN(n))
+            : (form.event_id ? [parseInt(form.event_id, 10)] : []);
+
+        let packageRange = null;
+        if (allowedEventIds.length > 0) {
+            const booking = await UtsavBooking.findOne({
+                where: {
+                    utsavid: { [Sequelize.Op.in]: allowedEventIds },
+                    cardno,
+                    status: {
+                        [Sequelize.Op.in]: [
+                            'confirmed',
+                            'completed',
+                            'cash_completed',
+                            'checkedin',
+                            'open'
+                        ]
+                    }
+                }
+            });
+            if (booking && booking.packageid) {
+                const pkg = await UtsavPackagesDb.findByPk(booking.packageid, { raw: true });
+                if (pkg && pkg.start_date && pkg.end_date) {
+                    packageRange = {
+                        start_date: moment(pkg.start_date).format('YYYY-MM-DD'),
+                        end_date: moment(pkg.end_date).format('YYYY-MM-DD'),
+                        name: pkg.name
+                    };
+                }
+            }
+        }
+
         for (const [dateLabel, tappChoice] of Object.entries(matrixAnswers)) {
             if (!tappChoice) continue;
 
             const normalizedDate = normalizeDateString(dateLabel, year);
             if (!normalizedDate) continue;
+
+            // Package date boundary guard
+            if (packageRange) {
+                if (normalizedDate < packageRange.start_date || normalizedDate > packageRange.end_date) {
+                    logger.warn('[TAPP_HOOK] Skipping date outside participant package dates', {
+                        cardno,
+                        date: normalizedDate,
+                        packageRange
+                    });
+                    continue;
+                }
+            }
 
             // Skip past dates & dates past cutoff (8:00 PM previous day in IST)
             if (isDatePastCutoff(normalizedDate, 20)) {

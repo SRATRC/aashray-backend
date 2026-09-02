@@ -50,7 +50,8 @@ import {
     saveFormDraft,
     getFormDraft,
     getMyResponse,
-    validateGuest
+    validateGuest,
+    getPendingFlatOwners
 } from '../../controllers/admin/customForm.controller.js';
 
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -132,6 +133,12 @@ router.get(
     '/:id/responses',
     authorizeRoles(...ALL_FORM_ROLES),
     CatchAsync(getFormResponses)
+);
+
+router.get(
+    '/:id/pending-flat-owners',
+    authorizeRoles(...ALL_FORM_ROLES),
+    CatchAsync(getPendingFlatOwners)
 );
 
 router.delete(
