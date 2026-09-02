@@ -21,6 +21,10 @@ const CustomForm = sequelize.define(
             type: DataTypes.STRING,
             allowNull: false
         },
+        secondary_depts: {
+            type: DataTypes.JSON,
+            allowNull: true
+        },
         slug: {
             type: DataTypes.STRING,
             allowNull: true,
@@ -102,6 +106,10 @@ const CustomForm = sequelize.define(
         },
         event_id: {
             type: DataTypes.INTEGER,
+            allowNull: true
+        },
+        event_ids: {
+            type: DataTypes.JSON,
             allowNull: true
         },
         event_name: {
