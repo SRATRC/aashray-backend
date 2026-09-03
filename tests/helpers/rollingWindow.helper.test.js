@@ -25,7 +25,7 @@ beforeEach(() => {
 test('room nights + requested exceed → exceeds true', async () => {
   jest
     .spyOn(RoomBooking, 'findAll')
-    .mockResolvedValue([{ checkin: '2026-03-01', checkout: '2026-03-08' }]); // 7 nights
+    .mockResolvedValue([{ cardno: 'C1', checkin: '2026-03-01', checkout: '2026-03-08' }]); // 7 nights
   jest.spyOn(FlatBooking, 'findAll').mockResolvedValue([]);
   const res = await checkRollingWindowLimit({
     card: nonResident,
@@ -41,7 +41,7 @@ test('non-resident: flat nights are counted', async () => {
   jest.spyOn(RoomBooking, 'findAll').mockResolvedValue([]);
   jest
     .spyOn(FlatBooking, 'findAll')
-    .mockResolvedValue([{ checkin: '2026-03-01', checkout: '2026-03-09' }]); // 8 nights
+    .mockResolvedValue([{ cardno: 'C1', checkin: '2026-03-01', checkout: '2026-03-09' }]); // 8 nights
   const res = await checkRollingWindowLimit({
     card: nonResident,
     ranges: [{ checkin: '2026-03-10', checkout: '2026-03-13' }], // +3 = 11
@@ -107,7 +107,7 @@ test('day visits (nights = 0) are excluded by the query filter and contribute 0 
 test('a far pre-existing over-cap cluster does not waitlist a clean new booking', async () => {
   jest
     .spyOn(RoomBooking, 'findAll')
-    .mockResolvedValue([{ checkin: '2026-03-01', checkout: '2026-03-13' }]); // 12 committed nights
+    .mockResolvedValue([{ cardno: 'C1', checkin: '2026-03-01', checkout: '2026-03-13' }]); // 12 committed nights
   jest.spyOn(FlatBooking, 'findAll').mockResolvedValue([]);
   const res = await checkRollingWindowLimit({
     card: nonResident,
@@ -193,7 +193,7 @@ describe('exemptions: widened res_status set + per-card exemption rows', () => {
     expect(exemptionSpy).not.toHaveBeenCalled();
   });
 
-  test('Staff card over cap → not exceeded (widened res_status set)', async () => {
+  test('unknown residency status remains subject to the cap', async () => {
     jest.spyOn(RoomBooking, 'findAll').mockResolvedValue([]);
     jest.spyOn(FlatBooking, 'findAll').mockResolvedValue([]);
 
@@ -202,7 +202,8 @@ describe('exemptions: widened res_status set + per-card exemption rows', () => {
       ranges: [{ checkin: '2026-03-01', checkout: '2026-03-14' }], // 13 nights
       t: null
     });
-    expect(res.exceeds).toBe(false);
+    expect(res.exceeds).toBe(true);
+    expect(res.windowNights).toBe(13);
   });
 
   test('temporary exemption whose valid_to == last stay night → still exempt (boundary)', async () => {

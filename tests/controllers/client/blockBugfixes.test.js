@@ -148,7 +148,8 @@ describe('POST /stay/check-blocked-dates block bugfixes', () => {
       name: 'Full',
       start_date: uStart,
       end_date: uEnd,
-      amount: 0
+      amount: 0,
+      updatedBy: 'test'
     });
     // The utsav's auto-block (mirrors createUtsav: checkin=start, checkout=end+1).
     await BlockDates.create({
@@ -164,6 +165,7 @@ describe('POST /stay/check-blocked-dates block bugfixes', () => {
       utsavid: utsav.id,
       cardno: ATTENDEE,
       packageid: pkg.id,
+      arrival: 'yes',
       status: STATUS_CONFIRMED,
       updatedBy: 'test'
     });
@@ -172,13 +174,13 @@ describe('POST /stay/check-blocked-dates block bugfixes', () => {
     const after = fmt(moment().add(77, 'day'));
 
     // Attendee: stay wraps the festival → split (bookable).
-    const attRes = await post({ mumukshus: [ATTENDEE], checkin: before, checkout: after });
+    const attRes = await post({ cardno: ATTENDEE, mumukshus: [ATTENDEE], checkin: before, checkout: after });
     expect(attRes.status).toBe(200);
     expect(attRes.body.isBlocked).toBe(true);
     expect(attRes.body.blockedAction).toBe('split');
 
     // Non-attendee: same span, not attending → reject.
-    const nonRes = await post({ mumukshus: [CARD], checkin: before, checkout: after });
+    const nonRes = await post({ cardno: CARD, mumukshus: [CARD], checkin: before, checkout: after });
     expect(nonRes.status).toBe(200);
     expect(nonRes.body.blockedAction).toBe('reject');
 
@@ -225,5 +227,94 @@ describe('POST /stay/check-blocked-dates block bugfixes', () => {
     await BlockDates.destroy({
       where: { comments: 'C1b same-day (getDateRangesDuringUtsav)' }
     });
+  });
+
+  // The "closed on these dates" message named an attended utsav's OWN auto-block
+  // alongside a genuine, unrelated closure — getBlockedDates(checkin, checkout)
+  // returns every block_dates row across the whole requested window, including
+  // the attending member's own utsav auto-block, which the message then quoted
+  // even though that member's stay legitimately splits around it (never blocked
+  // for them). Only rows that overlap this member's actually-blocked ranges
+  // should be named.
+  it('closed-dates message names the real closure, not the attended utsav', async () => {
+    const uStart = fmt(moment().add(110, 'day'));
+    const uEnd = fmt(moment().add(117, 'day'));
+    const utsav = await UtsavDb.create({
+      name: 'BLK_BUG_MSG Utsav',
+      start_date: uStart,
+      end_date: uEnd,
+      month: moment(uStart).format('MMMM'),
+      total_seats: 100,
+      location: RESEARCH_CENTRE,
+      available_seats: 100
+    });
+    // The utsav's own auto-block (checkin=start, checkout=end+1) — exists
+    // regardless of who attends.
+    await BlockDates.create({
+      checkin: uStart,
+      checkout: fmt(moment(uEnd).add(1, 'day')),
+      comments: 'BLK_BUG_MSG utsav auto-block',
+      status: STATUS_ACTIVE,
+      updatedBy: 'test'
+    });
+    const pkg = await UtsavPackagesDb.create({
+      utsavid: utsav.id,
+      name: 'Full',
+      start_date: uStart,
+      end_date: uEnd,
+      amount: 0,
+      updatedBy: 'test'
+    });
+    await UtsavBooking.create({
+      bookingid: 'BLK_BUG_MSG_UB_1',
+      utsavid: utsav.id,
+      cardno: ATTENDEE,
+      packageid: pkg.id,
+      arrival: 'own',
+      status: STATUS_CONFIRMED,
+      updatedBy: 'test'
+    });
+
+    // A real, unrelated closure before the utsav — same shape as the 15th in
+    // the original report.
+    const realClosure = fmt(moment().add(105, 'day'));
+    await BlockDates.create({
+      checkin: realClosure,
+      checkout: realClosure, // zero-length manual block
+      comments: 'BLK_BUG_MSG real closure',
+      status: STATUS_ACTIVE,
+      updatedBy: 'test'
+    });
+
+    // Stay spans the real closure, then the whole utsav, then past it.
+    const stayCheckin = fmt(moment().add(104, 'day'));
+    const stayCheckout = fmt(moment().add(120, 'day'));
+
+    const res = await postRoomValidate({
+      cardno: ATTENDEE,
+      primary_booking: roomBookingJson(ATTENDEE, stayCheckin, stayCheckout)
+    });
+    expect(res.status).toBe(200);
+
+    const blockedRow = res.body.data.roomDetails.find((r) => r.isBlocked);
+    expect(blockedRow).toBeDefined();
+    // Names the real closure...
+    expect(blockedRow.unavailableReason).toEqual(
+      expect.stringContaining(moment(realClosure).format('Do MMMM, YYYY'))
+    );
+    // ...but never the utsav's own dates, since this member is attending it.
+    expect(blockedRow.unavailableReason).not.toEqual(
+      expect.stringContaining(moment(uStart).format('Do MMMM, YYYY'))
+    );
+
+    // Delete children by foreign key rather than the one seeded bookingid, so a
+    // row created by the request under test cannot leave the UtsavDb delete
+    // failing on a foreign key and stranding fixtures for later suites.
+    await UtsavBooking.destroy({ where: { utsavid: utsav.id } });
+    await BlockDates.destroy({
+      where: { comments: ['BLK_BUG_MSG utsav auto-block', 'BLK_BUG_MSG real closure'] }
+    });
+    await UtsavPackagesDb.destroy({ where: { utsavid: utsav.id } });
+    await UtsavDb.destroy({ where: { id: utsav.id } });
   });
 });

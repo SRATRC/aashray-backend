@@ -2,6 +2,7 @@ import request from 'supertest';
 import moment from 'moment';
 import { app, sequelize } from '../../../app.js';
 import { RoomBooking, RoomDb } from '../../../models/associations.js';
+import BlockDates from '../../../models/block_dates.model.js';
 import { STATUS_WAITING, HOLD_REASON } from '../../../config/constants.js';
 import { MUMUKSHU_1 } from '../../testConstants.js';
 
@@ -17,7 +18,8 @@ const roomBookingJson = (checkin, checkout) => ({
     checkin_date: checkin,
     checkout_date: checkout,
     room_type: 'ac',
-    floor_pref: ''
+    floor_pref: '',
+    mumukshuGroup: [{ roomType: 'ac', floorType: '', mumukshus: [MUMUKSHU_1] }]
   }
 });
 
@@ -26,6 +28,7 @@ describe('Room rolling-window cap (client)', () => {
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
     await RoomBooking.truncate();
     await RoomDb.truncate();
+    await BlockDates.truncate();
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
     // Plenty of available rooms so waiting is caused by the CAP, not scarcity.
     for (let i = 1; i <= 5; i++) {
@@ -37,6 +40,13 @@ describe('Room rolling-window cap (client)', () => {
         updatedBy: 'admin'
       });
     }
+    await RoomDb.create({
+      roomno: 'NA',
+      roomtype: 'NA',
+      gender: 'NA',
+      roomstatus: 'available',
+      updatedBy: 'admin'
+    });
   });
 
   beforeEach(async () => {
