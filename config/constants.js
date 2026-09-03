@@ -168,16 +168,8 @@ export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
 export const ROLLING_WINDOW_DAYS = 30;
 export const ROLLING_WINDOW_NIGHT_LIMIT = 9;
 
-// Residency statuses exempt from the rolling-window night cap. Widened from the
-// original PR-only rule to also cover SEVA KUTIR and Staff (spec §2.4 / decision
-// #4). Literals are the exact `card_db.res_status` values: 'PR' and 'SEVA KUTIR'
-// are the live values (verified against card_db); 'Staff' is forward-compatible
-// (no such row exists yet, harmless until one does) and matches the locked spec.
-// The two RESIDENT classes are exempt from the visitor-facing 9-night cap;
-// MUMUKSHU + GUEST (transient visitors) are subject to it. Per the business
-// spec (docs/business-logic/02-accounts-identity-and-auth.md) there are exactly
-// four res_status classes and NO "Staff" residency — staff are admin accounts,
-// not a card res_status — so no phantom literal here.
+// Residency statuses exempt from the rolling-window night cap. These are the
+// live `card_db.res_status` values. Staff are admin accounts, not card rows.
 export const EXEMPT_RES_STATUSES = new Set([
   STATUS_RESIDENT, // 'PR'
   STATUS_SEVA_KUTIR // 'SEVA KUTIR'
@@ -271,5 +263,4 @@ export const DEEP_CLEANING_WA_RECIPIENTS = [
   '0008977629',
   '0002945068'
 ];
-
 

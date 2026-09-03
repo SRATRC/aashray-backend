@@ -111,7 +111,7 @@ export async function checkRollingWindowLimit({ card, ranges, t = null }) {
 // ~2 per occupant. Per-person card-row locks are taken one at a time in sorted
 // order: provably deadlock-free (all transactions lock shared rows in the same
 // order; no dependence on multi-row-statement lock ordering), bounded by the
-// number of people in the request. Exempt-status cards (PR / SEVA KUTIR / Staff)
+// number of people in the request. Exempt-status cards are PR and SEVA KUTIR.
 // and cards with an active per-card exemption row are exempt; occupants with no
 // requested nights are skipped.
 //   cards         — card_db rows (MUST include `cardno` and `res_status`)
@@ -133,7 +133,7 @@ export async function checkRollingWindowLimitBatch({ cards, rangesByCard, t = nu
 
   // Expand each occupant's requested nights ONCE; keep only non-exempt-status
   // occupants who actually request nights. Residency exemption is now the WIDENED
-  // set (PR + SEVA KUTIR + Staff), not PR-only — exempt statuses are skipped here
+  // set (PR + SEVA KUTIR), not PR-only — exempt statuses are skipped here
   // and keep their default {exceeds:false, windowNights:0}.
   const nightsByCard = new Map();
   for (const c of cards) {

@@ -47,6 +47,10 @@ export const ViewAllBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const upcomingOnly = req.query.upcoming === 'true';
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const upcomingWhere = upcomingOnly ? 'WHERE combined.checkout >= :today' : '';
+  const orderDirection = upcomingOnly ? 'ASC' : 'DESC';
 
   req.log.info('fetch_room_bookings_start', { cardno, page, pageSize });
 
@@ -92,7 +96,8 @@ FROM
    LEFT JOIN transactions t2 ON combined.bookingid = t2.bookingid
    AND t2.category IN (:category)
    LEFT JOIN card_db t3 ON t3.cardno = combined.bookedFor
-   ORDER BY combined.checkin DESC
+   ${upcomingWhere}
+   ORDER BY combined.checkin ${orderDirection}
    LIMIT :limit
    OFFSET :offset;
     `,
@@ -101,7 +106,8 @@ FROM
         cardno: req.user.cardno,
         category: [TYPE_ROOM, TYPE_GUEST_ROOM, TYPE_FLAT],
         limit: pageSize,
-        offset: offset
+        offset: offset,
+        ...(upcomingOnly ? { today } : {})
       },
       type: Sequelize.QueryTypes.SELECT
     }

@@ -29,13 +29,17 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import Sequelize from 'sequelize';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 export const FetchUpcoming = async (req, res) => {
   attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const upcomingOnly = req.query.upcoming === 'true';
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const upcomingWhere = upcomingOnly ? 'AND t1.date >= :today' : '';
+  const orderDirection = upcomingOnly ? 'ASC' : 'DESC';
   req.log.info('fetch_travel_bookings_start', { cardno: req.user.cardno, page, pageSize });
 
   const data = await database.query(
@@ -66,16 +70,17 @@ export const FetchUpcoming = async (req, res) => {
     LEFT JOIN travel_bus_stops t6 ON t5.id = t6.bus_group_id AND TRIM(LOWER(t6.stop_name)) = TRIM(LOWER(t1.pickup_point))
     LEFT JOIN travel_db t7 ON t5.coordinator_bookingid = t7.bookingid
     LEFT JOIN card_db t8 ON t7.cardno = t8.cardno
-    WHERE t1.cardno = :cardno
-      OR t1.bookedBy = :cardno
-    ORDER BY t1.date DESC
+    WHERE (t1.cardno = :cardno OR t1.bookedBy = :cardno)
+      ${upcomingWhere}
+    ORDER BY t1.date ${orderDirection}
     LIMIT :limit
     OFFSET :offset;`,
     {
       replacements: {
         cardno: req.user.cardno,
         limit: pageSize,
-        offset: offset
+        offset: offset,
+        ...(upcomingOnly ? { today } : {})
       },
       type: Sequelize.QueryTypes.SELECT
     }
@@ -192,7 +197,7 @@ export const CancelTravel = async (req, res) => {
 
 export const checkUpcomingEvents = async (req, res) => {
   attachUserContext(req);
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   req.log.info('check_upcoming_events_start', { cardno: req.user.cardno, date: today });
 
   const utsavs = await UtsavDb.findAll({

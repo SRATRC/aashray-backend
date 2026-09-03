@@ -29,13 +29,13 @@ import {
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
 
 export const FetchAllShibir = async (req, res) => {
   req.log.info('fetch_all_shibir_start');
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
@@ -108,6 +108,10 @@ export const FetchBookedShibir = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const upcomingOnly = req.query.upcoming === 'true';
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const upcomingWhere = upcomingOnly ? 'AND t2.end_date >= :today' : '';
+  const orderDirection = upcomingOnly ? 'ASC' : 'DESC';
   req.log.info('fetch_booked_shibir_start', { cardno: req.user.cardno, page, pageSize });
 
   const shibirs = await database.query(
@@ -131,7 +135,8 @@ export const FetchBookedShibir = async (req, res) => {
       AND t3.category IN (:category)
     LEFT JOIN card_db t4 ON t4.cardno = t1.cardno
     WHERE (t1.cardno = :cardno OR t1.bookedBy = :cardno)
-    ORDER BY t2.start_date DESC
+      ${upcomingWhere}
+    ORDER BY t2.start_date ${orderDirection}
     LIMIT :limit
     OFFSET :offset;
     `,
@@ -140,7 +145,8 @@ export const FetchBookedShibir = async (req, res) => {
         cardno: req.user.cardno,
         category: [TYPE_ADHYAYAN, TYPE_GUEST_ADHYAYAN],
         limit: pageSize,
-        offset: offset
+        offset: offset,
+        ...(upcomingOnly ? { today } : {})
       },
       type: Sequelize.QueryTypes.SELECT
     }

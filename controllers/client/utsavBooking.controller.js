@@ -31,7 +31,7 @@ import { attachUserContext } from '../../middleware/Logger.js';
 
 export const FetchUpcoming = async (req, res) => {
   req.log.info('fetch_upcoming_utsav_start');
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
@@ -101,6 +101,12 @@ export const ViewUtsavBookings = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const upcomingOnly = req.query.upcoming === 'true';
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const upcomingWhere = upcomingOnly
+    ? 'AND COALESCE(t3.end_date, t2.end_date) >= :today'
+    : '';
+  const orderDirection = upcomingOnly ? 'ASC' : 'DESC';
   req.log.info('fetch_utsav_bookings_start', { cardno: req.user.cardno, page, pageSize });
 
   const utsavs = await database.query(
@@ -130,8 +136,9 @@ export const ViewUtsavBookings = async (req, res) => {
     LEFT JOIN utsav_packages_db t3 ON t3.id = t1.packageid
     LEFT JOIN card_db t5 ON t5.cardno = t1.cardno
     LEFT JOIN transactions t4 ON t4.bookingid = t1.bookingid
-    WHERE t1.cardno = :cardno OR t1.bookedBy = :cardno
-    ORDER BY created_at DESC
+    WHERE (t1.cardno = :cardno OR t1.bookedBy = :cardno)
+      ${upcomingWhere}
+    ORDER BY COALESCE(t3.start_date, t2.start_date) ${orderDirection}
     LIMIT :limit
     OFFSET :offset;
   `,
@@ -139,7 +146,8 @@ export const ViewUtsavBookings = async (req, res) => {
       replacements: {
         cardno: req.user.cardno,
         limit: pageSize,
-        offset: offset
+        offset: offset,
+        ...(upcomingOnly ? { today } : {})
       },
       type: database.QueryTypes.SELECT,
       raw: true
@@ -271,7 +279,7 @@ export const CancelUtsavBooking = async (req, res) => {
 export const FetchUtsavById = async (req, res) => {
   const { id } = req.params;
   req.log.info('fetch_utsav_by_id_start', { utsavId: id });
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
   const utsav = await database.query(
     `
