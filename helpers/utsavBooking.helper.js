@@ -62,7 +62,15 @@ export const ACTIVE_UTSAV_BOOKING_STATUSES = [
 ];
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
-  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
+  // Lock the utsav row for the duration of the booking transaction: the
+  // read-seats → decide-status → write-seats sequence below is not atomic on
+  // its own, so two concurrent bookings could both read the same seat count
+  // and oversell / lose a decrement.
+  const utsav = await UtsavDb.findOne({
+    where: { id: utsavid },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
   const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
@@ -388,16 +396,24 @@ export async function validateUtsavBooking(bookingId, utsavId) {
 }
 
 export async function reserveUtsavSeat(utsav, t) {
-  if (utsav.available_seats <= 0) {
+  // Atomic conditional decrement. The previous read-then-write (seat count
+  // computed in JS from a possibly stale instance) let two concurrent
+  // reservations both pass the seat check and lose one decrement (oversell).
+  // The WHERE guard makes the database the arbiter: zero affected rows means
+  // no seat was left at the moment of the update.
+  const [affected] = await UtsavDb.update(
+    { available_seats: Sequelize.literal('available_seats - 1') },
+    {
+      where: {
+        id: utsav.id,
+        available_seats: { [Sequelize.Op.gt]: 0 }
+      },
+      transaction: t
+    }
+  );
+  if (affected === 0) {
     throw new ApiError(400, ERR_UTSAV_NO_SEATS_AVAILABLE);
   }
-
-  await utsav.update(
-    {
-      available_seats: utsav.dataValues.available_seats - 1
-    },
-    { transaction: t }
-  );
 }
 
 export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
@@ -406,12 +422,14 @@ export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
   // Only increase available seats if utsav is in "open" status
   if (utsav.status !== STATUS_OPEN) return;
 
-  await utsav.update(
+  // Atomic increment (mirror of reserveUtsavSeat): never write a JS-computed
+  // seat count from a possibly stale instance.
+  await UtsavDb.update(
     {
-      available_seats: utsav.dataValues.available_seats + 1,
+      available_seats: Sequelize.literal('available_seats + 1'),
       updatedBy: updatedBy // Optional: audit trail
     },
-    { transaction: t }
+    { where: { id: utsav.id }, transaction: t }
   );
 }
 
@@ -615,14 +633,41 @@ export async function getDateRangesDuringUtsav(
         : existingUtsavBookings[mumukshu]?.UtsavDb;
 
       if (utsavBooking) {
-        dateRanges.push(
-          ...splitDateRanges(
-            utsavBooking.start_date,
-            utsavBooking.end_date,
-            startDate,
-            endDate
-          )
+        const splitRanges = splitDateRanges(
+          utsavBooking.start_date,
+          utsavBooking.end_date,
+          startDate,
+          endDate
         );
+
+        if (splitRanges.length > 0) {
+          dateRanges.push(...splitRanges);
+        } else {
+          // The whole requested stay sits INSIDE the utsav the member attends, so
+          // the split leaves nothing to book. An empty range list then flowed
+          // through every downstream check vacuously — nothing to flag, nothing
+          // to validate, nothing to reject — and the request came back a silent
+          // success while the identical request from a non-attendee was rejected.
+          // Attendance never unblocks a blocked day: those nights belong to the
+          // utsav (its package covers them), so keep the requested span as ONE
+          // range marked unavailable. It is never bookable, never waitlisted,
+          // and the write path throws on it exactly like a centre block.
+          dateRanges.push({
+            start: startDate,
+            end: endDate,
+            overlappingWithUtsav: false,
+            // Independent of whether the utsav's auto-block row still exists: a
+            // stay with zero bookable nights is unavailable on its own terms.
+            forcedBlocked: true,
+            // Say it the way the blocked-dates calendar says it. Naming the
+            // utsav's own auto-block as "the centre is closed" would tell an
+            // attending member the centre is shut on the very days their calendar
+            // shows them as attending.
+            blockedReason: `These dates are part of ${
+              utsavBooking.name || 'the Utsav'
+            }, which you are attending. Those nights belong to the Utsav, not to your stay, so a room cannot be booked for them.`
+          });
+        }
       } else {
         // In case, utsav booking is not found for this mumukshu, check if there is any
         // utsav starts on checkout or ends on checkin date
@@ -649,7 +694,10 @@ export async function getDateRangesDuringUtsav(
     // range 15th->...) still read as two ranges merely touching at an edge, not
     // overlapping, and slipped through unblocked.
     for (const range of dateRanges) {
-      range.isBlocked = false;
+      // forcedBlocked ranges (a stay wholly inside an attended utsav) are
+      // unavailable regardless of which block rows exist, so they start blocked.
+      range.isBlocked = range.forcedBlocked === true;
+      if (range.isBlocked) continue;
       for (const blockedDate of blockedDates) {
         const effectiveCheckout = blockNightBounds(
           blockedDate.checkin,

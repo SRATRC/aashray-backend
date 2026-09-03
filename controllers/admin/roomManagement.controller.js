@@ -48,6 +48,7 @@ import {
   findRoom,
   bookDayVisit,
   checkRoomAlreadyBooked,
+  checkRoomAlreadyBookedInTransaction,
   createFlatBooking,
   createRoomBooking,
   roomCharge,
@@ -658,6 +659,28 @@ export const roomBooking = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  // Serialize same-card bookings (mirrors bulkRoomBooking): lock the card row,
+  // then re-check overlap INSIDE the transaction. The unlocked check above
+  // fast-fails the common case; this one closes the race where two concurrent
+  // requests for the same card both pass it and double-book.
+  await CardDb.findOne({
+    where: { cardno: card.cardno },
+    attributes: ['cardno'],
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (
+    await checkRoomAlreadyBookedInTransaction(
+      checkin_date,
+      checkout_date,
+      [card.cardno],
+      t
+    )
+  ) {
+    req.log.warn('room_booking_already_booked', { cardno: card.cardno, checkin_date, checkout_date });
+    throw new ApiError(400, ERR_ROOM_ALREADY_BOOKED);
+  }
+
   const nights = await calculateNights(checkin_date, checkout_date);
 
   // Non-blocking: admin bookings over the cap still go through; the warning is
@@ -695,7 +718,11 @@ export const roomBooking = async (req, res) => {
   }
 
   await t.commit();
-  const bookingIdToUse = nights === 0 ? booking.bookingid : booking.bookingId;
+  // bookDayVisit returns a model instance (.bookingid); createRoomBooking
+  // returns a result object (.bookingId) — including for half-day bookings
+  // (nights === 0 with a real room type), which previously fell through the
+  // nights ternary, resolved undefined, and silently skipped notifications.
+  const bookingIdToUse = booking.bookingid || booking.bookingId;
   if (bookingIdToUse != null) {
     let bookingIds = {};
     bookingIds[TYPE_ROOM] = [bookingIdToUse];
@@ -910,6 +937,26 @@ export const fetchRoomBookingsByCard = async (req, res) => {
   const cardno = req.params.cardno;
   req.log.info('fetch_room_bookings_by_card_start', { cardno });
 
+  if (req.query.kiosk === 'true') {
+    const [roomBookings, flatBookings, cardDetails] = await Promise.all([
+      RoomBooking.findAll({ where: { cardno }, order: [['checkin', 'ASC']] }),
+      FlatBooking.findAll({ where: { cardno }, order: [['checkin', 'ASC']] }),
+      CardDb.findOne({
+        where: { cardno },
+        attributes: ['cardno', 'issuedto']
+      })
+    ]);
+
+    return res.status(200).send({
+      message: 'Fetched bookings',
+      data: {
+        room_booking: roomBookings,
+        flat_booking: flatBookings,
+        card_details: cardDetails || {}
+      }
+    });
+  }
+
   const bookings = await RoomBooking.findAll({
     where: { cardno },
     order: [['checkin', 'ASC']]
@@ -946,44 +993,213 @@ const isBookingOverlap = (b1, b2) => {
   return b1_checkin < b2_checkout && b1_checkout > b2_checkin;
 };
 
+// Statuses that mean "this booking is holding the bed". `waiting` belongs here:
+// updateRoomBooking puts no status guard on the booking being moved, and the
+// promotion path assigns a room before flipping the status, so a waiting row can
+// legitimately carry a real roomno. Leaving it out made those rows invisible to
+// the overlap scan — the bed read as free and a second guest could be put in it,
+// which is the exact double-booking this check exists to stop. Waiting rows that
+// hold no room carry roomno 'NA' and never match a real room number, so
+// including the status here costs nothing on the common path.
+const ROOM_CHANGE_ACTIVE_STATUSES = [
+  ROOM_STATUS_PENDING_CHECKIN,
+  ROOM_STATUS_CHECKEDIN,
+  STATUS_PAYMENT_PENDING,
+  STATUS_WAITING
+];
+
+const bookingDateRange = (booking) => {
+  const start = moment(booking.checkin).format('YYYY-MM-DD');
+  const checkout = moment(booking.checkout);
+  const checkin = moment(booking.checkin);
+  const end = checkout.isSameOrBefore(checkin, 'day')
+    ? checkin.clone().add(1, 'day').format('YYYY-MM-DD')
+    : checkout.format('YYYY-MM-DD');
+  return { start, end };
+};
+
+const assertRoomAvailableForBooking = async ({ booking, roomno, excludedBookingIds, transaction }) => {
+  if (roomno === 'NA') return;
+
+  const room = await RoomDb.findOne({
+    where: { roomno },
+    transaction,
+    lock: transaction.LOCK.UPDATE
+  });
+
+  if (!room) {
+    throw new ApiError(404, ERR_ROOM_NOT_FOUND);
+  }
+  if (room.roomstatus === ROOM_BLOCKED) {
+    throw new ApiError(409, `Room ${roomno} is permanently blocked`);
+  }
+  if (booking.roomtype && room.roomtype !== booking.roomtype) {
+    throw new ApiError(400, `Room ${roomno} is not a ${booking.roomtype} room`);
+  }
+  const expectedGender = booking.gender === 'SCM' ? 'M' : booking.gender === 'SCF' ? 'F' : booking.gender;
+  if (expectedGender && room.gender !== expectedGender) {
+    throw new ApiError(400, `Room ${roomno} is not assigned to gender ${booking.gender}`);
+  }
+
+  const bookingWhere = {
+    roomno,
+    status: { [Op.in]: ROOM_CHANGE_ACTIVE_STATUSES },
+    bookingid: { [Op.notIn]: excludedBookingIds }
+  };
+  const assignedBookings = await RoomBooking.findAll({
+    where: bookingWhere,
+    attributes: ['bookingid', 'checkin', 'checkout', 'roomno'],
+    transaction,
+    lock: transaction.LOCK.UPDATE
+  });
+  const conflictingBooking = assignedBookings.find((candidate) =>
+    isBookingOverlap(booking, candidate)
+  );
+  if (conflictingBooking) {
+    throw new ApiError(
+      409,
+      `Room ${roomno} is already assigned for part of this stay (${conflictingBooking.bookingid})`
+    );
+  }
+
+  const { start, end } = bookingDateRange(booking);
+  const blocks = await RoomBlock.findAll({
+    where: { roomno, status: 'active' },
+    attributes: ['start_date', 'end_date'],
+    transaction,
+    lock: transaction.LOCK.UPDATE
+  });
+  const blocked = blocks.some((block) => {
+    const blockStart = moment(block.start_date).format('YYYY-MM-DD');
+    const blockEnd = block.end_date
+      ? moment(block.end_date).format('YYYY-MM-DD')
+      : '9999-12-31';
+    return start < blockEnd && end > blockStart;
+  });
+  if (blocked) {
+    throw new ApiError(409, `Room ${roomno} is blocked for part of this stay`);
+  }
+};
+
+const notifyRoomChange = (booking, newRoomNo, body) => {
+  sendDualUserNotifications({
+    primary: {
+      token: booking.CardDb?.token,
+      title: 'Room number changed',
+      body
+    },
+    screen: '/bookings'
+  });
+
+  const phone = booking.CardDb?.mobno;
+  if (!phone) return;
+
+  void (async () => {
+    const formattedPhone = formatWhatsAppPhone(phone, booking.CardDb?.country);
+    const checkinFormatted = booking.checkin ? moment(booking.checkin).format('DD-MM-YYYY') : '';
+    const checkoutFormatted = booking.checkout ? moment(booking.checkout).format('DD-MM-YYYY') : '';
+    const components = [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: booking.CardDb?.issuedto || 'Mumukshu' },
+          { type: 'text', text: newRoomNo },
+          { type: 'text', text: checkinFormatted },
+          { type: 'text', text: checkoutFormatted }
+        ]
+      }
+    ];
+    await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
+  })().catch((error) => {
+    logger.error('room_change_whatsapp_failed', {
+      bookingid: booking.bookingid,
+      error: error.message || error
+    });
+  });
+};
+
 export const updateRoomBooking = async (req, res) => {
   const { bookingid, roomno, conflictingBookingId, conflictingNewRoomNo } = req.body;
 
   req.log.info('update_room_booking_start', { bookingid, roomno, conflictingBookingId, conflictingNewRoomNo });
 
-  const booking = await RoomBooking.findOne({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['issuedto', 'token', 'cardno', 'mobno', 'country']
-      }
-    ],
-    where: { bookingid }
-  });
-
-  if (!booking) {
-    req.log.warn('update_room_booking_not_found', { bookingid });
-    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  if (!bookingid || !roomno) {
+    throw new ApiError(400, 'bookingid and roomno are required');
+  }
+  if (Boolean(conflictingBookingId) !== Boolean(conflictingNewRoomNo)) {
+    throw new ApiError(400, 'Both conflicting booking values are required together');
   }
 
   const t = await database.transaction();
   req.transaction = t;
 
   try {
+    const booking = await RoomBooking.findOne({
+      include: [
+        {
+          model: CardDb,
+          attributes: ['issuedto', 'token', 'cardno', 'mobno', 'country']
+        }
+      ],
+      where: { bookingid },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+
+    if (!booking) {
+      req.log.warn('update_room_booking_not_found', { bookingid });
+      throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+    }
+
+    const oldRoomno = booking.roomno;
+    let conflict = null;
     if (conflictingBookingId && conflictingNewRoomNo) {
-      const conflict = await RoomBooking.findOne({
+      if (conflictingBookingId === bookingid) {
+        throw new ApiError(400, 'A booking cannot conflict with itself');
+      }
+
+      conflict = await RoomBooking.findOne({
         include: [
           {
             model: CardDb,
             attributes: ['cardno', 'issuedto', 'token', 'mobno', 'country']
           }
         ],
-        where: { bookingid: conflictingBookingId }
+        where: { bookingid: conflictingBookingId },
+        transaction: t,
+        lock: t.LOCK.UPDATE
       });
 
       if (!conflict) {
         throw new ApiError(404, 'Conflicting booking not found');
       }
+      if (!ROOM_CHANGE_ACTIVE_STATUSES.includes(conflict.status)) {
+        throw new ApiError(400, 'The selected conflicting booking is not active');
+      }
+      if (conflict.roomno !== roomno || !isBookingOverlap(booking, conflict)) {
+        throw new ApiError(400, 'The selected conflicting booking does not overlap the selected room');
+      }
+      if (conflictingNewRoomNo === roomno) {
+        throw new ApiError(400, 'Conflicting bookings must use different rooms');
+      }
+    }
+
+    const excludedBookingIds = [bookingid];
+    if (conflict) excludedBookingIds.push(conflict.bookingid);
+    await assertRoomAvailableForBooking({
+      booking,
+      roomno,
+      excludedBookingIds,
+      transaction: t
+    });
+
+    if (conflict) {
+      await assertRoomAvailableForBooking({
+        booking: conflict,
+        roomno: conflictingNewRoomNo,
+        excludedBookingIds,
+        transaction: t
+      });
 
       await conflict.update(
         {
@@ -992,42 +1208,6 @@ export const updateRoomBooking = async (req, res) => {
         },
         { transaction: t }
       );
-
-      // Notify the conflicting guest
-      sendDualUserNotifications({
-        primary: {
-          token: conflict.CardDb?.token,
-          title: 'Room number changed',
-          body: `Your room number has been changed to ${conflictingNewRoomNo} due to administrative adjustment.`
-        },
-        screen: '/bookings'
-      });
-
-      // WhatsApp notification for Conflicting Guest Room Number change
-      const conflictPhone = conflict.CardDb?.mobno;
-      if (conflictPhone) {
-        try {
-          const formattedPhone = formatWhatsAppPhone(conflictPhone, conflict.CardDb?.country);
-          const checkinFormatted = conflict.checkin ? moment(conflict.checkin).format("DD-MM-YYYY") : "";
-          const checkoutFormatted = conflict.checkout ? moment(conflict.checkout).format("DD-MM-YYYY") : "";
-
-          const components = [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: conflict.CardDb?.issuedto || 'Mumukshu' },
-                { type: 'text', text: conflictingNewRoomNo },
-                { type: 'text', text: checkinFormatted },
-                { type: 'text', text: checkoutFormatted }
-              ]
-            }
-          ];
-
-          await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
-        } catch (waErr) {
-          console.error('Error sending WhatsApp conflict room_number_updated message:', waErr.message || waErr);
-        }
-      }
     }
 
     await booking.update(
@@ -1038,48 +1218,23 @@ export const updateRoomBooking = async (req, res) => {
       { transaction: t }
     );
 
-    sendDualUserNotifications({
-      primary: {
-        token: booking.CardDb.token,
-        title: 'Room number changed',
-        body: `Your room number has been changed to ${roomno}`
-      },
-      screen: '/bookings'
-    });
-
     await t.commit();
-    req.log.info('update_room_booking_success', { bookingid, oldRoomno: booking.roomno, newRoomno: roomno });
+    req.transaction = null;
+    req.log.info('update_room_booking_success', { bookingid, oldRoomno, newRoomno: roomno });
 
-    // --- Send WhatsApp notification for Room Number change ---
-    const phone = booking.CardDb?.mobno;
-    if (phone) {
-      try {
-        const formattedPhone = formatWhatsAppPhone(phone, booking.CardDb?.country);
-
-        const checkinFormatted = booking.checkin ? moment(booking.checkin).format("DD-MM-YYYY") : "";
-        const checkoutFormatted = booking.checkout ? moment(booking.checkout).format("DD-MM-YYYY") : "";
-
-        const components = [
-          {
-            type: 'body',
-            parameters: [
-              { type: 'text', text: booking.CardDb.issuedto || 'Mumukshu' },
-              { type: 'text', text: roomno },
-              { type: 'text', text: checkinFormatted },
-              { type: 'text', text: checkoutFormatted }
-            ]
-          }
-        ];
-
-        await sendWhatsAppMessage(formattedPhone, 'room_number_updated', components);
-      } catch (waErr) {
-        console.error('Error sending WhatsApp room_number_updated message:', waErr.message || waErr);
-      }
+    if (conflict) {
+      notifyRoomChange(
+        conflict,
+        conflictingNewRoomNo,
+        `Your room number has been changed to ${conflictingNewRoomNo} due to administrative adjustment.`
+      );
     }
+    notifyRoomChange(booking, roomno, `Your room number has been changed to ${roomno}`);
 
     return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
   } catch (error) {
-    await t.rollback();
+    if (!t.finished) await t.rollback();
+    req.transaction = null;
     throw error;
   }
 };
@@ -1192,6 +1347,8 @@ export const updateFlatBooking = async (req, res) => {
 export const roomList = async (req, res) => {
   req.log.info('room_list_start');
 
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
   const result = await RoomDb.findAll({
     attributes: ['roomno', 'roomtype', 'gender', 'roomstatus'],
     where: {
@@ -1210,8 +1367,20 @@ export const roomList = async (req, res) => {
     ]
   });
 
-  req.log.info('room_list_success', { count: result.length });
-  return res.status(200).send({ message: 'Success', data: result });
+  const data = result.map((room) => {
+    const plainRoom = room.toJSON();
+    plainRoom.blocks = (plainRoom.blocks || []).map((block) => ({
+      ...block,
+      isExpired: Boolean(block.end_date && block.end_date <= today),
+      isCurrent:
+        block.start_date <= today && (!block.end_date || block.end_date > today),
+      isFuture: Boolean(block.start_date > today)
+    }));
+    return plainRoom;
+  });
+
+  req.log.info('room_list_success', { count: data.length });
+  return res.status(200).send({ message: 'Success', data });
 };
 
 export const flatList = async (req, res) => {
@@ -1519,6 +1688,35 @@ export const listRoomBlocks = async (req, res) => {
   return res.status(200).send({ message: 'Success', data: blocks });
 };
 
+// The legacy block endpoint sets roomdb.roomstatus = 'blocked' AND writes a
+// permanent room_block row; only the legacy unblock endpoint used to clear the
+// flag. Cancelling that block from the newer block UI left roomstatus stuck at
+// 'blocked'. That was harmless while the client room finder ignored the column,
+// but the finder now filters on it, so a stale flag would silently remove the
+// bed from the booking funnel forever. Re-sync the flag whenever blocks are
+// cancelled: clear it only when no active permanent block remains.
+const syncRoomBlockedFlag = async (roomnos, username, transaction) => {
+  const uniqueRoomnos = [...new Set(roomnos)].filter(Boolean);
+  if (uniqueRoomnos.length === 0) return;
+
+  const stillBlocked = await RoomBlock.findAll({
+    where: { roomno: { [Op.in]: uniqueRoomnos }, status: 'active', end_date: null },
+    attributes: ['roomno'],
+    transaction
+  });
+  const stillBlockedSet = new Set(stillBlocked.map((b) => b.roomno));
+  const toClear = uniqueRoomnos.filter((roomno) => !stillBlockedSet.has(roomno));
+  if (toClear.length === 0) return;
+
+  await RoomDb.update(
+    { roomstatus: ROOM_STATUS_AVAILABLE, updatedBy: username },
+    {
+      where: { roomno: { [Op.in]: toClear }, roomstatus: ROOM_BLOCKED },
+      transaction
+    }
+  );
+};
+
 export const cancelRoomBlock = async (req, res) => {
   const { id } = req.params;
   const { allBeds } = req.query;
@@ -1552,6 +1750,11 @@ export const cancelRoomBlock = async (req, res) => {
           b.update({ status: 'cancelled', updatedBy: req.user.username }, { transaction: t })
         )
       );
+      await syncRoomBlockedFlag(
+        filteredBlocks.map((b) => b.roomno),
+        req.user.username,
+        t
+      );
       await t.commit();
     } catch (err) {
       await t.rollback();
@@ -1561,7 +1764,18 @@ export const cancelRoomBlock = async (req, res) => {
     req.log.info('cancel_room_block_success_all_beds', { baseRoomNo, count: filteredBlocks.length });
     return res.status(200).send({ message: 'Room blocks cancelled successfully for all beds' });
   } else {
-    await block.update({ status: 'cancelled', updatedBy: req.user.username });
+    const t = await database.transaction();
+    try {
+      await block.update(
+        { status: 'cancelled', updatedBy: req.user.username },
+        { transaction: t }
+      );
+      await syncRoomBlockedFlag([block.roomno], req.user.username, t);
+      await t.commit();
+    } catch (err) {
+      await t.rollback();
+      throw err;
+    }
     req.log.info('cancel_room_block_success', { id });
     return res.status(200).send({ message: 'Room block cancelled successfully' });
   }
@@ -1575,15 +1789,25 @@ export const bulkCancelRoomBlocks = async (req, res) => {
     throw new ApiError(400, 'roomnos array is required');
   }
 
-  const [affectedCount] = await RoomBlock.update(
-    { status: 'cancelled', updatedBy: req.user.username },
-    {
-      where: {
-        status: 'active',
-        roomno: { [Op.in]: roomnos }
+  const t = await database.transaction();
+  let affectedCount = 0;
+  try {
+    [affectedCount] = await RoomBlock.update(
+      { status: 'cancelled', updatedBy: req.user.username },
+      {
+        where: {
+          status: 'active',
+          roomno: { [Op.in]: roomnos }
+        },
+        transaction: t
       }
-    }
-  );
+    );
+    await syncRoomBlockedFlag(roomnos, req.user.username, t);
+    await t.commit();
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
 
   req.log.info('bulk_cancel_room_blocks_success', { affected: affectedCount });
   return res.status(200).send({ message: `Successfully cancelled blocks for ${affectedCount} beds` });
@@ -1983,6 +2207,15 @@ export const updateBookingStatus = async (req, res) => {
 
   req.log.info('update_room_booking_status_start', { bookingid, status });
 
+  const t = await database.transaction();
+  req.transaction = t;
+
+  // Fetch under the transaction with a row lock (same pattern as
+  // updateRoomBooking) so two concurrent status updates for the same booking
+  // serialize here: the second waits, then sees the first's committed status
+  // and fails the same-status/transition guards below, instead of both passing
+  // the waiting gate and double-creating transactions / double-deducting
+  // credits.
   const booking = await RoomBooking.findOne({
     include: [
       {
@@ -1990,15 +2223,14 @@ export const updateBookingStatus = async (req, res) => {
         attributes: ['issuedto', 'token']
       }
     ],
-    where: { bookingid }
+    where: { bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
   });
   if (!booking) {
     req.log.warn('update_room_booking_status_not_found', { bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
-
-  const t = await database.transaction();
-  req.transaction = t;
 
   const originalStatus = booking.status;
   let newStatus = originalStatus;
@@ -2068,6 +2300,16 @@ export const updateBookingStatus = async (req, res) => {
       let assignedRoom = booking.roomno;
       if (req.body.roomno && req.body.roomno.trim()) {
         assignedRoom = req.body.roomno.trim();
+        // Never trust a manually-supplied room: validate existence, roomtype,
+        // gender, admin blocks and overlapping assignments under the same
+        // transaction and row locks updateRoomBooking uses, so a concurrent
+        // promotion/move cannot double-book the bed.
+        await assertRoomAvailableForBooking({
+          booking,
+          roomno: assignedRoom,
+          excludedBookingIds: [bookingid],
+          transaction: t
+        });
       } else if (!assignedRoom || assignedRoom === 'NA') {
         const found = await findRoom(
           booking.checkin,
@@ -2852,6 +3094,14 @@ export const bulkRoomBooking = async (req, res) => {
     throw new ApiError(400, 'Bookings array is required and cannot be empty');
   }
 
+  const submittedCardnos = bookings.map((booking) => String(booking?.cardno || '').trim());
+  const duplicateCardnos = submittedCardnos.filter(
+    (cardno, index) => cardno && submittedCardnos.indexOf(cardno) !== index
+  );
+  if (duplicateCardnos.length > 0) {
+    throw new ApiError(400, `Duplicate card number in bulk booking: ${duplicateCardnos[0]}`);
+  }
+
   const nights = await calculateNights(checkin_date, checkout_date);
   const t = await database.transaction();
   req.transaction = t;
@@ -2864,18 +3114,32 @@ export const bulkRoomBooking = async (req, res) => {
   // the per-guest loop below does not re-query getPriorityOrderForMonth (N+1).
   const priorityList = await getPriorityOrderForMonth(checkin_date);
 
-  for (const b of bookings) {
-    const { cardno, room_type } = b;
-    if (!cardno) {
-      throw new ApiError(400, 'Card number is required for each booking row');
-    }
-
-    const card = await CardDb.findOne({ where: { cardno } });
+  // Take ALL card-row locks up front in SORTED order — the same global
+  // ordering rule checkRollingWindowLimitBatch uses — instead of locking in
+  // request order inside the loop, where two concurrent bulk requests with
+  // different roster orders could deadlock.
+  if (submittedCardnos.some((cardno) => !cardno)) {
+    throw new ApiError(400, 'Card number is required for each booking row');
+  }
+  const cardsByNo = new Map();
+  for (const cardno of [...submittedCardnos].sort()) {
+    const card = await CardDb.findOne({
+      where: { cardno },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
     if (!card) {
       throw new ApiError(400, `Card not found for card number: ${cardno}`);
     }
+    cardsByNo.set(cardno, card);
+  }
 
-    if (await checkRoomAlreadyBooked(checkin_date, checkout_date, card.cardno)) {
+  for (const b of bookings) {
+    const cardno = String(b.cardno || '').trim();
+    const { room_type } = b;
+    const card = cardsByNo.get(cardno);
+
+    if (await checkRoomAlreadyBookedInTransaction(checkin_date, checkout_date, [card.cardno], t)) {
       throw new ApiError(400, `Guest ${card.issuedto} (${card.cardno}) already has an active booking for these dates.`);
     }
 
@@ -3092,6 +3356,3 @@ export const deleteAllocationPriority = async (req, res) => {
   await record.destroy();
   return res.status(200).send({ message: 'Allocation priority rule removed successfully' });
 };
-
-
-
