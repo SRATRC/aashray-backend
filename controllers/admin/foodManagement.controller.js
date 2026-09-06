@@ -1232,7 +1232,14 @@ export const getMealCountByMobile = async (req, res) => {
  * Includes per-vendor breakdown and kitchen-wise totals per meal.
  */
 export const vendorFoodSummary = async (req, res) => {
-  const formId = parseInt(req.query.form_id, 10) || 1;
+  let formId = 1;
+  if (req.query.form_id !== undefined) {
+    const parsedFormId = parseInt(req.query.form_id, 10);
+    if (Number.isNaN(parsedFormId) || parsedFormId <= 0) {
+      throw new ApiError(400, 'Invalid form_id parameter');
+    }
+    formId = parsedFormId;
+  }
   const startDate = req.query.start_date || null;
   const endDate = req.query.end_date || null;
   req.log.info('vendor_food_summary_start', { formId, startDate, endDate });
