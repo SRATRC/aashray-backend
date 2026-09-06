@@ -6,7 +6,8 @@ import {
   ROLE_ACCOUNTS_ADMIN,
   ROLE_UTSAV_READ_ONLY,
   ROLE_UTSAV_ADMIN_RAJ,
-  ROLE_OFFICE_ADMIN
+  ROLE_OFFICE_ADMIN,
+  ROLE_HOUSEKEEPING_ADMIN
 } from '../../config/constants.js';
 import {
   createUtsav,
@@ -67,6 +68,36 @@ utsavPublicRouter.post('/issue/:cardno', CatchAsync(issuePlate));
 // Protected routes
 const utsavAdminRouter = express.Router();
 utsavAdminRouter.use(auth);
+
+// Routes accessible to Housekeeping in addition to Utsav admins
+utsavAdminRouter.get(
+  '/housekeeping-extra-beds-report',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_UTSAV_ADMIN,
+    ROLE_PRA_ACCOUNTS_ADMIN,
+    ROLE_ACCOUNTS_ADMIN,
+    ROLE_UTSAV_READ_ONLY,
+    ROLE_UTSAV_ADMIN_RAJ,
+    ROLE_HOUSEKEEPING_ADMIN
+  ),
+  CatchAsync(getHousekeepingExtraBedsReport)
+);
+
+utsavAdminRouter.get(
+  '/fetchList',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_UTSAV_ADMIN,
+    ROLE_PRA_ACCOUNTS_ADMIN,
+    ROLE_ACCOUNTS_ADMIN,
+    ROLE_UTSAV_READ_ONLY,
+    ROLE_UTSAV_ADMIN_RAJ,
+    ROLE_HOUSEKEEPING_ADMIN
+  ),
+  CatchAsync(fetchAllUtsavList)
+);
+
 utsavAdminRouter.use(
   authorizeRoles(
     ROLE_UTSAV_ADMIN,
@@ -106,7 +137,6 @@ utsavAdminRouter.get('/fetch/:id', CatchAsync(fetchUtsav));
 utsavAdminRouter.get('/fetchpackage/:id', CatchAsync(fetchPackage));
 utsavAdminRouter.put('/:id/:activate', CatchAsync(activateUtsav));
 utsavAdminRouter.put('/status', CatchAsync(utsavStatusUpdate));
-utsavAdminRouter.get('/fetchList', CatchAsync(fetchAllUtsavList));
 utsavAdminRouter.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
 utsavAdminRouter.get(
   '/participantHistoryReport',
@@ -152,7 +182,6 @@ utsavAdminRouter.post('/update-room-config', CatchAsync(updateRoomConfig));
 utsavAdminRouter.post('/update-room-inventory-bulk', CatchAsync(updateRoomInventoryBulk));
 utsavAdminRouter.post('/upload-external-rooms', CatchAsync(uploadExternalRooms));
 utsavAdminRouter.post('/run-smart-allocation', CatchAsync(runSmartAllocationController));
-utsavAdminRouter.get('/housekeeping-extra-beds-report', CatchAsync(getHousekeepingExtraBedsReport));
 utsavAdminRouter.get('/uncheckedin-beds-report', CatchAsync(getUncheckedInBedsReport));
 utsavAdminRouter.post('/reallot-bed', CatchAsync(reallotBed));
 utsavAdminRouter.get('/allotted-beds-report', CatchAsync(getAllottedBedsReport));

@@ -302,7 +302,31 @@ export const fetchUpcomingBookings = async (req, res) => {
   const data = await database.query(
     `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.createdAt,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
-       t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
+       CASE 
+         WHEN t1.leaving_post_adhyayan = 1 THEN 1
+         WHEN EXISTS (
+           SELECT 1 FROM shibir_booking_db sb
+           JOIN shibir_db s ON sb.shibir_id = s.id
+           WHERE sb.cardno = t1.cardno 
+             AND sb.status = 'confirmed' 
+             AND s.status != 'deleted'
+             AND s.end_date = t1.date
+         ) THEN 1 
+         ELSE 0 
+       END AS leaving_post_adhyayan,
+       CASE WHEN EXISTS (
+         SELECT 1 FROM shibir_booking_db sb
+         JOIN shibir_db s ON sb.shibir_id = s.id
+         WHERE sb.cardno = t1.cardno 
+           AND sb.status = 'confirmed' 
+           AND s.status != 'deleted'
+           AND s.end_date = t1.date
+       ) THEN 1 ELSE 0 END AS has_confirmed_adhyayan,
+       t1.type, t1.total_people, t1.luggage,
+       CASE WHEN EXISTS (
+         SELECT 1 FROM food_db fb 
+         WHERE fb.cardno = t1.cardno AND fb.date = t1.date AND fb.breakfast = 1
+       ) THEN 1 ELSE 0 END AS breakfast_booked,
 tbp.bus_group_id,
 tbg.bus_name,
 tbg.capacity AS bus_capacity,
@@ -836,14 +860,15 @@ export async function updateBooking(req, res) {
     date,
     leaving_post_adhyayan,
     bus_group_id,
-    is_coordinator
+    is_coordinator,
+    admin_comments
   } = req.body;
 
   let removedFromOldBus = false;
 
   let matchingBus = null;
 
-  req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date });
+  req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date, admin_comments });
 
   if (!bookingid) {
     throw new ApiError(400, 'Booking ID is required');
@@ -882,6 +907,9 @@ export async function updateBooking(req, res) {
   if (leaving_post_adhyayan !== undefined) {
     travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
   }
+  if (admin_comments !== undefined) {
+    travelUpdate.admin_comments = admin_comments;
+  }
 
   if (Object.keys(travelUpdate).length > 0) {
     const travelBooking = await TravelDb.findOne({
@@ -894,6 +922,7 @@ export async function updateBooking(req, res) {
     }
 
     await travelBooking.update(travelUpdate, { transaction: t });
+    updatedFields.push(...Object.keys(travelUpdate));
 
     if (
       pickup_point !== undefined ||
@@ -1182,54 +1211,37 @@ export async function updateBooking(req, res) {
           'bus_group_id'
         );
       }
-
-      // COORDINATOR UPDATE
-
-      if (
-        is_coordinator !== undefined
-      ) {
-
-        if (
-          is_coordinator === 'yes'
-        ) {
-
-          await TravelBusGroup.update(
-            {
-              coordinator_bookingid:
-                bookingid,
-            },
-            {
-              where: {
-                id: bus_group_id,
-              },
-              transaction: t,
-            }
-          );
-        }
-
-        else {
-
-          await TravelBusGroup.update(
-            {
-              coordinator_bookingid:
-                null,
-            },
-            {
-              where: {
-                id: bus_group_id,
-                coordinator_bookingid:
-                  bookingid,
-              },
-              transaction: t,
-            }
-          );
-        }
-
-        updatedFields.push(
-          'is_coordinator'
-        );
-      }
     }
+  }
+
+  // COORDINATOR UPDATE
+  if (is_coordinator !== undefined) {
+    if (is_coordinator === 'yes') {
+      let targetBusId = bus_group_id;
+      if (!targetBusId) {
+        const currentPassenger = await TravelBusPassengers.findOne({
+          where: { bookingid },
+          transaction: t,
+        });
+        targetBusId = currentPassenger?.bus_group_id;
+      }
+
+      if (!targetBusId) {
+        throw new ApiError(400, 'Please select an Assigned Bus before marking the passenger as a Bus Coordinator');
+      }
+
+      await TravelBusGroup.update(
+        { coordinator_bookingid: bookingid },
+        { where: { id: targetBusId }, transaction: t }
+      );
+    } else {
+      await TravelBusGroup.update(
+        { coordinator_bookingid: null },
+        { where: { coordinator_bookingid: bookingid }, transaction: t }
+      );
+    }
+
+    updatedFields.push('is_coordinator');
   }
 
 

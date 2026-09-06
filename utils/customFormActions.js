@@ -88,28 +88,74 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
                 title: { [Sequelize.Op.like]: '%Tapascharya%' },
                 status: 'active'
             },
-            attributes: ['id', 'fields']
+            attributes: ['id', 'fields', 'event_id']
         });
         if (!tappForms.length) return {};
 
         const formIds = [];
+        const formEventMap = new Map();
         const gridFieldIds = new Set(['tapascharya_matrix']);
         for (const f of tappForms) {
             formIds.push(f.id);
+            if (f.event_id) formEventMap.set(f.id, f.event_id);
             const grid = (f.fields || []).find(fld => fld.type === 'grid_radio');
             if (grid && grid.id) gridFieldIds.add(grid.id);
         }
 
         const responses = await CustomFormResponse.findAll({
             where: { form_id: { [Sequelize.Op.in]: formIds } },
-            attributes: ['id', 'cardno', 'responses', 'submittedAt'],
+            attributes: ['id', 'form_id', 'cardno', 'responses', 'submittedAt'],
             order: [['submittedAt', 'ASC']]
         });
+
+        // Collect all distinct card numbers to verify active utsav registration
+        const allCardnos = [...new Set(responses.map(r => r.cardno).filter(Boolean))];
+        const activeCardEventSet = new Set();
+        const activeCardGeneralSet = new Set();
+
+        const ACTIVE_BOOKING_STATUSES = [
+            'confirmed',
+            'completed',
+            'cash completed',
+            'cash_completed',
+            'checkedin',
+            'open'
+        ];
+
+        if (allCardnos.length > 0) {
+            const activeBookings = await UtsavBooking.findAll({
+                where: {
+                    cardno: { [Sequelize.Op.in]: allCardnos },
+                    status: { [Sequelize.Op.in]: ACTIVE_BOOKING_STATUSES }
+                },
+                attributes: ['cardno', 'utsavid', 'status']
+            });
+
+            for (const b of activeBookings) {
+                const c = String(b.cardno).trim();
+                activeCardEventSet.add(`${c}_${b.utsavid}`);
+                activeCardGeneralSet.add(c);
+            }
+        }
 
         // Group by cardno (or response id if cardno is not present) so latest response per member is used
         const latestByUser = new Map();
         for (const r of responses) {
-            const key = r.cardno || r.id;
+            const card = r.cardno ? String(r.cardno).trim() : null;
+
+            // Auto-exclude participants without an active (confirmed) Utsav booking
+            if (card) {
+                const eventId = formEventMap.get(r.form_id);
+                if (eventId) {
+                    if (!activeCardEventSet.has(`${card}_${eventId}`)) {
+                        continue; // Exclude cancelled / inactive booking for this event
+                    }
+                } else if (!activeCardGeneralSet.has(card)) {
+                    continue; // Exclude cancelled / inactive booking
+                }
+            }
+
+            const key = card || r.id;
             latestByUser.set(key, r.responses);
         }
 

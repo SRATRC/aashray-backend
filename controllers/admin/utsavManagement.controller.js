@@ -1391,7 +1391,7 @@ export const utsavCheckin = async (req, res) => {
   await t.commit();
 
   try {
-    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user?.username || 'ADMIN' });
   } catch (waErr) {
     console.error("Error sending utsav status change WhatsApp in utsavCheckin:", waErr);
   }
@@ -1401,6 +1401,88 @@ export const utsavCheckin = async (req, res) => {
     message: 'Utsav booking status updated to checkedin.'
   });
 };
+
+/**
+ * Helper to fetch Tapascharya / Upvaas details for participants of a given Utsav.
+ * Looks for custom forms matching event_id or title with Tapascharya,
+ * and extracts Upvaas / Aayambil / Tapascharya matrix choices.
+ */
+export async function getTappSummaryMap(utsavid, cardnos = []) {
+  const tappMap = new Map();
+  if (!utsavid || !cardnos.length) return tappMap;
+
+  try {
+    const tappForms = await CustomForm.findAll({
+      where: {
+        title: { [Sequelize.Op.like]: '%Tapascharya%' },
+        status: 'active',
+        [Sequelize.Op.or]: [
+          { event_id: utsavid },
+          { event_id: null }
+        ]
+      },
+      attributes: ['id', 'title'],
+      raw: true
+    });
+
+    if (!tappForms.length) return tappMap;
+    const formIds = tappForms.map(f => f.id);
+
+    const responses = await CustomFormResponse.findAll({
+      where: {
+        form_id: { [Sequelize.Op.in]: formIds },
+        cardno: { [Sequelize.Op.in]: cardnos }
+      },
+      attributes: ['cardno', 'responses'],
+      raw: true
+    });
+
+    for (const r of responses) {
+      const matrix = r.responses?.tapascharya_matrix || {};
+      const entries = Object.entries(matrix);
+      if (!entries.length) continue;
+
+      const upvaasDays = [];
+      const aayambilDays = [];
+      const otherTapp = [];
+
+      for (const [day, choice] of entries) {
+        if (!choice) continue;
+        const cLower = String(choice).trim().toLowerCase();
+        if (cLower.includes('upvaas') || cLower.includes('upvas')) {
+          upvaasDays.push(day);
+        } else if (cLower.includes('aayambil')) {
+          aayambilDays.push(day);
+        } else if (!cLower.includes('regular')) {
+          otherTapp.push(`${day}: ${choice}`);
+        }
+      }
+
+      const isUpvaas = upvaasDays.length > 0;
+      const isAayambil = aayambilDays.length > 0;
+      let summaryText = '';
+      if (isUpvaas) {
+        summaryText = `Upvaas (${upvaasDays.join(', ')})`;
+      } else if (isAayambil) {
+        summaryText = `Aayambil (${aayambilDays.length} days)`;
+      } else if (otherTapp.length > 0) {
+        summaryText = otherTapp.slice(0, 2).join('; ');
+      }
+
+      tappMap.set(r.cardno, {
+        is_upvaas: isUpvaas,
+        is_aayambil: isAayambil,
+        has_tapascharya: isUpvaas || isAayambil || otherTapp.length > 0,
+        upvaas_days: upvaasDays,
+        tapp_summary: summaryText
+      });
+    }
+  } catch (err) {
+    console.error('Error in getTappSummaryMap:', err);
+  }
+
+  return tappMap;
+}
 
 export const utsavCheckinReport = async (req, res) => {
   const utsavid = req.query.utsavid;
@@ -1466,6 +1548,18 @@ export const utsavCheckinReport = async (req, res) => {
       type: QueryTypes.SELECT
     }
   );
+
+  const cardnos = [...new Set(utsavData.map(r => r.cardno).filter(Boolean))];
+  const tappMap = await getTappSummaryMap(utsavid, cardnos);
+
+  for (const row of utsavData) {
+    const tapp = tappMap.get(row.cardno) || {};
+    row.is_upvaas = tapp.is_upvaas || false;
+    row.is_aayambil = tapp.is_aayambil || false;
+    row.has_tapascharya = tapp.has_tapascharya || false;
+    row.upvaas_days = tapp.upvaas_days || [];
+    row.tapp_summary = tapp.tapp_summary || '';
+  }
 
   req.log.info('utsav_checkin_report_success', { utsavid, count: utsavData.length });
   return res.status(200).send({
@@ -3013,7 +3107,10 @@ export const getUncheckedInBedsReport = async (req, res) => {
   });
   const packageMap = new Map(packages.map(p => [p.id, p.name]));
 
-  // 2. Separate into:
+  // 2. Fetch Tapascharya / Upvaas info for these participants
+  const tappMap = await getTappSummaryMap(utsavid, cardnos);
+
+  // 3. Separate into:
   // a) Unchecked-in with allocated beds (candidates for vacating / re-allotment)
   // b) All confirmed / checked-in participants for this Utsav (candidates for receiving the bed)
   const uncheckedInBeds = [];
@@ -3025,6 +3122,7 @@ export const getUncheckedInBedsReport = async (req, res) => {
     const age = card.dob ? Math.floor((new Date() - new Date(card.dob)) / (365.25 * 24 * 3600 * 1000)) : null;
     const hasBed = Boolean(b.roomno && String(b.roomno).trim() !== '' && String(b.roomno).trim() !== 'null');
     const isUncheckedIn = b.status !== 'checkedin';
+    const tapp = tappMap.get(b.cardno) || {};
 
     if (hasBed && isUncheckedIn) {
       const roomStr = String(b.roomno).trim();
@@ -3066,7 +3164,12 @@ export const getUncheckedInBedsReport = async (req, res) => {
         package_name: pkgName,
         status: b.status,
         checkin_status: 'Not Checked-In',
-        booked_at: b.createdAt
+        booked_at: b.createdAt,
+        is_upvaas: tapp.is_upvaas || false,
+        is_aayambil: tapp.is_aayambil || false,
+        has_tapascharya: tapp.has_tapascharya || false,
+        upvaas_days: tapp.upvaas_days || [],
+        tapp_summary: tapp.tapp_summary || ''
       });
     }
 
@@ -3080,7 +3183,11 @@ export const getUncheckedInBedsReport = async (req, res) => {
       center: card.center || '',
       package_name: pkgName,
       status: b.status,
-      current_room: b.roomno || null
+      current_room: b.roomno || null,
+      is_upvaas: tapp.is_upvaas || false,
+      is_aayambil: tapp.is_aayambil || false,
+      has_tapascharya: tapp.has_tapascharya || false,
+      tapp_summary: tapp.tapp_summary || ''
     });
   }
 
@@ -3091,6 +3198,7 @@ export const getUncheckedInBedsReport = async (req, res) => {
   const femaleBeds = uncheckedInBeds.filter(b => b.gender === 'F').length;
   const oagBeds = uncheckedInBeds.filter(b => b.property === 'OAG').length;
   const nagBeds = uncheckedInBeds.filter(b => b.property === 'NAG').length;
+  const upvaasBeds = uncheckedInBeds.filter(b => b.is_upvaas).length;
 
   return res.status(200).json({
     success: true,
@@ -3104,6 +3212,7 @@ export const getUncheckedInBedsReport = async (req, res) => {
         female_beds: femaleBeds,
         oag_beds: oagBeds,
         nag_beds: nagBeds,
+        upvaas_beds: upvaasBeds,
         total_confirmed_participants: candidates.length
       }
     }
