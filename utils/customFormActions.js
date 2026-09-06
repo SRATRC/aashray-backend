@@ -7,6 +7,12 @@ import UtsavDb from '../models/utsav_db.model.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import logger from '../config/logger.js';
+import {
+    STATUS_CONFIRMED,
+    STATUS_PAYMENT_COMPLETED,
+    STATUS_CASH_COMPLETED,
+    ROOM_STATUS_CHECKEDIN
+} from '../config/constants.js';
 
 // Meal mappings for Tapascharya choices (0 = NONE / no meal, 1 = REGULAR / meal booked)
 const TAPP_MEAL_MAP = {
@@ -114,12 +120,10 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
         const activeCardGeneralSet = new Set();
 
         const ACTIVE_BOOKING_STATUSES = [
-            'confirmed',
-            'completed',
-            'cash completed',
-            'cash_completed',
-            'checkedin',
-            'open'
+            STATUS_CONFIRMED,
+            STATUS_PAYMENT_COMPLETED,
+            STATUS_CASH_COMPLETED,
+            ROOM_STATUS_CHECKEDIN
         ];
 
         if (allCardnos.length > 0) {

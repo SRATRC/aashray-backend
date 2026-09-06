@@ -1114,8 +1114,6 @@ export async function updateBooking(req, res) {
             transaction: t,
           });
       }
-      updatedFields.push(...Object.keys(travelUpdate));
-
     }
 
     // MANUAL BUS CHANGE
