@@ -30,7 +30,7 @@ import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
-import { getTappDailyAayambilCounts } from '../../utils/customFormActions.js';
+import { getTappDailyAayambilCounts, getVendorFoodSummary } from '../../utils/customFormActions.js';
 
 
 export const issuePlate = async (req, res) => {
@@ -1223,5 +1223,40 @@ export const getMealCountByMobile = async (req, res) => {
     data,
     person,
     utsavExcluded: utsavs
+  });
+};
+
+/**
+ * GET /food/vendor-summary
+ * Returns vendor food registration summary for the active vendor form (form_id = 1).
+ * Includes per-vendor breakdown and kitchen-wise totals per meal.
+ */
+export const vendorFoodSummary = async (req, res) => {
+  let formId = 1;
+  if (req.query.form_id !== undefined) {
+    const parsedFormId = parseInt(req.query.form_id, 10);
+    if (Number.isNaN(parsedFormId) || parsedFormId <= 0) {
+      throw new ApiError(400, 'Invalid form_id parameter');
+    }
+    formId = parsedFormId;
+  }
+  const startDate = req.query.start_date || null;
+  const endDate = req.query.end_date || null;
+  req.log.info('vendor_food_summary_start', { formId, startDate, endDate });
+
+  const result = await getVendorFoodSummary(startDate, endDate, formId);
+
+  req.log.info('vendor_food_summary_success', {
+    formId,
+    startDate,
+    endDate,
+    hasData: result.hasData,
+    vendorCount: result.departments?.length || 0,
+    dateCount: result.dates?.length || 0
+  });
+
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    ...result
   });
 };

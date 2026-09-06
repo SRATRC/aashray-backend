@@ -23,7 +23,8 @@ import {
   foodReportDetailsGuests,
   cancelMultipleMeals,
   bulkIssuePlate,
-  getMealCountByMobile
+  getMealCountByMobile,
+  vendorFoodSummary
   } from '../../controllers/admin/foodManagement.controller.js';
 import { ROLE_SUPER_ADMIN, ROLE_FOOD_ADMIN, ROLE_SMILESTONES_ADMIN, ROLE_FOOD_PLATE_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -63,5 +64,7 @@ router.post('/menu', authorizeFoodAdmin, CatchAsync(addMenu));
 router.put('/menu', authorizeFoodAdmin, CatchAsync(updateMenu));
 router.delete('/menu', authorizeFoodAdmin, CatchAsync(deleteMenu));
 router.post('/menu/bulk', authorizeFoodAdmin, CatchAsync(addBulkMenu));
+
+router.get('/vendor-summary', authorizeFoodAdmin, CatchAsync(vendorFoodSummary));
 
 export default router;
