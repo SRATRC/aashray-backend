@@ -14,6 +14,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
   STATUS_CONFIRMED,
+  STATUS_DELETED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_WAITING,
   TYPE_TRAVEL,
@@ -257,7 +258,9 @@ export const fetchUpcomingBookings = async (req, res) => {
   const replacementMap = {
     startDate: start_date,
     endDate: end_date,
-    category: TYPE_TRAVEL
+    category: TYPE_TRAVEL,
+    shibirConfirmed: STATUS_CONFIRMED,
+    shibirDeleted: STATUS_DELETED
   };
 
   const conditions = [];
@@ -302,7 +305,31 @@ export const fetchUpcomingBookings = async (req, res) => {
   const data = await database.query(
     `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.createdAt,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
-       t1.leaving_post_adhyayan, t1.type, t1.total_people, t1.luggage,
+       CASE 
+         WHEN t1.leaving_post_adhyayan = 1 THEN 1
+         WHEN EXISTS (
+           SELECT 1 FROM shibir_booking_db sb
+           JOIN shibir_db s ON sb.shibir_id = s.id
+           WHERE sb.cardno = t1.cardno 
+             AND sb.status = :shibirConfirmed 
+             AND s.status != :shibirDeleted
+             AND s.end_date = t1.date
+         ) THEN 1 
+         ELSE 0 
+       END AS leaving_post_adhyayan,
+       CASE WHEN EXISTS (
+         SELECT 1 FROM shibir_booking_db sb
+         JOIN shibir_db s ON sb.shibir_id = s.id
+         WHERE sb.cardno = t1.cardno 
+           AND sb.status = :shibirConfirmed
+             AND s.status != :shibirDeleted
+           AND s.end_date = t1.date
+       ) THEN 1 ELSE 0 END AS has_confirmed_adhyayan,
+       t1.type, t1.total_people, t1.luggage,
+       CASE WHEN EXISTS (
+         SELECT 1 FROM food_db fb 
+         WHERE fb.cardno = t1.cardno AND fb.date = t1.date AND fb.breakfast = 1
+       ) THEN 1 ELSE 0 END AS breakfast_booked,
 tbp.bus_group_id,
 tbg.bus_name,
 tbg.capacity AS bus_capacity,
@@ -493,14 +520,20 @@ export const fetchBookingForDriver = async (req, res) => {
   }
 };
 
-export const updateBookingStatus = async (req, res) => {
-  const { bookingid, status, adminComments, description, charges, issueCredits } = req.body;
+async function executeTravelStatusUpdate({
+  bookingid,
+  status,
+  adminComments,
+  description,
+  charges,
+  issueCredits,
+  user,
+  logger,
+  t
+}) {
   let newBookingStatus = status;
 
-  req.log.info('travel_update_booking_status_start', { bookingid, status, adminComments, issueCredits });
-
-  const t = await database.transaction();
-  req.transaction = t;
+  logger.info('travel_update_booking_status_start', { bookingid, status, adminComments, issueCredits });
 
   const booking = await TravelDb.findOne({
     include: [
@@ -511,24 +544,25 @@ export const updateBookingStatus = async (req, res) => {
     ],
     where: {
       bookingid
-    }
+    },
+    transaction: t
   });
 
   if (!booking) {
-    req.log.warn('travel_update_booking_status_not_found', { bookingid });
+    logger.warn('travel_update_booking_status_not_found', { bookingid });
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
   const previousStatus = booking.status;
 
   if (status == booking.status) {
-    req.log.warn('travel_update_booking_status_same', { bookingid, status });
+    logger.warn('travel_update_booking_status_same', { bookingid, status });
     throw new ApiError(400, 'Status is same as before');
   }
 
   if ([STATUS_ADMIN_CANCELLED, STATUS_CANCELLED].includes(booking.status)) {
     if (!(booking.status === STATUS_CANCELLED && status === STATUS_ADMIN_CANCELLED)) {
-      req.log.warn('travel_update_booking_status_already_cancelled', { bookingid, currentStatus: booking.status });
+      logger.warn('travel_update_booking_status_already_cancelled', { bookingid, currentStatus: booking.status });
       throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
     }
   }
@@ -536,7 +570,7 @@ export const updateBookingStatus = async (req, res) => {
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
   let bookingWhichCameOutOfWaiting = null;
-  let transaction = await Transactions.findOne({ where: { bookingid } });
+  let transaction = await Transactions.findOne({ where: { bookingid }, transaction: t });
 
   switch (status) {
     case STATUS_PROCEED_FOR_PAYMENT:
@@ -547,7 +581,7 @@ export const updateBookingStatus = async (req, res) => {
             booking,
             TYPE_TRAVEL,
             charges,
-            req.user.username,
+            user.username,
             t
           )
         ).transaction;
@@ -560,16 +594,13 @@ export const updateBookingStatus = async (req, res) => {
 
     case STATUS_ADMIN_CANCELLED:
       if (transaction) {
-
         if (issueCredits === 'yes') {
           // Always cancel + issue credits
-          await cancelTransaction(req.user, bookedByCard, transaction, t, true);
+          await cancelTransaction(user, bookedByCard, transaction, t, true);
           break;
         }
 
         // issueCredits = "no"
-        // ---- IMPORTANT FIX ----
-        // If transaction is already completed, DO NOT update it.
         if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
           // leave transaction untouched
           break;
@@ -579,7 +610,7 @@ export const updateBookingStatus = async (req, res) => {
         await transaction.update(
           {
             status: STATUS_ADMIN_CANCELLED,
-            updatedBy: req.user.username,
+            updatedBy: user.username,
           },
           { transaction: t }
         );
@@ -588,13 +619,13 @@ export const updateBookingStatus = async (req, res) => {
 
     case STATUS_SEATSFULL_CANCELLED:
       if (transaction) {
-        await adminCancelTransaction(req.user, bookedByCard, transaction, t);
+        await adminCancelTransaction(user, bookedByCard, transaction, t);
       }
       break;
 
     case STATUS_WRONGFORM_CANCELLED:
       if (transaction) {
-        await adminCancelTransaction(req.user, bookedByCard, transaction, t);
+        await adminCancelTransaction(user, bookedByCard, transaction, t);
       }
       break;
 
@@ -618,7 +649,7 @@ export const updateBookingStatus = async (req, res) => {
             {
               status: newTransactionStatus,
               description,
-              updatedBy: req.user.username
+              updatedBy: user.username
             },
             { transaction: t }
           );
@@ -635,7 +666,7 @@ export const updateBookingStatus = async (req, res) => {
     {
       status: newBookingStatus,
       admin_comments: adminComments,
-      updatedBy: req.user.username
+      updatedBy: user.username
     },
     { transaction: t }
   );
@@ -647,140 +678,231 @@ export const updateBookingStatus = async (req, res) => {
     STATUS_CANCELLED
   ];
 
-  if (
-    cancelledStatuses.includes(
-      newBookingStatus
-    )
-  ) {
+  if (cancelledStatuses.includes(newBookingStatus)) {
+    bookingWhichCameOutOfWaiting = await updateWaitingTravelBooking(booking, t);
 
-    bookingWhichCameOutOfWaiting =
-      await updateWaitingTravelBooking(
-        booking,
-        t
-      );
-
-    const bookingid =
-      booking.bookingid;
-
-    // REMOVE FROM BUS ASSIGNMENT
-
-    const busAssignment =
-      await TravelBusPassengers.findOne({
-
-        where: {
-          bookingid,
-        },
-
-        transaction: t,
-      });
+    const busAssignment = await TravelBusPassengers.findOne({
+      where: { bookingid },
+      transaction: t,
+    });
 
     if (busAssignment) {
-
-      // REMOVE COORDINATOR
-
       await TravelBusGroup.update(
-
+        { coordinator_bookingid: null },
         {
-          coordinator_bookingid:
-            null,
-        },
-
-        {
-
           where: {
-
-            id:
-              busAssignment.bus_group_id,
-
-            coordinator_bookingid:
-              bookingid,
+            id: busAssignment.bus_group_id,
+            coordinator_bookingid: bookingid,
           },
-
           transaction: t,
         }
       );
 
-      // REMOVE PASSENGER
-
       await TravelBusPassengers.destroy({
-
-        where: {
-          bookingid,
-        },
-
+        where: { bookingid },
         transaction: t,
       });
 
-      req.log.info(
-
-        'travel_admin_cancel_removed_from_bus',
-
-        {
-          bookingid,
-
-          busGroupId:
-            busAssignment.bus_group_id,
-        }
-      );
+      logger.info('travel_admin_cancel_removed_from_bus', {
+        bookingid,
+        busGroupId: busAssignment.bus_group_id,
+      });
     }
   }
 
-  const card = await CardDb.findOne({ where: { cardno: booking.cardno } });
+  const card = await CardDb.findOne({ where: { cardno: booking.cardno }, transaction: t });
+  let notificationStatus = newBookingStatus;
   if (newBookingStatus === STATUS_ADMIN_CANCELLED) {
     if (booking.admin_comments === 'admin_cancel_seats_full') {
-      newBookingStatus = 'Cancelled because all seats were booked';
+      notificationStatus = 'Cancelled because all seats were booked';
     } else if (booking.admin_comments === 'admin_cancel_wrong_form') {
-      newBookingStatus = 'Cancelled because of wrong form filled';
+      notificationStatus = 'Cancelled because of wrong form filled';
     } else {
-      newBookingStatus = 'Cancelled by admin';
+      notificationStatus = 'Cancelled by admin';
     }
   }
 
+  return {
+    booking,
+    card,
+    previousStatus,
+    newBookingStatus,
+    notificationStatus,
+    bookingWhichCameOutOfWaiting
+  };
+}
 
-  await t.commit();
-  req.log.info('travel_update_booking_status_transition', { bookingid, fromStatus: booking.status, toStatus: newBookingStatus });
-
-  sendMail({
-    email: card.email,
-    subject: 'Raj Pravas - Travel Booking Updated',
-    template: 'rajPravasStatusUpdate',
-    context: {
-      name: card.issuedto,
-      bookingid: booking.bookingid,
-      date: moment(booking.date).format('Do MMMM, YYYY'),
-      pickup: booking.pickup_point,
-      drop: booking.drop_point,
-      status: newBookingStatus
-    }
-  });
+async function dispatchTravelStatusUpdateNotifications({
+  booking,
+  card,
+  previousStatus,
+  notificationStatus,
+  bookingWhichCameOutOfWaiting,
+  username
+}) {
+  if (card && card.email) {
+    sendMail({
+      email: card.email,
+      subject: 'Raj Pravas - Travel Booking Updated',
+      template: 'rajPravasStatusUpdate',
+      context: {
+        name: card.issuedto,
+        bookingid: booking.bookingid,
+        date: moment(booking.date).format('Do MMMM, YYYY'),
+        pickup: booking.pickup_point,
+        drop: booking.drop_point,
+        status: notificationStatus
+      }
+    });
+  }
 
   if (bookingWhichCameOutOfWaiting) {
     sendTravelBookingStatusUpdateMail(bookingWhichCameOutOfWaiting);
   }
 
-  sendDualUserNotifications({
-    primary: {
-      cardno: booking.cardno,
-      title: 'Raj Pravas Booking status update',
-      body: `Your travel booking status has been changed to "${newBookingStatus}"`
-    },
-    bookedBy: booking.bookedBy && {
-      cardno: booking.bookedBy,
-      title: 'Raj Pravas Booking Cancelled',
-      body: `Travel booking for ${booking.CardDb.issuedto.split(' ')[0]
-        } has been updated to "${newBookingStatus}"`
-    },
-    screen: '/bookings'
-  });
+  try {
+    sendDualUserNotifications({
+      primary: {
+        cardno: booking.cardno,
+        title: 'Raj Pravas Booking status update',
+        body: `Your travel booking status has been changed to "${notificationStatus}"`
+      },
+      bookedBy: booking.bookedBy && {
+        cardno: booking.bookedBy,
+        title: 'Raj Pravas Booking Cancelled',
+        body: `Travel booking for ${booking.CardDb?.issuedto ? booking.CardDb.issuedto.split(' ')[0] : 'passenger'} has been updated to "${notificationStatus}"`
+      },
+      screen: '/bookings'
+    });
+  } catch (notifErr) {
+    console.error("Error sending push notifications on travel status update:", notifErr);
+  }
 
   try {
-    await sendTravelStatusChangeWhatsApp(booking, previousStatus, { updatedBy: req.user.username });
+    await sendTravelStatusChangeWhatsApp(booking, previousStatus, { updatedBy: username });
   } catch (waErr) {
     console.error("Error triggering travel status change WhatsApp on admin update:", waErr);
   }
+}
+
+export const updateBookingStatus = async (req, res) => {
+  const { bookingid, status, adminComments, description, charges, issueCredits } = req.body;
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const result = await executeTravelStatusUpdate({
+    bookingid,
+    status,
+    adminComments,
+    description,
+    charges,
+    issueCredits,
+    user: req.user,
+    logger: req.log,
+    t
+  });
+
+  await t.commit();
+  req.log.info('travel_update_booking_status_transition', {
+    bookingid,
+    fromStatus: result.previousStatus,
+    toStatus: result.newBookingStatus
+  });
+
+  await dispatchTravelStatusUpdateNotifications({
+    booking: result.booking,
+    card: result.card,
+    previousStatus: result.previousStatus,
+    notificationStatus: result.notificationStatus,
+    bookingWhichCameOutOfWaiting: result.bookingWhichCameOutOfWaiting,
+    username: req.user.username
+  });
 
   req.log.info('travel_update_booking_status_success', { bookingid });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+};
+
+export const bulkUpdateBookingStatus = async (req, res) => {
+  const { bookingids, status, adminComments, description, charges, issueCredits } = req.body;
+
+  if (!Array.isArray(bookingids) || bookingids.length === 0) {
+    throw new ApiError(400, 'bookingids must be a non-empty array');
+  }
+
+  if (bookingids.length > 100) {
+    throw new ApiError(400, 'Batch size exceeds maximum limit of 100 bookings');
+  }
+
+  req.log.info('travel_bulk_update_booking_status_start', {
+    total: bookingids.length,
+    status,
+    adminComments,
+    charges,
+    issueCredits
+  });
+
+  const results = {
+    total: bookingids.length,
+    successCount: 0,
+    failedCount: 0,
+    failures: []
+  };
+
+  for (const bookingid of bookingids) {
+    const t = await database.transaction();
+    try {
+      const result = await executeTravelStatusUpdate({
+        bookingid,
+        status,
+        adminComments,
+        description,
+        charges,
+        issueCredits,
+        user: req.user,
+        logger: req.log,
+        t
+      });
+
+      await t.commit();
+      results.successCount++;
+
+      // Dispatch notifications asynchronously without blocking the loop
+      dispatchTravelStatusUpdateNotifications({
+        booking: result.booking,
+        card: result.card,
+        previousStatus: result.previousStatus,
+        notificationStatus: result.notificationStatus,
+        bookingWhichCameOutOfWaiting: result.bookingWhichCameOutOfWaiting,
+        username: req.user.username
+      }).catch(err => {
+        console.error("Error dispatching notifications in bulk update:", err);
+      });
+
+    } catch (err) {
+      await t.rollback();
+      results.failedCount++;
+      results.failures.push({
+        bookingid,
+        reason: err.message || 'Failed to update booking status'
+      });
+      req.log.warn('travel_bulk_update_single_failure', {
+        bookingid,
+        error: err.message
+      });
+    }
+  }
+
+  req.log.info('travel_bulk_update_booking_status_complete', {
+    total: results.total,
+    success: results.successCount,
+    failed: results.failedCount
+  });
+
+  return res.status(200).json({
+    message: `Bulk status update completed. ${results.successCount} succeeded, ${results.failedCount} failed.`,
+    data: results
+  });
 };
 
 export const updateTransactionStatus = async (req, res) => {
@@ -836,14 +958,15 @@ export async function updateBooking(req, res) {
     date,
     leaving_post_adhyayan,
     bus_group_id,
-    is_coordinator
+    is_coordinator,
+    admin_comments
   } = req.body;
 
   let removedFromOldBus = false;
 
   let matchingBus = null;
 
-  req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date });
+  req.log.info('travel_update_booking_start', { bookingid, amount, pickup_point, drop_point, type, date, admin_comments });
 
   if (!bookingid) {
     throw new ApiError(400, 'Booking ID is required');
@@ -882,6 +1005,9 @@ export async function updateBooking(req, res) {
   if (leaving_post_adhyayan !== undefined) {
     travelUpdate.leaving_post_adhyayan = leaving_post_adhyayan;
   }
+  if (admin_comments !== undefined) {
+    travelUpdate.admin_comments = admin_comments;
+  }
 
   if (Object.keys(travelUpdate).length > 0) {
     const travelBooking = await TravelDb.findOne({
@@ -894,6 +1020,7 @@ export async function updateBooking(req, res) {
     }
 
     await travelBooking.update(travelUpdate, { transaction: t });
+    updatedFields.push(...Object.keys(travelUpdate));
 
     if (
       pickup_point !== undefined ||
@@ -1085,8 +1212,6 @@ export async function updateBooking(req, res) {
             transaction: t,
           });
       }
-      updatedFields.push(...Object.keys(travelUpdate));
-
     }
 
     // MANUAL BUS CHANGE
@@ -1182,54 +1307,45 @@ export async function updateBooking(req, res) {
           'bus_group_id'
         );
       }
-
-      // COORDINATOR UPDATE
-
-      if (
-        is_coordinator !== undefined
-      ) {
-
-        if (
-          is_coordinator === 'yes'
-        ) {
-
-          await TravelBusGroup.update(
-            {
-              coordinator_bookingid:
-                bookingid,
-            },
-            {
-              where: {
-                id: bus_group_id,
-              },
-              transaction: t,
-            }
-          );
-        }
-
-        else {
-
-          await TravelBusGroup.update(
-            {
-              coordinator_bookingid:
-                null,
-            },
-            {
-              where: {
-                id: bus_group_id,
-                coordinator_bookingid:
-                  bookingid,
-              },
-              transaction: t,
-            }
-          );
-        }
-
-        updatedFields.push(
-          'is_coordinator'
-        );
-      }
     }
+  }
+
+  // COORDINATOR UPDATE
+  if (is_coordinator !== undefined) {
+    if (is_coordinator === 'yes') {
+      let targetBusId = bus_group_id;
+      if (!targetBusId) {
+        const currentPassenger = await TravelBusPassengers.findOne({
+          where: { bookingid },
+          transaction: t,
+        });
+        targetBusId = currentPassenger?.bus_group_id;
+      }
+
+      if (!targetBusId) {
+        throw new ApiError(400, 'Please select an Assigned Bus before marking the passenger as a Bus Coordinator');
+      }
+
+      const passengerExists = await TravelBusPassengers.findOne({
+        where: { bus_group_id: targetBusId, bookingid },
+        transaction: t,
+      });
+      if (!passengerExists) {
+        throw new ApiError(400, 'Passenger does not belong to this bus');
+      }
+
+      await TravelBusGroup.update(
+        { coordinator_bookingid: bookingid },
+        { where: { id: targetBusId }, transaction: t }
+      );
+    } else {
+      await TravelBusGroup.update(
+        { coordinator_bookingid: null },
+        { where: { coordinator_bookingid: bookingid }, transaction: t }
+      );
+    }
+
+    updatedFields.push('is_coordinator');
   }
 
 
