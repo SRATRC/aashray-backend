@@ -43,10 +43,6 @@ import {
     ROLE_UTSAV_ADMIN,
     ROLE_AVT_ADMIN,
     ROLE_WIFI_ADMIN,
-    ROLE_GATE_ADMIN,
-    ROLE_MAINTENANCE_ADMIN,
-    ROLE_HOUSEKEEPING_ADMIN,
-    ROLE_ELECTRICAL_ADMIN,
     ROLE_ACCOUNTS_ADMIN,
     ROLE_SMILESTONES_ADMIN
 } from '../../config/constants.js';
@@ -60,14 +56,14 @@ const DEPT_ROLE_MAP = {
     wifi: [ROLE_WIFI_ADMIN],
     adhyayan: [ROLE_ADHYAYAN_ADMIN],
     travel: [ROLE_TRAVEL_ADMIN],
-    maintenance: [ROLE_MAINTENANCE_ADMIN],
-    housekeeping: [ROLE_HOUSEKEEPING_ADMIN],
-    electrical: [ROLE_ELECTRICAL_ADMIN],
+    maintenance: [],
+    housekeeping: [],
+    electrical: [],
     room: [ROLE_ROOM_ADMIN, ROLE_OFFICE_ADMIN],
     card: [ROLE_CARD_ADMIN, ROLE_OFFICE_ADMIN],
     accounts: [ROLE_ACCOUNTS_ADMIN],
     avt: [ROLE_AVT_ADMIN],
-    gate: [ROLE_GATE_ADMIN],
+    gate: [],
     smilestone: [ROLE_SMILESTONES_ADMIN],
     office: [ROLE_OFFICE_ADMIN]
 };
