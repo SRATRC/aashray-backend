@@ -1434,6 +1434,7 @@ export async function getTappSummaryMap(utsavid, cardnos = []) {
         cardno: { [Sequelize.Op.in]: cardnos }
       },
       attributes: ['cardno', 'responses'],
+      order: [['submittedAt', 'ASC']],
       raw: true
     });
 

@@ -14,6 +14,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
   STATUS_CONFIRMED,
+  STATUS_DELETED,
   STATUS_PAYMENT_COMPLETED,
   STATUS_WAITING,
   TYPE_TRAVEL,
@@ -257,7 +258,9 @@ export const fetchUpcomingBookings = async (req, res) => {
   const replacementMap = {
     startDate: start_date,
     endDate: end_date,
-    category: TYPE_TRAVEL
+    category: TYPE_TRAVEL,
+    shibirConfirmed: STATUS_CONFIRMED,
+    shibirDeleted: STATUS_DELETED
   };
 
   const conditions = [];
@@ -308,8 +311,8 @@ export const fetchUpcomingBookings = async (req, res) => {
            SELECT 1 FROM shibir_booking_db sb
            JOIN shibir_db s ON sb.shibir_id = s.id
            WHERE sb.cardno = t1.cardno 
-             AND sb.status = 'confirmed' 
-             AND s.status != 'deleted'
+             AND sb.status = :shibirConfirmed 
+             AND s.status != :shibirDeleted
              AND s.end_date = t1.date
          ) THEN 1 
          ELSE 0 
@@ -318,8 +321,8 @@ export const fetchUpcomingBookings = async (req, res) => {
          SELECT 1 FROM shibir_booking_db sb
          JOIN shibir_db s ON sb.shibir_id = s.id
          WHERE sb.cardno = t1.cardno 
-           AND sb.status = 'confirmed' 
-           AND s.status != 'deleted'
+           AND sb.status = :shibirConfirmed
+             AND s.status != :shibirDeleted
            AND s.end_date = t1.date
        ) THEN 1 ELSE 0 END AS has_confirmed_adhyayan,
        t1.type, t1.total_people, t1.luggage,
@@ -804,7 +807,7 @@ export const updateBookingStatus = async (req, res) => {
   req.log.info('travel_update_booking_status_transition', {
     bookingid,
     fromStatus: result.previousStatus,
-    toStatus: result.notificationStatus
+    toStatus: result.newBookingStatus
   });
 
   await dispatchTravelStatusUpdateNotifications({
@@ -825,6 +828,10 @@ export const bulkUpdateBookingStatus = async (req, res) => {
 
   if (!Array.isArray(bookingids) || bookingids.length === 0) {
     throw new ApiError(400, 'bookingids must be a non-empty array');
+  }
+
+  if (bookingids.length > 100) {
+    throw new ApiError(400, 'Batch size exceeds maximum limit of 100 bookings');
   }
 
   req.log.info('travel_bulk_update_booking_status_start', {
@@ -1317,6 +1324,14 @@ export async function updateBooking(req, res) {
 
       if (!targetBusId) {
         throw new ApiError(400, 'Please select an Assigned Bus before marking the passenger as a Bus Coordinator');
+      }
+
+      const passengerExists = await TravelBusPassengers.findOne({
+        where: { bus_group_id: targetBusId, bookingid },
+        transaction: t,
+      });
+      if (!passengerExists) {
+        throw new ApiError(400, 'Passenger does not belong to this bus');
       }
 
       await TravelBusGroup.update(
