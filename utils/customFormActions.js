@@ -3,6 +3,7 @@ import UtsavBooking from '../models/utsav_boking.model.js';
 import CustomForm from '../models/custom_form.model.js';
 import CustomFormResponse from '../models/custom_form_response.model.js';
 import UtsavPackagesDb from '../models/utsav_packages.model.js';
+import UtsavDb from '../models/utsav_db.model.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import logger from '../config/logger.js';
@@ -191,6 +192,245 @@ export async function getTappDailyAayambilCounts(startDate, endDate) {
         logger.error('[TAPP_HOOK] Error fetching tapp daily aayambil counts:', err);
         return {};
     }
+}
+
+/**
+ * Reads all vendor food registration responses for a given form ID and returns
+ * per-meal (breakfast, lunch, dinner) counts split by kitchen type (Main Kitchen Mandap vs K1 Kitchen / Other),
+ * both across dates and filtered by the given date range.
+ *
+ * Supports both:
+ * 1. Grid-based responses where `food_requirements_no_of_vendors_per_meal` is keyed by dates (e.g. "7th Sep", "8th Sep")
+ * 2. Flat responses where meal fields are top-level.
+ *
+ * @param {string|null} startDate - Optional start date YYYY-MM-DD
+ * @param {string|null} endDate   - Optional end date YYYY-MM-DD
+ * @param {number} formId         - ID of the vendor registration form (default: 1)
+ * @returns {{ utsav: Object|null, hasData: boolean, summary: Object, dates: Array, departments: Array }}
+ */
+export async function getVendorFoodSummary(startDate = null, endDate = null, formId = 1) {
+    const form = await CustomForm.findByPk(formId, {
+        attributes: ['id', 'title', 'event_id', 'event_name', 'createdAt', 'fields']
+    });
+
+    let utsav = null;
+    let eventYear = new Date().getFullYear();
+    if (form && form.event_id) {
+        utsav = await UtsavDb.findByPk(form.event_id, {
+            attributes: ['id', 'name', 'start_date', 'end_date']
+        });
+        if (utsav && utsav.start_date) {
+            eventYear = moment(utsav.start_date).year();
+        }
+    }
+
+    const responses = await CustomFormResponse.findAll({
+        where: { form_id: formId },
+        attributes: ['id', 'responses', 'submittedAt'],
+        order: [['submittedAt', 'DESC']]
+    });
+
+    const emptySummary = () => ({
+        main: { breakfast: 0, lunch: 0, dinner: 0, total: 0 },
+        other: { breakfast: 0, lunch: 0, dinner: 0, total: 0 },
+        total: { breakfast: 0, lunch: 0, dinner: 0, total: 0 }
+    });
+
+    if (!responses.length) {
+        return {
+            utsav,
+            hasData: false,
+            summary: emptySummary(),
+            dates: [],
+            departments: []
+        };
+    }
+
+    // Discover field IDs: prioritize explicit vendorRole before falling back to label heuristics
+    const formFields = Array.isArray(form?.fields) ? form.fields : [];
+    const deptFieldDef = formFields.find((f) => {
+        if (f.vendorRole === 'department') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return id === 'name_of_department' || id === 'department' || lbl.includes('department') || lbl.includes('dept') || (lbl.includes('name') && lbl.includes('department'));
+    });
+    const deptFieldId = deptFieldDef?.id || 'name_of_department';
+
+    const kitchenFieldDef = formFields.find((f) => {
+        if (f.vendorRole === 'kitchen') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return id === 'kitchen_type' || lbl.includes('kitchen');
+    });
+    const kitchenFieldId = kitchenFieldDef?.id || 'kitchen_type';
+
+    const foodGridFieldDef = formFields.find((f) => {
+        if (f.vendorRole === 'food' || f.vendorRole === 'food_requirements') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return (f.type === 'grid_number' || f.type?.includes('grid')) && (id.includes('food') || lbl.includes('food') || lbl.includes('meal'));
+    });
+    const foodGridFieldId = foodGridFieldDef?.id || 'food_requirements_no_of_vendors_per_meal';
+
+    const remarksFieldDef = formFields.find((f) => {
+        if (f.vendorRole === 'remarks') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return id === 'remarks' || lbl.includes('remark') || lbl.includes('note');
+    });
+    const remarksFieldId = remarksFieldDef?.id || 'remarks';
+
+    // Deduplicate by department, keeping only the latest submission per department
+    const latestResponses = [];
+    const seenDepts = new Set();
+    for (const row of responses) {
+        const resp = row.responses || {};
+        const deptKey = (resp[deptFieldId] || resp.name_of_department || resp.department || resp.dept || '').trim().toLowerCase();
+        const dedupeKey = deptKey || `row_${row.id}`;
+        if (!seenDepts.has(dedupeKey)) {
+            seenDepts.add(dedupeKey);
+            latestResponses.push(row);
+        }
+    }
+
+    const summary = emptySummary();
+    const datesMap = {};
+    const deptList = [];
+
+    // Helper to normalize grid date keys like "7th Sep", "8th Sep", "7th Sep 2026", "2026-09-08"
+    function normalizeDate(rawKey) {
+        if (!rawKey) return null;
+        const str = String(rawKey).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+        const cleaned = str.replace(/(\d+)(st|nd|rd|th)/i, '$1');
+        const hasYear = /\d{4}/.test(cleaned);
+        const toParse = hasYear ? cleaned : `${cleaned} ${eventYear}`;
+        const formats = ['D MMM YYYY', 'D MMMM YYYY', 'D-MMM-YYYY', 'YYYY-MM-DD'];
+        const m = moment(toParse, formats, true);
+        return m.isValid() ? m.format('YYYY-MM-DD') : null;
+    }
+
+    for (const row of latestResponses) {
+        const resp = row.responses || {};
+        const dept = (resp[deptFieldId] || resp.name_of_department || resp.department || resp.dept || 'Vendor').trim();
+        const kitchenRaw = String(resp[kitchenFieldId] || resp.kitchen_type || '').trim();
+        const isMain = kitchenRaw.toLowerCase().includes('main');
+        const kitchen = isMain ? 'main' : 'other';
+        const kitchenLabel = isMain ? 'Main Kitchen Mandap' : (kitchenRaw || 'K1 Kitchen');
+        const remarks = String(resp[remarksFieldId] || resp.remarks || '').trim();
+
+        const foodGrid = resp[foodGridFieldId] || resp.food_requirements_no_of_vendors_per_meal;
+        const deptDateBreakdown = {};
+        const deptTotal = { breakfast: 0, lunch: 0, dinner: 0, total: 0 };
+
+        if (foodGrid && typeof foodGrid === 'object') {
+            // Grid structure: { "7th Sep": { Breakfast: "0", Lunch: "2", Dinner: "2" }, ... }
+            for (const [dateKey, mealObj] of Object.entries(foodGrid)) {
+                const dateStr = normalizeDate(dateKey);
+                if (!dateStr) continue;
+
+                // Filter by date range if provided
+                if (startDate && dateStr < startDate) continue;
+                if (endDate && dateStr > endDate) continue;
+
+                const b = parseInt(mealObj?.Breakfast || mealObj?.breakfast || 0, 10) || 0;
+                const l = parseInt(mealObj?.Lunch || mealObj?.lunch || 0, 10) || 0;
+                const d = parseInt(mealObj?.Dinner || mealObj?.dinner || 0, 10) || 0;
+                const rowSum = b + l + d;
+
+                deptDateBreakdown[dateStr] = { breakfast: b, lunch: l, dinner: d, total: rowSum };
+                deptTotal.breakfast += b;
+                deptTotal.lunch += l;
+                deptTotal.dinner += d;
+                deptTotal.total += rowSum;
+
+                if (!datesMap[dateStr]) {
+                    datesMap[dateStr] = {
+                        date: dateStr,
+                        dateLabel: dateKey,
+                        main: { breakfast: 0, lunch: 0, dinner: 0, total: 0 },
+                        other: { breakfast: 0, lunch: 0, dinner: 0, total: 0 },
+                        total: { breakfast: 0, lunch: 0, dinner: 0, total: 0 },
+                        departments: []
+                    };
+                }
+
+                datesMap[dateStr][kitchen].breakfast += b;
+                datesMap[dateStr][kitchen].lunch += l;
+                datesMap[dateStr][kitchen].dinner += d;
+                datesMap[dateStr][kitchen].total += rowSum;
+
+                datesMap[dateStr].total.breakfast += b;
+                datesMap[dateStr].total.lunch += l;
+                datesMap[dateStr].total.dinner += d;
+                datesMap[dateStr].total.total += rowSum;
+
+                if (rowSum > 0) {
+                    datesMap[dateStr].departments.push({
+                        dept,
+                        kitchen,
+                        kitchenLabel,
+                        breakfast: b,
+                        lunch: l,
+                        dinner: d,
+                        total: rowSum,
+                        remarks
+                    });
+                }
+
+                summary[kitchen].breakfast += b;
+                summary[kitchen].lunch += l;
+                summary[kitchen].dinner += d;
+                summary[kitchen].total += rowSum;
+
+                summary.total.breakfast += b;
+                summary.total.lunch += l;
+                summary.total.dinner += d;
+                summary.total.total += rowSum;
+            }
+        } else {
+            // Fallback for flat response
+            const b = parseInt(resp.breakfast || 0, 10) || 0;
+            const l = parseInt(resp.lunch || 0, 10) || 0;
+            const d = parseInt(resp.dinner || 0, 10) || 0;
+            const rowSum = b + l + d;
+
+            deptTotal.breakfast = b;
+            deptTotal.lunch = l;
+            deptTotal.dinner = d;
+            deptTotal.total = rowSum;
+
+            summary[kitchen].breakfast += b;
+            summary[kitchen].lunch += l;
+            summary[kitchen].dinner += d;
+            summary[kitchen].total += rowSum;
+
+            summary.total.breakfast += b;
+            summary.total.lunch += l;
+            summary.total.dinner += d;
+            summary.total.total += rowSum;
+        }
+
+        deptList.push({
+            dept,
+            kitchen,
+            kitchenLabel,
+            dates: deptDateBreakdown,
+            totals: deptTotal,
+            remarks
+        });
+    }
+
+    const sortedDates = Object.values(datesMap).sort((a, b) => a.date.localeCompare(b.date));
+    const hasData = summary.total.total > 0 || sortedDates.some((d) => d.total.total > 0);
+
+    return {
+        utsav,
+        hasData,
+        summary,
+        dates: sortedDates,
+        departments: deptList
+    };
 }
 
 /**
