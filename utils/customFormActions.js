@@ -227,7 +227,7 @@ export async function getVendorFoodSummary(startDate = null, endDate = null, for
     const responses = await CustomFormResponse.findAll({
         where: { form_id: formId },
         attributes: ['id', 'responses', 'submittedAt'],
-        order: [['submittedAt', 'ASC']]
+        order: [['submittedAt', 'DESC']]
     });
 
     const emptySummary = () => ({
@@ -246,31 +246,52 @@ export async function getVendorFoodSummary(startDate = null, endDate = null, for
         };
     }
 
-    // Discover field IDs dynamically from form definition, with fallback to standard IDs
+    // Discover field IDs: prioritize explicit vendorRole before falling back to label heuristics
     const formFields = Array.isArray(form?.fields) ? form.fields : [];
     const deptFieldDef = formFields.find((f) => {
-        const lbl = (f.label || f.id || '').toLowerCase();
-        return lbl.includes('department') || lbl.includes('dept') || (lbl.includes('name') && lbl.includes('department'));
+        if (f.vendorRole === 'department') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return id === 'name_of_department' || id === 'department' || lbl.includes('department') || lbl.includes('dept') || (lbl.includes('name') && lbl.includes('department'));
     });
     const deptFieldId = deptFieldDef?.id || 'name_of_department';
 
     const kitchenFieldDef = formFields.find((f) => {
-        const lbl = (f.label || f.id || '').toLowerCase();
-        return lbl.includes('kitchen');
+        if (f.vendorRole === 'kitchen') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return id === 'kitchen_type' || lbl.includes('kitchen');
     });
     const kitchenFieldId = kitchenFieldDef?.id || 'kitchen_type';
 
     const foodGridFieldDef = formFields.find((f) => {
-        const lbl = (f.label || f.id || '').toLowerCase();
-        return (f.type === 'grid_number' || f.type?.includes('grid')) && (lbl.includes('food') || lbl.includes('meal'));
+        if (f.vendorRole === 'food' || f.vendorRole === 'food_requirements') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return (f.type === 'grid_number' || f.type?.includes('grid')) && (id.includes('food') || lbl.includes('food') || lbl.includes('meal'));
     });
     const foodGridFieldId = foodGridFieldDef?.id || 'food_requirements_no_of_vendors_per_meal';
 
     const remarksFieldDef = formFields.find((f) => {
-        const lbl = (f.label || f.id || '').toLowerCase();
-        return lbl.includes('remark') || lbl.includes('note');
+        if (f.vendorRole === 'remarks') return true;
+        const id = (f.id || '').toLowerCase();
+        const lbl = (f.label || '').toLowerCase();
+        return id === 'remarks' || lbl.includes('remark') || lbl.includes('note');
     });
     const remarksFieldId = remarksFieldDef?.id || 'remarks';
+
+    // Deduplicate by department, keeping only the latest submission per department
+    const latestResponses = [];
+    const seenDepts = new Set();
+    for (const row of responses) {
+        const resp = row.responses || {};
+        const deptKey = (resp[deptFieldId] || resp.name_of_department || resp.department || resp.dept || '').trim().toLowerCase();
+        const dedupeKey = deptKey || `row_${row.id}`;
+        if (!seenDepts.has(dedupeKey)) {
+            seenDepts.add(dedupeKey);
+            latestResponses.push(row);
+        }
+    }
 
     const summary = emptySummary();
     const datesMap = {};
@@ -289,7 +310,7 @@ export async function getVendorFoodSummary(startDate = null, endDate = null, for
         return m.isValid() ? m.format('YYYY-MM-DD') : null;
     }
 
-    for (const row of responses) {
+    for (const row of latestResponses) {
         const resp = row.responses || {};
         const dept = (resp[deptFieldId] || resp.name_of_department || resp.department || resp.dept || 'Vendor').trim();
         const kitchenRaw = String(resp[kitchenFieldId] || resp.kitchen_type || '').trim();
