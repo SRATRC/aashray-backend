@@ -3,6 +3,7 @@ import './config/environment.js';
 import express, { urlencoded, json } from 'express';
 import { ErrorHandler } from './middleware/Error.js';
 import { httpLogger } from './middleware/Logger.js';
+import { deviceTelemetry } from './middleware/DeviceTelemetry.js';
 import cors from 'cors';
 import session from 'express-session';
 import sequelize from './config/database.js';
@@ -128,6 +129,7 @@ app.use(
 );
 app.use(cors(corsOptions));
 app.use(httpLogger);
+app.use(deviceTelemetry);
 
 app.use(
   session({
@@ -180,7 +182,6 @@ app.get('/api/health', async (_req, res) => {
     });
   }
 });
-
 
 app.use('/api/v1/updates', updateRoutes);
 
