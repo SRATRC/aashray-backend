@@ -887,10 +887,23 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
       let packageName = b.package || (b.UtsavPackagesDb && b.UtsavPackagesDb.name) || "";
 
       // Calculate meal details for confirmed templates
-      const utsavObj = b.UtsavDb || {};
-      const packageObj = b.UtsavPackagesDb || {};
+      let utsavObj = b.UtsavDb;
+      if (!utsavObj && b.utsavid) {
+        utsavObj = await UtsavDb.findOne({ where: { id: b.utsavid } }).catch(() => null);
+      }
+      utsavObj = utsavObj || {};
+      if (!utsavName && utsavObj.name) utsavName = utsavObj.name;
+
+      let packageObj = b.UtsavPackagesDb;
+      if (!packageObj && b.packageid) {
+        packageObj = await UtsavPackagesDb.findOne({ where: { id: b.packageid } }).catch(() => null);
+      }
+      packageObj = packageObj || {};
+      if (!packageName && packageObj.name) packageName = packageObj.name;
+
       const utsavIdVal = b.utsavid || utsavObj.id || "";
       const isRC = utsavObj.location === RESEARCH_CENTRE || utsavObj.location === "Research Centre";
+      const locationName = utsavObj.location || "";
 
       const pkgStart = packageObj.start_date ? moment(packageObj.start_date).format("DD/MM/YYYY") : (utsavObj.start_date ? moment(utsavObj.start_date).format("DD/MM/YYYY") : "");
       const pkgEnd = packageObj.end_date ? moment(packageObj.end_date).format("DD/MM/YYYY") : (utsavObj.end_date ? moment(utsavObj.end_date).format("DD/MM/YYYY") : "");
@@ -942,8 +955,13 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           template = isNRI ? "bn_usv_gu_b_pymtpndg_nri" : "bn_usv_gu_b_pymtpndg";
           bodyParams = [bookerName, utsavName, "payment pending", packageName];
         } else {
-          template = "bn_usv_gu_b_cf";
-          bodyParams = [bookerName, utsavName, packageName, paymentId, startingMealText, endingMealText, attendeeName];
+          if (isRC) {
+            template = "bn_usv_gu_b_cf";
+            bodyParams = [bookerName, utsavName, packageName, paymentId, startingMealText, endingMealText, attendeeName];
+          } else {
+            template = "bn_usv_gu_b_cf_nrc";
+            bodyParams = [bookerName, utsavName, packageName, paymentId, locationName];
+          }
           includeButton = true;
         }
       } else if (isGuestFor) {
@@ -958,8 +976,13 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           template = "bn_usv_gu_f_ppg";
           bodyParams = [attendeeName, utsavName, "payment pending", packageName];
         } else {
-          template = "bn_usv_gu_f_cf";
-          bodyParams = [attendeeName, utsavName, packageName, startingMealText, endingMealText];
+          if (isRC) {
+            template = "bn_usv_gu_f_cf";
+            bodyParams = [attendeeName, utsavName, packageName, startingMealText, endingMealText];
+          } else {
+            template = "bn_usv_gu_f_cf_nrc";
+            bodyParams = [attendeeName, utsavName, packageName, locationName];
+          }
           includeButton = true;
         }
       } else {
@@ -971,8 +994,13 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           template = isNRI ? "bn_usv_s_b_pymtpndg_nri" : "bn_usv_s_b_pymtpndg";
           bodyParams = [selfName, utsavName, "payment pending", packageName];
         } else {
-          template = "bn_usv_s_b_cf";
-          bodyParams = [selfName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          if (isRC) {
+            template = "bn_usv_s_b_cf";
+            bodyParams = [selfName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          } else {
+            template = "bn_usv_s_b_cf_nrc";
+            bodyParams = [selfName, utsavName, packageName, paymentId, locationName];
+          }
           includeButton = true;
         }
       }
@@ -2170,6 +2198,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
 
     // Calculate meal details for confirmed templates
     const isRC = utsav?.location === RESEARCH_CENTRE || utsav?.location === "Research Centre";
+    const locationName = utsav?.location || "";
     const pkgStart = pkg?.start_date ? moment(pkg.start_date).format("DD/MM/YYYY") : (utsav?.start_date ? moment(utsav.start_date).format("DD/MM/YYYY") : "");
     const pkgEnd = pkg?.end_date ? moment(pkg.end_date).format("DD/MM/YYYY") : (utsav?.end_date ? moment(utsav.end_date).format("DD/MM/YYYY") : "");
 
@@ -2236,8 +2265,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           templateName = "bk_usv_s_b_wtng2pymtpndg";
           parameters = [attendeeName, utsavName, packageName, "payment pending"];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_s_b_ppg2cf";
-          parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          if (isRC) {
+            templateName = "bk_usv_s_b_ppg2cf";
+            parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_s_b_ppg2cf_nrc";
+            parameters = [attendeeName, utsavName, packageName, paymentId, locationName];
+          }
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2251,8 +2285,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           }
           parameters = [attendeeName, utsavName, packageName, "admin cancelled"];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_s_b_ppg2cf";
-          parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          if (isRC) {
+            templateName = "bk_usv_s_b_ppg2cf";
+            parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_s_b_ppg2cf_nrc";
+            parameters = [attendeeName, utsavName, packageName, paymentId, locationName];
+          }
         }
       } else if (isConfirmedStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2281,7 +2320,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
         const sanitizedParams = parameters.map(p => sanitizeParamText(p));
         const components = buildBodyComponents(sanitizedParams);
         const utsavIdVal = booking.utsavid || utsav?.id || "";
-        if (templateName === "bk_usv_s_b_ppg2cf" && utsavIdVal) {
+        if ((templateName === "bk_usv_s_b_ppg2cf" || templateName === "bk_usv_s_b_ppg2cf_nrc") && utsavIdVal) {
           components.push({
             type: "button",
             sub_type: "url",
@@ -2317,8 +2356,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           templateName = "bk_usv_gu_b_w2ppg";
           parameters = [bookerName, utsavName, packageName, "payment pending", attendeeName];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_ppg2cf_wl";
-          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
+          if (isRC) {
+            templateName = "bk_usv_gu_b_ppg2cf_wl";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_gu_b_ppg2cf_wl_nrc";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, locationName];
+          }
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2332,8 +2376,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           }
           parameters = [bookerName, utsavName, packageName, "admin cancelled", attendeeName];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_ppg2cf_wl";
-          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
+          if (isRC) {
+            templateName = "bk_usv_gu_b_ppg2cf_wl";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_gu_b_ppg2cf_wl_nrc";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, locationName];
+          }
         }
       } else if (isConfirmedStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2359,7 +2408,7 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
         const sanitizedParams = parameters.map(p => sanitizeParamText(p));
         const components = buildBodyComponents(sanitizedParams);
         const utsavIdVal = booking.utsavid || utsav?.id || "";
-        if (templateName === "bk_usv_gu_b_ppg2cf_wl" && utsavIdVal) {
+        if ((templateName === "bk_usv_gu_b_ppg2cf_wl" || templateName === "bk_usv_gu_b_ppg2cf_wl_nrc") && utsavIdVal) {
           components.push({
             type: "button",
             sub_type: "url",
