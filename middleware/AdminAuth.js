@@ -12,6 +12,27 @@ export const auth = CatchAsync(async (req, res, next) => {
   const token = header.replace('Bearer ', '');
   const decoded = jwt.verify(token, process.env.SECRET);
 
+  if (decoded && (decoded.type === 'temporary_share_access' || decoded.type === 'utsav_report_share')) {
+    const scope = decoded.scope || {};
+    const roles = decoded.roles || (decoded.role ? [decoded.role] : ['utsavAdminReadOnly']);
+
+    req.user = {
+      id: 0,
+      username: decoded.username || 'temporary_share_viewer',
+      isShareToken: true,
+      shareType: decoded.type,
+      resource: decoded.resource || 'general',
+      utsavId: decoded.utsavId || scope.utsavId,
+      location: decoded.location || scope.location,
+      scope: scope
+    };
+    req.roles = Array.isArray(roles) ? roles : [roles];
+    attachUserContext(req);
+    return next();
+  }
+
+  if (!decoded || !decoded.user) throw new ApiError(401, 'Unauthorized');
+
   const user = await AdminUsers.findOne({
     where: {
       id: decoded.user.id,

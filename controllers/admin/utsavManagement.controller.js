@@ -632,7 +632,10 @@ export const updateUtsav = async (req, res) => {
 };
 
 export const fetchUtsavBookings = async (req, res) => {
-  const utsavid = req.query.utsavid;
+  let utsavid = req.query.utsavid;
+  if (req.user?.isShareToken && req.user.utsavId) {
+    utsavid = req.user.utsavId;
+  }
   let status = req.query.status;
   req.log.info('fetch_utsav_bookings_start', { utsavid, status });
 
@@ -721,7 +724,10 @@ export const fetchUtsavBookings = async (req, res) => {
 };
 
 export const fetchUtsavBookingsVolunteer = async (req, res) => {
-  const utsavid = req.query.utsavid;
+  let utsavid = req.query.utsavid;
+  if (req.user?.isShareToken && req.user.utsavId) {
+    utsavid = req.user.utsavId;
+  }
   req.log.info('fetch_utsav_bookings_volunteer_start', { utsavid });
 
   if (!utsavid) {
@@ -831,12 +837,22 @@ END) AS volunteer_opted_count
 
 export const fetchUtsavByLocation = async (req, res) => {
   try {
-    const { location } = req.query;
+    let { location } = req.query;
+    if (req.user?.isShareToken) {
+      location = req.user.location || location;
+    }
     req.log.info('fetch_utsav_by_location_start', { location });
 
     if (!location) {
       req.log.warn('fetch_utsav_by_location_missing_param');
       return res.status(400).send({ message: 'Location is required' });
+    }
+
+    const replacements = { location };
+    let extraWhere = '';
+    if (req.user?.isShareToken && req.user.utsavId) {
+      extraWhere = ' AND utsav_db.id = :shareUtsavId';
+      replacements.shareUtsavId = req.user.utsavId;
     }
 
     const utsavs = await database.query(
@@ -867,7 +883,7 @@ export const fetchUtsavByLocation = async (req, res) => {
       LEFT JOIN 
         utsav_booking ON utsav_db.id = utsav_booking.utsavid
       WHERE 
-        utsav_db.location = :location
+        utsav_db.location = :location ${extraWhere}
       GROUP BY
         utsav_db.id,
         utsav_db.name,
@@ -882,7 +898,7 @@ export const fetchUtsavByLocation = async (req, res) => {
         utsav_db.start_date ASC;`,
       {
         type: QueryTypes.SELECT,
-        replacements: { location }
+        replacements
       }
     );
 
@@ -1329,7 +1345,7 @@ export const fetchAllUtsavList = async (req, res) => {
     req.log.info('fetch_all_utsav_list_start');
 
     const adhyayans = await database.query(
-      `SELECT id, name FROM utsav_db ORDER BY id ASC`,
+      `SELECT id, name, location, status FROM utsav_db ORDER BY id DESC`,
       {
         type: QueryTypes.SELECT,
         raw: true
@@ -1502,7 +1518,10 @@ export async function getTappSummaryMap(utsavid, cardnos = []) {
 }
 
 export const utsavCheckinReport = async (req, res) => {
-  const utsavid = req.query.utsavid;
+  let utsavid = req.query.utsavid;
+  if (req.user?.isShareToken && req.user.utsavId) {
+    utsavid = req.user.utsavId;
+  }
   let status = req.query.status;
   req.log.info('utsav_checkin_report_start', { utsavid, status });
 
