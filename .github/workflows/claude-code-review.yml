@@ -27,7 +27,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Claude PR review (inline comments)
         uses: anthropics/claude-code-action@v1
@@ -36,11 +36,6 @@ jobs:
 
           # Posts a progress/summary tracking comment as the review runs.
           track_progress: true
-
-          # TEMPORARY (diagnostics): unhide the SDK stream so the real error and
-          # the denied tool names appear in the job log. Runner debug mode does
-          # NOT do this. Remove once the failure is understood.
-          show_full_output: true
 
           prompt: |
             REPO: ${{ github.repository }}
