@@ -27,7 +27,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Full depth: the action tells the reviewer to diff against the
+          # base branch, which a shallow clone cannot resolve — it then
+          # burns turns on git fetch calls the allowlist refuses.
+          fetch-depth: 0
 
       - name: Claude PR review (inline comments)
         uses: anthropics/claude-code-action@v1
@@ -37,10 +40,12 @@ jobs:
           # Posts a progress/summary tracking comment as the review runs.
           track_progress: true
 
-          # TEMPORARY: unhide the SDK stream so the review job's suppressed
-          # error is visible in the job log. The action validates this file
-          # against the default branch, so it has to live on main to take
-          # effect. Remove once the failure is understood.
+          # Keep the model's output in the job log. Without this the action
+          # hides it, and a failed review reports nothing but is_error:true —
+          # which cost a long investigation once already. Runner debug mode
+          # does NOT unhide it. The repo is public, so the log is public:
+          # it holds the diff and the files the reviewer read, never secrets
+          # (Actions masks those).
           show_full_output: true
 
           prompt: |
