@@ -56,6 +56,7 @@ import adminFormRoutes from './routes/admin/customForm.routes.js';
 
 import waManagementRoutes from './routes/admin/waManagement.routes.js';
 import satshrutRoutes from './routes/admin/satshrut.routes.js';
+import temporaryAccessRoutes from './routes/admin/temporaryAccess.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -218,6 +219,7 @@ app.use('/api/v1/admin/wa', waManagementRoutes);
 app.use('/api/v1/admin/satshrut', satshrutRoutes);
 app.use('/api/v1/coordinator', coordinatorAuthRoutes);
 app.use('/api/v1/short-links', shortLinkRoutes);
+app.use('/api/v1/admin/temporary-access', temporaryAccessRoutes);
 app.use('/api/v1/admin/forms', adminFormRoutes);
 app.use('/', redirectRoutes);
 
