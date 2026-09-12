@@ -636,7 +636,7 @@ export const fetchUtsavBookings = async (req, res) => {
   if (req.user?.isShareToken && req.user.utsavId) {
     utsavid = req.user.utsavId;
   }
-  let status = req.query.status;
+  let status = req.user?.isShareToken ? 'confirmed' : req.query.status;
   req.log.info('fetch_utsav_bookings_start', { utsavid, status });
 
   if (status != null || status != undefined) {
@@ -1522,7 +1522,7 @@ export const utsavCheckinReport = async (req, res) => {
   if (req.user?.isShareToken && req.user.utsavId) {
     utsavid = req.user.utsavId;
   }
-  let status = req.query.status;
+  let status = req.user?.isShareToken ? 'confirmed' : req.query.status;
   req.log.info('utsav_checkin_report_start', { utsavid, status });
 
   if (status != null || status != undefined) {
