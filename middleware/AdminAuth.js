@@ -27,6 +27,7 @@ export const auth = CatchAsync(async (req, res, next) => {
 
     const roles = decoded.roles || (decoded.role ? [decoded.role] : [ROLE_UTSAV_READ_ONLY]);
 
+    const scope = decoded.scope || {};
     req.user = {
       id: 0,
       username: decoded.username || 'temporary_share_viewer',
