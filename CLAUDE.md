@@ -9,6 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Never point QA tooling at prod, or vice versa.
 
+Both are local-session tools only. In GitHub Actions (the PR review job, `@claude`) the
+MCP server, the skill, the databases, the installed dependencies and the test suite are all
+out of reach — review from the diff and the checked-out files alone, and do not try to reach
+a database, fetch logs, or run tests there.
+
 ## Project Overview
 
 Aashray Backend is a Node.js/Express REST API for managing bookings and operations at a spiritual/residential center. It handles room, food, travel, event, and educational program bookings with Razorpay payment integration.
