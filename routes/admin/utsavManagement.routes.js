@@ -174,20 +174,25 @@ utsavAdminRouter.post(
 );
 
 
-utsavAdminRouter.get('/system-room-allocation', CatchAsync(getSystemRoomAllocations));
-utsavAdminRouter.post('/apply-room-allocations', CatchAsync(applyRoomAllocations));
+const ALLOCATION_ROLES = [
+  ROLE_SUPER_ADMIN,
+  ROLE_UTSAV_ADMIN
+];
+
+utsavAdminRouter.get('/system-room-allocation', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getSystemRoomAllocations));
+utsavAdminRouter.post('/apply-room-allocations', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(applyRoomAllocations));
 
 // Smart Room Allocation Engine
-utsavAdminRouter.get('/room-inventory', CatchAsync(getRoomInventory));
-utsavAdminRouter.post('/init-room-inventory', CatchAsync(initRoomInventory));
-utsavAdminRouter.post('/update-room-config', CatchAsync(updateRoomConfig));
-utsavAdminRouter.post('/update-room-inventory-bulk', CatchAsync(updateRoomInventoryBulk));
-utsavAdminRouter.post('/upload-external-rooms', CatchAsync(uploadExternalRooms));
-utsavAdminRouter.post('/run-smart-allocation', CatchAsync(runSmartAllocationController));
-utsavAdminRouter.get('/uncheckedin-beds-report', CatchAsync(getUncheckedInBedsReport));
-utsavAdminRouter.post('/reallot-bed', CatchAsync(reallotBed));
-utsavAdminRouter.get('/allotted-beds-report', CatchAsync(getAllottedBedsReport));
-utsavAdminRouter.post('/swap-beds', CatchAsync(swapBeds));
-utsavAdminRouter.get('/participant-stay-history', CatchAsync(getParticipantStayHistory));
+utsavAdminRouter.get('/room-inventory', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getRoomInventory));
+utsavAdminRouter.post('/init-room-inventory', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(initRoomInventory));
+utsavAdminRouter.post('/update-room-config', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(updateRoomConfig));
+utsavAdminRouter.post('/update-room-inventory-bulk', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(updateRoomInventoryBulk));
+utsavAdminRouter.post('/upload-external-rooms', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(uploadExternalRooms));
+utsavAdminRouter.post('/run-smart-allocation', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(runSmartAllocationController));
+utsavAdminRouter.get('/uncheckedin-beds-report', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getUncheckedInBedsReport));
+utsavAdminRouter.post('/reallot-bed', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(reallotBed));
+utsavAdminRouter.get('/allotted-beds-report', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getAllottedBedsReport));
+utsavAdminRouter.post('/swap-beds', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(swapBeds));
+utsavAdminRouter.get('/participant-stay-history', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getParticipantStayHistory));
 
 export { utsavPublicRouter, utsavAdminRouter };
