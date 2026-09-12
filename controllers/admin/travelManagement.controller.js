@@ -600,20 +600,15 @@ async function executeTravelStatusUpdate({
           break;
         }
 
-        // issueCredits = "no"
+        // issueCredits = "no" — same as user cancel:
+        // paid transactions stay as-is (no refund), pending/failed restore discount
         if ([STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)) {
-          // leave transaction untouched
+          // leave transaction untouched — money was collected, non-refundable
           break;
         }
 
-        // If transaction is pending or cash pending → mark admin cancelled
-        await transaction.update(
-          {
-            status: STATUS_ADMIN_CANCELLED,
-            updatedBy: user.username,
-          },
-          { transaction: t }
-        );
+        // Pending/failed: restore any previously applied credits (discount) back to card
+        await cancelTransaction(user, bookedByCard, transaction, t, false);
       }
       break;
 
