@@ -27,7 +27,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Full depth: the action tells the reviewer to diff against the
+          # base branch, which a shallow clone cannot resolve — it then
+          # burns turns on git fetch calls the allowlist refuses.
+          fetch-depth: 0
 
       - name: Claude PR review (inline comments)
         uses: anthropics/claude-code-action@v1
@@ -36,6 +39,14 @@ jobs:
 
           # Posts a progress/summary tracking comment as the review runs.
           track_progress: true
+
+          # Keep the model's output in the job log. Without this the action
+          # hides it, and a failed review reports nothing but is_error:true —
+          # which cost a long investigation once already. Runner debug mode
+          # does NOT unhide it. The repo is public, so the log is public:
+          # it holds the diff and the files the reviewer read, never secrets
+          # (Actions masks those).
+          show_full_output: true
 
           prompt: |
             REPO: ${{ github.repository }}
@@ -56,6 +67,10 @@ jobs:
             overall summary or general praise — put specific issues inline, not in
             one big comment.
 
+          # Read-only shell utilities are listed because a piped command is
+          # approved part by part: `git diff | grep` fails on the grep half
+          # alone, and the reviewer then burns turns working around it.
+          #
           # --allowedTools must include the inline-comment tool, or the review
           # falls back to a single summary comment with no line-anchored comments.
           #
@@ -64,6 +79,6 @@ jobs:
           # Actions > Variables) without editing this file. If a variable is
           # unset, the fallback after `||` is used, preserving current behavior.
           claude_args: >-
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(grep:*),Bash(awk:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(cut:*),Bash(cat:*),Bash(ls:*)"
             --model ${{ vars.CLAUDE_MODEL || 'claude-sonnet-5' }}
             --effort ${{ vars.CLAUDE_EFFORT || 'high' }}
