@@ -108,7 +108,7 @@ export const generateTemporaryAccessLink = async (req, res) => {
     }
 
     // Clean up path: strip leading /admin/ or /
-    resolvedPath = resolvedPath.replace(/^\\/?(admin\\/)?/, '');
+    resolvedPath = resolvedPath.replace(/^\/?(admin\/)?/, '');
 
     // Build JWT payload with sanitized scope only
     const payload = {
