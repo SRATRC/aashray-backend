@@ -4,6 +4,7 @@ import { attachUserContext } from './Logger.js';
 import ApiError from '../utils/ApiError.js';
 import CatchAsync from '../utils/CatchAsync.js';
 import jwt from 'jsonwebtoken';
+import ShortLink from '../models/short_link.model.js';
 
 export const auth = CatchAsync(async (req, res, next) => {
   const header = req.header('Authorization');
@@ -13,7 +14,17 @@ export const auth = CatchAsync(async (req, res, next) => {
   const decoded = jwt.verify(token, process.env.SECRET);
 
   if (decoded && (decoded.type === 'temporary_share_access' || decoded.type === 'utsav_report_share')) {
+    // Verify that the shortlink has not been revoked via the toggle endpoint.
+    // We look up by the slug embedded in the JWT to check its active status in DB.
     const scope = decoded.scope || {};
+    const slugFromScope = scope.slug || decoded.slug;
+    if (slugFromScope) {
+      const link = await ShortLink.findOne({ where: { slug: slugFromScope } });
+      if (!link || !link.active) {
+        throw new ApiError(401, 'This access link has been revoked');
+      }
+    }
+
     const roles = decoded.roles || (decoded.role ? [decoded.role] : ['utsavAdminReadOnly']);
 
     req.user = {

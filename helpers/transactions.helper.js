@@ -273,6 +273,8 @@ export async function adjustAmount(
 
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
+    // adjustAmount only receives updatedBy (string) — construct a minimal user object for addCredit
+    const user = { username: updatedBy };
     await addCredit(user, card, bookingType, credits, t);
     await useCredit(card, booking, transaction, amount, updatedBy, t);
   } else if (originalAmount < amount) {
