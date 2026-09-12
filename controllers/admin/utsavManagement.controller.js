@@ -29,7 +29,8 @@ import Sequelize, { QueryTypes } from 'sequelize';
 import {
   adminCancelTransaction,
   createPendingTransaction,
-  cancelTransaction
+  cancelTransaction,
+  useCredit
 } from '../../helpers/transactions.helper.js';
 
 import {
@@ -631,8 +632,11 @@ export const updateUtsav = async (req, res) => {
 };
 
 export const fetchUtsavBookings = async (req, res) => {
-  const utsavid = req.query.utsavid;
-  let status = req.query.status;
+  let utsavid = req.query.utsavid;
+  if (req.user?.isShareToken && req.user.utsavId) {
+    utsavid = req.user.utsavId;
+  }
+  let status = req.user?.isShareToken ? 'confirmed' : req.query.status;
   req.log.info('fetch_utsav_bookings_start', { utsavid, status });
 
   if (status != null || status != undefined) {
@@ -720,7 +724,10 @@ export const fetchUtsavBookings = async (req, res) => {
 };
 
 export const fetchUtsavBookingsVolunteer = async (req, res) => {
-  const utsavid = req.query.utsavid;
+  let utsavid = req.query.utsavid;
+  if (req.user?.isShareToken && req.user.utsavId) {
+    utsavid = req.user.utsavId;
+  }
   req.log.info('fetch_utsav_bookings_volunteer_start', { utsavid });
 
   if (!utsavid) {
@@ -830,12 +837,25 @@ END) AS volunteer_opted_count
 
 export const fetchUtsavByLocation = async (req, res) => {
   try {
-    const { location } = req.query;
+    let { location } = req.query;
+    if (req.user?.isShareToken) {
+      if (!req.user.location) {
+        return res.status(403).send({ message: 'Access token does not include a location scope' });
+      }
+      location = req.user.location;
+    }
     req.log.info('fetch_utsav_by_location_start', { location });
 
     if (!location) {
       req.log.warn('fetch_utsav_by_location_missing_param');
       return res.status(400).send({ message: 'Location is required' });
+    }
+
+    const replacements = { location };
+    let extraWhere = '';
+    if (req.user?.isShareToken && req.user.utsavId) {
+      extraWhere = ' AND utsav_db.id = :shareUtsavId';
+      replacements.shareUtsavId = req.user.utsavId;
     }
 
     const utsavs = await database.query(
@@ -866,7 +886,7 @@ export const fetchUtsavByLocation = async (req, res) => {
       LEFT JOIN 
         utsav_booking ON utsav_db.id = utsav_booking.utsavid
       WHERE 
-        utsav_db.location = :location
+        utsav_db.location = :location ${extraWhere}
       GROUP BY
         utsav_db.id,
         utsav_db.name,
@@ -881,7 +901,7 @@ export const fetchUtsavByLocation = async (req, res) => {
         utsav_db.start_date ASC;`,
       {
         type: QueryTypes.SELECT,
-        replacements: { location }
+        replacements
       }
     );
 
@@ -1056,26 +1076,45 @@ export const utsavStatusUpdate = async (req, res) => {
         ['credited', 'cancelled'].includes(transaction.status)
       ) {
         const cardnoToUse = booking.bookedBy || booking.cardno;
+        const card = await validateCard(cardnoToUse);
 
-        const [existingTransaction, created] = await Transactions.findOrCreate({
-          where: { bookingid: booking.bookingid },
-          defaults: {
-            cardno: cardnoToUse,
-            category: TYPE_UTSAV,
-            amount: pkg.amount,
-            discount: 0,
-            razorpay_order_id: null,
-            description: description || 'Payment pending for Utsav',
-            status: STATUS_PAYMENT_PENDING,
-            updatedBy: req.user.username || 'admin'
-          },
-          transaction: t
-        });
+        if (!transaction) {
+          const result = await createPendingTransaction(
+            card,
+            booking,
+            TYPE_UTSAV,
+            pkg.amount,
+            req.user.username || 'admin',
+            t
+          );
+          transaction = result.transaction;
+        } else {
+          await transaction.update(
+            {
+              amount: pkg.amount,
+              discount: 0,
+              status: STATUS_PAYMENT_PENDING,
+              updatedBy: req.user.username || 'admin',
+              description: description || 'Payment pending for Utsav'
+            },
+            { transaction: t }
+          );
+          await useCredit(
+            card,
+            booking,
+            transaction,
+            pkg.amount,
+            req.user.username || 'admin',
+            t
+          );
+        }
         await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
-        transaction = existingTransaction;
       }
 
-      newBookingStatus = STATUS_PAYMENT_PENDING;
+      newBookingStatus =
+        transaction.status === STATUS_PAYMENT_COMPLETED
+          ? STATUS_CONFIRMED
+          : STATUS_PAYMENT_PENDING;
       break;
 
     case STATUS_ADMIN_CANCELLED:
@@ -1128,6 +1167,8 @@ export const utsavStatusUpdate = async (req, res) => {
             req.log.info('utsav_status_update_issuing_credits', { bookingid, amount: transaction.amount });
             await cancelTransaction(req.user, null, transaction, t, true);
           } else {
+            // issueCredits = "no" — same as user cancel:
+            // paid transactions stay as-is (non-refundable), pending/failed restore discount
             const isCompletedStatus = [
               STATUS_PAYMENT_COMPLETED,
               STATUS_CASH_COMPLETED,
@@ -1139,15 +1180,9 @@ export const utsavStatusUpdate = async (req, res) => {
             if (isCompletedStatus) {
               req.log.info('utsav_status_update_tx_already_completed_leaving_as_is', { bookingid, transactionStatus: transaction.status });
             } else {
-              req.log.info('utsav_status_update_admin_cancelled_no_credits', { bookingid });
-              await transaction.update(
-                {
-                  status: STATUS_ADMIN_CANCELLED,
-                  description: description || 'Admin cancelled without credits',
-                  updatedBy: req.user.username
-                },
-                { transaction: t }
-              );
+              req.log.info('utsav_status_update_admin_cancelled_no_credits_restoring_discount', { bookingid });
+              // Pending/failed: restore any previously applied credits (discount) back to card
+              await cancelTransaction(req.user, null, transaction, t, false);
             }
           }
         } else {
@@ -1313,7 +1348,7 @@ export const fetchAllUtsavList = async (req, res) => {
     req.log.info('fetch_all_utsav_list_start');
 
     const adhyayans = await database.query(
-      `SELECT id, name FROM utsav_db ORDER BY id ASC`,
+      `SELECT id, name, location, status FROM utsav_db ORDER BY id DESC`,
       {
         type: QueryTypes.SELECT,
         raw: true
@@ -1486,8 +1521,11 @@ export async function getTappSummaryMap(utsavid, cardnos = []) {
 }
 
 export const utsavCheckinReport = async (req, res) => {
-  const utsavid = req.query.utsavid;
-  let status = req.query.status;
+  let utsavid = req.query.utsavid;
+  if (req.user?.isShareToken && req.user.utsavId) {
+    utsavid = req.user.utsavId;
+  }
+  let status = req.user?.isShareToken ? 'confirmed' : req.query.status;
   req.log.info('utsav_checkin_report_start', { utsavid, status });
 
   if (status != null || status != undefined) {
@@ -1584,174 +1622,13 @@ export const fetchVolunteerOptions = async (_req, res) => {
     .send({ message: 'Fetched volunteer options', data: options });
 };
 
-export const uploadRoomNoExcel = async (req, res) => {
-  req.log.info('upload_room_no_excel_start');
+// REMOVED: old bulk roomno upload — replaced by System Room Allocation
+// export const uploadRoomNoExcel = async (req, res) => { ... };
 
-  if (!req.file) {
-    req.log.warn('upload_room_no_excel_no_file');
-    return res.status(400).json({ error: 'No file uploaded.' });
-  }
 
-  const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-  const sheet = XLSX.utils.sheet_to_json(
-    workbook.Sheets[workbook.SheetNames[0]],
-    { defval: '' }
-  );
+// REMOVED: old inline roomno edit — replaced by System Room Allocation
+// export const updateRoomNo = async (req, res) => { ... };
 
-  if (sheet.length === 0) {
-    return res.status(400).json({ error: 'Excel file is empty.' });
-  }
-
-  try {
-    // Ensure all rows have same utsavid
-    const utsavidSet = new Set(
-      sheet.map((r) => String(r.utsavid || '').trim())
-    );
-    if (utsavidSet.size !== 1) {
-      return res
-        .status(400)
-        .json({ error: 'All rows must have the same UtsavID.' });
-    }
-    const utsavid = [...utsavidSet][0];
-
-    // Fetch existing bookings for this utsavid (no transaction yet)
-    // Fetch existing bookings for this utsavid but ONLY confirmed ones
-    const existingBookings = await database.query(
-      `SELECT bookingid, cardno, packageid, utsavid, status
-   FROM utsav_booking
-   WHERE utsavid = :utsavid
-   AND status IN ('confirmed', 'checkedin')`,
-      {
-        replacements: { utsavid },
-        type: database.QueryTypes.SELECT
-      }
-    );
-
-    const bookingMap = new Map();
-    existingBookings.forEach((b) => {
-      bookingMap.set(`${b.cardno}||${b.utsavid}||${b.packageid}`, b.bookingid);
-    });
-
-    const validRows = [];
-    const skippedRows = [];
-
-    for (const row of sheet) {
-      const bookingid = String(row.bookingid || '').trim();
-      const roomno = String(row.roomno || '').trim();
-      const cardno = String(row.cardno || '').trim();
-      const packageid = String(row.packageid || '').trim();
-
-      if (!bookingid || !roomno || !cardno || !utsavid || !packageid) {
-        skippedRows.push({ row, reason: 'Missing required fields' });
-        continue;
-      }
-
-      const key = `${cardno}||${utsavid}||${packageid}`;
-      const expectedBookingId = bookingMap.get(key);
-
-      if (!expectedBookingId) {
-        skippedRows.push({
-          row,
-          reason:
-            'CardNo / UtsavID / PackageID combination does not match existing booking'
-        });
-        continue;
-      }
-
-      if (bookingid !== expectedBookingId) {
-        skippedRows.push({
-          row,
-          reason: `BookingID mismatch (expected: ${expectedBookingId})`
-        });
-        continue;
-      }
-
-      validRows.push({ bookingid, roomno });
-    }
-
-    if (validRows.length === 0) {
-      return res
-        .status(400)
-        .json({ error: 'No valid rows to update.', skippedRows });
-    }
-
-    // Start transaction only for update
-    const transaction = await database.transaction();
-    try {
-      const caseStatements = validRows.map(
-        (r) => `WHEN '${r.bookingid}' THEN '${r.roomno}'`
-      );
-      const bookingIds = validRows.map((r) => `'${r.bookingid}'`);
-      // define updatedBy and updatedAt
-      const updatedBy = req.user?.username || 'system'; // adjust based on your auth
-
-      const query = `
-        UPDATE utsav_booking
-        SET roomno = CASE bookingid
-          ${caseStatements.join('\n')}
-        END,
-        updatedBy = '${updatedBy}'
-        WHERE bookingid IN (${bookingIds.join(', ')});
-      `;
-
-      await database.query(query, { transaction });
-      await transaction.commit();
-
-      req.log.info('upload_room_no_excel_success', { updated: validRows.length, skipped: skippedRows.length });
-      res.status(200).json({
-        message: `${validRows.length} record(s) updated successfully.`,
-        skippedRows
-      });
-    } catch (err) {
-      await transaction.rollback();
-      req.log.error('upload_room_no_excel_update_error', { error: err.message });
-      res.status(500).json({ error: 'Error updating room numbers.' });
-    }
-  } catch (err) {
-    req.log.error('upload_room_no_excel_processing_error', { error: err.message });
-    res.status(500).json({ error: 'Error processing file.' });
-  }
-};
-
-// Update room number for a booking
-export const updateRoomNo = async (req, res) => {
-  try {
-    const { bookingid, roomno } = req.body;
-    req.log.info('update_utsav_room_no_start', { bookingid, roomno });
-
-    // assuming you're attaching logged-in user info in req.user
-    const updatedBy = req.user?.username || req.user?.id || 'system';
-
-    if (!bookingid || !roomno) {
-      req.log.warn('update_utsav_room_no_missing_params', { bookingid, roomno });
-      return res
-        .status(400)
-        .json({ error: 'bookingid and roomno are required' });
-    }
-
-    // Check if booking exists
-    const booking = await UtsavBooking.findOne({ where: { bookingid } });
-
-    if (!booking) {
-      req.log.warn('update_utsav_room_no_not_found', { bookingid });
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    // Update fields
-    booking.roomno = roomno;
-    booking.updatedBy = updatedBy;
-    await booking.save();
-
-    req.log.info('update_utsav_room_no_success', { bookingid, roomno });
-    return res.status(200).json({
-      message: 'Room number updated successfully',
-      booking
-    });
-  } catch (error) {
-    req.log.error('update_utsav_room_no_error', { error: error.message });
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-};
 
 export const ReservationReport = async (req, res) => {
   try {
