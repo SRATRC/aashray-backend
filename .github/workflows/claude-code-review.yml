@@ -37,6 +37,12 @@ jobs:
           # Posts a progress/summary tracking comment as the review runs.
           track_progress: true
 
+          # TEMPORARY: unhide the SDK stream so the review job's suppressed
+          # error is visible in the job log. The action validates this file
+          # against the default branch, so it has to live on main to take
+          # effect. Remove once the failure is understood.
+          show_full_output: true
+
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
