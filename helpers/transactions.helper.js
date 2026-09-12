@@ -196,18 +196,24 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_FAILED:
     case STATUS_PAYMENT_AUTHORIZED:
       if (
-        [TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
-        ifMigrated(transaction)
+        !admin &&
+        ([TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
+        ifMigrated(transaction)) &&
+        [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)
       ) {
-        // for bookings that are not credited, keep txn status as completed for reports
-        if (
-          [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
-            transaction.status
-          )
-        ) {
-          status = transaction.status;
-        }
+        // Paid Adhyayan/Utsav cancelled by user: no refund, keep txn as completed for reports
+        status = transaction.status;
+      } else if (
+        !admin &&
+        [TYPE_ADHYAYAN].includes(bookingType) &&
+        ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)
+      ) {
+        // Adhyayan pending/failed cancelled by user: no credit restoration, just cancel
+        // status already set to STATUS_CANCELLED above
       } else if (credits > 0) {
+        // Travel/Utsav pending/failed: restore discount back as credits
+        // Room/Flat/Food: always restore credits
+        // Admin cancels any type: restore credits
         await addCredit(user, card, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;
@@ -267,6 +273,8 @@ export async function adjustAmount(
 
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
+    // adjustAmount only receives updatedBy (string) — construct a minimal user object for addCredit
+    const user = { username: updatedBy };
     await addCredit(user, card, bookingType, credits, t);
     await useCredit(card, booking, transaction, amount, updatedBy, t);
   } else if (originalAmount < amount) {
@@ -313,7 +321,7 @@ async function addCredit(user, card, bookingType, credits, t) {
   );
 }
 
-async function useCredit(card, booking, transaction, amount, updatedBy, t) {
+export async function useCredit(card, booking, transaction, amount, updatedBy, t) {
   const bookingType = getBookingType(transaction);
   const creditType = getCreditType(bookingType);
 

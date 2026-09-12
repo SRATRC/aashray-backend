@@ -26,8 +26,8 @@ import {
   utsavCheckin,
   utsavCheckinReport,
   fetchUtsavBookingsVolunteer,
-  uploadRoomNoExcel,
-  updateRoomNo,
+  // uploadRoomNoExcel,  // REMOVED: old bulk upload UI replaced by System Room Allocation
+  // updateRoomNo,        // REMOVED: old inline edit UI replaced by System Room Allocation
   fetchVolunteerOptions,
   fetchUtsavByLocation,
   ReservationReport,
@@ -142,12 +142,14 @@ utsavAdminRouter.get(
   '/participantHistoryReport',
   CatchAsync(utsavParticipantHistoryReport)
 );
-utsavAdminRouter.post(
-  '/uploadRoomNo',
-  upload.single('file'),
-  CatchAsync(uploadRoomNoExcel)
-);
-utsavAdminRouter.put('/updateRoomNo', CatchAsync(updateRoomNo));
+// REMOVED: old bulk roomno upload UI replaced by System Room Allocation
+// utsavAdminRouter.post(
+//   '/uploadRoomNo',
+//   upload.single('file'),
+//   CatchAsync(uploadRoomNoExcel)
+// );
+// utsavAdminRouter.put('/updateRoomNo', CatchAsync(updateRoomNo));
+
 utsavAdminRouter.get(
   '/fetchVolunteerOptions',
   CatchAsync(fetchVolunteerOptions)
