@@ -839,7 +839,10 @@ export const fetchUtsavByLocation = async (req, res) => {
   try {
     let { location } = req.query;
     if (req.user?.isShareToken) {
-      location = req.user.location || location;
+      if (!req.user.location) {
+        return res.status(403).send({ message: 'Access token does not include a location scope' });
+      }
+      location = req.user.location;
     }
     req.log.info('fetch_utsav_by_location_start', { location });
 

@@ -43,6 +43,10 @@ export const generateTemporaryAccessLink = async (req, res) => {
         throw new ApiError(400, 'Invalid slug format. Use only letters, numbers, hyphens, and underscores');
     }
 
+    if (notes && notes.length > 200) {
+        throw new ApiError(400, 'Notes must be 200 characters or fewer');
+    }
+
     // Validate scope object: reject overly large payloads and strip unknown keys
     if (typeof scope !== 'object' || Array.isArray(scope)) {
         throw new ApiError(400, 'scope must be a plain object');
@@ -245,9 +249,15 @@ export const listTemporaryAccessLinks = async (req, res) => {
 export const toggleTemporaryAccessLink = async (req, res) => {
     const { id } = req.params;
 
-    const link = await ShortLink.findByPk(id);
+    const TOGGLEABLE_TYPES = ['utsav', 'adhyayan', 'custom_share', 'temporary_share'];
+    const link = await ShortLink.findOne({
+        where: {
+            id,
+            type: TOGGLEABLE_TYPES
+        }
+    });
     if (!link) {
-        throw new ApiError(404, 'Shortlink not found');
+        throw new ApiError(404, 'Temporary access link not found');
     }
 
     link.active = !link.active;

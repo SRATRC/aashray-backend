@@ -16,12 +16,11 @@ export const auth = CatchAsync(async (req, res, next) => {
   if (decoded && (decoded.type === 'temporary_share_access' || decoded.type === 'utsav_report_share')) {
     // Verify that the shortlink has not been revoked via the toggle endpoint.
     // We look up by the slug embedded in the JWT to check its active status in DB.
-    const scope = decoded.scope || {};
-    const slugFromScope = scope.slug || decoded.slug;
-    if (!slugFromScope) {
+    const slug = decoded.slug;
+    if (!slug) {
       throw new ApiError(401, 'Access link is invalid or has been revoked');
     }
-    const link = await ShortLink.findOne({ where: { slug: slugFromScope } });
+    const link = await ShortLink.findOne({ where: { slug } });
     if (!link || !link.active) {
       throw new ApiError(401, 'This access link has been revoked');
     }
