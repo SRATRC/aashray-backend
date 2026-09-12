@@ -104,6 +104,7 @@ export const generateTemporaryAccessLink = async (req, res) => {
                 `Invalid or missing role for custom resource. Allowed roles: ${ALLOWED_SHARE_ROLES.join(', ')}`
             );
         }
+        linkType = 'custom_share';
         role = customRole;
     }
 
@@ -181,9 +182,10 @@ export const generateTemporaryAccessLink = async (req, res) => {
  * List temporary access shortlinks
  */
 export const listTemporaryAccessLinks = async (req, res) => {
-    // Fetch all shortlinks that contain an embedded access token
+    // Fetch all shortlinks that contain an embedded access token and match known share types
     const links = await ShortLink.findAll({
         where: {
+            type: ['utsav', 'adhyayan', 'custom_share', 'temporary_share'],
             target_url: { [Op.like]: '%token=%' }
         },
         order: [['createdAt', 'DESC']],

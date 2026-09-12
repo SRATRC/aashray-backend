@@ -1,5 +1,5 @@
 import { AdminRoles, AdminUsers } from '../models/associations.js';
-import { STATUS_ACTIVE, STATUS_INACTIVE } from '../config/constants.js';
+import { STATUS_ACTIVE, STATUS_INACTIVE, ROLE_UTSAV_READ_ONLY } from '../config/constants.js';
 import { attachUserContext } from './Logger.js';
 import ApiError from '../utils/ApiError.js';
 import CatchAsync from '../utils/CatchAsync.js';
@@ -18,14 +18,15 @@ export const auth = CatchAsync(async (req, res, next) => {
     // We look up by the slug embedded in the JWT to check its active status in DB.
     const scope = decoded.scope || {};
     const slugFromScope = scope.slug || decoded.slug;
-    if (slugFromScope) {
-      const link = await ShortLink.findOne({ where: { slug: slugFromScope } });
-      if (!link || !link.active) {
-        throw new ApiError(401, 'This access link has been revoked');
-      }
+    if (!slugFromScope) {
+      throw new ApiError(401, 'Access link is invalid or has been revoked');
+    }
+    const link = await ShortLink.findOne({ where: { slug: slugFromScope } });
+    if (!link || !link.active) {
+      throw new ApiError(401, 'This access link has been revoked');
     }
 
-    const roles = decoded.roles || (decoded.role ? [decoded.role] : ['utsavAdminReadOnly']);
+    const roles = decoded.roles || (decoded.role ? [decoded.role] : [ROLE_UTSAV_READ_ONLY]);
 
     req.user = {
       id: 0,
