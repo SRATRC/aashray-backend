@@ -14,3 +14,4 @@ logs/
 # ...but DO share team skills
 !.claude/skills/
 .superpowers/
+whatsapp_status.json

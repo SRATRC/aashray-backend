@@ -15,7 +15,8 @@ import {
   TYPE_UTSAV,
   TYPE_ROOM,
   TYPE_FLAT,
-  TYPE_TRAVEL
+  TYPE_TRAVEL,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
@@ -35,7 +36,6 @@ import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
 import { openUtsavSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
 import { updateWaitingTravelBooking } from './helpers/travelBooking.helper.js';
 import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendTomorrowMealsCount, checkAndSendMealsCountUpdate } from './helpers/whatsapp.helper.js';
-const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
 
 let isRunning = false; // Track task status
 
@@ -139,7 +139,7 @@ async function runJob(systemUser, t) {
 async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
   const cancelTimeFilter = moment
     .utc()
-    .subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
+    .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
   const pendingTransactions = await getPendingTransactions(cancelTimeFilter);
 
   for (const transaction of pendingTransactions) {

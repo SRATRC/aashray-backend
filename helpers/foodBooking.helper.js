@@ -7,13 +7,15 @@ import {
   LUNCH_PRICE,
   ROLE_FOOD_ADMIN,
   ROLE_SUPER_ADMIN,
+  ROOM_STATUS_CHECKEDIN,
   STATUS_AVAILABLE,
+  STATUS_CASH_COMPLETED,
   STATUS_CASH_PENDING,
+  STATUS_CONFIRMED,
   STATUS_GUEST,
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
   STATUS_SEVA_KUTIR,
-  TYPE_FOOD,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
   TYPE_GUEST_LUNCH,
@@ -23,18 +25,22 @@ import {
   checkFlatAlreadyBooked,
   checkRoomBookingProgress,
   checkSpecialAllowance,
+  checkUtsavBookingAllowance,
   validateDate
 } from '../controllers/helper.js';
 import {
   CardDb,
   FoodDb,
   Transactions,
+  UtsavBooking,
   UtsavDb
 } from '../models/associations.js';
+import { Op } from 'sequelize';
+import { sendUtsavStatusChangeWhatsApp } from './whatsapp.helper.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { cancelTransactions, usableCredits } from './transactions.helper.js';
+import { cancelTransactions } from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment-timezone';
@@ -225,15 +231,19 @@ export async function bookFoodForMumukshus(
   return { amount, userBookingIds, transactionIds };
 }
 
+/**
+ * Quotes the meal charge for a set of cards.
+ *
+ * Reads `res_status` exactly as `bookFoodForMumukshus` does, so the figure
+ * shown before booking is the figure the Razorpay order is built from.
+ */
 export async function checkFoodAvailabilityForMumumkshus(
   start_date,
   end_date,
   mumukshuGroup,
   primary_booking,
   addons,
-  utsav,
-  user,
-  isGuestBooking = false
+  utsav
 ) {
   if (!end_date) {
     end_date = start_date;
@@ -249,51 +259,48 @@ export async function checkFoodAvailabilityForMumumkshus(
     await validateFood(start_date, end_date, primary_booking, addons, card);
   }
 
+  // Only guests pay for meals, so only their existing bookings matter. A group
+  // of mumukshus needs no lookup at all.
+  const guestCardnos = cards
+    .filter((card) => card.res_status == STATUS_GUEST)
+    .map((card) => card.cardno);
+
+  if (guestCardnos.length === 0) {
+    return { status: STATUS_AVAILABLE, charge: 0, availableCredits: 0 };
+  }
+
+  const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
+  const bookings = await getFoodBookings(allDates, guestCardnos);
+
   var charge = 0;
-  var availableCredits = 0;
 
-  if (isGuestBooking) {
-    // Create a temp user with cloned credits to track usage during this validation loop without mutating the original user object.
-    const tempUser = { ...user, credits: { ...user.credits } };
+  for (const group of mumukshuGroup) {
+    const { meals } = group;
+    const groupGuests = (group.mumukshus || group.guests).filter((cardno) =>
+      guestCardnos.includes(cardno)
+    );
 
-    const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
-    const bookings = await getFoodBookings(allDates, mumukshus);
-
-    for (const group of mumukshuGroup) {
-      const meals = group.meals;
-      const mumukshus = group.mumukshus || group.guests;
-
+    for (const cardno of groupGuests) {
       for (const date of allDates) {
-        for (const mumukshu of mumukshus) {
-          const booking = bookings[mumukshu] && bookings[mumukshu][date];
+        const booking = bookings[cardno] && bookings[cardno][date];
 
-          if (booking) {
-            // Only charge for meals that weren't previously booked
-            charge +=
-              meals.includes('breakfast') && !booking.breakfast
-                ? BREAKFAST_PRICE
-                : 0;
-            charge +=
-              meals.includes('lunch') && !booking.lunch ? LUNCH_PRICE : 0;
-            charge +=
-              meals.includes('dinner') && !booking.dinner ? DINNER_PRICE : 0;
-          } else {
-            // Charge for all new meals
-            charge += meals.includes('breakfast') ? BREAKFAST_PRICE : 0;
-            charge += meals.includes('lunch') ? LUNCH_PRICE : 0;
-            charge += meals.includes('dinner') ? DINNER_PRICE : 0;
+        for (const meal of MEALS) {
+          // A meal already on the booking was paid for the first time round.
+          if (meals.includes(meal.type) && !(booking && booking[meal.type])) {
+            charge += meal.price;
           }
         }
       }
     }
-
-    availableCredits = usableCredits(tempUser, TYPE_FOOD, charge);
   }
 
   return {
     status: STATUS_AVAILABLE,
     charge,
-    availableCredits
+    // bookFoodForMumukshus writes meal transactions at full price and never
+    // calls useCredit, so no food credit is ever spent. Reporting a credit here
+    // would show a "pay now" figure below what Razorpay actually collects.
+    availableCredits: 0
   };
 }
 
@@ -345,6 +352,13 @@ export async function validateFood(
       (await checkRoomAlreadyBooked(start_date, end_date, card.cardno)) ||
       (await checkFlatAlreadyBooked(start_date, end_date, card.cardno)) ||
       (await checkSpecialAllowance(
+        start_date,
+        end_date,
+        primary_booking,
+        addons,
+        card.cardno
+      )) ||
+      (await checkUtsavBookingAllowance(
         start_date,
         end_date,
         primary_booking,
@@ -641,17 +655,21 @@ export async function cancelAllMeals(start_date, end_date, cardno, updatedBy, t)
 
 
 
-export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
-  // ✅ Use provided date or fallback to current date in IST
+export async function issueFoodPlate(cardno, meal, t, providedDate = null, scannedAt = null) {
+  // ✅ Use scannedAt timestamp if provided, fallback to providedDate or current IST date
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
+  const referenceTime = scannedAt ? moment(scannedAt).tz('Asia/Kolkata') : moment().tz('Asia/Kolkata');
   const targetDate = providedDate
     ? moment.tz(providedDate, 'Asia/Kolkata').format('YYYY-MM-DD')
-    : moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+    : referenceTime.format('YYYY-MM-DD');
 
-  const currentTime = moment().tz('Asia/Kolkata');
+  const currentTime = referenceTime;
   const mealTimes = {
-    breakfast: moment().tz('Asia/Kolkata').hour(10).minute(0).second(0), // Ends at 10:00 AM IST
-    lunch: moment().tz('Asia/Kolkata').hour(14).minute(0).second(0),     // Ends at 2:00 PM IST
-    dinner: moment().tz('Asia/Kolkata').hour(19).minute(0).second(0)     // Ends at 7:00 PM IST
+    breakfast: referenceTime.clone().hour(10).minute(0).second(0), // Ends at 10:00 AM IST
+    lunch: referenceTime.clone().hour(14).minute(0).second(0),     // Ends at 2:00 PM IST
+    dinner: referenceTime.clone().hour(19).minute(0).second(0)     // Ends at 7:00 PM IST
   };
 
   // ✅ Find booking for the TARGET DATE (not always today)
@@ -707,8 +725,77 @@ export async function issueFoodPlate(cardno, meal, t, providedDate = null) {
 
   logger.info('food_plate_issued', { cardno, meal: currentMeal, targetDate });
 
+  // ── Auto Check-In on First Meal Plate during Active Utsav ──
+  let autoCheckin = null;
+  try {
+    const activeUtsavs = await UtsavDb.findAll({
+      where: {
+        start_date: { [Op.lte]: targetDate },
+        end_date: { [Op.gte]: targetDate }
+      },
+      transaction: t,
+      raw: true
+    });
+
+    if (activeUtsavs && activeUtsavs.length > 0) {
+      const utsavIds = activeUtsavs.map(u => u.id);
+      const utsavBooking = await UtsavBooking.findOne({
+        where: {
+          cardno: cardno,
+          utsavid: { [Op.in]: utsavIds },
+          status: { [Op.in]: [STATUS_CONFIRMED, STATUS_CASH_COMPLETED] }
+        },
+        transaction: t
+      });
+
+      if (utsavBooking) {
+        const matchedUtsav = activeUtsavs.find(u => u.id === utsavBooking.utsavid) || activeUtsavs[0];
+        const prevStatus = utsavBooking.status;
+        const checkinUpdate = {
+          status: ROOM_STATUS_CHECKEDIN,
+          updatedBy: 'SYSTEM-MEAL-CHECKIN'
+        };
+        if (scannedAt && moment(scannedAt).isValid()) {
+          checkinUpdate.updatedAt = new Date(scannedAt);
+        }
+        await utsavBooking.update(checkinUpdate, { transaction: t });
+
+        // Trigger WhatsApp confirmation only after transaction successfully commits
+        if (t && typeof t.afterCommit === 'function') {
+          t.afterCommit(() => {
+            sendUtsavStatusChangeWhatsApp(utsavBooking, prevStatus, { updatedBy: 'SYSTEM-MEAL-CHECKIN' }).catch(err => {
+              logger.error('Error sending auto-checkin WhatsApp in issueFoodPlate:', { error: err.message, cardno, utsavid: matchedUtsav.id });
+            });
+          });
+        } else {
+          sendUtsavStatusChangeWhatsApp(utsavBooking, prevStatus, { updatedBy: 'SYSTEM-MEAL-CHECKIN' }).catch(err => {
+            logger.error('Error sending auto-checkin WhatsApp in issueFoodPlate:', { error: err.message, cardno, utsavid: matchedUtsav.id });
+          });
+        }
+
+        logger.info('utsav_auto_checkin_on_meal_scan', {
+          cardno,
+          utsavid: matchedUtsav.id,
+          utsavName: matchedUtsav.name,
+          bookingid: utsavBooking.bookingid,
+          meal: currentMeal
+        });
+
+        autoCheckin = {
+          performed: true,
+          utsav_id: matchedUtsav.id,
+          utsav_name: matchedUtsav.name,
+          roomno: utsavBooking.roomno || null
+        };
+      }
+    }
+  } catch (checkinErr) {
+    logger.warn('utsav_auto_checkin_error', { cardno, error: checkinErr.message });
+  }
+
   return {
     message: `Plate for ${currentMeal} issued successfully`,
-    issuedto: card.issuedto
+    issuedto: card.issuedto,
+    auto_checkin: autoCheckin
   };
 }

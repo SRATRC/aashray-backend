@@ -50,6 +50,15 @@ import RoomBlock from './room_block.model.js';
 // RoomBlock
 RoomDb.hasMany(RoomBlock, { foreignKey: 'roomno', sourceKey: 'roomno', as: 'blocks' });
 RoomBlock.belongsTo(RoomDb, { foreignKey: 'roomno', targetKey: 'roomno' });
+import CustomForm from './custom_form.model.js';
+import CustomFormResponse from './custom_form_response.model.js';
+import CustomFormDraft from './custom_form_draft.model.js';
+import CustomFormOtpAllowlist from './custom_form_otp_allowlist.model.js';
+import UtsavRoomConfig from './utsav_room_config.model.js';
+import WaGroupJob from './waGroupJob.model.js';
+import WaSession from './waSession.model.js';
+import WaSessionKey from './waSessionKey.model.js';
+import WaTemplate from './waTemplate.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -695,6 +704,56 @@ Transactions.belongsTo(FlatBooking, {
 
 RoomBookingExemption.belongsTo(CardDb, { foreignKey: 'cardno', targetKey: 'cardno' });
 CardDb.hasMany(RoomBookingExemption, { foreignKey: 'cardno', sourceKey: 'cardno' });
+// CustomForm
+CustomForm.belongsTo(Departments, {
+  foreignKey: 'dept_name',
+  targetKey: 'dept_name',
+  as: 'department'
+});
+CustomForm.hasMany(CustomFormResponse, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'responses'
+});
+CustomFormResponse.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
+CustomFormResponse.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'respondent'
+});
+CustomForm.hasMany(CustomFormDraft, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'drafts'
+});
+CustomFormDraft.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
+CustomForm.hasMany(CustomFormOtpAllowlist, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'otpAllowlist'
+});
+CustomFormOtpAllowlist.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
+
+WaSession.hasMany(WaSessionKey, {
+  foreignKey: 'session_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+WaSessionKey.belongsTo(WaSession, {
+  foreignKey: 'session_id',
+  targetKey: 'id'
+});
 
 export {
   CardDb,
@@ -743,5 +802,14 @@ export {
   UtsavFeedback,
   UtsavFeedbackAnswer,
   RoomBookingExemption,
-  RoomAllocationPriority
+  RoomAllocationPriority,
+  CustomForm,
+  CustomFormResponse,
+  CustomFormDraft,
+  CustomFormOtpAllowlist,
+  UtsavRoomConfig,
+  WaGroupJob,
+  WaSession,
+  WaSessionKey,
+  WaTemplate
 };

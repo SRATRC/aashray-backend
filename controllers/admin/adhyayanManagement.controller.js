@@ -9,6 +9,7 @@ import {
   ShibirAttendanceRecord
 } from '../../models/associations.js';
 import ShortLink from '../../models/short_link.model.js';
+import WaGroupJob from '../../models/waGroupJob.model.js';
 import {
   STATUS_WAITING,
   STATUS_CONFIRMED,
@@ -118,12 +119,34 @@ export const createAdhyayan = async (req, res) => {
     }
 
     if (whatsapp_link) {
-      await ShortLink.create({
-        slug: comments,
-        target_url: whatsapp_link,
-        type: 'adhyayan',
-        createdBy: req.user.username
-      }, { transaction: t });
+      const slug = `a${adhyayan_details.id}`;
+      await ShortLink.upsert(
+        {
+          slug,
+          target_url: whatsapp_link,
+          type: 'adhyayan',
+          active: true,
+          createdBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
+      if (inviteMatch && inviteMatch[1]) {
+        await WaGroupJob.create(
+          {
+            action: 'resolve_invite_link',
+            status: 'pending',
+            priority: 'high',
+            payload: {
+              inviteCode: inviteMatch[1],
+              type: 'shibir',
+              eventId: adhyayan_details.id
+            }
+          },
+          { transaction: t }
+        );
+      }
     }
 
     await t.commit();
@@ -157,6 +180,8 @@ export const fetchALLAdhyayan = async (req, res) => {
       shibir_db.comments,
       shibir_db.whatsapp_link,
       shibir_db.status,
+      shibir_db.whatsapp_link,
+      shibir_db.whatsapp_group_jid,
       shibir_db.updatedBy
     FROM 
       shibir_db
@@ -178,6 +203,8 @@ export const fetchALLAdhyayan = async (req, res) => {
       shibir_db.comments,
       shibir_db.whatsapp_link,
       shibir_db.status,
+      shibir_db.whatsapp_link,
+      shibir_db.whatsapp_group_jid,
       shibir_db.updatedBy
     ORDER BY 
       shibir_db.start_date ASC;`,
@@ -479,6 +506,7 @@ export const updateAdhyayan = async (req, res) => {
     }
   }
 
+  const previousWhatsappLink = adhyayan.whatsapp_link;
   const t = await database.transaction();
   try {
     const oldSlug = adhyayan.comments;
@@ -546,6 +574,37 @@ export const updateAdhyayan = async (req, res) => {
       // If changed away from Research Centre, clear sessions and attendance records
       await ShibirSession.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
       await ShibirAttendanceRecord.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
+    }
+
+    if (whatsapp_link) {
+      const slug = `a${adhyayanId}`;
+      await ShortLink.upsert(
+        {
+          slug,
+          target_url: whatsapp_link,
+          type: 'adhyayan',
+          active: true,
+          createdBy: req.user.username
+        },
+        { transaction: t }
+      );
+
+      const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
+      if (inviteMatch && inviteMatch[1] && whatsapp_link !== previousWhatsappLink) {
+        await WaGroupJob.create(
+          {
+            action: 'resolve_invite_link',
+            status: 'pending',
+            priority: 'high',
+            payload: {
+              inviteCode: inviteMatch[1],
+              type: 'shibir',
+              eventId: adhyayanId
+            }
+          },
+          { transaction: t }
+        );
+      }
     }
 
     await t.commit();
@@ -993,6 +1052,12 @@ export const markAdhyayanAttendance = async (req, res) => {
     transaction: t
   });
 
+  const scannedAt = req.body?.scannedAt;
+  if (scannedAt && !moment(scannedAt).isValid()) {
+    throw new ApiError(400, 'Invalid scannedAt timestamp');
+  }
+  const createdAt = scannedAt ? new Date(scannedAt) : undefined;
+
   await ShibirAttendanceRecord.upsert(
     {
       shibir_id,
@@ -1000,7 +1065,8 @@ export const markAdhyayanAttendance = async (req, res) => {
       cardno,
       session_number: sessionNo,
       attended: true,
-      updatedBy: req.user.cardno || req.user.username
+      updatedBy: req.user.cardno || req.user.username,
+      ...(createdAt && { createdAt })
     },
     { transaction: t }
   );
@@ -1511,5 +1577,118 @@ export const createAttendanceEntryManually = async (req, res) => {
   req.log.info('create_attendance_entry_manually_success', { bookingid });
   return res.status(201).json({
     message: "Attendance record created"
+  });
+};
+
+/**
+ * Audit Adhyayan confirmed participants
+ */
+export const adhyayanGroupAudit = async (req, res) => {
+  const { shibir_id } = req.query;
+  if (!shibir_id) {
+    return res.status(400).send({ message: 'shibir_id is required' });
+  }
+
+  const shibir = await ShibirDb.findByPk(shibir_id);
+  if (!shibir) {
+    return res.status(404).send({ message: 'Shibir not found' });
+  }
+
+  const slug = `a${shibir_id}`;
+  const shortlink = await ShortLink.findOne({ where: { slug } });
+
+  const bookings = await ShibirBookingDb.findAll({
+    where: {
+      shibir_id,
+      status: [STATUS_CONFIRMED]
+    },
+    include: [{
+      model: CardDb,
+      attributes: ['issuedto', 'mobno', 'country', 'cardno', 'center', 'res_status']
+    }]
+  });
+
+  const participants = bookings.map(b => {
+    const card = b.CardDb || {};
+    return {
+      bookingid: b.bookingid,
+      cardno: card.cardno,
+      issuedto: card.issuedto || 'Unknown',
+      mobno: card.mobno,
+      center: card.center,
+      res_status: card.res_status
+    };
+  });
+
+  return res.status(200).send({
+    message: 'Adhyayan group audit fetched successfully',
+    data: {
+      shibir_name: shibir.name,
+      slug,
+      whatsapp_link: shibir.whatsapp_link,
+      shortlink_active: !!shortlink,
+      total_confirmed: participants.length,
+      participants
+    }
+  });
+};
+
+/**
+ * Send Adhyayan group join reminder WhatsApp message
+ */
+export const sendAdhyayanGroupReminder = async (req, res) => {
+  const { shibir_id, phone } = req.body;
+  if (!shibir_id) {
+    return res.status(400).send({ message: 'shibir_id is required' });
+  }
+
+  const shibir = await ShibirDb.findByPk(shibir_id);
+  if (!shibir) {
+    return res.status(404).send({ message: 'Shibir not found' });
+  }
+
+  const slug = `a${shibir_id}`;
+  const { sendGroupJoinReminderWhatsApp } = await import('../../helpers/whatsapp.helper.js');
+
+  if (phone) {
+    const card = await CardDb.findOne({ where: { mobno: phone } }).catch(() => null);
+    const name = card?.issuedto || 'Mumukshu';
+    const result = await sendGroupJoinReminderWhatsApp(phone, name, shibir.name, slug);
+    return res.status(200).send({ message: 'Reminder sent', result });
+  }
+
+  const bookings = await ShibirBookingDb.findAll({
+    where: {
+      shibir_id,
+      status: [STATUS_CONFIRMED]
+    },
+    include: [{ model: CardDb }]
+  });
+
+  // Reconcile members to find only missing participants
+  let missingBookings = bookings;
+  if (shibir.whatsapp_group_jid) {
+    try {
+      const { fetchGroupReconciliationInternal } = await import('./waManagement.controller.js');
+      const reconData = await fetchGroupReconciliationInternal(shibir.whatsapp_group_jid, 'shibir', shibir.id);
+      if (reconData && reconData.missing) {
+        const missingCardNos = new Set(reconData.missing.map(m => String(m.cardno)));
+        missingBookings = bookings.filter(b => b.CardDb && missingCardNos.has(String(b.CardDb.cardno)));
+      }
+    } catch (auditErr) {
+      console.error('[Batch Reminder] Group reconciliation failed, sending to all bookings:', auditErr.message);
+    }
+  }
+
+  let sentCount = 0;
+  for (const b of missingBookings) {
+    if (b.CardDb && b.CardDb.mobno) {
+      await sendGroupJoinReminderWhatsApp(b.CardDb.mobno, b.CardDb.issuedto, shibir.name, slug);
+      sentCount++;
+    }
+  }
+
+  return res.status(200).send({
+    message: `Reminder batch dispatched to ${sentCount} un-joined participants`
   });
 };

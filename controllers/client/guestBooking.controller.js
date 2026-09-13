@@ -59,7 +59,8 @@ import {
 } from '../../helpers/rollingWindow.helper.js';
 import {
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import {
   bookFoodForMumukshus,
@@ -553,9 +554,7 @@ async function checkFoodAvailability(body, data, user, utsav) {
     guestGroup,
     body.primary_booking,
     body.addons,
-    utsav,
-    user,
-    true
+    utsav
   );
 
   return result;
@@ -895,6 +894,10 @@ async function checkFlatAvailability(data, user) {
     checkout_date
   );
 
+  // Clone credits so this read-only preview loop doesn't mutate the caller's
+  // card (mirrors the mumukshu flat-availability preview in roomBooking.helper.js).
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const guest of guests) {
     const clashes = overlappingByCard[String(guest)] || [];
     if (clashes.length > 0) {
@@ -924,6 +927,7 @@ async function checkFlatAvailability(data, user) {
         isAlreadyBooked: false,
         unavailableReason: null,
         holdReasonMessage: HOLD_REASON_COPY.ROLLING_WINDOW_LIMIT.userMessage,
+        availableCredits: 0,
         ...rollingWaitlistFields(cap)
       });
       continue;
@@ -938,6 +942,8 @@ async function checkFlatAvailability(data, user) {
     });
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+    const availableCredits =
+      charge > 0 ? usableCredits(tempUser, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       guest: guest,
@@ -947,7 +953,8 @@ async function checkFlatAvailability(data, user) {
       status: STATUS_AVAILABLE,
       isAlreadyBooked: false,
       unavailableReason: null,
-      holdReasonMessage: null
+      holdReasonMessage: null,
+      availableCredits: availableCredits
     });
   }
 

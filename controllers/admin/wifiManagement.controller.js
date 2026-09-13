@@ -282,25 +282,6 @@ export const updatePermanentCodeRequest = async (req, res) => {
       throw new ApiError(400, 'Permanent code is required for approval');
     }
 
-    // 🔹 THIRD: duplicate code check (only for new)
-    if (action === STATUS_APPROVED && permanent_code) {
-      const existingCode = await PermanentWifiCodes.findOne({
-        where: {
-          code: permanent_code,
-          status: STATUS_APPROVED,
-          id: { [Sequelize.Op.ne]: requestId }
-        },
-        transaction: t
-      });
-
-      if (existingCode) {
-        throw new ApiError(
-          400,
-          `This permanent code is already assigned to another user: ${existingCode.cardno}`
-        );
-      }
-    }
-
     // 🔹 FOURTH: prepare update payload
     const updateData = {
       status: action,
@@ -476,29 +457,6 @@ export const uploadPerWiFiCodes = async (req, res) => {
     });
     const dbMap = new Map(dbRows.map(r => [r.id, r]));
 
-    // 4. Fetch all approved codes to check database uniqueness
-    const codesToCheck = [...new Set(validRows.map(r => r.code).filter(Boolean))];
-    const approvedCodesInDb = await PermanentWifiCodes.findAll({
-      where: {
-        code: codesToCheck,
-        status: 'approved'
-      },
-      attributes: ['id', 'cardno', 'code'],
-      transaction
-    });
-
-    // Check duplicate codes in Excel
-    const excelCodesSeen = new Set();
-    const excelCodeDuplicates = new Set();
-    validRows.forEach(r => {
-      if (r.code) {
-        if (excelCodesSeen.has(r.code)) {
-          excelCodeDuplicates.add(r.code);
-        }
-        excelCodesSeen.add(r.code);
-      }
-    });
-
     // 5. Run row-by-row validation
     const matched = [];
     const mismatched = [];
@@ -527,20 +485,6 @@ export const uploadPerWiFiCodes = async (req, res) => {
         hasRowError = true;
       }
 
-      // Check code uniqueness in Excel
-      if (r.code && excelCodeDuplicates.has(r.code)) {
-        errors.push({ row: r.rowNumber, error: `Duplicate code '${r.code}' found multiple times in the Excel sheet.` });
-        hasRowError = true;
-      }
-
-      // Check code uniqueness in Database (only if status is approved)
-      if (r.status === 'approved' && r.code) {
-        const conflictingDbCode = approvedCodesInDb.find(dbC => dbC.code === r.code && dbC.id !== r.id);
-        if (conflictingDbCode) {
-          errors.push({ row: r.rowNumber, error: `Code '${r.code}' is already assigned to another approved request (Card: ${conflictingDbCode.cardno}).` });
-          hasRowError = true;
-        }
-      }
 
       if (!hasRowError) {
         matched.push({
@@ -850,29 +794,6 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
     });
     const existingSet = new Set(existingPermanentCodes.map(r => `${r.id}|${r.cardno}`));
 
-    // Fetch approved codes to check database uniqueness
-    const codesToCheck = [...new Set(validRows.map(r => r.code).filter(Boolean))];
-    const approvedCodesInDb = await PermanentWifiCodes.findAll({
-      where: {
-        code: codesToCheck,
-        status: 'approved'
-      },
-      attributes: ['id', 'cardno', 'code'],
-      transaction
-    });
-
-    // Check duplicate codes in Excel
-    const excelCodesSeen = new Set();
-    const excelCodeDuplicates = new Set();
-    validRows.forEach(r => {
-      if (r.code) {
-        if (excelCodesSeen.has(r.code)) {
-          excelCodeDuplicates.add(r.code);
-        }
-        excelCodesSeen.add(r.code);
-      }
-    });
-
     /* =====================================================
        3. DETAILED VALIDATIONS
        ==================================================== */
@@ -900,20 +821,6 @@ export const insertPerWiFiCodesFromExcel = async (req, res) => {
         hasRowError = true;
       }
 
-      // Check Excel duplicate code
-      if (r.code && excelCodeDuplicates.has(r.code)) {
-        errors.push({ row: r.rowNumber, error: `Duplicate code '${r.code}' found multiple times in the Excel sheet.` });
-        hasRowError = true;
-      }
-
-      // Check DB duplicate code
-      if (r.status === 'approved' && r.code) {
-        const conflictingDbCode = approvedCodesInDb.find(dbC => dbC.code === r.code);
-        if (conflictingDbCode) {
-          errors.push({ row: r.rowNumber, error: `Code '${r.code}' is already assigned to another approved request (Card: ${conflictingDbCode.cardno}).` });
-          hasRowError = true;
-        }
-      }
 
       if (!hasRowError) {
         toInsert.push(r);

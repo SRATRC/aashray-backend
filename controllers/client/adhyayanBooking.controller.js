@@ -52,7 +52,10 @@ export const FetchAllShibir = async (req, res) => {
     },
     offset,
     limit: pageSize,
-    order: [['start_date', 'ASC']]
+    order: [
+      ['start_date', 'ASC'],
+      ['id', 'ASC']
+    ]
   });
 
   // How many people are already queued on each shibir. A full shibir is still

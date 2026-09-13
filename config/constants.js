@@ -17,6 +17,7 @@ export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
 export const FEEDBACK_ELIGIBILITY_HOUR = 13;
+export const MAX_APP_PAYMENT_DURATION_MINUTES = 24 * 60;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
@@ -105,6 +106,7 @@ export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
 export const ROLE_UTSAV_ADMIN_RAJ = 'utsavAdminRaj';
+export const ROLE_SATSHRUT_ADMIN = 'satshrutAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';

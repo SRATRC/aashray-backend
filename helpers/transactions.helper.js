@@ -16,12 +16,14 @@ import {
   STATUS_PAYMENT_FAILED,
   TYPE_UTSAV,
   TYPE_TRAVEL,
-  STATUS_PAYMENT_AUTHORIZED
+  STATUS_PAYMENT_AUTHORIZED,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from '../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Sequelize } from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import Razorpay from 'razorpay';
+import moment from 'moment';
 import { getBookingType, ifMigrated } from './booking.helper.js';
 import { validateCard } from './card.helper.js';
 import logger from '../config/logger.js';
@@ -194,18 +196,24 @@ export async function cancelTransaction(
     case STATUS_PAYMENT_FAILED:
     case STATUS_PAYMENT_AUTHORIZED:
       if (
-        [TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
-        ifMigrated(transaction)
+        !admin &&
+        ([TYPE_ADHYAYAN, TYPE_UTSAV].includes(bookingType) ||
+        ifMigrated(transaction)) &&
+        [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)
       ) {
-        // for bookings that are not credited, keep txn status as completed for reports
-        if (
-          [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(
-            transaction.status
-          )
-        ) {
-          status = transaction.status;
-        }
+        // Paid Adhyayan/Utsav cancelled by user: no refund, keep txn as completed for reports
+        status = transaction.status;
+      } else if (
+        !admin &&
+        [TYPE_ADHYAYAN].includes(bookingType) &&
+        ![STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)
+      ) {
+        // Adhyayan pending/failed cancelled by user: no credit restoration, just cancel
+        // status already set to STATUS_CANCELLED above
       } else if (credits > 0) {
+        // Travel/Utsav pending/failed: restore discount back as credits
+        // Room/Flat/Food: always restore credits
+        // Admin cancels any type: restore credits
         await addCredit(user, card, bookingType, credits, t);
         status = STATUS_CREDITED;
         description = `credits added: ${credits}`;
@@ -241,8 +249,6 @@ export async function cancelTransaction(
 
   await transaction.update(
     {
-      discount: 0,
-      amount: totalAmount,
       description,
       status,
       updatedBy: user.username
@@ -267,6 +273,8 @@ export async function adjustAmount(
 
   if (originalAmount > amount) {
     const credits = originalAmount - amount;
+    // adjustAmount only receives updatedBy (string) — construct a minimal user object for addCredit
+    const user = { username: updatedBy };
     await addCredit(user, card, bookingType, credits, t);
     await useCredit(card, booking, transaction, amount, updatedBy, t);
   } else if (originalAmount < amount) {
@@ -313,7 +321,7 @@ async function addCredit(user, card, bookingType, credits, t) {
   );
 }
 
-async function useCredit(card, booking, transaction, amount, updatedBy, t) {
+export async function useCredit(card, booking, transaction, amount, updatedBy, t) {
   const bookingType = getBookingType(transaction);
   const creditType = getCreditType(bookingType);
 
@@ -441,6 +449,43 @@ const withRazorpayTimeout = async (promise, label) => {
   }
 };
 
+export const fetchRazorpayPayment = async (paymentId) => {
+  if (!paymentId) {
+    throw new ApiError(400, 'Razorpay payment id is required');
+  }
+
+  try {
+    return await withRazorpayTimeout(
+      getRazorpayClient().payments.fetch(paymentId),
+      'razorpay_payment_fetch_timeout'
+    );
+  } catch (err) {
+    const statusCode =
+      Number(err?.statusCode ?? err?.error?.statusCode) || undefined;
+
+    // Split the log event so on-call can tell a caller sending a payment id we
+    // cannot read apart from Razorpay being down. The route is unauthenticated
+    // while the secret is missing, so the first is expected noise and the
+    // second is an incident.
+    //
+    // Both still answer 503, which Razorpay retries. A 4xx here is not proof
+    // the payment is fake: Razorpay delivers within a second of capture, so a
+    // genuine payment can briefly read back as unknown. Answering 400 would
+    // spend our only retry on that race and lose the payment.
+    logger.error(
+      statusCode && statusCode < 500
+        ? 'razorpay_payment_fetch_rejected'
+        : 'razorpay_payment_fetch_failed',
+      {
+        paymentId,
+        statusCode,
+        error: err?.message ?? err?.error?.description
+      }
+    );
+    throw new ApiError(503, 'Unable to verify payment with Razorpay');
+  }
+};
+
 export const generateOrderId = async (amount) => {
   const razorpay = getRazorpayClient();
 
@@ -477,7 +522,7 @@ export async function getPendingTransactions(timeFilter) {
         attributes: ['cardno', 'email', 'mobno'],
         required: true,
         where: {
-          country: 'INDIA'
+          country: 'India'
         }
       }
     ],
@@ -495,17 +540,49 @@ export async function getPendingTransactions(timeFilter) {
   return transactions;
 }
 
+// Statuses a transaction can still be paid from. Anything else is settled or
+// dead, and stamping a new order id on it would let a later webhook reopen it.
+// verifyPayment acts on the same list, so keep it shared: if the two drift, the
+// webhook and the order stamp disagree about the same transaction.
+export const PAYABLE_TRANSACTION_STATUSES = [
+  STATUS_PAYMENT_PENDING,
+  STATUS_CASH_PENDING,
+  STATUS_PAYMENT_FAILED,
+  STATUS_PAYMENT_AUTHORIZED
+];
+
+// Amounts are DECIMAL, so they reach us as floats. Round when converting to
+// paise, the unit Razorpay works in, or a fraction of a paise of drift decides
+// a comparison.
+export const toPaise = (amount) => Math.round(amount * 100);
+
 export async function updateRazorpayTransactions(
   bookingIds,
   transactionIds,
   razorpay_order_id,
   t
 ) {
+  // MySQL cannot use an index through `id IN (NULL) OR ...`, so an empty side
+  // turns a 3-row primary-key lookup into a full scan - and the UPDATE below
+  // then holds a table-wide write lock for its duration. Build the clause from
+  // the arrays that actually have entries.
+  const idClauses = [
+    bookingIds?.length && { bookingid: bookingIds },
+    transactionIds?.length && { id: transactionIds }
+  ].filter(Boolean);
+
+  if (idClauses.length === 0) return;
+
+  const where = {
+    ...(idClauses.length === 1
+      ? idClauses[0]
+      : { [Sequelize.Op.or]: idClauses }),
+    status: PAYABLE_TRANSACTION_STATUSES
+  };
+
   // I know i am running this query twice but for logging purposes it is better to do it this way
   const transactionsToUpdate = await Transactions.findAll({
-    where: {
-      [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }]
-    },
+    where,
     transaction: t
   });
 
@@ -516,13 +593,57 @@ export async function updateRazorpayTransactions(
       razorpay_order_id: razorpay_order_id
     },
     {
-      where: {
-        [Sequelize.Op.or]: [{ bookingid: bookingIds }, { id: transactionIds }]
-      },
+      where,
       transaction: t
     }
   );
 }
+
+/**
+ * Splits unsettled transactions into the ones a payment still covers and the
+ * ones it does not, settling them in creation order until the money runs out.
+ *
+ * A booking flow that builds its order from a subtotal leaves transactions
+ * stamped with an order id worth less than they cost, and settling all of them
+ * hands out bookings nobody paid for.
+ *
+ * `remainingInPaise` is what the payment has left after the transactions it
+ * already settled. Razorpay delivers the same payment more than once - order
+ * order_TKp4lCuDbgtvZD saw `captured` and then `authorized` a second apart -
+ * and each delivery only reads the still-unsettled rows, so a budget measured
+ * against the payment total would hand the leftover rows a second, free pass.
+ *
+ * @param {Array} transactions - unsettled transactions sharing one order id
+ * @param {number} remainingInPaise - payment amount minus what it already settled
+ */
+export const splitTransactionsByPayment = (transactions, remainingInPaise) => {
+  const ordered = [...transactions].sort((a, b) => a.id - b.id);
+
+  // The amount is the only evidence of what was collected, and verifyPayment
+  // reads it out of an unauthenticated request body. Settle nothing without a
+  // usable one: omitting the field must not buy what a real payment could not.
+  // Razorpay has sent it on all 26,329 webhooks so far, so this costs nothing
+  // in practice, and razorpay_underpaid_order logs every time it fires.
+  if (!Number.isFinite(remainingInPaise)) {
+    return { covered: [], uncovered: ordered };
+  }
+
+  let runningInPaise = 0;
+  const firstUnaffordable = ordered.findIndex((txn) => {
+    runningInPaise += toPaise(txn.amount);
+    return runningInPaise > remainingInPaise;
+  });
+
+  return firstUnaffordable === -1
+    ? { covered: ordered, uncovered: [] }
+    : {
+        covered: ordered.slice(0, firstUnaffordable),
+        uncovered: ordered.slice(firstUnaffordable)
+      };
+};
+
+export const owedInPaise = (transactions) =>
+  transactions.reduce((sum, txn) => sum + toPaise(txn.amount), 0);
 
 // Razorpay order statuses that are still payable, so the order can be reused.
 const REUSABLE_RAZORPAY_ORDER_STATUSES = ['created', 'attempted'];
@@ -550,7 +671,7 @@ export const getSharedRazorpayOrderId = (transactions) => {
  * so a payable stub is reconstructed instead of calling Razorpay.
  */
 export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
-  const expectedAmount = Math.round(amount * 100);
+  const expectedAmount = toPaise(amount);
   const payableStub = {
     order: { id: razorpay_order_id, amount: expectedAmount, currency: 'INR' }
   };
@@ -609,35 +730,68 @@ export const inspectRazorpayOrder = async (razorpay_order_id, amount) => {
  * created and persisted only when there is no reusable one.
  *
  * @throws ApiError(409) when the existing order was already paid — that needs
- *   reconciliation, not another payable order (avoids double-charging).
+ *   reconciliation, not another payable order (avoids double-charging). Checked
+ *   before the expiry rejection below, so a transaction that is both stale in
+ *   our DB (e.g. a delayed webhook) and already paid on Razorpay is reconciled
+ *   (409), never told its payment "expired" and retried.
+ * @throws ApiError(400) when an online pending/failed transaction is older
+ *   than the 24-hour window. Cash pending transactions never expire.
  */
-export const resolveOrderForTransactions = async (
-  transactions,
-  amount,
-  bookingIds,
-  transactionIds,
-  t
-) => {
+export const resolveOrderForTransactions = async (transactions, t) => {
+  // Derive the amount from the rows rather than take it as an argument. A
+  // caller-supplied total is a second copy of a number this function can read,
+  // so it can only ever differ by mistake - which is the defect this guards.
+  const amount = transactions.reduce((sum, txn) => sum + txn.amount, 0);
   const existingOrderId = getSharedRazorpayOrderId(transactions);
+  const existing = existingOrderId
+    ? await inspectRazorpayOrder(existingOrderId, amount)
+    : null;
 
-  if (existingOrderId) {
-    const existing = await inspectRazorpayOrder(existingOrderId, amount);
-    if (existing?.paid) {
-      throw new ApiError(
-        409,
-        'Payment already received for this booking. Please contact support if it is not yet confirmed.'
-      );
-    }
-    if (existing?.order) {
-      logger.info('reuse_existing_razorpay_order', {
-        razorpay_order_id: existingOrderId,
-        amount
-      });
-      return existing.order;
-    }
+  if (existing?.paid) {
+    throw new ApiError(
+      409,
+      'Payment already received for this booking. Please contact support if it is not yet confirmed.'
+    );
+  }
+
+  const paymentCutoff = moment
+    .utc()
+    .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
+  const expiredTransactions = transactions.filter(
+    (txn) =>
+      txn.status !== STATUS_CASH_PENDING &&
+      moment.utc(txn.createdAt).isSameOrBefore(paymentCutoff)
+  );
+
+  if (expiredTransactions.length > 0) {
+    logger.warn('resolve_order_expired_transactions', {
+      cardno: transactions[0]?.cardno,
+      transactionIds: expiredTransactions.map((txn) => txn.id)
+    });
+    throw new ApiError(
+      400,
+      'One or more payments have expired. Please refresh and try again.'
+    );
+  }
+
+  if (existing?.order) {
+    logger.info('reuse_existing_razorpay_order', {
+      razorpay_order_id: existingOrderId,
+      amount
+    });
+    return existing.order;
   }
 
   const order = await generateOrderId(amount);
-  await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
+  // Stamp exactly the transactions the amount came from. Passing the caller's
+  // booking ids instead widened the update to every transaction on those
+  // bookings - including ones belonging to another card, which the request body
+  // can name - so paying this order completed them too.
+  await updateRazorpayTransactions(
+    [],
+    transactions.map((txn) => txn.id),
+    order.id,
+    t
+  );
   return order;
 };
