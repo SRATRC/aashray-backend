@@ -588,6 +588,12 @@ export const updateUtsav = async (req, res) => {
 
   const previousWhatsappLink = utsav.whatsapp_link;
 
+  // The utsav row and its centre block must move together: without one
+  // transaction a failed block write leaves the utsav on new dates while the
+  // block still closes the old ones. CatchAsync rolls req.transaction back.
+  const t = await database.transaction();
+  req.transaction = t;
+
   // Capture the pre-update values BEFORE utsav.update mutates the instance, so the
   // auto-created block_dates row can still be located (createUtsav stores
   // checkin=start, checkout=end+1, comments=name, with no utsavid FK).
@@ -611,13 +617,14 @@ export const updateUtsav = async (req, res) => {
     ending_meal,
     whatsapp_link,
     updatedBy: req.user.username
-  });
+  }, { transaction: t });
 
   // Keep the centre block in step with the utsav's own dates. Without this an
   // edited utsav leaves a stale block, or a festival moved off-site keeps the
   // Research Centre closed for dates it no longer occupies.
   const existingBlock = await BlockDates.findOne({
-    where: { comments: oldName, checkin: oldStart, checkout: oldCheckout }
+    where: { comments: oldName, checkin: oldStart, checkout: oldCheckout },
+    transaction: t
   });
 
   const effectiveLocation = location || oldLocation || RESEARCH_CENTRE;
@@ -630,20 +637,20 @@ export const updateUtsav = async (req, res) => {
         comments: name,
         status: STATUS_ACTIVE,
         updatedBy: req.user.username
-      });
+      }, { transaction: t });
     } else {
       await BlockDates.create({
         checkin: start_date,
         checkout: newCheckout,
         comments: name,
         updatedBy: req.user.username
-      });
+      }, { transaction: t });
     }
   } else if (existingBlock) {
     await existingBlock.update({
       status: STATUS_INACTIVE,
       updatedBy: req.user.username
-    });
+    }, { transaction: t });
   }
 
   if (whatsapp_link) {
@@ -654,7 +661,7 @@ export const updateUtsav = async (req, res) => {
       type: 'utsav',
       active: true,
       createdBy: req.user.username
-    });
+    }, { transaction: t });
 
     const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
     if (inviteMatch && inviteMatch[1] && whatsapp_link !== previousWhatsappLink) {
@@ -667,9 +674,11 @@ export const updateUtsav = async (req, res) => {
           type: 'utsav',
           eventId: utsavId
         }
-      });
+      }, { transaction: t });
     }
   }
+
+  await t.commit();
 
   req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
   return res.status(200).send({ message: 'Updated Utsav' });
