@@ -82,11 +82,32 @@ const VALID_PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
 /**
  * Validates and normalizes video playback speed to an accepted YouTube rate.
+ * Used for bulk imports where lenient fallback is preferred.
  */
 const normalizePlaybackSpeed = (val, defaultVal = 1.0) => {
   if (val === undefined || val === null || val === '') return defaultVal;
   const num = parseFloat(val);
   return VALID_PLAYBACK_SPEEDS.includes(num) ? num : defaultVal;
+};
+
+/**
+ * Validates playback speed for interactive API requests.
+ * Throws 400 ApiError if invalid.
+ */
+const parsePlaybackSpeed = (val, defaultVal = 1.0) => {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  const num = parseFloat(val);
+  if (!VALID_PLAYBACK_SPEEDS.includes(num)) {
+    throw new ApiError(400, `Invalid playback speed '${val}'. Allowed values: ${VALID_PLAYBACK_SPEEDS.join(', ')}`);
+  }
+  return num;
+};
+
+/**
+ * Calculates effective session duration accounting for playback speeds.
+ */
+const computeEffectiveSecs = (v1Dur, speed1, v2Dur = 0, speed2 = 1.0) => {
+  return Math.round(v1Dur / speed1) + (v2Dur > 0 ? Math.round(v2Dur / speed2) : 0);
 };
 
 /**
@@ -308,8 +329,10 @@ export const createSession = async (req, res) => {
     audio2_youtube_url: audio2_youtube_url ? audio2_youtube_url.trim() : null,
     notes: notes || null,
     notes2: notes2 || null,
-    playback_speed: normalizePlaybackSpeed(rawSpeed, 1.0),
-    video2_playback_speed: rawSpeed2 ? normalizePlaybackSpeed(rawSpeed2, null) : null,
+    playback_speed: parsePlaybackSpeed(rawSpeed, 1.0),
+    video2_playback_speed: (rawSpeed2 !== undefined && rawSpeed2 !== null && rawSpeed2 !== '')
+      ? parsePlaybackSpeed(rawSpeed2, null)
+      : null,
     status: STATUS_ACTIVE,
     created_by: req.user?.id || null
   });
@@ -489,7 +512,7 @@ export const listSessions = async (req, res) => {
 
     const speed1 = Number(s.playback_speed || 1.0);
     const speed2 = Number(s.video2_playback_speed || 1.0);
-    const effectiveSecs = Math.round(v1Dur / (speed1 || 1.0)) + Math.round(v2Dur / (speed2 || 1.0));
+    const effectiveSecs = computeEffectiveSecs(v1Dur, speed1, v2Dur, speed2);
 
     return {
       ...s.toJSON(),
@@ -585,10 +608,12 @@ export const updateSession = async (req, res) => {
     }
   }
   if (playback_speed !== undefined) {
-    updateData.playback_speed = normalizePlaybackSpeed(playback_speed, 1.0);
+    updateData.playback_speed = parsePlaybackSpeed(playback_speed, 1.0);
   }
   if (video2_playback_speed !== undefined) {
-    updateData.video2_playback_speed = video2_playback_speed ? normalizePlaybackSpeed(video2_playback_speed, null) : null;
+    updateData.video2_playback_speed = (video2_playback_speed !== null && video2_playback_speed !== '')
+      ? parsePlaybackSpeed(video2_playback_speed, null)
+      : null;
   }
 
   // Validate timestamps after merge
@@ -1010,7 +1035,7 @@ export const getTodaySession = async (req, res) => {
 
   const speed1 = Number(session.playback_speed || 1.0);
   const speed2 = Number(session.video2_playback_speed || 1.0);
-  const effectiveSecs = Math.round(v1Dur / (speed1 || 1.0)) + Math.round(v2Dur / (speed2 || 1.0));
+  const effectiveSecs = computeEffectiveSecs(v1Dur, speed1, v2Dur, speed2);
 
   return res.status(200).json({
     success: true,
