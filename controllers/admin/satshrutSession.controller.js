@@ -9,14 +9,46 @@ import { STATUS_ACTIVE, STATUS_INACTIVE } from '../../config/constants.js';
 
 /**
  * Extracts YouTube video ID from a full URL or returns a bare ID as-is.
- * Supports: youtu.be/ID, youtube.com/watch?v=ID, youtube.com/embed/ID
+ * Supports:
+ *   - Bare 11-char ID
+ *   - youtu.be/ID
+ *   - youtube.com/watch?v=ID  (any extra query params handled safely)
+ *   - youtube.com/embed/ID, /v/ID, /live/ID, /shorts/ID
  */
 const extractYouTubeId = (input) => {
   if (!input) return null;
   const trimmed = input.trim();
+
+  // Bare video ID
   if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+
+  try {
+    const url = new URL(trimmed);
+    const host = url.hostname.replace(/^www\./, '');
+
+    if (host === 'youtu.be') {
+      const id = url.pathname.slice(1).split('/')[0];
+      if (/^[a-zA-Z0-9_-]{11}$/.test(id)) return id;
+    }
+
+    if (host === 'youtube.com') {
+      // watch?v=<ID> — handles any extra query params safely
+      const v = url.searchParams.get('v');
+      if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
+
+      // /embed/<ID>, /v/<ID>, /live/<ID>, /shorts/<ID>
+      const pathMatch = url.pathname.match(
+        /\/(?:embed|v|live|shorts|e)\/([a-zA-Z0-9_-]{11})/i
+      );
+      if (pathMatch) return pathMatch[1];
+    }
+  } catch {
+    // Not a valid URL — fall through to regex fallback
+  }
+
+  // Regex fallback for malformed / partial URLs
   const match = trimmed.match(
-    /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?|live|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i
+    /(?:youtube\.com\/(?:embed|v|live|shorts|e)\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
   );
   return match ? match[1] : null;
 };
@@ -56,24 +88,24 @@ const normalizeDateStr = (dateStr) => {
   const trimmed = String(dateStr).trim();
 
   // Match YYYY-MM-DD or YYYY/MM/DD
-  const isoMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  const isoMatch = trimmed.match(/^(\d{4})([-/])(\d{1,2})\2(\d{1,2})$/);
   if (isoMatch) {
     const y = isoMatch[1];
-    const m = isoMatch[2].padStart(2, '0');
-    const d = isoMatch[3].padStart(2, '0');
+    const m = isoMatch[3].padStart(2, '0');
+    const d = isoMatch[4].padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
 
   // Match DD-MM-YYYY or DD/MM/YYYY
-  const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  const dmyMatch = trimmed.match(/^(\d{1,2})([-/])(\d{1,2})\2(\d{4})$/);
   if (dmyMatch) {
     const d = dmyMatch[1].padStart(2, '0');
-    const m = dmyMatch[2].padStart(2, '0');
-    const y = dmyMatch[3];
+    const m = dmyMatch[3].padStart(2, '0');
+    const y = dmyMatch[4];
     return `${y}-${m}-${d}`;
   }
 
-  return trimmed;
+  return null;
 };
 
 /**
@@ -381,7 +413,7 @@ export const bulkCreateSessions = async (req, res) => {
         created_by: req.user?.id || null
       });
 
-      results.created.push({ session_date });
+      results.created.push({ session_date: rawSessionDate || session_date });
     } catch (err) {
       results.errors.push({ session_date: rawSessionDate || session_date || '?', reason: err.message });
     }
