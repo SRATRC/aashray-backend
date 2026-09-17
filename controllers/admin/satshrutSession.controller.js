@@ -9,14 +9,48 @@ import { STATUS_ACTIVE, STATUS_INACTIVE } from '../../config/constants.js';
 
 /**
  * Extracts YouTube video ID from a full URL or returns a bare ID as-is.
- * Supports: youtu.be/ID, youtube.com/watch?v=ID, youtube.com/embed/ID
+ * Supports:
+ *   - Bare 11-char ID
+ *   - youtu.be/ID
+ *   - youtube.com/watch?v=ID  (any extra query params handled safely)
+ *   - youtube.com/embed/ID, /v/ID, /live/ID, /shorts/ID
  */
 const extractYouTubeId = (input) => {
   if (!input) return null;
   const trimmed = input.trim();
+
+  // Bare video ID
   if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+
+  try {
+    const urlStr = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed.replace(/^\/\//, '')}`;
+    const url = new URL(urlStr);
+    const host = url.hostname.replace(/^www\./, '');
+
+    if (host === 'youtu.be') {
+      // youtu.be/<ID>
+      const id = url.pathname.slice(1).split('/')[0];
+      if (/^[a-zA-Z0-9_-]{11}$/.test(id)) return id;
+    }
+
+    if (host === 'youtube.com' || host === 'm.youtube.com') {
+      // watch?v=<ID> — handles any extra query params safely
+      const v = url.searchParams.get('v');
+      if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
+
+      // /embed/<ID>, /v/<ID>, /live/<ID>, /shorts/<ID>
+      const pathMatch = url.pathname.match(
+        /\/(?:embed|v|live|shorts|e)\/([a-zA-Z0-9_-]{11})/i
+      );
+      if (pathMatch) return pathMatch[1];
+    }
+  } catch {
+    // Not a valid URL — fall through to regex fallback
+  }
+
+  // Regex fallback for malformed / partial / scheme-less URLs
   const match = trimmed.match(
-    /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?|live|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i
+    /(?:youtube\.com\/(?:embed|v|live|shorts|e)\/|youtu\.be\/|youtube\.com\/.*[?&]v=)([a-zA-Z0-9_-]{11})/i
   );
   return match ? match[1] : null;
 };
@@ -42,6 +76,82 @@ const secondsToHMS = (secs) => {
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
+
+const VALID_PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+/**
+ * Validates and normalizes video playback speed to an accepted YouTube rate.
+ * Used for bulk imports where lenient fallback is preferred.
+ */
+const normalizePlaybackSpeed = (val, defaultVal = 1.0) => {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  const num = parseFloat(val);
+  return VALID_PLAYBACK_SPEEDS.includes(num) ? num : defaultVal;
+};
+
+/**
+ * Validates playback speed for interactive API requests.
+ * Throws 400 ApiError if invalid.
+ */
+const parsePlaybackSpeed = (val, defaultVal = 1.0) => {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  const num = parseFloat(val);
+  if (!VALID_PLAYBACK_SPEEDS.includes(num)) {
+    throw new ApiError(400, `Invalid playback speed '${val}'. Allowed values: ${VALID_PLAYBACK_SPEEDS.join(', ')}`);
+  }
+  return num;
+};
+
+/**
+ * Calculates effective session duration accounting for playback speeds.
+ */
+const computeEffectiveSecs = (v1Dur, speed1, v2Dur = 0, speed2 = 1.0) => {
+  return Math.round(v1Dur / speed1) + (v2Dur > 0 ? Math.round(v2Dur / speed2) : 0);
+};
+
+/**
+ * Normalizes common date strings into YYYY-MM-DD.
+ * Supports:
+ * - YYYY-MM-DD, YYYY/MM/DD
+ * - DD-MM-YYYY, DD/MM/YYYY
+ * - D-M-YYYY, D/M/YYYY
+ */
+const normalizeDateStr = (dateStr) => {
+  if (!dateStr) return null;
+  const trimmed = String(dateStr).trim();
+
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  const isoMatch = trimmed.match(/^(\d{4})([-/])(\d{1,2})\2(\d{1,2})$/);
+  if (isoMatch) {
+    const y = isoMatch[1];
+    const m = isoMatch[3].padStart(2, '0');
+    const d = isoMatch[4].padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // Match DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})([-/])(\d{1,2})\2(\d{4})$/);
+  if (dmyMatch) {
+    const d = dmyMatch[1].padStart(2, '0');
+    const m = dmyMatch[3].padStart(2, '0');
+    const y = dmyMatch[4];
+    return `${y}-${m}-${d}`;
+  }
+
+  return null;
+};
+
+/**
+ * Validates that a normalized string is a real calendar date YYYY-MM-DD.
+ */
+const isValidDateStr = (dateStr) => {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dateObj = new Date(Date.UTC(y, m - 1, d));
+  return dateObj.getUTCFullYear() === y &&
+         dateObj.getUTCMonth() === m - 1 &&
+         dateObj.getUTCDate() === d;
 };
 
 /**
@@ -116,14 +226,19 @@ const getOrCreateConfig = async () => {
  */
 export const createSession = async (req, res) => {
   const {
-    session_date, status,
+    session_date: rawSessionDate, status,
     youtube_url, start_time, end_time,
     youtube2_url, start2_time, end2_time,
-    notes, notes2, audio1_youtube_url, audio2_youtube_url
+    notes, notes2, audio1_youtube_url, audio2_youtube_url,
+    playback_speed: rawSpeed, video2_playback_speed: rawSpeed2
   } = req.body;
 
+  const session_date = normalizeDateStr(rawSessionDate);
+
   if (status === STATUS_INACTIVE) {
-    if (!session_date) throw new ApiError(400, 'session_date is required');
+    if (!session_date || !isValidDateStr(session_date)) {
+      throw new ApiError(400, 'A valid session_date (YYYY-MM-DD or DD-MM-YYYY) is required');
+    }
     const existing = await SatshrutSession.findOne({ where: { session_date } });
     if (existing) {
       await existing.update({ status: STATUS_INACTIVE, notes: notes || null });
@@ -142,8 +257,12 @@ export const createSession = async (req, res) => {
     return res.status(201).json({ success: true, data: session, message: 'Marked as no-session day' });
   }
 
-  if (!session_date || !youtube_url || !start_time || !end_time) {
-    throw new ApiError(400, 'session_date, youtube_url, start_time, and end_time are required');
+  if (!session_date || !isValidDateStr(session_date)) {
+    throw new ApiError(400, 'A valid session_date (YYYY-MM-DD or DD-MM-YYYY) is required');
+  }
+
+  if (!youtube_url || !start_time || !end_time) {
+    throw new ApiError(400, 'youtube_url, start_time, and end_time are required');
   }
 
   const youtube_video_id = extractYouTubeId(youtube_url);
@@ -210,6 +329,10 @@ export const createSession = async (req, res) => {
     audio2_youtube_url: audio2_youtube_url ? audio2_youtube_url.trim() : null,
     notes: notes || null,
     notes2: notes2 || null,
+    playback_speed: parsePlaybackSpeed(rawSpeed, 1.0),
+    video2_playback_speed: (rawSpeed2 !== undefined && rawSpeed2 !== null && rawSpeed2 !== '')
+      ? parsePlaybackSpeed(rawSpeed2, null)
+      : null,
     status: STATUS_ACTIVE,
     created_by: req.user?.id || null
   });
@@ -242,19 +365,31 @@ export const bulkCreateSessions = async (req, res) => {
 
   for (const row of sessions) {
     const {
-      session_date, youtube_url, start_time, end_time, notes,
-      youtube2_url, start2_time, end2_time, notes2
+      session_date: rawSessionDate, youtube_url, start_time, end_time, notes,
+      youtube2_url, start2_time, end2_time, notes2,
+      playback_speed: rowSpeed, speed: rowSpeedAlt,
+      video2_playback_speed: rowSpeed2, speed2: rowSpeed2Alt
     } = row;
 
+    const session_date = normalizeDateStr(rawSessionDate);
+
     try {
-      if (!session_date || !youtube_url || !start_time || !end_time) {
-        results.errors.push({ session_date: session_date || '?', reason: 'Missing required fields for Video 1' });
+      if (!session_date || !isValidDateStr(session_date)) {
+        results.errors.push({
+          session_date: rawSessionDate || '?',
+          reason: `Invalid date '${rawSessionDate || ''}'. Please use YYYY-MM-DD or DD-MM-YYYY format`
+        });
+        continue;
+      }
+
+      if (!youtube_url || !start_time || !end_time) {
+        results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Missing required fields for Video 1' });
         continue;
       }
 
       const youtube_video_id = extractYouTubeId(youtube_url);
       if (!youtube_video_id) {
-        results.errors.push({ session_date, reason: 'Invalid Video 1 YouTube URL' });
+        results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Invalid Video 1 YouTube URL' });
         continue;
       }
 
@@ -262,7 +397,7 @@ export const bulkCreateSessions = async (req, res) => {
       const video_end_seconds = parseTimestamp(end_time);
 
       if (video_end_seconds <= 0 || video_end_seconds <= video_start_seconds) {
-        results.errors.push({ session_date, reason: 'Video 1 end_time must be > 0 and after start_time' });
+        results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Video 1 end_time must be > 0 and after start_time' });
         continue;
       }
 
@@ -273,18 +408,18 @@ export const bulkCreateSessions = async (req, res) => {
 
       if (youtube2_url) {
         if (!start2_time || !end2_time) {
-          results.errors.push({ session_date, reason: 'Video 2 start2_time and end2_time are required when youtube2_url is provided' });
+          results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Video 2 start2_time and end2_time are required when youtube2_url is provided' });
           continue;
         }
         youtube2_video_id = extractYouTubeId(youtube2_url);
         if (!youtube2_video_id) {
-          results.errors.push({ session_date, reason: 'Invalid Video 2 YouTube URL' });
+          results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Invalid Video 2 YouTube URL' });
           continue;
         }
         video2_start_seconds = parseTimestamp(start2_time);
         video2_end_seconds = parseTimestamp(end2_time);
         if (video2_end_seconds <= 0 || video2_end_seconds <= video2_start_seconds) {
-          results.errors.push({ session_date, reason: 'Video 2 end_time must be greater than 00:00:00 and after start2_time' });
+          results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Video 2 end_time must be greater than 00:00:00 and after start2_time' });
           continue;
         }
       }
@@ -292,14 +427,14 @@ export const bulkCreateSessions = async (req, res) => {
       // Skip no-session days
       const dayOfWeek = new Date(`${session_date}T12:00:00Z`).getDay();
       if (noSessionDays.includes(dayOfWeek)) {
-        results.skipped.push({ session_date, reason: 'No-session day (Monday/Thursday)' });
+        results.skipped.push({ session_date: rawSessionDate || session_date, reason: 'No-session day (Monday/Thursday)' });
         continue;
       }
 
       // Skip duplicate dates
       const existing = await SatshrutSession.findOne({ where: { session_date } });
       if (existing) {
-        results.skipped.push({ session_date, reason: 'Session already exists for this date' });
+        results.skipped.push({ session_date: rawSessionDate || session_date, reason: 'Session already exists for this date' });
         continue;
       }
 
@@ -315,13 +450,15 @@ export const bulkCreateSessions = async (req, res) => {
         video2_end_seconds,
         notes: notes || null,
         notes2: notes2 || null,
+        playback_speed: normalizePlaybackSpeed(rowSpeed ?? rowSpeedAlt, 1.0),
+        video2_playback_speed: (rowSpeed2 ?? rowSpeed2Alt) ? normalizePlaybackSpeed(rowSpeed2 ?? rowSpeed2Alt, null) : null,
         status: STATUS_ACTIVE,
         created_by: req.user?.id || null
       });
 
-      results.created.push({ session_date });
+      results.created.push({ session_date: rawSessionDate || session_date });
     } catch (err) {
-      results.errors.push({ session_date: session_date || '?', reason: err.message });
+      results.errors.push({ session_date: rawSessionDate || session_date || '?', reason: err.message });
     }
   }
 
@@ -373,6 +510,10 @@ export const listSessions = async (req, res) => {
     const startDisplay = secondsToHMS(s.video_start_seconds || 0);
     const endDisplay = secondsToHMS(s.video_end_seconds || 0);
 
+    const speed1 = Number(s.playback_speed || 1.0);
+    const speed2 = Number(s.video2_playback_speed || 1.0);
+    const effectiveSecs = computeEffectiveSecs(v1Dur, speed1, v2Dur, speed2);
+
     return {
       ...s.toJSON(),
       start_time_display: startDisplay,
@@ -382,7 +523,9 @@ export const listSessions = async (req, res) => {
       video1_duration_seconds: v1Dur,
       video2_duration_seconds: v2Dur,
       video_duration_seconds: totalVideoSecs,
-      duration_minutes: Math.max(1, Math.round(totalVideoSecs / 60))
+      effective_duration_seconds: effectiveSecs,
+      duration_minutes: Math.max(1, Math.round(totalVideoSecs / 60)),
+      effective_duration_minutes: Math.max(1, Math.round(effectiveSecs / 60))
     };
   });
 
@@ -398,7 +541,8 @@ export const updateSession = async (req, res) => {
   const {
     youtube_url, start_time, end_time,
     youtube2_url, start2_time, end2_time,
-    notes, notes2, status, audio1_youtube_url, audio2_youtube_url
+    notes, notes2, status, audio1_youtube_url, audio2_youtube_url,
+    playback_speed, video2_playback_speed
   } = req.body;
 
   const session = await SatshrutSession.findByPk(id);
@@ -462,6 +606,14 @@ export const updateSession = async (req, res) => {
       updateData.audio2_youtube_id = audioId;
       updateData.audio2_youtube_url = audio2_youtube_url.trim();
     }
+  }
+  if (playback_speed !== undefined) {
+    updateData.playback_speed = parsePlaybackSpeed(playback_speed, 1.0);
+  }
+  if (video2_playback_speed !== undefined) {
+    updateData.video2_playback_speed = (video2_playback_speed !== null && video2_playback_speed !== '')
+      ? parsePlaybackSpeed(video2_playback_speed, null)
+      : null;
   }
 
   // Validate timestamps after merge
@@ -853,6 +1005,8 @@ export const getTodaySession = async (req, res) => {
               video_duration_seconds: vidDur,
               video1_duration_seconds: vidDur,
               video2_duration_seconds: 0,
+              playback_speed: 1.0,
+              video2_playback_speed: null,
               notes: `Bhakti — Week ${videoIndex + 1}`,
               week_index: videoIndex,
               week_number: videoIndex + 1
@@ -879,6 +1033,10 @@ export const getTodaySession = async (req, res) => {
     ? (session.video2_end_seconds - session.video2_start_seconds)
     : 0;
 
+  const speed1 = Number(session.playback_speed || 1.0);
+  const speed2 = Number(session.video2_playback_speed || 1.0);
+  const effectiveSecs = computeEffectiveSecs(v1Dur, speed1, v2Dur, speed2);
+
   return res.status(200).json({
     success: true,
     data: {
@@ -893,7 +1051,10 @@ export const getTodaySession = async (req, res) => {
       end2_time_display: session.video2_end_seconds !== null ? secondsToHMS(session.video2_end_seconds) : null,
       video1_duration_seconds: v1Dur,
       video2_duration_seconds: v2Dur,
-      video_duration_seconds: v1Dur + v2Dur
+      video_duration_seconds: v1Dur + v2Dur,
+      effective_duration_seconds: effectiveSecs,
+      duration_minutes: Math.max(1, Math.round((v1Dur + v2Dur) / 60)),
+      effective_duration_minutes: Math.max(1, Math.round(effectiveSecs / 60))
     }
   });
 };
