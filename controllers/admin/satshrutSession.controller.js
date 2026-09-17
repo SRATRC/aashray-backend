@@ -78,6 +78,17 @@ const secondsToHMS = (secs) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 };
 
+const VALID_PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+/**
+ * Validates and normalizes video playback speed to an accepted YouTube rate.
+ */
+const normalizePlaybackSpeed = (val, defaultVal = 1.0) => {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  const num = parseFloat(val);
+  return VALID_PLAYBACK_SPEEDS.includes(num) ? num : defaultVal;
+};
+
 /**
  * Normalizes common date strings into YYYY-MM-DD.
  * Supports:
@@ -197,7 +208,8 @@ export const createSession = async (req, res) => {
     session_date: rawSessionDate, status,
     youtube_url, start_time, end_time,
     youtube2_url, start2_time, end2_time,
-    notes, notes2, audio1_youtube_url, audio2_youtube_url
+    notes, notes2, audio1_youtube_url, audio2_youtube_url,
+    playback_speed: rawSpeed, video2_playback_speed: rawSpeed2
   } = req.body;
 
   const session_date = normalizeDateStr(rawSessionDate);
@@ -296,6 +308,8 @@ export const createSession = async (req, res) => {
     audio2_youtube_url: audio2_youtube_url ? audio2_youtube_url.trim() : null,
     notes: notes || null,
     notes2: notes2 || null,
+    playback_speed: normalizePlaybackSpeed(rawSpeed, 1.0),
+    video2_playback_speed: rawSpeed2 ? normalizePlaybackSpeed(rawSpeed2, null) : null,
     status: STATUS_ACTIVE,
     created_by: req.user?.id || null
   });
@@ -329,7 +343,9 @@ export const bulkCreateSessions = async (req, res) => {
   for (const row of sessions) {
     const {
       session_date: rawSessionDate, youtube_url, start_time, end_time, notes,
-      youtube2_url, start2_time, end2_time, notes2
+      youtube2_url, start2_time, end2_time, notes2,
+      playback_speed: rowSpeed, speed: rowSpeedAlt,
+      video2_playback_speed: rowSpeed2, speed2: rowSpeed2Alt
     } = row;
 
     const session_date = normalizeDateStr(rawSessionDate);
@@ -411,6 +427,8 @@ export const bulkCreateSessions = async (req, res) => {
         video2_end_seconds,
         notes: notes || null,
         notes2: notes2 || null,
+        playback_speed: normalizePlaybackSpeed(rowSpeed ?? rowSpeedAlt, 1.0),
+        video2_playback_speed: (rowSpeed2 ?? rowSpeed2Alt) ? normalizePlaybackSpeed(rowSpeed2 ?? rowSpeed2Alt, null) : null,
         status: STATUS_ACTIVE,
         created_by: req.user?.id || null
       });
@@ -469,6 +487,10 @@ export const listSessions = async (req, res) => {
     const startDisplay = secondsToHMS(s.video_start_seconds || 0);
     const endDisplay = secondsToHMS(s.video_end_seconds || 0);
 
+    const speed1 = Number(s.playback_speed || 1.0);
+    const speed2 = Number(s.video2_playback_speed || s.playback_speed || 1.0);
+    const effectiveSecs = Math.round(v1Dur / (speed1 || 1.0)) + Math.round(v2Dur / (speed2 || 1.0));
+
     return {
       ...s.toJSON(),
       start_time_display: startDisplay,
@@ -478,7 +500,8 @@ export const listSessions = async (req, res) => {
       video1_duration_seconds: v1Dur,
       video2_duration_seconds: v2Dur,
       video_duration_seconds: totalVideoSecs,
-      duration_minutes: Math.max(1, Math.round(totalVideoSecs / 60))
+      effective_duration_seconds: effectiveSecs,
+      duration_minutes: Math.max(1, Math.round(effectiveSecs / 60))
     };
   });
 
@@ -494,7 +517,8 @@ export const updateSession = async (req, res) => {
   const {
     youtube_url, start_time, end_time,
     youtube2_url, start2_time, end2_time,
-    notes, notes2, status, audio1_youtube_url, audio2_youtube_url
+    notes, notes2, status, audio1_youtube_url, audio2_youtube_url,
+    playback_speed, video2_playback_speed
   } = req.body;
 
   const session = await SatshrutSession.findByPk(id);
@@ -558,6 +582,12 @@ export const updateSession = async (req, res) => {
       updateData.audio2_youtube_id = audioId;
       updateData.audio2_youtube_url = audio2_youtube_url.trim();
     }
+  }
+  if (playback_speed !== undefined) {
+    updateData.playback_speed = normalizePlaybackSpeed(playback_speed, 1.0);
+  }
+  if (video2_playback_speed !== undefined) {
+    updateData.video2_playback_speed = video2_playback_speed ? normalizePlaybackSpeed(video2_playback_speed, null) : null;
   }
 
   // Validate timestamps after merge
@@ -947,6 +977,8 @@ export const getTodaySession = async (req, res) => {
               video_duration_seconds: vidDur,
               video1_duration_seconds: vidDur,
               video2_duration_seconds: 0,
+              playback_speed: 1.0,
+              video2_playback_speed: null,
               notes: `Bhakti — Week ${videoIndex + 1}`,
               week_index: videoIndex,
               week_number: videoIndex + 1
@@ -973,6 +1005,10 @@ export const getTodaySession = async (req, res) => {
     ? (session.video2_end_seconds - session.video2_start_seconds)
     : 0;
 
+  const speed1 = Number(session.playback_speed || 1.0);
+  const speed2 = Number(session.video2_playback_speed || session.playback_speed || 1.0);
+  const effectiveSecs = Math.round(v1Dur / (speed1 || 1.0)) + Math.round(v2Dur / (speed2 || 1.0));
+
   return res.status(200).json({
     success: true,
     data: {
@@ -987,7 +1023,8 @@ export const getTodaySession = async (req, res) => {
       end2_time_display: session.video2_end_seconds !== null ? secondsToHMS(session.video2_end_seconds) : null,
       video1_duration_seconds: v1Dur,
       video2_duration_seconds: v2Dur,
-      video_duration_seconds: v1Dur + v2Dur
+      video_duration_seconds: v1Dur + v2Dur,
+      effective_duration_seconds: effectiveSecs
     }
   });
 };
