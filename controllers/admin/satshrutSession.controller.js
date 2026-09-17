@@ -45,6 +45,50 @@ const secondsToHMS = (secs) => {
 };
 
 /**
+ * Normalizes common date strings into YYYY-MM-DD.
+ * Supports:
+ * - YYYY-MM-DD, YYYY/MM/DD
+ * - DD-MM-YYYY, DD/MM/YYYY
+ * - D-M-YYYY, D/M/YYYY
+ */
+const normalizeDateStr = (dateStr) => {
+  if (!dateStr) return null;
+  const trimmed = String(dateStr).trim();
+
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  const isoMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (isoMatch) {
+    const y = isoMatch[1];
+    const m = isoMatch[2].padStart(2, '0');
+    const d = isoMatch[3].padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // Match DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (dmyMatch) {
+    const d = dmyMatch[1].padStart(2, '0');
+    const m = dmyMatch[2].padStart(2, '0');
+    const y = dmyMatch[3];
+    return `${y}-${m}-${d}`;
+  }
+
+  return trimmed;
+};
+
+/**
+ * Validates that a normalized string is a real calendar date YYYY-MM-DD.
+ */
+const isValidDateStr = (dateStr) => {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dateObj = new Date(Date.UTC(y, m - 1, d));
+  return dateObj.getUTCFullYear() === y &&
+         dateObj.getUTCMonth() === m - 1 &&
+         dateObj.getUTCDate() === d;
+};
+
+/**
  * Add / subtract days to a YYYY-MM-DD string.
  */
 const addDays = (dateStr, days) => {
@@ -116,14 +160,18 @@ const getOrCreateConfig = async () => {
  */
 export const createSession = async (req, res) => {
   const {
-    session_date, status,
+    session_date: rawSessionDate, status,
     youtube_url, start_time, end_time,
     youtube2_url, start2_time, end2_time,
     notes, notes2, audio1_youtube_url, audio2_youtube_url
   } = req.body;
 
+  const session_date = normalizeDateStr(rawSessionDate);
+
   if (status === STATUS_INACTIVE) {
-    if (!session_date) throw new ApiError(400, 'session_date is required');
+    if (!session_date || !isValidDateStr(session_date)) {
+      throw new ApiError(400, 'A valid session_date (YYYY-MM-DD or DD-MM-YYYY) is required');
+    }
     const existing = await SatshrutSession.findOne({ where: { session_date } });
     if (existing) {
       await existing.update({ status: STATUS_INACTIVE, notes: notes || null });
@@ -142,7 +190,11 @@ export const createSession = async (req, res) => {
     return res.status(201).json({ success: true, data: session, message: 'Marked as no-session day' });
   }
 
-  if (!session_date || !youtube_url || !start_time || !end_time) {
+  if (!session_date || !isValidDateStr(session_date)) {
+    throw new ApiError(400, 'A valid session_date (YYYY-MM-DD or DD-MM-YYYY) is required');
+  }
+
+  if (!youtube_url || !start_time || !end_time) {
     throw new ApiError(400, 'session_date, youtube_url, start_time, and end_time are required');
   }
 
@@ -242,19 +294,29 @@ export const bulkCreateSessions = async (req, res) => {
 
   for (const row of sessions) {
     const {
-      session_date, youtube_url, start_time, end_time, notes,
+      session_date: rawSessionDate, youtube_url, start_time, end_time, notes,
       youtube2_url, start2_time, end2_time, notes2
     } = row;
 
+    const session_date = normalizeDateStr(rawSessionDate);
+
     try {
-      if (!session_date || !youtube_url || !start_time || !end_time) {
-        results.errors.push({ session_date: session_date || '?', reason: 'Missing required fields for Video 1' });
+      if (!session_date || !isValidDateStr(session_date)) {
+        results.errors.push({
+          session_date: rawSessionDate || '?',
+          reason: `Invalid date '${rawSessionDate || ''}'. Please use YYYY-MM-DD or DD-MM-YYYY format`
+        });
+        continue;
+      }
+
+      if (!youtube_url || !start_time || !end_time) {
+        results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Missing required fields for Video 1' });
         continue;
       }
 
       const youtube_video_id = extractYouTubeId(youtube_url);
       if (!youtube_video_id) {
-        results.errors.push({ session_date, reason: 'Invalid Video 1 YouTube URL' });
+        results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Invalid Video 1 YouTube URL' });
         continue;
       }
 
@@ -262,7 +324,7 @@ export const bulkCreateSessions = async (req, res) => {
       const video_end_seconds = parseTimestamp(end_time);
 
       if (video_end_seconds <= 0 || video_end_seconds <= video_start_seconds) {
-        results.errors.push({ session_date, reason: 'Video 1 end_time must be > 0 and after start_time' });
+        results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Video 1 end_time must be > 0 and after start_time' });
         continue;
       }
 
@@ -273,18 +335,18 @@ export const bulkCreateSessions = async (req, res) => {
 
       if (youtube2_url) {
         if (!start2_time || !end2_time) {
-          results.errors.push({ session_date, reason: 'Video 2 start2_time and end2_time are required when youtube2_url is provided' });
+          results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Video 2 start2_time and end2_time are required when youtube2_url is provided' });
           continue;
         }
         youtube2_video_id = extractYouTubeId(youtube2_url);
         if (!youtube2_video_id) {
-          results.errors.push({ session_date, reason: 'Invalid Video 2 YouTube URL' });
+          results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Invalid Video 2 YouTube URL' });
           continue;
         }
         video2_start_seconds = parseTimestamp(start2_time);
         video2_end_seconds = parseTimestamp(end2_time);
         if (video2_end_seconds <= 0 || video2_end_seconds <= video2_start_seconds) {
-          results.errors.push({ session_date, reason: 'Video 2 end_time must be greater than 00:00:00 and after start2_time' });
+          results.errors.push({ session_date: rawSessionDate || session_date, reason: 'Video 2 end_time must be greater than 00:00:00 and after start2_time' });
           continue;
         }
       }
@@ -292,14 +354,14 @@ export const bulkCreateSessions = async (req, res) => {
       // Skip no-session days
       const dayOfWeek = new Date(`${session_date}T12:00:00Z`).getDay();
       if (noSessionDays.includes(dayOfWeek)) {
-        results.skipped.push({ session_date, reason: 'No-session day (Monday/Thursday)' });
+        results.skipped.push({ session_date: rawSessionDate || session_date, reason: 'No-session day (Monday/Thursday)' });
         continue;
       }
 
       // Skip duplicate dates
       const existing = await SatshrutSession.findOne({ where: { session_date } });
       if (existing) {
-        results.skipped.push({ session_date, reason: 'Session already exists for this date' });
+        results.skipped.push({ session_date: rawSessionDate || session_date, reason: 'Session already exists for this date' });
         continue;
       }
 
@@ -321,7 +383,7 @@ export const bulkCreateSessions = async (req, res) => {
 
       results.created.push({ session_date });
     } catch (err) {
-      results.errors.push({ session_date: session_date || '?', reason: err.message });
+      results.errors.push({ session_date: rawSessionDate || session_date || '?', reason: err.message });
     }
   }
 
