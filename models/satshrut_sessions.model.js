@@ -85,7 +85,10 @@ const SatshrutSession = sequelize.define(
     video2_playback_speed: {
       type: DataTypes.DECIMAL(3, 2),
       allowNull: true,
-      defaultValue: null
+      defaultValue: null,
+      validate: {
+        isIn: [[null, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]]
+      }
     },
     status: {
       type: DataTypes.ENUM,

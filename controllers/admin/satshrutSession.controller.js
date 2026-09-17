@@ -50,7 +50,7 @@ const extractYouTubeId = (input) => {
 
   // Regex fallback for malformed / partial / scheme-less URLs
   const match = trimmed.match(
-    /(?:youtube\.com\/(?:embed|v|live|shorts|e)\/|youtu\.be\/|youtube\.com\/.*[?&]v=|[?&]v=)([a-zA-Z0-9_-]{11})/i
+    /(?:youtube\.com\/(?:embed|v|live|shorts|e)\/|youtu\.be\/|youtube\.com\/.*[?&]v=)([a-zA-Z0-9_-]{11})/i
   );
   return match ? match[1] : null;
 };
@@ -488,7 +488,7 @@ export const listSessions = async (req, res) => {
     const endDisplay = secondsToHMS(s.video_end_seconds || 0);
 
     const speed1 = Number(s.playback_speed || 1.0);
-    const speed2 = Number(s.video2_playback_speed || s.playback_speed || 1.0);
+    const speed2 = Number(s.video2_playback_speed || 1.0);
     const effectiveSecs = Math.round(v1Dur / (speed1 || 1.0)) + Math.round(v2Dur / (speed2 || 1.0));
 
     return {
@@ -501,7 +501,8 @@ export const listSessions = async (req, res) => {
       video2_duration_seconds: v2Dur,
       video_duration_seconds: totalVideoSecs,
       effective_duration_seconds: effectiveSecs,
-      duration_minutes: Math.max(1, Math.round(effectiveSecs / 60))
+      duration_minutes: Math.max(1, Math.round(totalVideoSecs / 60)),
+      effective_duration_minutes: Math.max(1, Math.round(effectiveSecs / 60))
     };
   });
 
@@ -1006,7 +1007,7 @@ export const getTodaySession = async (req, res) => {
     : 0;
 
   const speed1 = Number(session.playback_speed || 1.0);
-  const speed2 = Number(session.video2_playback_speed || session.playback_speed || 1.0);
+  const speed2 = Number(session.video2_playback_speed || 1.0);
   const effectiveSecs = Math.round(v1Dur / (speed1 || 1.0)) + Math.round(v2Dur / (speed2 || 1.0));
 
   return res.status(200).json({
@@ -1024,7 +1025,9 @@ export const getTodaySession = async (req, res) => {
       video1_duration_seconds: v1Dur,
       video2_duration_seconds: v2Dur,
       video_duration_seconds: v1Dur + v2Dur,
-      effective_duration_seconds: effectiveSecs
+      effective_duration_seconds: effectiveSecs,
+      duration_minutes: Math.max(1, Math.round((v1Dur + v2Dur) / 60)),
+      effective_duration_minutes: Math.max(1, Math.round(effectiveSecs / 60))
     }
   });
 };
