@@ -23,15 +23,17 @@ const extractYouTubeId = (input) => {
   if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
 
   try {
-    const url = new URL(trimmed);
+    const urlStr = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed.replace(/^\/\//, '')}`;
+    const url = new URL(urlStr);
     const host = url.hostname.replace(/^www\./, '');
 
     if (host === 'youtu.be') {
+      // youtu.be/<ID>
       const id = url.pathname.slice(1).split('/')[0];
       if (/^[a-zA-Z0-9_-]{11}$/.test(id)) return id;
     }
 
-    if (host === 'youtube.com') {
+    if (host === 'youtube.com' || host === 'm.youtube.com') {
       // watch?v=<ID> — handles any extra query params safely
       const v = url.searchParams.get('v');
       if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
@@ -46,9 +48,9 @@ const extractYouTubeId = (input) => {
     // Not a valid URL — fall through to regex fallback
   }
 
-  // Regex fallback for malformed / partial URLs
+  // Regex fallback for malformed / partial / scheme-less URLs
   const match = trimmed.match(
-    /(?:youtube\.com\/(?:embed|v|live|shorts|e)\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
+    /(?:youtube\.com\/(?:embed|v|live|shorts|e)\/|youtu\.be\/|youtube\.com\/.*[?&]v=|[?&]v=)([a-zA-Z0-9_-]{11})/i
   );
   return match ? match[1] : null;
 };
@@ -227,7 +229,7 @@ export const createSession = async (req, res) => {
   }
 
   if (!youtube_url || !start_time || !end_time) {
-    throw new ApiError(400, 'session_date, youtube_url, start_time, and end_time are required');
+    throw new ApiError(400, 'youtube_url, start_time, and end_time are required');
   }
 
   const youtube_video_id = extractYouTubeId(youtube_url);
