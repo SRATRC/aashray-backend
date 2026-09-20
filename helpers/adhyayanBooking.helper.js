@@ -290,12 +290,15 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
     await createShibirAttendanceEntry(booking, { username: updatedBy }, t);
     return booking;
   } else {
-    const freshAdhyayan =
-      (await ShibirDb.findOne({
-        where: { id: adhyayan.id },
-        transaction: t,
-        lock: t ? t.LOCK.UPDATE : undefined
-      })) || adhyayan;
+    const freshAdhyayan = await ShibirDb.findOne({
+      where: { id: adhyayan.id },
+      transaction: t,
+      lock: t ? t.LOCK.UPDATE : undefined
+    });
+
+    if (!freshAdhyayan) {
+      throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
+    }
 
     const newSeats = Math.min(freshAdhyayan.total_seats, freshAdhyayan.available_seats + 1);
 

@@ -394,12 +394,15 @@ export async function validateUtsavBooking(bookingId, utsavId) {
 }
 
 export async function reserveUtsavSeat(utsav, t) {
-  const freshUtsav =
-    (await UtsavDb.findOne({
-      where: { id: utsav.id },
-      transaction: t,
-      lock: t ? t.LOCK.UPDATE : undefined
-    })) || utsav;
+  const freshUtsav = await UtsavDb.findOne({
+    where: { id: utsav.id },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
+
+  if (!freshUtsav) {
+    throw new ApiError(404, 'Utsav not found');
+  }
 
   if (freshUtsav.available_seats <= 0) {
     throw new ApiError(400, ERR_UTSAV_NO_SEATS_AVAILABLE);
@@ -421,12 +424,15 @@ export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
   logger.info('open_utsav_seat_start', { utsavid: utsav?.id, cardno, updatedBy, utsavStatus: utsav?.status });
 
   // Re-fetch utsav record with row lock to prevent race conditions or stale snapshots
-  const freshUtsav =
-    (await UtsavDb.findOne({
-      where: { id: utsav.id },
-      transaction: t,
-      lock: t ? t.LOCK.UPDATE : undefined
-    })) || utsav;
+  const freshUtsav = await UtsavDb.findOne({
+    where: { id: utsav.id },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
+
+  if (!freshUtsav) {
+    throw new ApiError(404, 'Utsav not found');
+  }
 
   // Only increase available seats if utsav is in "open" status
   if (freshUtsav.status !== STATUS_OPEN) return;

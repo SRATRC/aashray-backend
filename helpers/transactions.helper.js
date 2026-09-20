@@ -171,13 +171,14 @@ export async function cancelTransaction(
     [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(transaction.status)
   ) {
     if (transaction.discount > 0) {
+      const refundCredits = transaction.discount;
       // User cancelling a paid travel/utsav booking where credits were used:
       // Refund the used credits back to the user's card
-      await addCredit(user, card, bookingType, transaction.discount, t);
+      await addCredit(user, card, bookingType, refundCredits, t);
       await transaction.update(
         {
           status: STATUS_CANCELLED,
-          description: `cancelled - credits refunded: ${transaction.discount}`,
+          description: `cancelled - credits refunded: ${refundCredits}`,
           discount: 0,
           updatedBy: user.username
         },
@@ -186,9 +187,9 @@ export async function cancelTransaction(
       logger.info('cancel_transaction_user_credits_refunded', {
         transactionId: transaction.id,
         bookingType,
-        creditsRefunded: transaction.discount
+        creditsRefunded: refundCredits
       });
-      return { credits: transaction.discount };
+      return { credits: refundCredits };
     }
 
     // User cancelling a paid travel/utsav booking via the app (no credits were used):
@@ -329,11 +330,11 @@ function getCreditType(bookingType) {
  */
 export function parseCredits(rawCredits) {
   if (!rawCredits) return {};
-  if (typeof rawCredits === 'object') return rawCredits;
+  if (typeof rawCredits === 'object' && !Array.isArray(rawCredits)) return rawCredits;
   if (typeof rawCredits === 'string') {
     try {
       const parsed = JSON.parse(rawCredits);
-      return typeof parsed === 'object' && parsed !== null ? parsed : {};
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
     } catch {
       return {};
     }
