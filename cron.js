@@ -164,7 +164,9 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
     switch (bookingType) {
       case TYPE_ADHYAYAN:
         const adhyayan = await ShibirDb.findOne({
-          where: { id: booking.shibir_id }
+          where: { id: booking.shibir_id },
+          transaction: t,
+          lock: t.LOCK.UPDATE
         });
 
         let newBooking = await openAdhyayanSeat(
@@ -190,7 +192,9 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
         break;
       case TYPE_UTSAV:
         const utsav = await UtsavDb.findOne({
-          where: { id: booking.utsavid }
+          where: { id: booking.utsavid },
+          transaction: t,
+          lock: t.LOCK.UPDATE
         });
         //Not automatically moving from waiting to payment pending for now
         await cancelUtsavFoodBookings(booking, systemUser.username, t);

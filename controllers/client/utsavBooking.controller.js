@@ -230,7 +230,9 @@ export const CancelUtsavBooking = async (req, res) => {
   });
 
   const utsav = await UtsavDb.findOne({
-    where: { id: booking.utsavid }
+    where: { id: booking.utsavid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
   });
   await cancelUtsavFoodBookings(booking,req.user.username,t);
   await openUtsavSeat(utsav, booking.cardno, req.user.username, t);

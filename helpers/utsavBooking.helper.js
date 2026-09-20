@@ -61,7 +61,11 @@ const ACTIVE_UTSAV_BOOKING_STATUSES = [
 ];
 
 export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
-  const utsav = await UtsavDb.findOne({ where: { id: utsavid } });
+  const utsav = await UtsavDb.findOne({
+    where: { id: utsavid },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
   if (!utsav) throw new ApiError(400, 'Utsav not found');
 
   const packages = await UtsavPackagesDb.findAll({ where: { utsavid } });
@@ -390,31 +394,56 @@ export async function validateUtsavBooking(bookingId, utsavId) {
 }
 
 export async function reserveUtsavSeat(utsav, t) {
-  if (utsav.available_seats <= 0) {
+  const freshUtsav =
+    (await UtsavDb.findOne({
+      where: { id: utsav.id },
+      transaction: t,
+      lock: t ? t.LOCK.UPDATE : undefined
+    })) || utsav;
+
+  if (freshUtsav.available_seats <= 0) {
     throw new ApiError(400, ERR_UTSAV_NO_SEATS_AVAILABLE);
   }
 
-  await utsav.update(
+  const newSeats = freshUtsav.available_seats - 1;
+
+  await freshUtsav.update(
     {
-      available_seats: utsav.dataValues.available_seats - 1
+      available_seats: newSeats
     },
     { transaction: t }
   );
+
+  utsav.available_seats = newSeats;
 }
 
 export async function openUtsavSeat(utsav, cardno, updatedBy, t) {
   logger.info('open_utsav_seat_start', { utsavid: utsav?.id, cardno, updatedBy, utsavStatus: utsav?.status });
 
-  // Only increase available seats if utsav is in "open" status
-  if (utsav.status !== STATUS_OPEN) return;
+  // Re-fetch utsav record with row lock to prevent race conditions or stale snapshots
+  const freshUtsav =
+    (await UtsavDb.findOne({
+      where: { id: utsav.id },
+      transaction: t,
+      lock: t ? t.LOCK.UPDATE : undefined
+    })) || utsav;
 
-  await utsav.update(
+  // Only increase available seats if utsav is in "open" status
+  if (freshUtsav.status !== STATUS_OPEN) return;
+
+  const newSeats = Math.min(freshUtsav.total_seats, freshUtsav.available_seats + 1);
+
+  await freshUtsav.update(
     {
-      available_seats: utsav.dataValues.available_seats + 1,
+      available_seats: newSeats,
       updatedBy: updatedBy // Optional: audit trail
     },
     { transaction: t }
   );
+
+  // Keep in-memory object in sync
+  utsav.available_seats = newSeats;
+  utsav.updatedBy = updatedBy;
 }
 
 export async function validateUtsavPackage(packageId, utsavId) {
