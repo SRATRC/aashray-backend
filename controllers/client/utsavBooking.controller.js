@@ -239,12 +239,22 @@ export const CancelUtsavBooking = async (req, res) => {
   // tap) both saw it as confirmed and each handed a seat back. Lock and re-read
   // its payment row and then the booking, in the same order the payment
   // confirmation locks them, and decide from what is there now.
-  await Transactions.findOne({ where: { bookingid }, transaction: t, lock: t.LOCK.UPDATE });
+  //
+  // transactions.bookingid has no index, so a locking read by bookingid scans
+  // and locks the whole table, blocking every new booking until this commits.
+  // Find the payment row's id with a plain read, then lock only that row.
+  const paymentRow = await Transactions.findOne({ where: { bookingid }, attributes: ['id'] });
+  if (paymentRow) {
+    await Transactions.findOne({ where: { id: paymentRow.id }, transaction: t, lock: t.LOCK.UPDATE });
+  }
   const current = await UtsavBooking.findOne({
     where: { bookingid },
     transaction: t,
     lock: t.LOCK.UPDATE
   });
+  if (!current) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
   if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(current.status)) {
     req.log.warn('cancel_utsav_booking_already_cancelled', { bookingid, status: current.status });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
