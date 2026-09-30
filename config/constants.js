@@ -128,9 +128,6 @@ export const ERR_ROOM_FAILED_TO_BOOK = 'Failed to book a room';
 export const ERR_ROOM_MUST_BE_BOOKED =
   'Must have room booked on one or more selected dates';
 
-export const ERR_EXTRA_STAY_REASON_REQUIRED =
-  'Please provide a reason for requesting a stay beyond the 9-night limit.';
-
 export const ERR_FLAT_FAILED_TO_BOOK = 'Failed to book flat';
 
 export const ERR_ADHYAYAN_ALREADY_BOOKED = 'Adhyayan already booked';

@@ -68,21 +68,6 @@ export const createAdhyayan = async (req, res) => {
 
   req.log.info('create_adhyayan_start', { name, speaker, start_date, end_date, total_seats, amount, whatsapp_link });
 
-  if (whatsapp_link) {
-    if (!comments) {
-      throw new ApiError(400, 'Comments (slug) is required when a WhatsApp link is provided');
-    }
-    const slugRegex = /^[A-Za-z0-9_-]+$/;
-    if (!slugRegex.test(comments)) {
-      throw new ApiError(400, 'Comments must be a valid short link slug (alphanumeric, hyphens, and underscores only) when a WhatsApp link is provided');
-    }
-    // Check if slug already exists
-    const existingLink = await ShortLink.findOne({ where: { slug: comments } });
-    if (existingLink) {
-      throw new ApiError(400, 'The slug in comments already exists in short links');
-    }
-  }
-
   const alreadyExists = await ShibirDb.findOne({
     where: {
       speaker: { [Sequelize.Op.like]: speaker },
@@ -181,7 +166,6 @@ export const fetchALLAdhyayan = async (req, res) => {
       shibir_db.comments,
       shibir_db.whatsapp_link,
       shibir_db.status,
-      shibir_db.whatsapp_link,
       shibir_db.whatsapp_group_jid,
       shibir_db.updatedBy
     FROM 
@@ -204,7 +188,6 @@ export const fetchALLAdhyayan = async (req, res) => {
       shibir_db.comments,
       shibir_db.whatsapp_link,
       shibir_db.status,
-      shibir_db.whatsapp_link,
       shibir_db.whatsapp_group_jid,
       shibir_db.updatedBy
     ORDER BY 
@@ -510,48 +493,6 @@ export const updateAdhyayan = async (req, res) => {
   const previousWhatsappLink = adhyayan.whatsapp_link;
   const t = await database.transaction();
   try {
-    const oldSlug = adhyayan.comments;
-    const newSlug = comments;
-    const oldLink = oldSlug ? await ShortLink.findOne({ where: { slug: oldSlug }, transaction: t }) : null;
-
-    if (whatsapp_link) {
-      if (!newSlug) {
-        throw new ApiError(400, 'Comments (slug) is required when a WhatsApp link is provided');
-      }
-      const slugRegex = /^[A-Za-z0-9_-]+$/;
-      if (!slugRegex.test(newSlug)) {
-        throw new ApiError(400, 'Comments must be a valid short link slug (alphanumeric, hyphens, and underscores only) when a WhatsApp link is provided');
-      }
-
-      // Check if new slug already exists (and is not our own old link)
-      const slugOwner = await ShortLink.findOne({ where: { slug: newSlug }, transaction: t });
-      if (slugOwner && (!oldLink || slugOwner.id !== oldLink.id)) {
-        throw new ApiError(400, 'The slug in comments already exists in short links');
-      }
-
-      if (oldLink) {
-        // Update existing short link
-        await oldLink.update({
-          slug: newSlug,
-          target_url: whatsapp_link,
-          type: 'adhyayan'
-        }, { transaction: t });
-      } else {
-        // Create new short link
-        await ShortLink.create({
-          slug: newSlug,
-          target_url: whatsapp_link,
-          type: 'adhyayan',
-          createdBy: req.user.username
-        }, { transaction: t });
-      }
-    } else {
-      // If whatsapp_link is cleared, delete the old short link if it existed
-      if (oldLink) {
-        await oldLink.destroy({ transaction: t });
-      }
-    }
-
     await adhyayan.update({
       name,
       speaker,
