@@ -23,6 +23,14 @@ describe('Admin rolling-window warning (non-blocking: create + warn)', () => {
     await RoomBooking.truncate();
     await RoomDb.truncate();
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
+    // The 'NA' placeholder room a waiting booking points at (roomno is a foreign key).
+    await RoomDb.create({
+      roomno: 'NA',
+      roomtype: 'NA',
+      gender: 'NA',
+      roomstatus: 'available',
+      updatedBy: 'admin'
+    });
     for (let i = 1; i <= 5; i++) {
       await RoomDb.create({
         roomno: `${i}A`,

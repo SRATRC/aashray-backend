@@ -2,6 +2,7 @@ import request from 'supertest';
 import moment from 'moment';
 import { app, sequelize } from '../../../app.js';
 import { CardDb, RoomBooking } from '../../../models/associations.js';
+import BlockDates from '../../../models/block_dates.model.js';
 import CardFactory from '../../factories/cardFactory.js';
 
 jest.mock('../../../utils/sendMail.js');
@@ -15,6 +16,7 @@ describe('POST /stay/check-blocked-dates (app contract, Task B4)', () => {
   beforeAll(async () => {
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
     await RoomBooking.truncate();
+    await BlockDates.truncate(); // block rows left by other suites would change the answers
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
     await CardFactory.create(OVER_CAP_CARD);
     await CardFactory.create(WITHIN_CAP_CARD);
@@ -38,7 +40,9 @@ describe('POST /stay/check-blocked-dates (app contract, Task B4)', () => {
         exceedsLimit: true,
         totalWindowNights: expect.any(Number),
         reasonType: 'rolling_limit_exceeded',
-        splitRanges: expect.anything(),
+        // null unless the stay is cut into several ranges around an utsav;
+        // a plain over-cap stay is one range, so the key is present but null.
+        splitRanges: null,
         isBlocked: expect.any(Boolean),
         blockedPeriods: expect.any(Array),
         isUtsavBlock: expect.any(Boolean),
