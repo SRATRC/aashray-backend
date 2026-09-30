@@ -372,54 +372,106 @@ export async function findRoom(
     ).map((b) => b.roomno);
   const allExcluded = [...new Set([...excludeRooms, ...blockedRooms])];
 
-  const whereConditions = {
-    // Belt-and-braces alongside the room_block rows: a room whose legacy
-    // roomstatus is 'blocked' must never be assignable, even if its room_block
-    // sync row is missing (e.g. an environment that booted via sequelize.sync()
-    // before the backfill migration ran, or a direct roomstatus edit).
-    roomstatus: STATUS_AVAILABLE,
-    roomtype: room_type,
-    gender: normalizedGender,
-    [Sequelize.Op.and]: [
-      { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
-      { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
-      {
-        roomno: {
-          [Sequelize.Op.notIn]: Sequelize.literal(`(
+  const effectivePriorityList =
+    priorityList || (await getPriorityOrderForMonth(checkin));
+  const orderClause = buildPriorityOrderClause(effectivePriorityList, isGroundPref);
+
+  const buildWhere = (excluded) => {
+    const whereConditions = {
+      // Belt-and-braces alongside the room_block rows: a room whose legacy
+      // roomstatus is 'blocked' must never be assignable, even if its room_block
+      // sync row is missing (e.g. an environment that booted via sequelize.sync()
+      // before the backfill migration ran, or a direct roomstatus edit).
+      roomstatus: STATUS_AVAILABLE,
+      roomtype: room_type,
+      gender: normalizedGender,
+      [Sequelize.Op.and]: [
+        { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
+        { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
+        {
+          roomno: {
+            [Sequelize.Op.notIn]: Sequelize.literal(`(
             SELECT roomno 
             FROM room_booking 
             WHERE (checkout > :reqCheckin AND checkin < :reqCheckout)
           AND status NOT IN (:excludeStatus1, :excludeStatus2)
           )`)
+          }
         }
-      }
-    ]
+      ]
+    };
+    if (excluded.length > 0) {
+      whereConditions[Sequelize.Op.and].push({
+        roomno: { [Sequelize.Op.notIn]: excluded }
+      });
+    }
+    return whereConditions;
   };
 
-  if (allExcluded.length > 0) {
-    whereConditions[Sequelize.Op.and].push({
-      roomno: { [Sequelize.Op.notIn]: allExcluded }
+  const replacements = {
+    reqCheckin: checkin,
+    reqCheckout: queryCheckout,
+    excludeStatus1: 'cancelled',
+    excludeStatus2: 'admin cancelled'
+  };
+
+  // Read-only path (preview / validate): no locks, plain first match.
+  if (!t) {
+    return RoomDb.findOne({
+      attributes: ['roomno'],
+      where: buildWhere(allExcluded),
+      order: orderClause,
+      replacements,
+      limit: 1
     });
   }
 
-  const effectivePriorityList =
-    priorityList || (await getPriorityOrderForMonth(checkin));
-  const orderClause = buildPriorityOrderClause(effectivePriorityList, isGroundPref);
+  // Locking path. The candidate scan above runs against this transaction's
+  // REPEATABLE-READ snapshot, so its "already booked" subquery can be stale: a
+  // concurrent transaction may have booked (and committed) the same room after
+  // the snapshot was taken. Lock only the candidate room's row (this
+  // serialises concurrent bookers of that room), then re-read its overlapping
+  // bookings with a LOCKING read, which sees the latest committed data. If the
+  // room turned out to be taken, skip it and try the next candidate.
+  const tried = [];
+  const BATCH = 10;
+  const MAX_ATTEMPTS = 200;
+  while (tried.length < MAX_ATTEMPTS) {
+    const candidates = await RoomDb.findAll({
+      attributes: ['roomno'],
+      where: buildWhere([...allExcluded, ...tried]),
+      order: orderClause,
+      replacements,
+      transaction: t,
+      limit: BATCH
+    });
+    if (candidates.length === 0) return null;
 
-  return RoomDb.findOne({
-    attributes: ['roomno'],
-    where: whereConditions,
-    order: orderClause,
-    replacements: {
-      reqCheckin: checkin,
-      reqCheckout: queryCheckout,
-      excludeStatus1: 'cancelled',
-      excludeStatus2: 'admin cancelled'
-    },
-    transaction: t,
-    lock: t ? t.LOCK.UPDATE : undefined,
-    limit: 1
-  });
+    for (const candidate of candidates) {
+      const locked = await RoomDb.findOne({
+        attributes: ['roomno'],
+        where: { roomno: candidate.roomno, roomstatus: STATUS_AVAILABLE },
+        transaction: t,
+        lock: t.LOCK.UPDATE
+      });
+      if (locked) {
+        const clash = await RoomBooking.findOne({
+          attributes: ['bookingid'],
+          where: {
+            roomno: candidate.roomno,
+            checkout: { [Sequelize.Op.gt]: checkin },
+            checkin: { [Sequelize.Op.lt]: queryCheckout },
+            status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled'] }
+          },
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        });
+        if (!clash) return locked;
+      }
+      tried.push(candidate.roomno);
+    }
+  }
+  return null;
 }
 
 export async function findAllRooms(checkin, checkout, room_type, gender, floorPref = null) {
