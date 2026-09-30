@@ -3,7 +3,12 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
-    await queryInterface.createTable('room_block', {
+    const existing = (await queryInterface.showAllTables()).map((t) =>
+      String(typeof t === 'object' ? t.tableName || t.table_name : t).toLowerCase()
+    );
+    // Idempotent: sequelize.sync() at boot may already have created the table
+    // (prod did), in which case only the backfill below is still needed.
+    if (!existing.includes('room_block')) await queryInterface.createTable('room_block', {
       id: {
         type: Sequelize.INTEGER,
         primaryKey: true,
@@ -59,7 +64,7 @@ module.exports = {
     // Migrate existing permanently-blocked rooms into room_block
     await queryInterface.sequelize.query(`
       INSERT INTO room_block (roomno, start_date, end_date, reason, status, createdBy, updatedBy, createdAt, updatedAt)
-      SELECT roomno,
+      SELECT r.roomno,
              CURDATE(),
              NULL,
              'Migrated from legacy permanent block',
@@ -68,8 +73,11 @@ module.exports = {
              'system',
              NOW(),
              NOW()
-      FROM roomdb
-      WHERE roomstatus = 'blocked'
+      FROM roomdb r
+      WHERE r.roomstatus = 'blocked'
+        AND NOT EXISTS (
+          SELECT 1 FROM room_block b WHERE b.roomno = r.roomno AND b.status = 'active'
+        )
     `);
   },
 

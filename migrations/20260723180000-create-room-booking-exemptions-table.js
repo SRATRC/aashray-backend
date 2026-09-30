@@ -3,6 +3,13 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
+    // Idempotent: app.js runs sequelize.sync() on boot, which creates this table
+    // from the model when the code ships before the migration runs (that is how
+    // prod got it without a SequelizeMeta row). Never fail on that.
+    const existing = (await queryInterface.showAllTables()).map((t) =>
+      String(typeof t === 'object' ? t.tableName || t.table_name : t).toLowerCase()
+    );
+    if (existing.includes('room_booking_exemptions')) return;
     await queryInterface.createTable('room_booking_exemptions', {
       id: {
         type: Sequelize.INTEGER,

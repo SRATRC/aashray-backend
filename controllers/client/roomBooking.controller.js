@@ -10,7 +10,8 @@ import {
   BOOKING_STATUS_PENDING,
   HOLD_REASON_COPY,
   STATUS_CANCELLED,
-  STATUS_ADMIN_CANCELLED
+  STATUS_ADMIN_CANCELLED,
+  STATUS_REJECTED
 } from '../../config/constants.js';
 import { sendUnifiedEmail, sendUnifiedEmailForBookedBy, getBlockedDates, formatBlockedPeriod, blockNightBounds } from '../helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
@@ -19,7 +20,8 @@ import {
   FlatBooking,
   CardDb,
   UtsavDb,
-  UtsavBooking
+  UtsavBooking,
+  GuestRelationship
 } from '../../models/associations.js';
 import { bookFlatForMumukshus } from '../../helpers/roomBooking.helper.js';
 import { checkRollingWindowLimit } from '../../helpers/rollingWindow.helper.js';
@@ -356,8 +358,24 @@ export const FlatBookingMumukshu = async (req, res) => {
   });
 };
 
+// B7: the blocked-dates endpoints report a card's own bookings, utsav attendance
+// and 9-night cap usage, so a member may only ask about a card they act for:
+// their own card, or a guest they have on their guest list. Anything else is
+// refused (403) rather than answered.
+const isOwnOrGuestCard = async (callerCardno, targetCardno) => {
+  if (targetCardno == null || String(targetCardno) === '') return true;
+  if (callerCardno && String(targetCardno) === String(callerCardno)) return true;
+  if (!callerCardno) return false;
+  const related = await GuestRelationship.findOne({
+    attributes: ['id'],
+    where: { cardno: String(callerCardno), guest: String(targetCardno) }
+  });
+  return Boolean(related);
+};
+
 export const CheckBlockedDates = async (req, res) => {
   const { checkin, checkout, cardno, mumukshus, guests } = req.body;
+  const callerCardno = req.user?.cardno ? String(req.user.cardno) : null;
   if (!checkin || !checkout) {
     throw new ApiError(400, 'Checkin and checkout dates are required');
   }
@@ -366,6 +384,10 @@ export const CheckBlockedDates = async (req, res) => {
   }
   if (checkout < checkin) {
     throw new ApiError(400, 'checkout date cannot be before checkin date');
+  }
+
+  if (cardno && !(await isOwnOrGuestCard(callerCardno, cardno))) {
+    throw new ApiError(403, 'You can only check dates for your own card or your guests');
   }
 
   const blockedDates = await getBlockedDates(checkin, checkout);
@@ -406,7 +428,11 @@ export const CheckBlockedDates = async (req, res) => {
   if (Array.isArray(guests)) {
     for (const g of guests) {
       const c = await extractCardno(g);
-      if (c && !stayingCards.includes(c)) stayingCards.push(c);
+      // B7: a guest entry that resolves to a card which is not on the caller's
+      // guest list (e.g. another member's card looked up by phone) is dropped.
+      if (c && !stayingCards.includes(c) && (await isOwnOrGuestCard(callerCardno, c))) {
+        stayingCards.push(c);
+      }
     }
   }
 
@@ -582,7 +608,11 @@ export const GetBlockedDatesInRange = async (req, res) => {
     throw new ApiError(400, 'Date range too large; max 92 days');
   }
 
-  const cardno = req.query.cardno || req.user?.cardno || null;
+  const callerCardno = req.user?.cardno ? String(req.user.cardno) : null;
+  const cardno = req.query.cardno || callerCardno || null;
+  if (req.query.cardno && !(await isOwnOrGuestCard(callerCardno, req.query.cardno))) {
+    throw new ApiError(403, 'You can only view dates for your own card or your guests');
+  }
 
   // Active centre blocks overlapping the window (reuses the booking-path helper).
   const blockedDates = await getBlockedDates(from, to);
@@ -694,7 +724,11 @@ export const GetBlockedDatesInRange = async (req, res) => {
       checkin: { [Sequelize.Op.lte]: to },
       checkout: { [Sequelize.Op.gte]: from },
       status: {
-        [Sequelize.Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED]
+        [Sequelize.Op.notIn]: [
+          STATUS_CANCELLED,
+          STATUS_ADMIN_CANCELLED,
+          STATUS_REJECTED
+        ]
       }
     };
 

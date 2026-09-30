@@ -1360,11 +1360,13 @@ export const checkRoomConflict = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
+  // B20: same status set the reassign step enforces (waiting rows included), so
+  // the pre-check and the write can never disagree; every overlap is returned.
   const activeBookings = await RoomBooking.findAll({
     where: {
       roomno,
       bookingid: { [Op.ne]: bookingid },
-      status: { [Op.in]: [ROOM_STATUS_PENDING_CHECKIN, ROOM_STATUS_CHECKEDIN, STATUS_PAYMENT_PENDING] }
+      status: { [Op.in]: ROOM_CHANGE_ACTIVE_STATUSES }
     },
     include: [
       {
@@ -1374,17 +1376,22 @@ export const checkRoomConflict = async (req, res) => {
     ]
   });
 
-  const conflict = activeBookings.find(b => isBookingOverlap(booking, b));
+  const conflicts = activeBookings
+    .filter((b) => isBookingOverlap(booking, b))
+    .map((b) => ({
+      bookingid: b.bookingid,
+      guestName: b.CardDb?.issuedto || 'Guest',
+      checkin: b.checkin,
+      checkout: b.checkout,
+      status: b.status
+    }));
 
-  if (conflict) {
+  if (conflicts.length > 0) {
     return res.status(200).send({
       hasConflict: true,
-      conflict: {
-        bookingid: conflict.bookingid,
-        guestName: conflict.CardDb?.issuedto || 'Guest',
-        checkin: conflict.checkin,
-        checkout: conflict.checkout
-      }
+      // First conflict kept under the old key for existing admin builds.
+      conflict: conflicts[0],
+      conflicts
     });
   }
 
@@ -1881,7 +1888,7 @@ export const cancelRoomBlock = async (req, res) => {
 };
 
 export const bulkCancelRoomBlocks = async (req, res) => {
-  const { roomnos } = req.body;
+  const { roomnos, includeFuture = false, includePermanent = false } = req.body;
   req.log.info('bulk_cancel_room_blocks_start', { count: roomnos ? roomnos.length : 0 });
 
   if (!roomnos || !Array.isArray(roomnos) || roomnos.length === 0) {
@@ -1891,12 +1898,22 @@ export const bulkCancelRoomBlocks = async (req, res) => {
   const t = await database.transaction();
   let affectedCount = 0;
   try {
+    // A10: "Bulk Unblock" clears the blocks that are in force TODAY only
+    // (started, not permanent). Future and permanent blocks stay unless the
+    // caller asks for them explicitly.
+    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+    const scopes = [
+      { start_date: { [Op.lte]: today }, end_date: { [Op.gte]: today } }
+    ];
+    if (includeFuture) scopes.push({ start_date: { [Op.gt]: today } });
+    if (includePermanent) scopes.push({ end_date: null });
     [affectedCount] = await RoomBlock.update(
       { status: 'cancelled', updatedBy: req.user.username },
       {
         where: {
           status: 'active',
-          roomno: { [Op.in]: roomnos }
+          roomno: { [Op.in]: roomnos },
+          [Op.or]: scopes
         },
         transaction: t
       }
@@ -1909,7 +1926,7 @@ export const bulkCancelRoomBlocks = async (req, res) => {
   }
 
   req.log.info('bulk_cancel_room_blocks_success', { affected: affectedCount });
-  return res.status(200).send({ message: `Successfully cancelled blocks for ${affectedCount} beds` });
+  return res.status(200).send({ message: `Successfully cancelled current blocks for ${affectedCount} beds`, cancelled: affectedCount });
 };
 
 export const updateRoom = async (req, res) => {
@@ -2667,10 +2684,19 @@ export async function findAllRoomsForDay(date, room_type, gender) {
   // Step 3: Get rooms from roomdb excluding booked + blocked ones
   return RoomDb.findAll({
     where: {
+      // Op.and array: a repeated [Op.notLike] key in one literal is the same
+      // Symbol, so the second silently replaces the first (B19).
+      [Sequelize.Op.and]: [
+        { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
+        { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
+        {
+          roomno: {
+            [Sequelize.Op.notIn]: excludedRooms.length > 0 ? excludedRooms : ['']
+          }
+        }
+      ],
+      roomstatus: ROOM_STATUS_AVAILABLE,
       roomtype: room_type,
-      roomno: {
-        [Sequelize.Op.notIn]: excludedRooms.length > 0 ? excludedRooms : ['']
-      },
       ...(gender && { gender })
     },
     order: [
@@ -2725,11 +2751,16 @@ export async function findAllRoomsUnfiltered(room_type, gender) {
 
   return RoomDb.findAll({
     where: {
-      roomno: {
-        [Sequelize.Op.notLike]: 'NA%',
-        [Sequelize.Op.notLike]: 'WL%',
-        [Sequelize.Op.notIn]: blockedRoomNos.length > 0 ? blockedRoomNos : ['']
-      },
+      [Sequelize.Op.and]: [
+        { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
+        { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
+        {
+          roomno: {
+            [Sequelize.Op.notIn]: blockedRoomNos.length > 0 ? blockedRoomNos : ['']
+          }
+        }
+      ],
+      roomstatus: ROOM_STATUS_AVAILABLE,
       roomtype: room_type,
       ...(gender && { gender })
     },
@@ -3488,28 +3519,42 @@ export const getAllocationPriorities = async (req, res) => {
   return res.status(200).send({ data: priorities });
 };
 
+// Month is either the global default (null / '' / 'default' / 'null') or an
+// integer 1-12. Anything else (NaN, 0, 13, 1.5, 'x') is a 400, never a row.
+const parseAllocationMonth = (month) => {
+  if (month === null || month === undefined || month === '' || month === 'default' || month === 'null') {
+    return null;
+  }
+  const value = typeof month === 'string' && /^\d+$/.test(month.trim()) ? Number(month) : month;
+  if (!Number.isInteger(value) || value < 1 || value > 12) {
+    throw new ApiError(400, 'month must be a whole number from 1 to 12, or empty for the global default');
+  }
+  return value;
+};
+
 export const updateAllocationPriority = async (req, res) => {
   const { month, priority_order } = req.body;
-  const monthVal = (month === null || month === undefined || month === '' || month === 'default' || month === 'null') ? null : Number(month);
+  const monthVal = parseAllocationMonth(month);
 
   if (!priority_order) {
     throw new ApiError(400, 'priority_order string is required');
   }
 
-  let record = await RoomAllocationPriority.findOne({
-    where: { month: monthVal }
-  });
-
   const updatedBy = req.user?.username || 'ADMIN';
 
-  if (record) {
-    await record.update({ priority_order, updatedBy });
+  // The unique index (migration 20260930130000) stops two concurrent saves from
+  // both inserting; the loser re-reads and updates the winner's row.
+  let record = await RoomAllocationPriority.findOne({ where: { month: monthVal } });
+  if (!record) {
+    try {
+      record = await RoomAllocationPriority.create({ month: monthVal, priority_order, updatedBy });
+    } catch (err) {
+      if (err?.name !== 'SequelizeUniqueConstraintError') throw err;
+      record = await RoomAllocationPriority.findOne({ where: { month: monthVal } });
+      await record.update({ priority_order, updatedBy });
+    }
   } else {
-    record = await RoomAllocationPriority.create({
-      month: monthVal,
-      priority_order,
-      updatedBy
-    });
+    await record.update({ priority_order, updatedBy });
   }
 
   return res.status(200).send({
@@ -3520,7 +3565,7 @@ export const updateAllocationPriority = async (req, res) => {
 
 export const deleteAllocationPriority = async (req, res) => {
   const { month } = req.params;
-  const monthVal = (month === null || month === undefined || month === '' || month === 'default' || month === 'null') ? null : Number(month);
+  const monthVal = parseAllocationMonth(month);
 
   const record = await RoomAllocationPriority.findOne({
     where: { month: monthVal }

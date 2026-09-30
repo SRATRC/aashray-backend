@@ -25,24 +25,27 @@ import { validateCard } from './card.helper.js';
 
 const toISO = (ms) => new Date(ms).toISOString().slice(0, 10);
 
-// Pure predicate: is a card exempt from the cap by a per-card `room_booking_exemptions`
-// row? `rows` are that card's exemption rows; `lastNightISO` is the card's LAST
-// requested night as `YYYY-MM-DD` (= checkout − 1 day, because checkout is exclusive).
-// A permanent row always exempts. A temporary row exempts when its inclusive
-// [valid_from, valid_to] range covers the last night — compared on calendar date,
-// NOT against the exclusive checkout (fixes the off-by-one). `YYYY-MM-DD` strings
-// sort lexicographically == chronologically. A row whose valid_to EQUALS the last
-// night still matches. Temporary rows missing either bound cannot cover anything.
-export function isExemptByExemptionRow(rows, lastNightISO) {
+// Pure predicate: is a card exempt from the cap by its per-card
+// `room_booking_exemptions` rows? `rows` are that card's exemption rows;
+// `nightsISO` is EVERY requested night as `YYYY-MM-DD` (a single string is
+// accepted as a one-night list). A permanent row covers every night. A temporary
+// row covers the nights inside its inclusive [valid_from, valid_to] range, compared
+// on calendar date. The card is exempt only when EVERY requested night is covered
+// by some row (rows may together cover the stay) — a stay that starts inside the
+// exemption but runs past its end is still subject to the cap (B21; it used to
+// look at the last night only, so an exemption ending earlier than checkout was
+// judged on the wrong night). `YYYY-MM-DD` strings sort lexicographically ==
+// chronologically. Temporary rows missing either bound cover nothing.
+export function isExemptByExemptionRow(rows, nightsISO) {
   if (!rows || rows.length === 0) return false;
-  for (const r of rows) {
-    if (r.is_permanent) return true;
-    if (r.valid_from == null || r.valid_to == null) continue;
-    const from = String(r.valid_from).slice(0, 10);
-    const to = String(r.valid_to).slice(0, 10);
-    if (from <= lastNightISO && lastNightISO <= to) return true;
-  }
-  return false;
+  if (rows.some((r) => r.is_permanent)) return true;
+  const nights = Array.isArray(nightsISO) ? nightsISO : [nightsISO];
+  if (nights.length === 0) return false;
+  const windows = rows
+    .filter((r) => r.valid_from != null && r.valid_to != null)
+    .map((r) => [String(r.valid_from).slice(0, 10), String(r.valid_to).slice(0, 10)]);
+  if (windows.length === 0) return false;
+  return nights.every((n) => windows.some(([from, to]) => from <= n && n <= to));
 }
 
 // Only committed stays count. `waiting` is excluded: it is unconfirmed (no
@@ -160,8 +163,7 @@ export async function checkRollingWindowLimitBatch({ cards, rangesByCard, t = nu
   }
   const exemptByCard = new Set();
   for (const [cardno, nights] of nightsByCard) {
-    const lastNightISO = toISO(nights[nights.length - 1]); // checkout − 1 day
-    if (isExemptByExemptionRow(exemptionsByCard[cardno], lastNightISO)) {
+    if (isExemptByExemptionRow(exemptionsByCard[cardno], nights.map(toISO))) {
       exemptByCard.add(cardno);
     }
   }
