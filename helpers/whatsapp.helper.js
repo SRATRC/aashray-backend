@@ -2485,19 +2485,29 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
     return;
   }
 
-  // Skip WhatsApp for PR (Permanent Residents) self food bookings — they book daily, high volume, low value
-  // NOTE: still send if PR is booking food FOR a guest (isGuest check happens below)
-  const firstBookingForPrCheck = Array.isArray(foodBookingDetails) && foodBookingDetails[0];
-  const isSelfBookingForPrCheck = !firstBookingForPrCheck?.bookedBy ||
-    String(firstBookingForPrCheck.bookedBy) === String(firstBookingForPrCheck.cardno);
-  if (user.res_status === STATUS_RESIDENT && isSelfBookingForPrCheck) {
-    console.log(`WA FOOD SKIP: PR self-booking for user ${user.cardno} (${user.issuedto}) — skipping food WhatsApp to reduce cost.`);
+  if (!Array.isArray(foodBookingDetails) || foodBookingDetails.length === 0) return;
+
+  const firstBooking = foodBookingDetails[0];
+  const attendeeCardno = firstBooking?.cardno;
+
+  // Skip WhatsApp if the attendee (person receiving the food) is a PR (Permanent Resident).
+  // PRs stay at the ashram and book daily meals — high volume, low value.
+  // We skip food WA whether the PR booked for themselves or another member booked for them.
+  let attendee = null;
+  if (String(user.cardno) === String(attendeeCardno)) {
+    attendee = user;
+  } else if (bookedForUser && String(bookedForUser.cardno) === String(attendeeCardno)) {
+    attendee = bookedForUser;
+  } else if (attendeeCardno) {
+    attendee = await CardDb.findOne({ where: { cardno: attendeeCardno } }).catch(() => null);
+  }
+
+  if (attendee?.res_status === STATUS_RESIDENT) {
+    console.log(`WA FOOD SKIP: Food booking is for PR user ${attendee.cardno} (${attendee.issuedto}) — skipping food WhatsApp to reduce cost.`);
     return;
   }
 
   const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
-
-  if (!Array.isArray(foodBookingDetails) || foodBookingDetails.length === 0) return;
 
   try {
     // 1. Gather all dates and find min/max
@@ -2544,12 +2554,10 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
       const isBooker = String(user.cardno) === String(bookedByCardno);
 
       if (isBooker) {
-        let attendeeName = "";
-        if (bookedForUser) {
-          attendeeName = bookedForUser.issuedto || "";
-        } else {
-          const attendee = await CardDb.findOne({ where: { cardno: attendeeCardno } }).catch(() => null);
-          attendeeName = attendee?.issuedto || "";
+        let attendeeName = attendee?.issuedto || bookedForUser?.issuedto || "";
+        if (!attendeeName) {
+          const attendeeRecord = await CardDb.findOne({ where: { cardno: attendeeCardno } }).catch(() => null);
+          attendeeName = attendeeRecord?.issuedto || "";
         }
         headerParam = attendeeName;
 

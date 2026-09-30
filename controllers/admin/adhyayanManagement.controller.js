@@ -21,6 +21,7 @@ import {
   STATUS_CASH_PENDING,
   TYPE_ADHYAYAN,
   ERR_BOOKING_ALREADY_CANCELLED,
+  ERR_ADHYAYAN_NO_SEATS_AVAILABLE,
   MSG_FETCH_SUCCESSFUL,
   RESEARCH_CENTRE
 } from '../../config/constants.js';
@@ -710,7 +711,13 @@ export const adhyayanStatusUpdate = async (req, res) => {
     // Only Waiting & Payment Pending booking can be changed to Confirmed
     case STATUS_CONFIRMED:
       if (booking.status == STATUS_WAITING) {
-        await reserveAdhyayanSeat(adhyayan, t);
+        // reserveAdhyayanSeat now reports whether it got a seat under the row
+        // lock instead of throwing, so refuse the promotion here when the
+        // session is full — otherwise this would confirm an extra seat.
+        const seatReserved = await reserveAdhyayanSeat(adhyayan, t);
+        if (!seatReserved) {
+          throw new ApiError(400, ERR_ADHYAYAN_NO_SEATS_AVAILABLE);
+        }
       }
 
       if (!transaction) {
@@ -752,7 +759,10 @@ export const adhyayanStatusUpdate = async (req, res) => {
 
       // Only Waiting booking can be changed to Payment Pending
       if (booking.status == STATUS_WAITING) {
-        await reserveAdhyayanSeat(adhyayan, t);
+        const seatReserved = await reserveAdhyayanSeat(adhyayan, t);
+        if (!seatReserved) {
+          throw new ApiError(400, ERR_ADHYAYAN_NO_SEATS_AVAILABLE);
+        }
 
         if (!transaction) {
           transaction = await createPendingTransaction(
