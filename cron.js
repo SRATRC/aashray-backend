@@ -33,7 +33,7 @@ import {
   getBookingTypeFromBooking
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
-import { openUtsavSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
+import { openUtsavSeat, utsavBookingHeldSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
 import { updateWaitingTravelBooking } from './helpers/travelBooking.helper.js';
 import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendTomorrowMealsCount, checkAndSendMealsCountUpdate } from './helpers/whatsapp.helper.js';
 
@@ -44,25 +44,24 @@ const job = cron.schedule('*/30 * * * *', async () => {
   logger.info('Cron job started.');
   isRunning = true;
 
-  await database.authenticate();
+  // runJob owns its own (per-item) transactions now, so there is nothing for
+  // the scheduler to roll back. try/finally instead of .finally() so isRunning
+  // is always cleared — with the setup outside the old promise chain, a throw
+  // from authenticate() left the flag stuck on and hung graceful shutdown.
+  try {
+    await database.authenticate();
 
-  const systemUser = await AdminUsers.findOne({
-    where: { username: 'admin' }
-  });
-
-  const t = await database.transaction();
-
-  runJob(systemUser, t)
-    .then(() => {
-      logger.info('Cron job finished.');
-    })
-    .catch((error) => {
-      logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
-      t.rollback();
-    })
-    .finally(() => {
-      isRunning = false;
+    const systemUser = await AdminUsers.findOne({
+      where: { username: 'admin' }
     });
+
+    await runJob(systemUser);
+    logger.info('Cron job finished.');
+  } catch (error) {
+    logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
+  } finally {
+    isRunning = false;
+  }
 });
 
 async function cancelMeals(systemUser, transactions, t) {
@@ -79,22 +78,86 @@ async function cancelMeals(systemUser, transactions, t) {
   }
 }
 
-async function runJob(systemUser, t) {
+async function runJob(systemUser) {
   const userBookingIds = {};
   const openBookings = {};
-  const transactions = [];
   const bookings = [];
 
-  await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
+  const items = await getUnpaidOnlineBookingsAndTransactions();
   // await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+  // ^ still returns the old two-array shape; convert it to items before
+  //   re-enabling it, otherwise its rows never reach the per-item sweep below.
 
-  logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings)}`);
-  logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions)}`);
+  logger.info(
+    `Cron cancelling bookings: ${JSON.stringify(
+      items.map((item) => item.booking).filter(Boolean)
+    )}`
+  );
+  logger.info(
+    `Cron cancelling transactions: ${JSON.stringify(
+      items.map((item) => item.transaction)
+    )}`
+  );
 
-  await cancelBookings(systemUser, bookings, userBookingIds, openBookings, t);
-  await cancelTransactions(systemUser, transactions, t, true);
-  await cancelMeals(systemUser, transactions, t);
-  await t.commit();
+  // One transaction per item instead of one for the whole sweep. The event-row
+  // FOR UPDATE locks mean a sweep-wide transaction held a write lock on every
+  // affected event and every affected member card until the very end, so
+  // members booking those events blocked or hit a lock timeout for as long as
+  // the sweep ran. Each item is still atomic — its booking, its transaction
+  // and its meals commit or roll back together — but a failure now only loses
+  // that item, and the items already committed stay applied.
+  for (const { booking, transaction } of items) {
+    const t = await database.transaction();
+
+    // Collected inside the item transaction, published to the shared maps
+    // below only once that transaction has committed — otherwise a rolled-back
+    // item would still be emailed and WhatsApped as cancelled.
+    const itemOpenBookings = {};
+
+    try {
+      if (booking) {
+        await cancelBookings(systemUser, [booking], itemOpenBookings, t);
+      }
+      await cancelTransactions(systemUser, [transaction], t, true);
+      await cancelMeals(systemUser, [transaction], t);
+      await t.commit();
+    } catch (error) {
+      try {
+        await t.rollback();
+      } catch (rollbackError) {
+        logger.error(
+          `Cron item rollback failed for bookingid ${transaction.bookingid}: ${rollbackError.message}`
+        );
+      }
+      logger.error(
+        `Cron item cancel failed for bookingid ${transaction.bookingid}: ${
+          error.stack || error.message
+        }`
+      );
+      continue;
+    }
+
+    // Past the commit, so a throw here would escape the catch above and kill
+    // the rest of the sweep. The item itself is already durable — only its
+    // notification bookkeeping can fail, so log it and carry on.
+    try {
+      if (booking) {
+        bookings.push(booking);
+        addToUserBookingIdMap(userBookingIds, booking);
+      }
+      for (const bookingType in itemOpenBookings) {
+        for (const openedBooking of itemOpenBookings[bookingType]) {
+          addToOpenBookings(openBookings, openedBooking);
+        }
+      }
+    } catch (error) {
+      logger.error(
+        `Cron item cancelled but notification bookkeeping failed for bookingid ${
+          transaction.bookingid
+        }: ${error.stack || error.message}`
+      );
+    }
+  }
 
   // Trigger WhatsApp notifications for cancelled bookings
   for (const booking of bookings) {
@@ -136,28 +199,36 @@ async function runJob(systemUser, t) {
   }
 }
 
-async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
+// Returns the sweep as a list of { transaction, booking } items. One item is
+// the unit of work for one database transaction, so a booking is paired with
+// the pending transaction it belongs to. booking is null for food, which has
+// no booking row of its own and is cancelled from the transaction instead.
+async function getUnpaidOnlineBookingsAndTransactions() {
   const cancelTimeFilter = moment
     .utc()
     .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
   const pendingTransactions = await getPendingTransactions(cancelTimeFilter);
+
+  const items = [];
 
   for (const transaction of pendingTransactions) {
     const bookingType = getBookingType(transaction);
     // TODO: optimize, get all bookings at once
 
     // Food bookings are handled in a special way
+    let booking = null;
     if (bookingType != TYPE_FOOD) {
-      const booking = await getBooking(bookingType, transaction.bookingid);
-      if (booking) {
-        bookings.push(booking);
-      }
+      booking = await getBooking(bookingType, transaction.bookingid);
     }
-    transactions.push(transaction);
+    items.push({ transaction, booking });
   }
+
+  return items;
 }
 
-async function cancelBookings(systemUser, bookings, userBookingIds, openBookings, t) {
+// userBookingIds is no longer collected here: the caller adds each booking to
+// it after that booking's own transaction has committed.
+async function cancelBookings(systemUser, bookings, openBookings, t) {
   for (const booking of bookings) {
     const bookingType = getBookingTypeFromBooking(booking);
 
@@ -191,15 +262,22 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
         }
         break;
       case TYPE_UTSAV:
-        const utsav = await UtsavDb.findOne({
-          where: { id: booking.utsavid },
-          transaction: t,
-          lock: t.LOCK.UPDATE
-        });
         //Not automatically moving from waiting to payment pending for now
         await cancelUtsavFoodBookings(booking, systemUser.username, t);
-        await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
 
+        // booking.status is still the pre-cancel status here: the update to
+        // 'admin cancelled' happens after this switch. A waiting-list booking
+        // never held a seat, so cancelling it must not hand one back — and
+        // when no seat is freed there is no reason to take the utsav row lock
+        // at all.
+        if (utsavBookingHeldSeat(booking.status)) {
+          const utsav = await UtsavDb.findOne({
+            where: { id: booking.utsavid },
+            transaction: t,
+            lock: t.LOCK.UPDATE
+          });
+          await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
+        }
 
         break;
       case TYPE_TRAVEL:
@@ -227,7 +305,6 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
         t
       );
     }
-    addToUserBookingIdMap(userBookingIds, booking);
   }
 }
 

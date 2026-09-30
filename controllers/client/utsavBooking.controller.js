@@ -14,6 +14,7 @@ import {
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   openUtsavSeat,
+  utsavBookingHeldSeat,
   sendUtsavBookingUpdateEmail,
   cancelUtsavFoodBookings,
   validateFeedbackEligibility
@@ -221,6 +222,14 @@ export const CancelUtsavBooking = async (req, res) => {
     currentStatus: booking.status
   });
 
+  // Lock the utsav row before cancelling, so every flow takes the utsav lock
+  // before the card lock. The cancel path can lock the card (credit restore),
+  // and the booking path locks utsav first; the reverse order deadlocks.
+  const utsav = await UtsavDb.findOne({
+    where: { id: booking.utsavid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
   await userCancelBooking(req.user, booking, t);
   req.log.info('cancel_utsav_booking_cancelled', {
     bookingid,
@@ -229,14 +238,21 @@ export const CancelUtsavBooking = async (req, res) => {
     newStatus: 'cancelled'
   });
 
-  const utsav = await UtsavDb.findOne({
-    where: { id: booking.utsavid },
-    transaction: t,
-    lock: t.LOCK.UPDATE
-  });
   await cancelUtsavFoodBookings(booking,req.user.username,t);
-  await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
-  req.log.info('cancel_utsav_booking_seat_opened', { bookingid, utsavid: booking.utsavid });
+
+  // Branch on previousStatus: userCancelBooking above has already overwritten
+  // booking.status with 'cancelled'. A waiting-list booking never held a seat,
+  // so cancelling it must not hand one back.
+  if (utsavBookingHeldSeat(previousStatus)) {
+    await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
+    req.log.info('cancel_utsav_booking_seat_opened', { bookingid, utsavid: booking.utsavid });
+  } else {
+    req.log.info('cancel_utsav_booking_seat_not_held', {
+      bookingid,
+      utsavid: booking.utsavid,
+      previousStatus
+    });
+  }
 
   await t.commit();
   req.log.info('cancel_utsav_booking_committed', { bookingid });
