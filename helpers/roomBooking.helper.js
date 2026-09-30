@@ -331,6 +331,11 @@ function buildPriorityOrderClause(priorityList, isGroundPref = false) {
   ];
 }
 
+// Senior-citizen guests (SCM/SCF) get senior-citizen rooms first; when none is
+// free they fall back to the ordinary room of the same sex (M/F).
+const gendersToTry = (gender) =>
+  gender === 'SCM' ? ['SCM', 'M'] : gender === 'SCF' ? ['SCF', 'F'] : [gender];
+
 export async function findRoom(
   checkin,
   checkout,
@@ -347,34 +352,61 @@ export async function findRoom(
   // skip the per-call RoomBlock query (same N+1 concern as priorityList).
   adminBlockedRooms = null
 ) {
-  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || gender === 'SCM' || gender === 'SCF';
-  const normalizedGender = (gender === 'SCM' ? 'M' : (gender === 'SCF' ? 'F' : gender));
+  // Read the blocks and the month's priority once, not once per gender tried.
+  const queryCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  const blocked = adminBlockedRooms ?? (await fetchBlockedRoomnos(checkin, queryCheckout));
+  const priority = priorityList || (await getPriorityOrderForMonth(checkin));
+  for (const g of gendersToTry(gender)) {
+    const room = await findRoomOfGender(
+      checkin, checkout, room_type, g, gender, excludeRooms, t, floorPref, priority, blocked
+    );
+    if (room) return room;
+  }
+  return null;
+}
+
+// Rooms with an active block on any night of [checkin, queryCheckout). A block's
+// end_date is its LAST blocked day (inclusive); NULL = permanent.
+async function fetchBlockedRoomnos(checkin, queryCheckout) {
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: queryCheckout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gte]: checkin } }
+      ]
+    }
+  });
+  return blocks.map((b) => b.roomno);
+}
+
+async function findRoomOfGender(
+  checkin,
+  checkout,
+  room_type,
+  roomGender,
+  requestedGender,
+  excludeRooms,
+  t,
+  floorPref,
+  priorityList,
+  adminBlockedRooms
+) {
+  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || requestedGender === 'SCM' || requestedGender === 'SCF';
+  const normalizedGender = roomGender;
 
   const queryCheckout = checkin === checkout
     ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
 
-  // Get admin-blocked rooms overlapping [checkin, queryCheckout)
-  const blockedRooms =
-    adminBlockedRooms ??
-    (
-      await RoomBlock.findAll({
-        attributes: ['roomno'],
-        where: {
-          status: 'active',
-          start_date: { [Sequelize.Op.lt]: queryCheckout },
-          [Sequelize.Op.or]: [
-            { end_date: null },
-            { end_date: { [Sequelize.Op.gt]: checkin } }
-          ]
-        }
-      })
-    ).map((b) => b.roomno);
+  const blockedRooms = adminBlockedRooms;
   const allExcluded = [...new Set([...excludeRooms, ...blockedRooms])];
 
-  const effectivePriorityList =
-    priorityList || (await getPriorityOrderForMonth(checkin));
-  const orderClause = buildPriorityOrderClause(effectivePriorityList, isGroundPref);
+  const orderClause = buildPriorityOrderClause(priorityList, isGroundPref);
 
   const buildWhere = (excluded) => {
     const whereConditions = {
@@ -476,25 +508,14 @@ export async function findRoom(
 
 export async function findAllRooms(checkin, checkout, room_type, gender, floorPref = null) {
   const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || gender === 'SCM' || gender === 'SCF';
-  const normalizedGender = (gender === 'SCM' ? 'M' : (gender === 'SCF' ? 'F' : gender));
+  // SC guests: SC rooms first, then the ordinary rooms of the same sex.
+  const genders = gendersToTry(gender);
 
   const queryCheckout = checkin === checkout
     ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
 
-  // Get admin-blocked rooms overlapping [checkin, queryCheckout)
-  const blocks = await RoomBlock.findAll({
-    attributes: ['roomno'],
-    where: {
-      status: 'active',
-      start_date: { [Sequelize.Op.lt]: queryCheckout },
-      [Sequelize.Op.or]: [
-        { end_date: null },
-        { end_date: { [Sequelize.Op.gt]: checkin } }
-      ]
-    }
-  });
-  const adminBlockedRooms = blocks.map((b) => b.roomno);
+  const adminBlockedRooms = await fetchBlockedRoomnos(checkin, queryCheckout);
 
   const bookings = await RoomBooking.findAll({
     where: {
@@ -529,7 +550,7 @@ export async function findAllRooms(checkin, checkout, room_type, gender, floorPr
   const priorityList = await getPriorityOrderForMonth(checkin);
   const orderClause = buildPriorityOrderClause(priorityList, isGroundPref);
 
-  return RoomDb.findAll({
+  const rooms = await RoomDb.findAll({
     where: {
       // Op.and array, NOT repeated computed keys: `[Op.notLike]` twice in one
       // object literal is the same Symbol key, so the second silently replaced
@@ -542,10 +563,14 @@ export async function findAllRooms(checkin, checkout, room_type, gender, floorPr
       // Belt-and-braces alongside the room_block rows (see findRoom).
       roomstatus: STATUS_AVAILABLE,
       roomtype: room_type,
-      ...(normalizedGender && { gender: normalizedGender })
+      ...(gender && { gender: { [Sequelize.Op.in]: genders } })
     },
     order: orderClause
   });
+  // Keep SC rooms ahead of the ordinary fallback rooms (stable sort).
+  return genders.length > 1
+    ? [...genders.flatMap((g) => rooms.filter((r) => r.gender === g))]
+    : rooms;
 }
 
 export async function bookRoomForMumukshus(
@@ -653,7 +678,20 @@ export async function bookRoomForMumukshus(
     return result;
   };
 
-  for (const roomDetail of roomDetails) {
+  // Lock order. Each guest's room row is locked as it is booked, so two group
+  // bookings that list the same guests in opposite order (A=[M,F], B=[F,M])
+  // used to lock the M and F rooms in opposite order and deadlock (MySQL 1213
+  // -> HTTP 500). Book in one fixed order everywhere: room type, then the
+  // gender pool (SCM rooms/M rooms, then SCF rooms/F rooms). A stable sort, so a
+  // guest's own split ranges keep their date order.
+  const lockRank = (d) =>
+    `${d.roomType || ''}|${{ SCM: 0, M: 1, SCF: 2, F: 3 }[d.gender] ?? 4}`;
+  const lockOrdered = [...roomDetails].sort((x, y) => {
+    const a = lockRank(x), b = lockRank(y);
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+
+  for (const roomDetail of lockOrdered) {
     const {
       mumukshu,
       status,
@@ -1257,7 +1295,7 @@ export async function checkRoomAvailabilityForMumukshus(
       start_date: { [Sequelize.Op.lt]: windowCheckout },
       [Sequelize.Op.or]: [
         { end_date: null },
-        { end_date: { [Sequelize.Op.gt]: checkin_date } }
+        { end_date: { [Sequelize.Op.gte]: checkin_date } }
       ]
     }
   });
@@ -1269,7 +1307,7 @@ export async function checkRoomAvailabilityForMumukshus(
       .filter(
         (b) =>
           b.start_date < rangeEnd &&
-          (b.end_date === null || b.end_date > start)
+          (b.end_date === null || b.end_date >= start)
       )
       .map((b) => b.roomno);
   };

@@ -230,7 +230,10 @@ export const guestBooking = async (req, res) => {
   var order = null;
   if (amount > 0) {
     req.log.info('guest_booking_creating_order', { cardno: req.user.cardno, amount });
-    order = await generateOrderId(amount);
+    // Reused on a deadlock retry so a retry never opens a second Razorpay order.
+    const cache = (req.retryCache ||= {});
+    order = cache.order?.amount === amount ? cache.order.value : await generateOrderId(amount);
+    cache.order = { amount, value: order };
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
     req.log.info('guest_booking_order_created', { cardno: req.user.cardno, orderId: order.id, amount });

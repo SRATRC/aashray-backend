@@ -46,7 +46,7 @@ import {
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
-import CatchAsync from '../../utils/CatchAsync.js';
+import CatchAsync, { catchAsyncRetry } from '../../utils/CatchAsync.js';
 import {
   generateTempCodeForAdmin,
   fetchTempCodesForAdmin
@@ -60,12 +60,12 @@ router.get('/occupancyReport', authorizeRoles(ROLE_HOUSEKEEPING_ADMIN, ROLE_OFFI
 router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN));
 
 // room routes
-router.post('/bookForMumukshu', CatchAsync(roomBooking));
+router.post('/bookForMumukshu', catchAsyncRetry(roomBooking));
 router.put('/checkin/:bookingid', CatchAsync(manualCheckin));
 router.put('/checkout/:bookingid', CatchAsync(manualCheckout));
 router.put('/update_room_booking', CatchAsync(updateRoomBooking));
 router.post('/check_room_conflict', CatchAsync(checkRoomConflict));
-router.put('/update_booking_status', CatchAsync(updateBookingStatus));
+router.put('/update_booking_status', catchAsyncRetry(updateBookingStatus));
 router.get('/room_list', CatchAsync(roomList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));
 router.get('/available_rooms_for_day', CatchAsync(availableRoomsForDay))
@@ -107,7 +107,7 @@ router.post('/room_block/bulk', CatchAsync(createRoomBlock));
 router.get('/room_block', CatchAsync(listRoomBlocks));
 router.delete('/room_block/:id', CatchAsync(cancelRoomBlock));
 router.post('/room_block/bulk_cancel', CatchAsync(bulkCancelRoomBlocks));
-router.post('/bulk_book', CatchAsync(bulkRoomBooking));
+router.post('/bulk_book', catchAsyncRetry(bulkRoomBooking));
 
 // RC management routes
 router.post('/block_rc', CatchAsync(blockRC));

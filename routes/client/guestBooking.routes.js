@@ -9,13 +9,13 @@ import {
   guestBookingFlat
 } from '../../controllers/client/guestBooking.controller.js';
 import { validateCard } from '../../middleware/validate.js';
-import CatchAsync from '../../utils/CatchAsync.js';
+import CatchAsync, { catchAsyncRetry } from '../../utils/CatchAsync.js';
 
 router.use(validateCard);
 
 router.get('/', CatchAsync(fetchGuests));
 router.post('/', CatchAsync(createGuests));
-router.post('/booking', CatchAsync(guestBooking));
+router.post('/booking', catchAsyncRetry(guestBooking));
 router.post('/validate', CatchAsync(validateBooking));
 // DEPRECATED: Use unified booking endpoint instead
 router.post('/flat', CatchAsync(guestBookingFlat));

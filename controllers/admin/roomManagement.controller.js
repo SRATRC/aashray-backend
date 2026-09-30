@@ -1096,8 +1096,11 @@ const assertRoomAvailableForBooking = async ({ booking, roomno, excludedBookingI
   if (booking.roomtype && room.roomtype !== booking.roomtype) {
     throw new ApiError(400, `Room ${roomno} is not a ${booking.roomtype} room`);
   }
-  const expectedGender = booking.gender === 'SCM' ? 'M' : booking.gender === 'SCF' ? 'F' : booking.gender;
-  if (expectedGender && room.gender !== expectedGender) {
+  // A senior-citizen guest may take an SC room or the ordinary room of the
+  // same sex (same rule as auto-allocation); an ordinary guest only their own.
+  const allowedGenders =
+    booking.gender === 'SCM' ? ['SCM', 'M'] : booking.gender === 'SCF' ? ['SCF', 'F'] : booking.gender ? [booking.gender] : null;
+  if (allowedGenders && !allowedGenders.includes(room.gender)) {
     throw new ApiError(400, `Room ${roomno} is not assigned to gender ${booking.gender}`);
   }
 
@@ -1134,7 +1137,8 @@ const assertRoomAvailableForBooking = async ({ booking, roomno, excludedBookingI
     const blockEnd = block.end_date
       ? moment(block.end_date).format('YYYY-MM-DD')
       : '9999-12-31';
-    return start < blockEnd && end > blockStart;
+    // blockEnd is the last blocked day (inclusive); the stay's nights are start..end-1.
+    return start <= blockEnd && end > blockStart;
   });
   if (blocked) {
     throw new ApiError(409, `Room ${roomno} is blocked for part of this stay`);
@@ -1431,9 +1435,10 @@ export const roomList = async (req, res) => {
     const plainRoom = room.toJSON();
     plainRoom.blocks = (plainRoom.blocks || []).map((block) => ({
       ...block,
-      isExpired: Boolean(block.end_date && block.end_date <= today),
+      // end_date is the last blocked day (inclusive)
+      isExpired: Boolean(block.end_date && block.end_date < today),
       isCurrent:
-        block.start_date <= today && (!block.end_date || block.end_date > today),
+        block.start_date <= today && (!block.end_date || block.end_date >= today),
       isFuture: Boolean(block.start_date > today)
     }));
     return plainRoom;
@@ -1616,18 +1621,13 @@ export const createRoomBlock = async (req, res) => {
   if (end_date && !moment(end_date, 'YYYY-MM-DD', true).isValid()) {
     throw new ApiError(400, 'Invalid end_date format, must be YYYY-MM-DD');
   }
-  // end_date is EXCLUSIVE across the booking engine — a block [start, end) covers
-  // start .. end-1. Reject only a truly inverted range. A single-day block for
-  // `start_date` is expressed as end_date === start_date and stored as
-  // start_date + 1 (exclusive) so it correctly excludes exactly that one day.
-  // A missing end_date means a permanent block (NULL).
+  // end_date is the LAST blocked day (inclusive): a block 10th..12th makes the
+  // 12th unbookable and the 13th bookable. A single-day block is
+  // end_date === start_date. A missing end_date means a permanent block (NULL).
   if (end_date && end_date < start_date) {
     throw new ApiError(400, 'end_date must be on or after start_date');
   }
-  let effectiveEndDate = end_date || null;
-  if (end_date && end_date === start_date) {
-    effectiveEndDate = moment(start_date, 'YYYY-MM-DD').add(1, 'day').format('YYYY-MM-DD');
-  }
+  const effectiveEndDate = end_date || null;
 
   // Resolve room beds to block
   let roomsToBlock = [];
@@ -1665,7 +1665,9 @@ export const createRoomBlock = async (req, res) => {
   const conflictWhere = {
     roomno: { [Op.in]: roomNosToBlock },
     status: { [Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] },
-    checkin: { [Op.lt]: effectiveEndDate || '9999-12-31' },
+    // the block covers start_date..effectiveEndDate inclusive, so a stay overlaps
+    // when it arrives on or before that last day
+    checkin: { [Op.lte]: effectiveEndDate || '9999-12-31' },
     checkout: { [Op.gt]: start_date }
   };
   const conflictingBookings = await RoomBooking.findAll({
@@ -1678,7 +1680,7 @@ export const createRoomBlock = async (req, res) => {
 
   try {
     // Dedup: skip beds that already carry an equivalent active block for the
-    // same [start_date, effectiveEndDate) range so repeated calls don't pile up
+    // same [start_date, effectiveEndDate] range so repeated calls don't pile up
     // unbounded duplicate active rows. A permanent block is matched as end_date NULL.
     const existingBlocks = await RoomBlock.findAll({
       attributes: ['roomno'],
@@ -2506,6 +2508,10 @@ export const updateBookingStatus = async (req, res) => {
       throw new ApiError(400, 'Invalid status provided');
   }
 
+  // Commit first: pushes below must only go out for a booking that really
+  // committed (the request is retried whole on a MySQL deadlock).
+  await t.commit();
+
   switch (newStatus) {
     case STATUS_ADMIN_CANCELLED: {
       sendDualUserNotifications({
@@ -2562,7 +2568,6 @@ export const updateBookingStatus = async (req, res) => {
       break;
   }
 
-  await t.commit();
   req.log.info('update_room_booking_status_transition', { bookingid, fromStatus: originalStatus, toStatus: newStatus });
 
   try {
@@ -2605,7 +2610,7 @@ export async function findAllRoomsForDay(date, room_type, gender) {
       start_date: { [Sequelize.Op.lte]: date },
       [Sequelize.Op.or]: [
         { end_date: null },                              // permanent block
-        { end_date: { [Sequelize.Op.gt]: date } }        // date-range block overlapping
+        { end_date: { [Sequelize.Op.gte]: date } }       // last blocked day is inclusive
       ]
     }
   });

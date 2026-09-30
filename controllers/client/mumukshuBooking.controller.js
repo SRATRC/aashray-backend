@@ -252,7 +252,10 @@ export const mumukshuBooking = async (req, res, next) => {
 
     let order = null;
     if (amount > 0) {
-      order = await generateOrderId(amount);
+      // Reused on a deadlock retry so a retry never opens a second Razorpay order.
+      const cache = (req.retryCache ||= {});
+      order = cache.order?.amount === amount ? cache.order.value : await generateOrderId(amount);
+      cache.order = { amount, value: order };
       const bookingIds = retrieveBookingIds(userBookingIdMap);
       await updateRazorpayTransactions(bookingIds, [], order.id, t);
     }
