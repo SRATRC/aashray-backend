@@ -121,12 +121,21 @@ async function runJob(systemUser) {
     // item would still be emailed and WhatsApped as cancelled.
     const itemOpenBookings = {};
 
+    let fresh;
     try {
-      if (booking) {
-        await cancelBookings(systemUser, [booking], itemOpenBookings, t);
+      fresh = await lockAndRecheckItem(booking, transaction, t);
+      if (!fresh) {
+        await t.rollback();
+        logger.info(
+          `Cron item skipped for bookingid ${transaction.bookingid}: paid or cancelled since the sweep read it`
+        );
+        continue;
       }
-      await cancelTransactions(systemUser, [transaction], t, true);
-      await cancelMeals(systemUser, [transaction], t);
+      if (fresh.booking) {
+        await cancelBookings(systemUser, [fresh.booking], itemOpenBookings, t);
+      }
+      await cancelTransactions(systemUser, [fresh.transaction], t, true);
+      await cancelMeals(systemUser, [fresh.transaction], t);
       await t.commit();
     } catch (error) {
       try {
@@ -148,9 +157,11 @@ async function runJob(systemUser) {
     // the rest of the sweep. The item itself is already durable — only its
     // notification bookkeeping can fail, so log it and carry on.
     try {
-      if (booking) {
-        bookings.push(booking);
-        addToUserBookingIdMap(userBookingIds, booking);
+      // The re-read copy is the one cancelBookings updated; the sweep's
+      // original copy still says pending.
+      if (fresh.booking) {
+        bookings.push(fresh.booking);
+        addToUserBookingIdMap(userBookingIds, fresh.booking);
       }
       for (const bookingType in itemOpenBookings) {
         for (const openedBooking of itemOpenBookings[bookingType]) {
@@ -204,6 +215,42 @@ async function runJob(systemUser) {
     const bookings = openBookings[bookingType];
     await sendOpenBookingEmail(bookingType, bookings);
   }
+}
+
+// The sweep reads every unpaid item up front, before any item's transaction
+// starts. A payment or a member cancel can land in between; acting on the old
+// copy then cancels a booking that was just paid, or hands its seat back twice.
+// Lock and re-read the item inside its own transaction — event row, then
+// payment row, then booking, the same order the member cancel and the payment
+// confirmation use — and return null if either row has moved on.
+async function lockAndRecheckItem(booking, transaction, t) {
+  if (booking) {
+    const bookingType = getBookingTypeFromBooking(booking);
+    if (bookingType === TYPE_UTSAV) {
+      await UtsavDb.findOne({ where: { id: booking.utsavid }, transaction: t, lock: t.LOCK.UPDATE });
+    } else if (bookingType === TYPE_ADHYAYAN) {
+      await ShibirDb.findOne({ where: { id: booking.shibir_id }, transaction: t, lock: t.LOCK.UPDATE });
+    }
+  }
+
+  const freshTransaction = await Transactions.findOne({
+    where: { id: transaction.id },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (!freshTransaction || freshTransaction.status !== transaction.status) return null;
+
+  let freshBooking = null;
+  if (booking) {
+    freshBooking = await booking.constructor.findOne({
+      where: { bookingid: booking.bookingid },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    if (!freshBooking || freshBooking.status !== booking.status) return null;
+  }
+
+  return { booking: freshBooking, transaction: freshTransaction };
 }
 
 // Returns the sweep as a list of { transaction, booking } items. One item is
