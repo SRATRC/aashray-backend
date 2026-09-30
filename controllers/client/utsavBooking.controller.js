@@ -1,11 +1,15 @@
 import {
   ERR_BOOKING_NOT_FOUND,
+  ERR_BOOKING_ALREADY_CANCELLED,
   MSG_CANCEL_SUCCESSFUL,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED,
   STATUS_CONFIRMED,
   ROOM_STATUS_CHECKEDIN,
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import {
+  Transactions,
   UtsavBooking,
   UtsavDb,
   UtsavFeedback,
@@ -14,11 +18,13 @@ import {
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   openUtsavSeat,
+  utsavBookingHeldSeat,
   sendUtsavBookingUpdateEmail,
   cancelUtsavFoodBookings,
   validateFeedbackEligibility
 } from '../../helpers/utsavBooking.helper.js';
 import moment from 'moment-timezone';
+import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -202,8 +208,14 @@ export const CancelUtsavBooking = async (req, res) => {
         as: 'UtsavDb'
       }
     ],
+    // Only the member or whoever booked for them may cancel, same as the
+    // study-session cancel. Before, any booking id could be cancelled.
     where: {
-      bookingid: bookingid
+      bookingid: bookingid,
+      [Sequelize.Op.or]: [
+        { cardno: req.user.cardno },
+        { bookedBy: req.user.cardno }
+      ]
     }
   });
 
@@ -212,7 +224,7 @@ export const CancelUtsavBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const previousStatus = booking.status;
+  let previousStatus = booking.status;
   req.log.info('cancel_utsav_booking_found', {
     bookingid,
     cardno: req.user.cardno,
@@ -221,20 +233,70 @@ export const CancelUtsavBooking = async (req, res) => {
     currentStatus: booking.status
   });
 
+  // Lock the utsav row before cancelling, so every flow takes the utsav lock
+  // before the card lock. The cancel path can lock the card (credit restore),
+  // and the booking path locks utsav first; the reverse order deadlocks.
+  const utsav = await UtsavDb.findOne({
+    where: { id: booking.utsavid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  // The booking above was read with no lock, so two cancels at once (a double
+  // tap) both saw it as confirmed and each handed a seat back. Lock and re-read
+  // its payment row and then the booking, in the same order the payment
+  // confirmation locks them, and decide from what is there now.
+  //
+  // transactions.bookingid has no index, so a locking read by bookingid scans
+  // and locks the whole table, blocking every new booking until this commits.
+  // Find the payment row's id with a plain read, then lock only that row.
+  const paymentRow = await Transactions.findOne({ where: { bookingid }, attributes: ['id'] });
+  if (paymentRow) {
+    await Transactions.findOne({ where: { id: paymentRow.id }, transaction: t, lock: t.LOCK.UPDATE });
+  }
+  const current = await UtsavBooking.findOne({
+    where: { bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (!current) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+  if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(current.status)) {
+    req.log.warn('cancel_utsav_booking_already_cancelled', { bookingid, status: current.status });
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+  previousStatus = current.status;
+
   await userCancelBooking(req.user, booking, t);
   req.log.info('cancel_utsav_booking_cancelled', {
     bookingid,
     cardno: req.user.cardno,
-    previousStatus: booking.status,
+    previousStatus,
     newStatus: 'cancelled'
   });
 
-  const utsav = await UtsavDb.findOne({
-    where: { id: booking.utsavid }
-  });
-  await cancelUtsavFoodBookings(booking,req.user.username,t);
-  await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
-  req.log.info('cancel_utsav_booking_seat_opened', { bookingid, utsavid: booking.utsavid });
+  // Only a booking that held a seat was given utsav meals; waiting-list
+  // bookings never are. The cleanup clears every meal in the package dates,
+  // so running it for a booking that never had them wipes meals the member
+  // booked on their own for those days.
+  if (utsavBookingHeldSeat(previousStatus)) {
+    await cancelUtsavFoodBookings(booking, req.user.username, t);
+  }
+
+  // Branch on previousStatus: userCancelBooking above has already overwritten
+  // booking.status with 'cancelled'. A waiting-list booking never held a seat,
+  // so cancelling it must not hand one back.
+  if (utsavBookingHeldSeat(previousStatus)) {
+    await openUtsavSeat(utsav, booking.cardno, req.user.username, t);
+    req.log.info('cancel_utsav_booking_seat_opened', { bookingid, utsavid: booking.utsavid });
+  } else {
+    req.log.info('cancel_utsav_booking_seat_not_held', {
+      bookingid,
+      utsavid: booking.utsavid,
+      previousStatus
+    });
+  }
 
   await t.commit();
   req.log.info('cancel_utsav_booking_committed', { bookingid });

@@ -300,42 +300,84 @@ function getCreditType(bookingType) {
   return creditType;
 }
 
+/**
+ * Safely parses credits from card_db.credits which could be a JSON object,
+ * a JSON string, or null/undefined.
+ * @param {object|string|null} rawCredits
+ * @returns {object} Object with credit keys (e.g. { travel: 1800 })
+ */
+export function parseCredits(rawCredits) {
+  if (!rawCredits) return {};
+  if (typeof rawCredits === 'object' && !Array.isArray(rawCredits)) return rawCredits;
+  if (typeof rawCredits === 'string') {
+    try {
+      const parsed = JSON.parse(rawCredits);
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 async function addCredit(user, card, bookingType, credits, t) {
   const creditType = getCreditType(bookingType);
 
-  const previousCredits =
-    card.credits && card.credits[creditType] ? card.credits[creditType] : 0;
+  // Re-fetch card record with row lock if transaction is active to prevent race conditions
+  const targetCard =
+    (await CardDb.findOne({
+      where: { cardno: card.cardno },
+      transaction: t,
+      lock: t ? t.LOCK.UPDATE : undefined
+    })) || card;
+
+  const currentCredits = parseCredits(targetCard.credits);
+  const previousCredits = currentCredits[creditType] || 0;
+  const newBalance = previousCredits + credits;
 
   const updatedCredits = getUpdatedCredits(
-    card,
+    currentCredits,
     creditType,
-    previousCredits + credits
+    newBalance
   );
 
-  await card.update(
+  await targetCard.update(
     {
       credits: updatedCredits,
       updatedBy: user.username
     },
     { transaction: t }
   );
+
+  // Keep in-memory card reference in sync for caller
+  card.credits = updatedCredits;
+  card.updatedBy = user.username;
 }
 
 export async function useCredit(card, booking, transaction, amount, updatedBy, t) {
   const bookingType = getBookingType(transaction);
   const creditType = getCreditType(bookingType);
 
-  if (!(card.credits && card.credits[creditType] > 0)) {
+  // Re-fetch card record with row lock if transaction is active to prevent race conditions
+  const targetCard =
+    (await CardDb.findOne({
+      where: { cardno: card.cardno },
+      transaction: t,
+      lock: t ? t.LOCK.UPDATE : undefined
+    })) || card;
+
+  const currentCredits = parseCredits(targetCard.credits);
+  const availableCredits = currentCredits[creditType] || 0;
+
+  if (availableCredits <= 0) {
     return amount;
   }
 
-  const credits = card.credits[creditType];
-
-  const status =
-    amount > credits ? transaction.status : STATUS_PAYMENT_COMPLETED;
-
-  const creditsUsed = Math.min(amount, credits);
+  const creditsUsed = Math.min(amount, availableCredits);
   const discountedAmount = amount - creditsUsed;
+  const status =
+    amount > availableCredits ? transaction.status : STATUS_PAYMENT_COMPLETED;
+
   await transaction.update(
     {
       status,
@@ -366,18 +408,22 @@ export async function useCredit(card, booking, transaction, amount, updatedBy, t
   }
 
   const updatedCredits = getUpdatedCredits(
-    card,
+    currentCredits,
     creditType,
-    credits - creditsUsed
+    availableCredits - creditsUsed
   );
 
-  await card.update(
+  await targetCard.update(
     {
       credits: updatedCredits,
       updatedBy
     },
     { transaction: t }
   );
+
+  // Keep in-memory card reference in sync for caller
+  card.credits = updatedCredits;
+  card.updatedBy = updatedBy;
 
   return discountedAmount;
 }
@@ -393,26 +439,29 @@ export async function useCredit(card, booking, transaction, amount, updatedBy, t
  */
 export function usableCredits(card, bookingType, amount) {
   const creditType = getCreditType(bookingType);
+  const creditsObj = parseCredits(card.credits);
 
-  const totalCredits =
-    card.credits && card.credits[creditType] ? card.credits[creditType] : 0;
+  const totalCredits = creditsObj[creditType] || 0;
+  const usable = Math.min(amount, totalCredits);
 
-  const usableCredits = Math.min(amount, totalCredits);
+  card.credits = { ...creditsObj };
+  const remaining = totalCredits - usable;
+  if (remaining > 0) {
+    card.credits[creditType] = remaining;
+  } else {
+    delete card.credits[creditType];
+  }
 
-  card.credits = card.credits || {};
-  card.credits[creditType] = totalCredits - usableCredits;
-
-  return usableCredits;
+  return usable;
 }
 
-function getUpdatedCredits(card, creditType, newCredits) {
-  const updatedCredits = card.credits
-    ? JSON.parse(JSON.stringify(card.credits))
-    : {};
+export function getUpdatedCredits(cardOrCredits, creditType, newCredits) {
+  const credits = parseCredits(cardOrCredits?.credits || cardOrCredits);
+  const updatedCredits = { ...credits };
 
-  updatedCredits[creditType] = newCredits;
-
-  if (updatedCredits[creditType] == 0) {
+  if (newCredits > 0) {
+    updatedCredits[creditType] = newCredits;
+  } else {
     delete updatedCredits[creditType];
   }
 
