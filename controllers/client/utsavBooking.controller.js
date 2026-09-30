@@ -1,11 +1,15 @@
 import {
   ERR_BOOKING_NOT_FOUND,
+  ERR_BOOKING_ALREADY_CANCELLED,
   MSG_CANCEL_SUCCESSFUL,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED,
   STATUS_CONFIRMED,
   ROOM_STATUS_CHECKEDIN,
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import {
+  Transactions,
   UtsavBooking,
   UtsavDb,
   UtsavFeedback,
@@ -213,7 +217,7 @@ export const CancelUtsavBooking = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const previousStatus = booking.status;
+  let previousStatus = booking.status;
   req.log.info('cancel_utsav_booking_found', {
     bookingid,
     cardno: req.user.cardno,
@@ -230,6 +234,23 @@ export const CancelUtsavBooking = async (req, res) => {
     transaction: t,
     lock: t.LOCK.UPDATE
   });
+
+  // The booking above was read with no lock, so two cancels at once (a double
+  // tap) both saw it as confirmed and each handed a seat back. Lock and re-read
+  // its payment row and then the booking, in the same order the payment
+  // confirmation locks them, and decide from what is there now.
+  await Transactions.findOne({ where: { bookingid }, transaction: t, lock: t.LOCK.UPDATE });
+  const current = await UtsavBooking.findOne({
+    where: { bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(current.status)) {
+    req.log.warn('cancel_utsav_booking_already_cancelled', { bookingid, status: current.status });
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+  previousStatus = current.status;
+
   await userCancelBooking(req.user, booking, t);
   req.log.info('cancel_utsav_booking_cancelled', {
     bookingid,
