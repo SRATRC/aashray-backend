@@ -18,6 +18,7 @@ import {
   validateUtsavBooking,
   reserveUtsavSeat,
   openUtsavSeat,
+  utsavBookingHeldSeat,
   validateUtsavPackage,
   bookUtsavForMumukshus,
   cancelUtsavFoodBookings,
@@ -1131,7 +1132,13 @@ export const utsavStatusUpdate = async (req, res) => {
           'Admin Cancelled can only be set from waiting, payment pending, confirmed or cancelled'
         );
       }
-      await cancelUtsavFoodBookings(booking,req.user.username,t);
+      // Only a booking that held a seat was given utsav meals; waiting-list
+      // bookings never are. The cleanup clears every meal in the package dates,
+      // so running it for a booking that never had them wipes meals the member
+      // booked on their own for those days.
+      if (utsavBookingHeldSeat(booking.status)) {
+        await cancelUtsavFoodBookings(booking, req.user.username, t);
+      }
       // 🪑 Free seat if applicable
       if (
         booking.status === STATUS_CONFIRMED ||

@@ -41,6 +41,13 @@ let isRunning = false; // Track task status
 
 // Schedule the cron job to run every 30 minutes
 const job = cron.schedule('*/30 * * * *', async () => {
+  // A sweep can outlast the 30-minute interval. A second run started on top
+  // of it reads the same unpaid bookings before the first commits them, and
+  // cancels them again, handing their seats back twice.
+  if (isRunning) {
+    logger.warn('Cron job skipped: previous run still in progress.');
+    return;
+  }
   logger.info('Cron job started.');
   isRunning = true;
 
@@ -263,7 +270,13 @@ async function cancelBookings(systemUser, bookings, openBookings, t) {
         break;
       case TYPE_UTSAV:
         //Not automatically moving from waiting to payment pending for now
-        await cancelUtsavFoodBookings(booking, systemUser.username, t);
+        // Only a booking that held a seat was given utsav meals; waiting-list
+        // bookings never are. The cleanup clears every meal in the package dates,
+        // so running it for a booking that never had them wipes meals the member
+        // booked on their own for those days.
+        if (utsavBookingHeldSeat(booking.status)) {
+          await cancelUtsavFoodBookings(booking, systemUser.username, t);
+        }
 
         // booking.status is still the pre-cancel status here: the update to
         // 'admin cancelled' happens after this switch. A waiting-list booking

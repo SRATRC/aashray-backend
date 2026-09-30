@@ -238,7 +238,13 @@ export const CancelUtsavBooking = async (req, res) => {
     newStatus: 'cancelled'
   });
 
-  await cancelUtsavFoodBookings(booking,req.user.username,t);
+  // Only a booking that held a seat was given utsav meals; waiting-list
+  // bookings never are. The cleanup clears every meal in the package dates,
+  // so running it for a booking that never had them wipes meals the member
+  // booked on their own for those days.
+  if (utsavBookingHeldSeat(previousStatus)) {
+    await cancelUtsavFoodBookings(booking, req.user.username, t);
+  }
 
   // Branch on previousStatus: userCancelBooking above has already overwritten
   // booking.status with 'cancelled'. A waiting-list booking never held a seat,
