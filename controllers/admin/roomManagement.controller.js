@@ -35,7 +35,9 @@ import {
   STATUS_PAYMENT_COMPLETED,
   ERR_TRANSACTION_NOT_FOUND,
   AMT_TYPE_LATE_CHECKOUT_ROOM,
-  STATUS_CONFIRMED
+  STATUS_CONFIRMED,
+  BOOKING_STATUS_PENDING,
+  MSG_ROLLING_WINDOW_ADMIN_WARNING
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -49,16 +51,20 @@ import {
   bookDayVisit,
   checkRoomAlreadyBooked,
   checkRoomAlreadyBookedInTransaction,
+  getOverlappingRoomBookings,
+  fetchActiveRoomBlocks,
   createFlatBooking,
   createRoomBooking,
   roomCharge,
   getPriorityOrderForMonth
 } from '../../helpers/roomBooking.helper.js';
+import { findUtsavOnBoundaryDates } from '../../helpers/utsavBooking.helper.js';
 import RoomBookingExemption from '../../models/room_booking_exemption.model.js';
 import RoomAllocationPriority from '../../models/room_allocation_priority.model.js';
 import {
   getRollingWindowWarning,
   getPromotionCapWarning,
+  checkRollingWindowLimitForCards,
   withWarning
 } from '../../helpers/rollingWindow.helper.js';
 import {
@@ -165,7 +171,11 @@ const handleOverstayCheckout = async ({
     booking.floor_pref,
     guest,
     dbTransaction,
-    true
+    true,
+    [],
+    null,
+    null,
+    true // skipCap: overstay nights are billed, never waitlisted
   );
 
   // Mark original booking as checked-out.
@@ -222,9 +232,10 @@ const handleEarlyCheckout = async ({
 
   // create a new booking with the new booking dates
   let bookingId = uuidv4();
-  const effectiveCheckout = booking.checkin === today
-    ? moment(booking.checkin).add(1, 'day').format('YYYY-MM-DD')
-    : today;
+  // Arrival-day checkout is a half-day stay (nights 0): stored checkout equals
+  // checkin, same as the model getter shows. (Day-visit creation still stores
+  // checkin+1; readers must not filter on raw checkout for nights = 0.)
+  const effectiveCheckout = today;
 
   const newBooking = await RoomBooking.create(
     {
@@ -773,7 +784,11 @@ export const roomBooking = async (req, res) => {
       floor_pref,
       card,
       t,
-      true
+      true,
+      [],
+      null,
+      null,
+      true // skipCap: admin booking is confirmed + billed; warning goes in the response
     );
   }
 
@@ -783,10 +798,20 @@ export const roomBooking = async (req, res) => {
   // (nights === 0 with a real room type), which previously fell through the
   // nights ternary, resolved undefined, and silently skipped notifications.
   const bookingIdToUse = booking.bookingid || booking.bookingId;
+  // A room can still come back on the waiting list (e.g. single night on an
+  // utsav boundary date). Tell the member the truth in email and push.
+  const isWaiting = booking.bookedRoomNo === 'NA' && room_type !== 'NA';
   if (bookingIdToUse != null) {
     let bookingIds = {};
     bookingIds[TYPE_ROOM] = [bookingIdToUse];
-    sendUnifiedEmail(card.cardno, bookingIds, card, STATUS_CONFIRMED, 'unifiedBookingEmail', false);
+    sendUnifiedEmail(
+      card.cardno,
+      bookingIds,
+      card,
+      isWaiting ? BOOKING_STATUS_PENDING : STATUS_CONFIRMED,
+      'unifiedBookingEmail',
+      false
+    );
   }
 
   if (bookingIdToUse) {
@@ -815,19 +840,31 @@ export const roomBooking = async (req, res) => {
   sendDualUserNotifications({
     primary: {
       token: card.token,
-      title: 'Raj Sharan Booking by Admin',
-      body:
-        'Your stay has been booked from ' +
-        moment(checkin_date).format('Do MMM, YYYY') +
-        ' to ' +
-        moment(checkout_date).format('Do MMM, YYYY') +
-        ' by admin.'
+      title: isWaiting ? 'Raj Sharan Booking Waitlisted' : 'Raj Sharan Booking by Admin',
+      body: isWaiting
+        ? 'Your stay from ' +
+          moment(checkin_date).format('Do MMM, YYYY') +
+          ' to ' +
+          moment(checkout_date).format('Do MMM, YYYY') +
+          ' is on the waiting list. You will be notified once it is confirmed.'
+        : 'Your stay has been booked from ' +
+          moment(checkin_date).format('Do MMM, YYYY') +
+          ' to ' +
+          moment(checkout_date).format('Do MMM, YYYY') +
+          ' by admin.'
     },
     screen: '/bookings'
   });
   req.log.info('room_booking_success', { cardno: card.cardno, checkin_date, checkout_date, bookingId: booking.bookingId });
   return res.status(201).send(
-    withWarning({ message: MSG_BOOKING_SUCCESSFUL }, rollingWarning)
+    withWarning(
+      {
+        message: MSG_BOOKING_SUCCESSFUL,
+        status: isWaiting ? STATUS_WAITING : 'booked',
+        roomno: booking.bookedRoomNo || 'NA'
+      },
+      rollingWarning
+    )
   );
 };
 
@@ -1993,7 +2030,8 @@ export const occupancyReport = async (req, res) => {
   if (date && !moment(date, 'YYYY-MM-DD', true).isValid()) {
     throw new ApiError(400, 'Invalid date format, must be YYYY-MM-DD');
   }
-  const targetDate = date || moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const todayIST = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const targetDate = date || todayIST;
 
   req.log.info('occupancy_report_start', { targetDate });
 
@@ -2019,7 +2057,9 @@ export const occupancyReport = async (req, res) => {
         {
           status: ROOM_STATUS_CHECKEDIN,
           checkin: { [Op.lte]: targetDate },
-          checkout: { [Op.gte]: targetDate }
+          // Still-checked-in guests past their checkout date are in the
+          // building: for today or a past date do not cap on checkout.
+          ...(targetDate <= todayIST ? {} : { checkout: { [Op.gte]: targetDate } })
         },
         {
           status: ROOM_STATUS_CHECKEDOUT,
@@ -2214,7 +2254,12 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
       status: statuses,
       [Sequelize.Op.or]: [
         { checkin: { [Sequelize.Op.between]: [startDate, endDate] } },
-        { checkout: { [Sequelize.Op.between]: [startDate, endDate] } }
+        // Day visits (nights 0) store checkout = checkin + 1 but present
+        // checkout = checkin; match them on checkin only.
+        {
+          nights: { [Sequelize.Op.gt]: 0 },
+          checkout: { [Sequelize.Op.between]: [startDate, endDate] }
+        }
       ]
     },
     order: [['checkin', 'ASC']]
@@ -2327,8 +2372,9 @@ export const updateBookingStatus = async (req, res) => {
         t
       });
 
-      const rate = booking.roomtype?.toLowerCase() === 'ac' ? 1100 : 700;
-      const baseAmount = rate * booking.nights;
+      // Same price rule as booking: half-day (nights = 0) is half the rate.
+      const nightlyRate = roomCharge(String(booking.roomtype || '').toLowerCase());
+      const baseAmount = booking.nights === 0 ? nightlyRate / 2 : nightlyRate * booking.nights;
 
       let discount = 0;
       let finalAmount = baseAmount;
@@ -3179,6 +3225,12 @@ export const bulkRoomBooking = async (req, res) => {
   // the per-guest loop below does not re-query getPriorityOrderForMonth (N+1).
   const priorityList = await getPriorityOrderForMonth(checkin_date);
 
+  // Same for the utsav-boundary lookup: it depends only on the shared dates.
+  const boundaryUtsav =
+    nights === 1
+      ? (await findUtsavOnBoundaryDates(checkin_date, checkout_date)) || null
+      : null;
+
   // Take ALL card-row locks up front in SORTED order — the same global
   // ordering rule checkRollingWindowLimitBatch uses — instead of locking in
   // request order inside the loop, where two concurrent bulk requests with
@@ -3199,12 +3251,25 @@ export const bulkRoomBooking = async (req, res) => {
     cardsByNo.set(cardno, card);
   }
 
+  // Admin bookings are not held back by the 9-night cap; staff get a per-row
+  // warning instead. One batched cap check for all rows.
+  // The cards are already locked above, so the cap check does not lock them again.
+  const capByCard = nights > 0
+    ? await checkRollingWindowLimitForCards([...cardsByNo.values()], checkin_date, checkout_date, t, true)
+    : new Map();
+
+  // One read each for the whole roster (they used to run per guest): every
+  // guest's overlapping stays, and the room blocks for the shared dates.
+  const overlapByCard = await getOverlappingRoomBookings(checkin_date, checkout_date, [...cardsByNo.keys()], t);
+  const activeRoomBlocks = await fetchActiveRoomBlocks(checkin_date, checkout_date);
+
+  const notify = [];
   for (const b of bookings) {
     const cardno = String(b.cardno || '').trim();
     const { room_type } = b;
     const card = cardsByNo.get(cardno);
 
-    if (await checkRoomAlreadyBookedInTransaction(checkin_date, checkout_date, [card.cardno], t)) {
+    if (overlapByCard[String(card.cardno)]?.length > 0) {
       throw new ApiError(400, `Guest ${card.issuedto} (${card.cardno}) already has an active booking for these dates.`);
     }
 
@@ -3229,25 +3294,72 @@ export const bulkRoomBooking = async (req, res) => {
         floor_pref || null,
         card,
         t,
-        false,
+        true, // pay at centre (cash pending), like a single admin booking
         excludeRooms,
         null,
-        priorityList
+        priorityList,
+        true, // skipCap: confirmed + billed, warning below
+        boundaryUtsav,
+        activeRoomBlocks
       );
     }
 
-    results.push({
+    const roomno = bookingResult.bookedRoomNo || bookingResult.roomno || 'NA';
+    const isWaiting = roomno === 'NA' && room_type !== 'NA';
+    const cap = capByCard.get(card.cardno);
+    const row = {
       cardno: card.cardno,
       name: card.issuedto,
-      roomno: bookingResult.bookedRoomNo || bookingResult.roomno || 'NA'
+      roomno,
+      status: isWaiting ? STATUS_WAITING : 'booked',
+      payment: isWaiting ? null : 'pay at centre'
+    };
+    if (cap && cap.exceeds) {
+      row.warning = { message: MSG_ROLLING_WINDOW_ADMIN_WARNING, windowNights: cap.windowNights };
+    }
+    results.push(row);
+    notify.push({
+      card,
+      isWaiting,
+      bookingId: bookingResult.bookingid || bookingResult.bookingId
     });
   }
 
   await t.commit();
+
+  // Notifications only after the commit (a retried/rolled-back attempt sends none).
+  for (const { card, isWaiting, bookingId } of notify) {
+    if (bookingId != null) {
+      sendUnifiedEmail(
+        card.cardno,
+        { [TYPE_ROOM]: [bookingId] },
+        card,
+        isWaiting ? BOOKING_STATUS_PENDING : STATUS_CONFIRMED,
+        'unifiedBookingEmail',
+        false
+      );
+    }
+    sendDualUserNotifications({
+      primary: {
+        token: card.token,
+        title: isWaiting ? 'Raj Sharan Booking Waitlisted' : 'Raj Sharan Booking by Admin',
+        body: isWaiting
+          ? 'Your stay from ' + moment(checkin_date).format('Do MMM, YYYY') + ' to ' +
+            moment(checkout_date).format('Do MMM, YYYY') +
+            ' is on the waiting list. You will be notified once it is confirmed.'
+          : 'Your stay has been booked from ' + moment(checkin_date).format('Do MMM, YYYY') +
+            ' to ' + moment(checkout_date).format('Do MMM, YYYY') + ' by admin.'
+      },
+      screen: '/bookings'
+    });
+  }
   req.log.info('bulk_room_booking_success', { count: results.length });
   return res.status(201).send({
     message: `Successfully booked rooms for ${results.length} guests`,
-    data: results
+    data: results,
+    warning: results.some((r) => r.warning)
+      ? { message: MSG_ROLLING_WINDOW_ADMIN_WARNING, count: results.filter((r) => r.warning).length }
+      : undefined
   });
 };
 

@@ -391,10 +391,20 @@ const fetchBookings = async (cardno, transaction = null) => {
     checkout: { [Sequelize.Op.gte]: today },
     status: ROOM_STATUS_CHECKEDIN
   };
+  // Day visits (nights 0) store checkout = checkin + 1; judge them by checkin
+  // so a visit today is not eligible tomorrow.
+  const roomWhereClause = {
+    cardno,
+    status: ROOM_STATUS_CHECKEDIN,
+    [Sequelize.Op.or]: [
+      { nights: { [Sequelize.Op.gt]: 0 }, checkout: { [Sequelize.Op.gte]: today } },
+      { nights: 0, checkin: { [Sequelize.Op.gte]: today } }
+    ]
+  };
 
   const [isRoomCheckedin, isFlatCheckedin, isUtsavCheckedin] =
     await Promise.all([
-      RoomBooking.findOne({ where: commonWhereClause, transaction }),
+      RoomBooking.findOne({ where: roomWhereClause, transaction }),
       FlatBooking.findOne({ where: commonWhereClause, transaction }),
       UtsavBooking.findOne({
         include: [

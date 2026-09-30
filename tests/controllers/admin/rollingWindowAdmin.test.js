@@ -54,6 +54,10 @@ describe('Admin rolling-window warning (non-blocking: create + warn)', () => {
     expect(res.body.warning.windowNights).toBeDefined();
     const bookings = await RoomBooking.findAll({ where: { cardno: MUMUKSHU_1 } });
     expect(bookings.length).toBeGreaterThan(0); // booking WAS created (no hard stop)
+    // ...and it is a real, billed booking: not parked on the waiting list.
+    expect(bookings[0].status).toBe(STATUS_PAYMENT_PENDING);
+    expect(bookings[0].roomno).not.toBe('NA');
+    expect(res.body.status).toBe('booked');
   });
 
   it('within cap: creates the booking with no warning', async () => {

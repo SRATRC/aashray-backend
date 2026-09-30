@@ -647,6 +647,12 @@ export async function getDateRangesDuringUtsav(
 
   const blockedDates = await getBlockedDates(startDate, endDate);
 
+  // The boundary-utsav lookup depends only on the requested dates, so ask once
+  // (on first need) instead of once per guest.
+  let boundaryLookup = null;
+  const utsavOnBoundaryOnce = () =>
+    (boundaryLookup ??= findUtsavOnBoundaryDates(startDate, endDate));
+
   const dateRangesByMumukshu = {};
   for (const mumukshu of mumukshus) {
     const isDayVisit = startDate === endDate;
@@ -716,10 +722,7 @@ export async function getDateRangesDuringUtsav(
       } else {
         // In case, utsav booking is not found for this mumukshu, check if there is any
         // utsav starts on checkout or ends on checkin date
-        const utsavOnBoundary = await findUtsavOnBoundaryDates(
-          startDate,
-          endDate
-        );
+        const utsavOnBoundary = await utsavOnBoundaryOnce();
         dateRanges.push({
           start: startDate,
           end: endDate,

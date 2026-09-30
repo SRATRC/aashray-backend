@@ -12,7 +12,7 @@ import {
   STATUS_WAITING,
   ROLLING_WINDOW_DAYS,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  MSG_ROLLING_WINDOW_EXCEEDED,
+  MSG_ROLLING_WINDOW_ADMIN_WARNING,
   HOLD_REASON,
   EXEMPT_RES_STATUSES
 } from '../config/constants.js';
@@ -117,7 +117,9 @@ export async function checkRollingWindowLimit({ card, ranges, t = null }) {
 //   cards         — card_db rows (MUST include `cardno` and `res_status`)
 //   rangesByCard  — { cardno: [{ checkin, checkout }, ...] }
 // Returns Map<cardno, { exceeds, windowNights }> covering every input card.
-export async function checkRollingWindowLimitBatch({ cards, rangesByCard, t = null }) {
+// cardsLocked: the caller already holds these cards' row locks in this transaction
+// (in sorted order), so taking them again would only repeat the queries.
+export async function checkRollingWindowLimitBatch({ cards, rangesByCard, t = null, cardsLocked = false }) {
   const result = new Map();
   for (const c of cards) {
     // Fail loud rather than silently mis-classify: the residency exemption reads
@@ -169,7 +171,7 @@ export async function checkRollingWindowLimitBatch({ cards, rangesByCard, t = nu
   const cardnos = [...nightsByCard.keys()].sort();
 
   // Sorted per-person row locks — deadlock-free by ordering (see header).
-  if (t) {
+  if (t && !cardsLocked) {
     for (const cardno of cardnos) {
       await CardDb.findOne({
         where: { cardno },
@@ -242,7 +244,7 @@ export async function getRollingWindowWarning({ card, checkin, checkout, t }) {
     t
   });
   if (!cap.exceeds) return null;
-  return { message: MSG_ROLLING_WINDOW_EXCEEDED, windowNights: cap.windowNights };
+  return { message: MSG_ROLLING_WINDOW_ADMIN_WARNING, windowNights: cap.windowNights };
 }
 
 // Warning for an admin promoting a waiting booking. The cap applies to the
@@ -268,10 +270,10 @@ export function withWarning(body, warning) {
 
 // Convenience wrapper for the common "same single date range for a list of
 // cards" shape (flat previews + flat booking). Returns Map<cardno, {exceeds, windowNights}>.
-export async function checkRollingWindowLimitForCards(cards, checkin, checkout, t = null) {
+export async function checkRollingWindowLimitForCards(cards, checkin, checkout, t = null, cardsLocked = false) {
   const rangesByCard = {};
   for (const c of cards) rangesByCard[c.cardno] = [{ checkin, checkout }];
-  return checkRollingWindowLimitBatch({ cards, rangesByCard, t });
+  return checkRollingWindowLimitBatch({ cards, rangesByCard, t, cardsLocked });
 }
 
 // The preview/detail fields for a stay forced to waiting by the rolling cap —

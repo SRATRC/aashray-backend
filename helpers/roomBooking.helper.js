@@ -384,6 +384,70 @@ async function fetchBlockedRoomnos(checkin, queryCheckout) {
   return blocks.map((b) => b.roomno);
 }
 
+// All active blocks that touch [checkin, windowCheckout), with their dates, so a
+// caller with several stays (or several guests) in the same window reads the
+// blocks once and filters per range in memory with blockedRoomsInRange.
+export async function fetchActiveRoomBlocks(checkin, checkout) {
+  const windowCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  return RoomBlock.findAll({
+    attributes: ['roomno', 'start_date', 'end_date'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: windowCheckout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gte]: checkin } }
+      ]
+    }
+  });
+}
+
+// Rooms blocked on any night of [start, end) out of a fetchActiveRoomBlocks() list.
+// end_date is the LAST blocked day (inclusive); NULL = permanent.
+export function blockedRoomsInRange(activeRoomBlocks, start, end) {
+  const rangeEnd = start === end
+    ? moment(start, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : end;
+  return activeRoomBlocks
+    .filter(
+      (b) =>
+        b.start_date < rangeEnd &&
+        (b.end_date === null || b.end_date >= start)
+    )
+    .map((b) => b.roomno);
+}
+
+// Locking path of the finder for ONE known room: lock the roomdb row, then
+// re-read its overlapping bookings with a LOCKING read (sees the latest
+// committed data, unlike the transaction's snapshot). Returns the locked room
+// row, or null when the room is not bookable for these dates any more.
+export async function lockRoomIfFree(roomno, checkin, checkout, t) {
+  const queryCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  const locked = await RoomDb.findOne({
+    attributes: ['roomno'],
+    where: { roomno, roomstatus: STATUS_AVAILABLE },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (!locked) return null;
+  const clash = await RoomBooking.findOne({
+    attributes: ['bookingid'],
+    where: {
+      roomno,
+      checkout: { [Sequelize.Op.gt]: checkin },
+      checkin: { [Sequelize.Op.lt]: queryCheckout },
+      status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled'] }
+    },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  return clash ? null : locked;
+}
+
 async function findRoomOfGender(
   checkin,
   checkout,
@@ -480,26 +544,8 @@ async function findRoomOfGender(
     if (candidates.length === 0) return null;
 
     for (const candidate of candidates) {
-      const locked = await RoomDb.findOne({
-        attributes: ['roomno'],
-        where: { roomno: candidate.roomno, roomstatus: STATUS_AVAILABLE },
-        transaction: t,
-        lock: t.LOCK.UPDATE
-      });
-      if (locked) {
-        const clash = await RoomBooking.findOne({
-          attributes: ['bookingid'],
-          where: {
-            roomno: candidate.roomno,
-            checkout: { [Sequelize.Op.gt]: checkin },
-            checkin: { [Sequelize.Op.lt]: queryCheckout },
-            status: { [Sequelize.Op.notIn]: ['cancelled', 'admin cancelled'] }
-          },
-          transaction: t,
-          lock: t.LOCK.UPDATE
-        });
-        if (!clash) return locked;
-      }
+      const locked = await lockRoomIfFree(candidate.roomno, checkin, checkout, t);
+      if (locked) return locked;
       tried.push(candidate.roomno);
     }
   }
@@ -595,6 +641,11 @@ export async function bookRoomForMumukshus(
   });
   const cardDb = await validateCards(mumukshus);
 
+  // Read once for the whole request and shared with the availability pass and
+  // the locked room pick below (each used to re-read them).
+  const priorityList = await getPriorityOrderForMonth(checkin_date);
+  const activeRoomBlocks = await fetchActiveRoomBlocks(checkin_date, checkout_date);
+
   // Pass the booking transaction so the rolling-window cap check runs under a
   // card-row lock (race-safe) in a single authoritative pass. roomDetail.status
   // already reflects the cap decision, so the dispatch below just trusts it.
@@ -604,7 +655,9 @@ export async function bookRoomForMumukshus(
     mumukshuGroup,
     user,
     utsav,
-    t
+    t,
+    false,
+    { cardDb, priorityList, activeRoomBlocks }
   );
 
   // "Blocked = unavailable" (centre block, or a non-attended overlapping utsav)
@@ -617,10 +670,6 @@ export async function bookRoomForMumukshus(
   const assignedRooms = [];
   const updatedBy = user.cardno;
 
-  // Fetch the allocation priority once for the whole group (mirrors
-  // bulkRoomBooking's N+1 fix); used by the locked re-selection below.
-  const priorityList = await getPriorityOrderForMonth(checkin_date);
-
   // The preview above picked each roomno WITHOUT a row lock (it also serves the
   // read-only /validate path), so a concurrent request may have taken the same
   // bed in the meantime. Re-select under the booking transaction with the same
@@ -631,16 +680,27 @@ export async function bookRoomForMumukshus(
   // gives when no bed is free — instead of failing the whole group booking.
   const bookAvailableRoomLocked = async (occupantCardno, bookedBy, roomDetail) => {
     const { range, nights, roomType, gender } = roomDetail;
-    const lockedRoom = await findRoom(
-      range.start,
-      range.end,
-      roomType,
-      gender,
-      assignedRooms,
-      t,
-      null,
-      priorityList
-    );
+    // The availability pass already picked a bed for this stay (roomDetail.roomno,
+    // best free bed, distinct from the other guests'). Try that one first: lock
+    // it and re-read its bookings. Only if it was taken meanwhile, run the full
+    // finder again (with the blocks already in hand).
+    let lockedRoom = null;
+    if (roomDetail.roomno && !assignedRooms.includes(roomDetail.roomno)) {
+      lockedRoom = await lockRoomIfFree(roomDetail.roomno, range.start, range.end, t);
+    }
+    if (!lockedRoom) {
+      lockedRoom = await findRoom(
+        range.start,
+        range.end,
+        roomType,
+        gender,
+        assignedRooms,
+        t,
+        null,
+        priorityList,
+        blockedRoomsInRange(activeRoomBlocks, range.start, range.end)
+      );
+    }
     if (!lockedRoom) {
       log.warn('room_booking_bed_raced_away', {
         cardno: occupantCardno,
@@ -684,8 +744,20 @@ export async function bookRoomForMumukshus(
   // -> HTTP 500). Book in one fixed order everywhere: room type, then the
   // gender pool (SCM rooms/M rooms, then SCF rooms/F rooms). A stable sort, so a
   // guest's own split ranges keep their date order.
+  // A stay that already has a chosen bed (roomDetail.roomno) locks that bed, so
+  // the beds themselves are locked in one global order (room type, then room
+  // number) no matter which guest holds them or which pool (SCM/M/SCF/F) they
+  // came from: two groups contesting the same beds then always lock them in the
+  // same order. Stays without a bed (waitlist, or a bed to be found again) come
+  // after, in the pool order used before.
+  const roomKey = (no) => {
+    const m = /^(\d+)([A-Za-z]*)$/.exec(String(no));
+    return m ? `${m[1].padStart(6, '0')}${m[2]}` : `~${no}`;
+  };
   const lockRank = (d) =>
-    `${d.roomType || ''}|${{ SCM: 0, M: 1, SCF: 2, F: 3 }[d.gender] ?? 4}`;
+    d.roomno
+      ? `0|${d.roomType || ''}|${roomKey(d.roomno)}`
+      : `1|${d.roomType || ''}|${{ SCM: 0, M: 1, SCF: 2, F: 3 }[d.gender] ?? 4}`;
   const lockOrdered = [...roomDetails].sort((x, y) => {
     const a = lockRank(x), b = lockRank(y);
     return a < b ? -1 : a > b ? 1 : 0;
@@ -800,7 +872,18 @@ export async function createRoomBooking(
   extra_stay_reason = null,
   // Optional pre-fetched allocation priority list, threaded through to findRoom
   // so bulk/loop callers fetch it once instead of per booking (N+1 fix).
-  priorityList = null
+  priorityList = null,
+  // Admin and overstay bookings are never held back by the 9-night rolling cap:
+  // the stay is confirmed and billed, and the admin caller reports a warning.
+  // Only member-facing paths leave this false.
+  skipCap = false,
+  // Optional pre-fetched utsav on the stay's boundary dates (null = none).
+  // undefined means "look it up". Bulk callers share one lookup across rows.
+  boundaryUtsav = undefined,
+  // Optional pre-fetched active room blocks (fetchActiveRoomBlocks) for the
+  // whole stay window, so a loop of guests reads the blocks once. null = the
+  // finder reads them itself.
+  activeRoomBlocks = null
 ) {
   const gender = floor_pref ? floor_pref + user_gender : user_gender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
@@ -811,7 +894,10 @@ export async function createRoomBooking(
   // This handles the scenario: check-in = utsav.end_date, check-out = utsav.end_date + 1 day.
   const isSingleNight = nights === 1;
   if (isSingleNight) {
-    const utsavOnBoundary = await findUtsavOnBoundaryDates(checkin, checkout);
+    const utsavOnBoundary =
+      boundaryUtsav !== undefined
+        ? boundaryUtsav
+        : await findUtsavOnBoundaryDates(checkin, checkout);
     if (utsavOnBoundary) {
       logger.debug('room_booking_utsav_boundary_waiting', {
         cardno,
@@ -834,15 +920,15 @@ export async function createRoomBooking(
     }
   }
 
-  // 9-night / 30-day rolling cap (admin + bulk write path). The admin path is
-  // NON-BLOCKING by design — the controller attaches a getRollingWindowWarning to
-  // the success response — so we do NOT throw here; we simply route an over-cap
-  // stay to waiting instead of assigning a room, mirroring the client funnel.
+  // 9-night / 30-day rolling cap. Skipped (skipCap) for admin, bulk and overstay
+  // bookings: those are confirmed and billed, and the calling controller attaches
+  // a rolling-window warning for staff. When not skipped, an over-cap stay goes
+  // to waiting instead of getting a room.
   // The cap applies to the OCCUPANT (`cardno`), so fetch that card (guarantees
   // res_status for the residency/exemption fold); residents/exempt come back as
   // exceeds:false. A supplied extra_stay_reason is persisted as
   // hold_reason_meta.userReason (omitted when none).
-  if (nights > 0) {
+  if (nights > 0 && !skipCap) {
     const occupantCard = await validateCard(cardno);
     const cap = await checkRollingWindowLimit({
       card: occupantCard,
@@ -885,7 +971,8 @@ export async function createRoomBooking(
     excludeRooms,
     t,
     null,
-    priorityList
+    priorityList,
+    activeRoomBlocks ? blockedRoomsInRange(activeRoomBlocks, checkin, checkout) : null
   );
 
   if (!roomno) {
@@ -1124,7 +1211,11 @@ export async function checkRoomAvailabilityForMumukshus(
   user,
   utsav,
   t = null,
-  preview = false
+  preview = false,
+  // Optional reads the caller already made for this same request (the booking
+  // path reads them once and passes them on): { cardDb, priorityList,
+  // activeRoomBlocks }. Anything missing is read here.
+  shared = {}
 ) {
   validateDate(checkin_date, checkout_date);
   requireMumukshuGroup(mumukshuGroup);
@@ -1132,7 +1223,7 @@ export async function checkRoomAvailabilityForMumukshus(
   const mumukshus = mumukshuGroup.flatMap(
     (group) => group.mumukshus || group.guests
   );
-  const cardDb = await validateCards(mumukshus);
+  const cardDb = shared.cardDb || (await validateCards(mumukshus));
 
   const overlappingByCard = await getOverlappingRoomBookings(
     checkin_date,
@@ -1270,7 +1361,9 @@ export async function checkRoomAvailabilityForMumukshus(
   const capByCard = await checkRollingWindowLimitBatch({
     cards: cardDb,
     rangesByCard,
-    t
+    t,
+    // The write path locked every occupant's card row above, in sorted order.
+    cardsLocked: !!(t && !preview)
   });
   const overCapUsage = new Map();
   for (const [cno, cap] of capByCard) {
@@ -1284,33 +1377,13 @@ export async function checkRoomAvailabilityForMumukshus(
   // allocation priority and the active room blocks overlapping the whole
   // requested window. Blocks are then filtered per range below, because a split
   // stay's segments can overlap different blocks.
-  const priorityList = await getPriorityOrderForMonth(checkin_date);
-  const windowCheckout = checkin_date === checkout_date
-    ? moment(checkin_date).add(1, 'day').format('YYYY-MM-DD')
-    : checkout_date;
-  const activeRoomBlocks = await RoomBlock.findAll({
-    attributes: ['roomno', 'start_date', 'end_date'],
-    where: {
-      status: 'active',
-      start_date: { [Sequelize.Op.lt]: windowCheckout },
-      [Sequelize.Op.or]: [
-        { end_date: null },
-        { end_date: { [Sequelize.Op.gte]: checkin_date } }
-      ]
-    }
-  });
-  const adminBlockedRoomsFor = (start, end) => {
-    const rangeEnd = start === end
-      ? moment(start).add(1, 'day').format('YYYY-MM-DD')
-      : end;
-    return activeRoomBlocks
-      .filter(
-        (b) =>
-          b.start_date < rangeEnd &&
-          (b.end_date === null || b.end_date >= start)
-      )
-      .map((b) => b.roomno);
-  };
+  const priorityList =
+    shared.priorityList || (await getPriorityOrderForMonth(checkin_date));
+  const activeRoomBlocks =
+    shared.activeRoomBlocks ||
+    (await fetchActiveRoomBlocks(checkin_date, checkout_date));
+  const adminBlockedRoomsFor = (start, end) =>
+    blockedRoomsInRange(activeRoomBlocks, start, end);
 
   for (const group of mumukshuGroup) {
     const { roomType, floorType } = group;
@@ -1334,6 +1407,15 @@ export async function checkRoomAvailabilityForMumukshus(
         const nights = await calculateNights(range.start, range.end);
         const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
 
+        // A card that already holds an overlapping booking cannot take these
+        // dates at all. Reported per card so a group booking can say "Rakesh
+        // already has a stay" instead of failing for everyone. Decided BEFORE
+        // any room is looked for, so such a row reserves no bed, quotes no
+        // charge and does not use up credits (the write path never gets here
+        // with a clash: it threw above).
+        const clashes = overlappingByCard[String(mumukshu)] || [];
+        const isAlreadyBooked = clashes.length > 0;
+
         if (range.isBlocked) {
           // Blocked (centre block, or an overlapping utsav the member is NOT
           // attending): NOT bookable and NOT waitlisted. A block waitlist is a
@@ -1343,6 +1425,10 @@ export async function checkRoomAvailabilityForMumukshus(
           // we only surface the flag (roomDetails.isBlocked below) so the client
           // can render the reject. No room is assigned, nothing is charged, and
           // no hold reason is invented (a blocked range never becomes a hold).
+        } else if (isAlreadyBooked) {
+          // Nothing to allocate or price; the row is reported below with the
+          // reason. status stays WAITING with no hold reason (as the flat
+          // preview does), which no client renders as a waitlist.
         } else if (nights == 0) {
           // 1 day visit
           if (roomType === 'NA') {
@@ -1411,11 +1497,6 @@ export async function checkRoomAvailabilityForMumukshus(
           holdReason = HOLD_REASON.UTSAV_BOUNDARY;
         }
 
-        // A card that already holds an overlapping booking cannot take these
-        // dates at all. Reported per card so a group booking can say "Rakesh
-        // already has a stay" instead of failing for everyone.
-        const clashes = overlappingByCard[String(mumukshu)] || [];
-        const isAlreadyBooked = clashes.length > 0;
         let unavailableReason = null;
         if (range.isBlocked) {
           unavailableReason = range.blockedReason || blockedReason;
@@ -1453,7 +1534,7 @@ export async function checkRoomAvailabilityForMumukshus(
           isBlocked: range.isBlocked || false,
           isAlreadyBooked,
           unavailableReason,
-          requiresExtraStayReason: overCapUsage.has(mumukshu),
+          requiresExtraStayReason: overCapUsage.has(mumukshu) && !isAlreadyBooked,
           ...(assignedRoom && { roomno: assignedRoom })
         });
       }

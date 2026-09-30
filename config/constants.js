@@ -174,6 +174,8 @@ export const EXEMPT_RES_STATUSES = new Set([
   STATUS_SEVA_KUTIR // 'SEVA KUTIR'
 ]);
 export const MSG_ROLLING_WINDOW_EXCEEDED = `This stay exceeds the ${ROLLING_WINDOW_NIGHT_LIMIT}-night limit within ${ROLLING_WINDOW_DAYS} days and has been placed on the waitlist for approval.`;
+// Shown to staff: admin bookings are NOT waitlisted by the cap, they are booked and billed.
+export const MSG_ROLLING_WINDOW_ADMIN_WARNING = `This stay exceeds the ${ROLLING_WINDOW_NIGHT_LIMIT}-night limit within ${ROLLING_WINDOW_DAYS} days. It was still booked and billed because it was made by admin.`;
 
 // Why a booking is being held on the waitlist. Orthogonal to `status`:
 // `status` is where the booking is, HOLD_REASON is why it's waiting.

@@ -18,18 +18,24 @@ const catchAsync = (fn) => (req, res, next) => {
 
 export default catchAsync;
 
-// MySQL deadlock (1213) and lock-wait timeout (1205), whether Sequelize wraps the
-// driver error (err.parent / err.original) or not.
+// MySQL deadlock (1213), whether Sequelize wraps the driver error
+// (err.parent / err.original) or not. Lock-wait timeout (1205) is deliberately
+// NOT retried: each wait already burns innodb_lock_wait_timeout (50s), so a retry
+// would run past the app's 120s booking timeout and the member would see a
+// timeout for a request that may still complete.
 export const isRetryableDbError = (err) => {
   for (let e = err, i = 0; e && i < 4; e = e.parent || e.original, i++) {
-    if (e.errno === 1213 || e.errno === 1205) return true;
-    if (e.code === 'ER_LOCK_DEADLOCK' || e.code === 'ER_LOCK_WAIT_TIMEOUT') return true;
+    if (e.errno === 1213 || e.code === 'ER_LOCK_DEADLOCK') return true;
   }
   return false;
 };
 
+// Never start another attempt once the request has run this long (well inside
+// the app's 120s booking timeout).
+const RETRY_BUDGET_MS = 60000;
+
 /**
- * catchAsync + bounded whole-request retry on MySQL deadlock / lock-wait timeout.
+ * catchAsync + bounded whole-request retry on MySQL deadlock (1213).
  *
  * MySQL rolls the losing transaction back, so the only correct recovery is to
  * run the handler again from the top. Rules for a handler wrapped with this:
@@ -44,6 +50,7 @@ export const catchAsyncRetry = (fn, { attempts = 3, baseDelayMs = 40 } = {}) => 
   const wrapped = async (req, res, next) => {
     const originalBody = req.body === undefined ? undefined : structuredClone(req.body);
     req.retryCache = {};
+    const startedAt = Date.now();
     let lastErr;
     for (let attempt = 1; attempt <= attempts; attempt++) {
       let captured = null;
@@ -58,12 +65,21 @@ export const catchAsyncRetry = (fn, { attempts = 3, baseDelayMs = 40 } = {}) => 
       }
       if (!captured) return;
       lastErr = captured;
+      // Was the transaction already committed? Then the work is durable and
+      // running the handler again would duplicate it (and its side effects).
+      const committed = req.transaction && req.transaction.finished === 'commit';
       try {
         if (req.transaction && !req.transaction.finished) await req.transaction.rollback();
       } catch (rollbackError) {
         logger.error(`Error rolling back transaction: ${rollbackError.message}`);
       }
-      if (isRetryableDbError(captured) && attempt < attempts && !res.headersSent) {
+      if (
+        isRetryableDbError(captured) &&
+        attempt < attempts &&
+        !res.headersSent &&
+        !committed &&
+        Date.now() - startedAt < RETRY_BUDGET_MS
+      ) {
         logger.warn(
           `DB deadlock/lock-timeout on ${req.method} ${req.originalUrl}; retry ${attempt}/${attempts - 1}`
         );
