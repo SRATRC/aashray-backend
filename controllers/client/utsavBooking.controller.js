@@ -24,6 +24,7 @@ import {
   validateFeedbackEligibility
 } from '../../helpers/utsavBooking.helper.js';
 import moment from 'moment-timezone';
+import Sequelize from 'sequelize';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { sendUtsavStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -207,8 +208,14 @@ export const CancelUtsavBooking = async (req, res) => {
         as: 'UtsavDb'
       }
     ],
+    // Only the member or whoever booked for them may cancel, same as the
+    // study-session cancel. Before, any booking id could be cancelled.
     where: {
-      bookingid: bookingid
+      bookingid: bookingid,
+      [Sequelize.Op.or]: [
+        { cardno: req.user.cardno },
+        { bookedBy: req.user.cardno }
+      ]
     }
   });
 
@@ -265,7 +272,7 @@ export const CancelUtsavBooking = async (req, res) => {
   req.log.info('cancel_utsav_booking_cancelled', {
     bookingid,
     cardno: req.user.cardno,
-    previousStatus: booking.status,
+    previousStatus,
     newStatus: 'cancelled'
   });
 

@@ -1,6 +1,7 @@
 import {
   ShibirDb,
   ShibirBookingDb,
+  Transactions,
   AdhyayanFeedback,
   CardDb,
   ShibirAttendanceDb
@@ -193,12 +194,41 @@ export const CancelShibir = async (req, res) => {
     currentStatus: booking.status
   });
 
+  // The checks above ran on an unlocked read, so two cancels at once (a double
+  // tap) both passed them. Each then freed the seat, and with a waiting list
+  // each promoted someone: two people confirmed for one seat. Lock the session
+  // row, then the payment row, then the booking (the order booking, payment
+  // confirmation and the nightly job use) and re-check.
   const adhyayan = await ShibirDb.findOne({
-    where: { id: booking.shibir_id }
+    where: { id: booking.shibir_id },
+    transaction: t,
+    lock: t.LOCK.UPDATE
   });
+  // transactions.bookingid has no index; lock the payment row by its id only.
+  const paymentRow = await Transactions.findOne({ where: { bookingid }, attributes: ['id'] });
+  if (paymentRow) {
+    await Transactions.findOne({ where: { id: paymentRow.id }, transaction: t, lock: t.LOCK.UPDATE });
+  }
+  const current = await ShibirBookingDb.findOne({
+    where: { bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (!current) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+  if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(current.status)) {
+    req.log.warn('cancel_shibir_already_cancelled', {
+      bookingid,
+      cardno: req.user.cardno,
+      currentStatus: current.status
+    });
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+  const previousStatus = current.status;
 
   let newBooking = null;
-  if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
+  if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(previousStatus)) {
     req.log.info('cancel_shibir_opening_seat', { shibirId: booking.shibir_id });
     newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
     if (newBooking) {
@@ -211,7 +241,6 @@ export const CancelShibir = async (req, res) => {
 
   await resetShibirAttendance(booking.bookingid, req.user.username, t);
 
-  const previousStatus = booking.status;
   await userCancelBooking(req.user, booking, t);
   req.log.info('cancel_shibir_cancelled', { bookingid, cardno: req.user.cardno });
   await t.commit();
