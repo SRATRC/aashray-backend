@@ -222,8 +222,11 @@ export async function cancelTransaction(
 
     case STATUS_CANCELLED:
       if (admin) {
-        // ✅ force credits to full amount if admin chooses to issue credits
-        const creditAmount = transaction.amount + transaction.discount;
+        // A cancelled transaction was never paid: a paid one that the member
+        // cancels stays completed (see above), and one whose applied credit
+        // went back is marked credited. So the only money owed here is credit
+        // that was applied and not returned, which is the discount.
+        const creditAmount = Number(transaction.discount) || 0;
         if (creditAmount > 0) {
           await addCredit(user, card, bookingType, creditAmount, t);
           status = STATUS_CREDITED;
