@@ -349,8 +349,9 @@ export const updateCard = async (req, res) => {
 
   // A guest link stores the host in `cardno` and the guest in `guest`.
   if (res_status === STATUS_GUEST) {
-    // Only this host's link to this guest. Other hosts who also book this
-    // person keep their own links.
+    // A guest has one host, so naming a different host moves the guest. The
+    // named host's link is saved first and the other links go after it, so a
+    // failed save never leaves the guest with no host.
     const [relation, created] = await GuestRelationship.findOrCreate({
       where: { cardno: referenceCardno, guest: cardno },
       defaults: {
@@ -367,6 +368,13 @@ export const updateCard = async (req, res) => {
         updatedBy: req.user.username
       });
     }
+
+    await GuestRelationship.destroy({
+      where: {
+        guest: cardno,
+        cardno: { [Sequelize.Op.ne]: String(referenceCardno) }
+      }
+    });
   } else if (wasGuest && card.res_status !== STATUS_GUEST) {
     // The card stopped being a guest card: drop the links where it is the
     // guest. Links where it is the host belong to its own guests and stay.
