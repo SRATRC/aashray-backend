@@ -81,8 +81,13 @@ function exportedNames(src) {
   return names;
 }
 
+// Strings are matched first and kept, so 'image/*' or 'http://...' inside a
+// string is not read as the start of a comment.
 function stripComments(text) {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  return text.replace(
+    /'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\[\s\S]|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/.*$/gm,
+    (m) => (m[0] === '/' ? '' : m)
+  );
 }
 
 for (const p of problems) console.error(p);
