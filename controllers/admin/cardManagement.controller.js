@@ -197,9 +197,12 @@ export const createCard = async (req, res) => {
       }
     }
 
+    // A created record still holds the starter password hash; never send it.
+    const { password, token, ...cardData } = newCard.get({ plain: true });
+
     return res.status(200).json({
       message: 'Card created successfully',
-      data: newCard
+      data: cardData
     });
 
   } catch (error) {
@@ -217,7 +220,9 @@ export const createCard = async (req, res) => {
 
 export const fetchAllCards = async (req, res) => {
   req.log.info('fetch_all_cards_start');
+  // The push address stays in the backend; staff screens never use it.
   const data = await CardDb.findAll({
+    attributes: { exclude: ['token'] }
   });
 
   req.log.info('fetch_all_cards_success', { count: data.length });
@@ -237,7 +242,8 @@ export const searchCardsByName = async (req, res) => {
           { mobno: { [Sequelize.Op.like]: `%${term}%` } },
           { cardno: { [Sequelize.Op.like]: `%${term}%` } } // ✅ added this
         ]
-      }
+      },
+      attributes: { exclude: ['token'] }
     });
 
     req.log.info('search_cards_by_name_success', { term, count: data.length });
