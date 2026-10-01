@@ -46,6 +46,7 @@ export const deviceTelemetry = (req, res, next) => {
         app_version,
         os_version
       }).catch((err) => {
+        lastWrite.delete(key); // retry on the next request, not tomorrow
         req.log?.warn?.('device_telemetry_upsert_failed', {
           error: err.message
         });
