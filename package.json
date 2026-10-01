@@ -11,6 +11,8 @@
     "start:cron": "node cron.js",
     "start:whatsapp": "node whatsapp-service.js",
     "logs:clean": "rm -rf logs/*",
+    "lint:undef": "eslint . && node scripts/check-dynamic-imports.mjs",
+    "pretest": "npm run lint:undef",
     "test": "npx jest"
   },
   "keywords": [],
@@ -52,6 +54,9 @@
     "@faker-js/faker": "^9.9.0",
     "babel-jest": "^29.7.0",
     "babel-register": "^6.26.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-import": "^2.32.0",
+    "globals": "^17.13.0",
     "jest": "^29.7.0",
     "nodemon": "^3.1.11",
     "sequelize-cli": "^6.6.3",

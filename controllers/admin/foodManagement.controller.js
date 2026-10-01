@@ -68,7 +68,7 @@ export const bulkIssuePlate = async (req, res) => {
     res.status(200).send({ message: 'Plates issued successfully' });
   } catch (err) {
     await t.rollback();
-    req.log.error('bulk_issue_plate_error', { meal, error: err.message });
+    req.log.error('bulk_issue_plate_error', { meal: req.body?.meal, error: err.message });
     res.status(400).send({ message: err.message });
   }
 };
