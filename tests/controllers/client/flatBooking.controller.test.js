@@ -6,6 +6,7 @@ import {
   TYPE_ROOM,
   TYPE_UTSAV,
   STATUS_PAYMENT_PENDING,
+  STATUS_WAITING,
   ROOM_STATUS_PENDING_CHECKIN,
   MSG_BOOKING_SUCCESSFUL
 } from '../../../config/constants.js';
@@ -60,6 +61,26 @@ describe('Flat Booking Integration Tests', () => {
       expect(booking).not.toBeNull();
       expect(booking.flatno).toBe(101);
       expect(booking.status).toBe(ROOM_STATUS_PENDING_CHECKIN); // Flat owner gets free booking
+    });
+
+    it('should put a flat booking of more than 9 nights on the waiting list', async () => {
+      const startDay = nDaysFromToday(1);
+      const endDay = nDaysFromToday(11); // 10 nights
+
+      const res = await request(app)
+        .post('/api/v1/mumukshu/booking')
+        .send({
+          cardno: MUMUKSHU_1,
+          primary_booking: createFlatBookingJson(MUMUKSHU_1, startDay, endDay)
+        });
+
+      // Over the 9-night cap is no longer rejected: it is accepted and held.
+      expect(res.status).toBe(200);
+      const booking = await FlatBooking.findOne({
+        where: { cardno: MUMUKSHU_1, checkin: startDay, checkout: endDay, nights: 10 }
+      });
+      expect(booking).not.toBeNull();
+      expect(booking.status).toBe(STATUS_WAITING);
     });
 
     it('should validate flat booking successfully', async () => {

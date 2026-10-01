@@ -16,6 +16,8 @@ import { Op } from 'sequelize';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import logger from '../../config/logger.js';
+import moment from 'moment';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -28,7 +30,10 @@ import {
   TYPE_FLAT,
   TYPE_TRAVEL,
   MSG_BOOKING_WAITING,
-  BOOKING_STATUS_PENDING
+  BOOKING_STATUS_PENDING,
+  STATUS_AVAILABLE,
+  STATUS_WAITING,
+  HOLD_REASON_COPY
 } from '../../config/constants.js';
 import {
   calculateNights,
@@ -39,6 +44,7 @@ import {
   sendUnifiedEmail,
   sendUnifiedEmailForBookedBy,
   checkFlatAlreadyBooked,
+  getOverlappingFlatBookings,
   setWaitingBookingCountMap
 } from '../helper.js';
 import {
@@ -73,6 +79,17 @@ import { validateCards } from '../../helpers/card.helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
+
+// Defensive: the app double-nests the reason. Accept it top-level, on the
+// booking node, or under its `details`. Optional — null when absent.
+function extractExtraStayReason(body, data) {
+  return (
+    body?.extra_stay_reason ||
+    data?.extra_stay_reason ||
+    data?.details?.extra_stay_reason ||
+    null
+  );
+}
 
 async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const typeMap = userBookingIdMap[cardno] || {};
@@ -211,9 +228,12 @@ export const guestBooking = async (req, res) => {
   }
 
   var order = null;
-  if (req.user.country == 'India' && amount > 0) {
+  if (amount > 0) {
     req.log.info('guest_booking_creating_order', { cardno: req.user.cardno, amount });
-    order = await generateOrderId(amount);
+    // Reused on a deadlock retry so a retry never opens a second Razorpay order.
+    const cache = (req.retryCache ||= {});
+    order = cache.order?.amount === amount ? cache.order.value : await generateOrderId(amount);
+    cache.order = { amount, value: order };
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
     req.log.info('guest_booking_order_created', { cardno: req.user.cardno, orderId: order.id, amount });
@@ -374,7 +394,7 @@ async function book(
 
   switch (data.booking_type) {
     case TYPE_ROOM:
-      const roomResult = await bookRoom(data, t, user, utsav);
+      const roomResult = await bookRoom(body, data, t, user, utsav);
       amount += roomResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_ROOM, roomResult.userBookingIds);
       break;
@@ -415,7 +435,7 @@ async function book(
       break;
 
     case TYPE_FLAT:
-      const flatResult = await bookFlat(data, t, user);
+      const flatResult = await bookFlat(body, data, t, user);
       amount += flatResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
       break;
@@ -495,7 +515,12 @@ async function checkRoomAvailability(data, user, utsav) {
     checkout_date,
     guestGroup,
     user,
-    utsav
+    utsav,
+    null,
+    // preview: report "cannot be booked" as data on each row instead of throwing,
+    // so the client shows all three answers in one place. The write path still
+    // throws, so a blocked or overlapping stay can never be created.
+    true
   );
 
   return result;
@@ -507,15 +532,18 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-async function bookRoom(data, t, user, utsav) {
+async function bookRoom(body, data, t, user, utsav) {
   const { checkin_date, checkout_date, guestGroup } = data.details;
+  const extra_stay_reason = extractExtraStayReason(body, data);
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     guestGroup,
     t,
     user,
-    utsav
+    utsav,
+    logger,
+    extra_stay_reason
   );
   return result;
 }
@@ -782,7 +810,7 @@ export const checkGuests = async (req, res) => {
   }
 };
 
-async function bookFlat(data, t, user) {
+async function bookFlat(body, data, t, user) {
   const { checkin_date, checkout_date, guests } = data.details;
 
   // Handle missing checkout_date
@@ -797,15 +825,23 @@ async function bookFlat(data, t, user) {
     );
   }
 
+  const extra_stay_reason = extractExtraStayReason(body, data);
+
+  // createOrder must stay false: the caller creates one order for the whole
+  // booking. Creating one here too would overwrite it, and result.order.amount
+  // is in paise, which the caller would then multiply by 100 again.
   const result = await bookFlatForMumukshus(
     checkin_date,
     checkout_date,
     guests,
     user,
-    t
+    t,
+    false,
+    logger,
+    extra_stay_reason
   );
   return {
-    amount: result.order.amount,
+    amount: result.amount,
     userBookingIds: result.userBookingIds
   };
 }
@@ -840,15 +876,14 @@ async function checkFlatAvailability(data, user) {
   validateDate(checkin_date, checkout_date);
   const guestCardDb = await validateCards(guests);
 
-  // Check if any guest already has a flat booking for these dates
-  for (const guest of guests) {
-    if (await checkFlatAlreadyBooked(checkin_date, checkout_date, guest)) {
-      throw new ApiError(
-        400,
-        `Flat already booked for ${guest} during selected dates`
-      );
-    }
-  }
+  // Guests who already hold an overlapping flat booking. This function only ever
+  // runs on the preview (/validate) path, so it reports the clash per guest
+  // instead of failing the whole request. The write path still throws.
+  const overlappingByCard = await getOverlappingFlatBookings(
+    checkin_date,
+    checkout_date,
+    guests
+  );
 
   const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
@@ -867,12 +902,34 @@ async function checkFlatAvailability(data, user) {
   const tempUser = { ...user, credits: { ...user.credits } };
 
   for (const guest of guests) {
+    const clashes = overlappingByCard[String(guest)] || [];
+    if (clashes.length > 0) {
+      const clash = clashes[0];
+      const span = `${moment(clash.checkin).format('D MMM')} to ${moment(
+        clash.checkout
+      ).format('D MMM')}`;
+      flatDetails.push({
+        guest: guest,
+        flatno: flat.flatno,
+        nights: nights,
+        charge: 0,
+        status: STATUS_WAITING,
+        isAlreadyBooked: true,
+        unavailableReason: `This guest already has a flat stay booked from ${span}. Cancel it first, or pick dates that do not overlap.`
+      });
+      continue;
+    }
+
     const cap = capByCard.get(guest);
     if (cap.exceeds) {
       flatDetails.push({
         guest: guest,
         flatno: flat.flatno,
         nights: nights,
+        requiresExtraStayReason: true,
+        isAlreadyBooked: false,
+        unavailableReason: null,
+        holdReasonMessage: HOLD_REASON_COPY.ROLLING_WINDOW_LIMIT.userMessage,
         availableCredits: 0,
         ...rollingWaitlistFields(cap)
       });
@@ -896,8 +953,11 @@ async function checkFlatAvailability(data, user) {
       flatno: flat.flatno,
       nights: nights,
       charge: charge,
-      availableCredits: availableCredits,
-      status: 'available'
+      status: STATUS_AVAILABLE,
+      isAlreadyBooked: false,
+      unavailableReason: null,
+      holdReasonMessage: null,
+      availableCredits: availableCredits
     });
   }
 

@@ -36,6 +36,7 @@ import moment from 'moment';
 import Sequelize from 'sequelize';
 import ApiError from '../utils/ApiError.js';
 import {
+  blockNightBounds,
   getBlockedDates,
   isDateRangeOverlapping,
   validateBlockedDates
@@ -52,7 +53,7 @@ const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
 // 'admin cancelled' bookings are ignored. Previously this list omitted
 // checkedin / cash pending / cash completed, which let a member whose first
 // booking had advanced past confirmed book a second package for the same Utsav.
-const ACTIVE_UTSAV_BOOKING_STATUSES = [
+export const ACTIVE_UTSAV_BOOKING_STATUSES = [
   STATUS_PAYMENT_PENDING,
   STATUS_CONFIRMED,
   STATUS_WAITING,
@@ -155,9 +156,9 @@ export async function bookUtsavForMumukshus(utsavid, mumukshus, t, user) {
   return { amount: total_amount, userBookingIds, waitingBookingCount };
 }
 
-export async function bookFoodForUtsav(package_info , utsav, mumukshu, t, updatedBy) {
-  
-  if(utsav.location !== RESEARCH_CENTRE) 
+export async function bookFoodForUtsav(package_info, utsav, mumukshu, t, updatedBy) {
+
+  if (utsav.location !== RESEARCH_CENTRE)
     return;
 
   const effectiveStartingMeal = moment(package_info.start_date).isSame(utsav.start_date, 'day')
@@ -578,15 +579,55 @@ export function splitDateRanges(
     });
   }
 
-  if (new Date(bookingEnd) > new Date(utsavEnd)) {
+  // Post-festival segment. The utsav's auto-block covers nights
+  // start_date..end_date INCLUSIVE (block checkout = end_date + 1, exclusive
+  // departure). Starting the post segment at utsavEnd (= end_date, itself a
+  // blocked festival night) made the utsav's OWN block flag this segment as
+  // isBlocked, wrongly rejecting an attending member extending past the festival
+  // (I3). The post-festival stay actually begins the night AFTER end_date, so
+  // start it at utsavEnd + 1 (departure day is exclusive) and only add it when a
+  // real night exists beyond that day. overlappingWithUtsav stays true so the
+  // boundary-night behavior (minNights = 1 / UTSAV_BOUNDARY) is preserved: the
+  // first genuine post-festival night is still waitlisted for review, and a
+  // block whose checkout touches postStart is allowed at the boundary.
+  const postStart = moment(utsavEnd).add(1, 'day').format('YYYY-MM-DD');
+  if (new Date(bookingEnd) > new Date(postStart)) {
     ranges.push({
-      start: utsavEnd,
+      start: postStart,
       end: bookingEnd,
       overlappingWithUtsav: true
     });
   }
 
   return ranges;
+}
+
+export async function findOverlappingUtsav(startDate, endDate) {
+  const utsav = await UtsavDb.findOne({
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { start_date: { [Sequelize.Op.gte]: startDate } },
+            { start_date: { [Sequelize.Op.lt]: endDate } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { end_date: { [Sequelize.Op.gt]: startDate } },
+            { end_date: { [Sequelize.Op.lte]: endDate } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { start_date: { [Sequelize.Op.lte]: startDate } },
+            { end_date: { [Sequelize.Op.gte]: endDate } }
+          ]
+        }
+      ]
+    }
+  });
+  return utsav;
 }
 
 export async function getDateRangesDuringUtsav(
@@ -607,72 +648,124 @@ export async function getDateRangesDuringUtsav(
 
   const blockedDates = await getBlockedDates(startDate, endDate);
 
+  // The boundary-utsav lookup depends only on the requested dates, so ask once
+  // (on first need) instead of once per guest.
+  let boundaryLookup = null;
+  const utsavOnBoundaryOnce = () =>
+    (boundaryLookup ??= findUtsavOnBoundaryDates(startDate, endDate));
+
   const dateRangesByMumukshu = {};
   for (const mumukshu of mumukshus) {
     const isDayVisit = startDate === endDate;
 
     const dateRanges = [];
 
-    // A day visit is one whole range and is never split around an utsav. It used
-    // to return here, BEFORE the blocked-date validation below, so a day visit
-    // onto a blocked date was never checked for anyone. It now falls through to
-    // the same validation as every other stay.
     if (isDayVisit) {
+      // A day visit is a single whole range. It must STILL flow through the
+      // shared isBlocked-flagging loop below — the previous `continue` returned
+      // before it, leaving isBlocked === undefined, so a day visit landing on a
+      // blocked day was neither rejected nor counted (I1). It is never split.
       dateRanges.push({
         start: startDate,
         end: endDate,
         overlappingWithUtsav: false
       });
-      validateBlockedDates(blockedDates, dateRanges);
-      dateRangesByMumukshu[mumukshu] = dateRanges;
-      continue;
-    }
-
-    const utsavBooking = inProgressUtsavOverlapping
-      ? utsav
-      : existingUtsavBookings[mumukshu]?.UtsavDb;
-
-    if (utsavBooking) {
-      const splitRanges = splitDateRanges(
-        utsavBooking.start_date,
-        utsavBooking.end_date,
-        startDate,
-        endDate
-      );
-
-      if (splitRanges.length > 0) {
-        dateRanges.push(...splitRanges);
-      } else {
-        // The whole requested stay sits INSIDE the utsav this member attends, so
-        // the split leaves nothing to book. The empty range list then made every
-        // check below vacuous — nothing to validate, nothing to reject — and the
-        // request came back a silent success, while the identical request from a
-        // non-attendee was correctly rejected. Attending an utsav never unblocks
-        // its dates: those nights belong to the utsav (its package covers them),
-        // so refuse the stay outright.
-        throw new ApiError(
-          400,
-          `These dates are part of ${
-            utsavBooking.name || 'the Utsav'
-          }, which you are attending. Those nights belong to the Utsav, not to your stay, so a room cannot be booked for them.`
-        );
-      }
     } else {
-      // In case, utsav booking is not found for this mumukshu, check if there is any
-      // utsav starts on checkout or ends on checkin date
-      const utsavOnBoundary = await findUtsavOnBoundaryDates(
-        startDate,
-        endDate
-      );
-      dateRanges.push({
-        start: startDate,
-        end: endDate,
-        overlappingWithUtsav: utsavOnBoundary ? true : false
-      });
+      // Gate the utsav split on ACTUAL attendance: only split the stay around a
+      // utsav the member is truly attending — either an in-flow utsav being booked
+      // in this same request (`inProgressUtsavOverlapping`) or an existing
+      // (non-cancelled) utsav booking (`getUtsavBookingsByCardno`). The previous
+      // `findOverlappingUtsav` fallback split the stay for NON-attendees too,
+      // silently excluding the festival days from a stay the member never signed up
+      // for. Per the locked "blocked = unavailable" rule, a non-attended overlapping
+      // utsav's dates are treated as a plain centre block: the range stays WHOLE and
+      // is rejected downstream via `isBlocked` — never auto-split.
+      let utsavBooking = inProgressUtsavOverlapping
+        ? utsav
+        : existingUtsavBookings[mumukshu]?.UtsavDb;
+
+      if (utsavBooking) {
+        const splitRanges = splitDateRanges(
+          utsavBooking.start_date,
+          utsavBooking.end_date,
+          startDate,
+          endDate
+        );
+
+        if (splitRanges.length > 0) {
+          dateRanges.push(...splitRanges);
+        } else {
+          // The whole requested stay sits INSIDE the utsav the member attends, so
+          // the split leaves nothing to book. An empty range list then flowed
+          // through every downstream check vacuously — nothing to flag, nothing
+          // to validate, nothing to reject — and the request came back a silent
+          // success while the identical request from a non-attendee was rejected.
+          // Attendance never unblocks a blocked day: those nights belong to the
+          // utsav (its package covers them), so keep the requested span as ONE
+          // range marked unavailable. It is never bookable, never waitlisted,
+          // and the write path throws on it exactly like a centre block.
+          dateRanges.push({
+            start: startDate,
+            end: endDate,
+            overlappingWithUtsav: false,
+            // Independent of whether the utsav's auto-block row still exists: a
+            // stay with zero bookable nights is unavailable on its own terms.
+            forcedBlocked: true,
+            // Say it the way the blocked-dates calendar says it. Naming the
+            // utsav's own auto-block as "the centre is closed" would tell an
+            // attending member the centre is shut on the very days their calendar
+            // shows them as attending.
+            blockedReason: `These dates are part of ${
+              utsavBooking.name || 'the Utsav'
+            }, which you are attending. Those nights belong to the Utsav, not to your stay, so a room cannot be booked for them.`
+          });
+        }
+      } else {
+        // In case, utsav booking is not found for this mumukshu, check if there is any
+        // utsav starts on checkout or ends on checkin date
+        const utsavOnBoundary = await utsavOnBoundaryOnce();
+        dateRanges.push({
+          start: startDate,
+          end: endDate,
+          overlappingWithUtsav: utsavOnBoundary ? true : false
+        });
+      }
     }
 
-    // validate blockedDates
-    validateBlockedDates(blockedDates, dateRanges);
+    // flag blockedDates so they can be booked in waiting list status
+    //
+    // A manual same-day block stores checkout === checkin (zero-length), while
+    // an utsav auto-block stores end+1 (exclusive departure) — the same
+    // inconsistency getBlockedDates already normalizes for its own query (see
+    // its comment). That normalization only fixed which rows getBlockedDates
+    // returns; it never touched the raw checkin/checkout on those rows, so a
+    // range that starts exactly on a same-day block's date (block 15th/15th vs
+    // range 15th->...) still read as two ranges merely touching at an edge, not
+    // overlapping, and slipped through unblocked.
+    for (const range of dateRanges) {
+      // forcedBlocked ranges (a stay wholly inside an attended utsav) are
+      // unavailable regardless of which block rows exist, so they start blocked.
+      range.isBlocked = range.forcedBlocked === true;
+      if (range.isBlocked) continue;
+      for (const blockedDate of blockedDates) {
+        const effectiveCheckout = blockNightBounds(
+          blockedDate.checkin,
+          blockedDate.checkout
+        ).effectiveCheckout.format('YYYY-MM-DD');
+        if (
+          isDateRangeOverlapping(
+            blockedDate.checkin,
+            effectiveCheckout,
+            range.start,
+            range.end,
+            range.overlappingWithUtsav
+          )
+        ) {
+          range.isBlocked = true;
+          break;
+        }
+      }
+    }
 
     dateRangesByMumukshu[mumukshu] = dateRanges;
   }

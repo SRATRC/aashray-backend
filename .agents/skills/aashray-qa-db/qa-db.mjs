@@ -2,14 +2,14 @@
 // Read-only query runner for the Aashray QA database (Aiven MySQL, TLS required).
 //
 // Usage (run from the aashray-backend repo root so mysql2 + .env.qa resolve):
-//   node --env-file=.env.qa .claude/skills/aashray-qa/qa-db.mjs "SELECT * FROM users LIMIT 5"
+//   node --env-file=.env.qa .claude/skills/aashray-qa-db/qa-db.mjs "SELECT * FROM users LIMIT 5"
 //
 // Reads DB creds + the Aiven CA cert from the environment loaded via --env-file=.env.qa.
 // Read-only by default: only SELECT / SHOW / DESCRIBE / EXPLAIN are allowed, and any
 // multi-statement query (containing ';') is rejected. A missing LIMIT is auto-capped.
 //
 // To run a write/DDL statement you must OPT IN explicitly (only when the human asked):
-//   QA_DB_ALLOW_WRITE=1 node --env-file=.env.qa .claude/skills/aashray-qa/qa-db.mjs "UPDATE ..."
+//   QA_DB_ALLOW_WRITE=1 node --env-file=.env.qa .claude/skills/aashray-qa-db/qa-db.mjs "UPDATE ..."
 
 let mysql;
 try {
@@ -80,7 +80,7 @@ if (!process.env.DB_HOST || !process.env.DB_CERT) {
       'Cause: either .env.qa is missing, or you did not pass --env-file=.env.qa.\n' +
       'Fix:\n' +
       '  1. Make sure aashray-backend/.env.qa exists (get it from the team — it is gitignored).\n' +
-      '  2. Run from the repo root with: node --env-file=.env.qa .claude/skills/aashray-qa/qa-db.mjs "<SQL>"',
+      '  2. Run from the repo root with: node --env-file=.env.qa .claude/skills/aashray-qa-db/qa-db.mjs "<SQL>"',
   );
   process.exit(3);
 }

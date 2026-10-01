@@ -166,7 +166,16 @@ export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
 
 export const ROLLING_WINDOW_DAYS = 30;
 export const ROLLING_WINDOW_NIGHT_LIMIT = 9;
+
+// Residency statuses exempt from the rolling-window night cap. These are the
+// live `card_db.res_status` values. Staff are admin accounts, not card rows.
+export const EXEMPT_RES_STATUSES = new Set([
+  STATUS_RESIDENT, // 'PR'
+  STATUS_SEVA_KUTIR // 'SEVA KUTIR'
+]);
 export const MSG_ROLLING_WINDOW_EXCEEDED = `This stay exceeds the ${ROLLING_WINDOW_NIGHT_LIMIT}-night limit within ${ROLLING_WINDOW_DAYS} days and has been placed on the waitlist for approval.`;
+// Shown to staff: admin bookings are NOT waitlisted by the cap, they are booked and billed.
+export const MSG_ROLLING_WINDOW_ADMIN_WARNING = `This stay exceeds the ${ROLLING_WINDOW_NIGHT_LIMIT}-night limit within ${ROLLING_WINDOW_DAYS} days. It was still booked and billed because it was made by admin.`;
 
 // Why a booking is being held on the waitlist. Orthogonal to `status`:
 // `status` is where the booking is, HOLD_REASON is why it's waiting.
@@ -255,5 +264,4 @@ export const DEEP_CLEANING_WA_RECIPIENTS = [
   '0008977629',
   '0002945068'
 ];
-
 

@@ -1,9 +1,9 @@
 import Sequelize from "sequelize";
 // at top of both files (whatsapp.helper and mumukshuBooking.controller)
 import { Op } from 'sequelize';
-import { CardDb, Transactions, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking } from "../models/associations.js";
+import { CardDb, Transactions, RoomBooking, UtsavDb, UtsavPackagesDb, ShibirDb, FoodDb, BulkFoodBooking } from "../models/associations.js";
 import moment from "moment-timezone";
-import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD, STATUS_RESIDENT } from "../config/constants.js";
+import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD, STATUS_RESIDENT, HOLD_REASON } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { formatWhatsAppPhone } from "../utils/phoneFormatter.js";
 import fs from "fs";
@@ -460,6 +460,24 @@ export async function sendAdhyayanWhatsApp(user, adhyanBookingDetails = [], book
   }
 }
 
+// A room booking held by the rolling-night cap is waiting for admin approval,
+// not for a free bed. WhatsApp shows it with the "awaiting confirmation"
+// templates. The member's own reason lives in hold_reason_meta.userReason.
+const DEFAULT_EXTRA_STAY_REASON = "Extended stay request";
+
+function isCapHold(holdReason) {
+  return holdReason === HOLD_REASON.ROLLING_WINDOW_LIMIT;
+}
+
+function readHoldUserReason(holdReasonMeta) {
+  let meta = holdReasonMeta;
+  if (typeof meta === "string") {
+    try { meta = JSON.parse(meta); } catch { meta = null; }
+  }
+  const reason = meta && typeof meta.userReason === "string" ? meta.userReason.trim() : "";
+  return reason || DEFAULT_EXTRA_STAY_REASON;
+}
+
 // --- Generic pattern for other booking types (room, travel, utsav, flat) ---
 // Each follows the same robust pattern: normalize status, pick template, resolve bookedForName, assemble params, call sendWithTemplateFallback.
 
@@ -481,6 +499,20 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
   const bookingIds = roomBookingDetails
     .map((b) => (b.bookingid || b.bookingId || b.id ? String(b.bookingid || b.bookingId || b.id) : null))
     .filter(Boolean);
+
+  // Hold reason per booking (callers pass only status, not why it is waiting)
+  const holdMap = new Map();
+  try {
+    if (bookingIds.length) {
+      const holdRows = await RoomBooking.findAll({
+        where: { bookingid: { [Op.in]: bookingIds } },
+        attributes: ["bookingid", "hold_reason", "hold_reason_meta"]
+      });
+      for (const h of holdRows) holdMap.set(String(h.bookingid), h);
+    }
+  } catch (err) {
+    console.warn("Failed to fetch hold reasons for room bookings (non-fatal):", err && (err.message || err));
+  }
 
   // Fetch transactions in batch
   let transactionsMap = new Map();
@@ -529,13 +561,24 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
       const bookingStatus = rawStatus.trim().toLowerCase();
 
-      // Normalize status to waiting, pending, or confirmed
+      // Normalize status to waiting, pending, awaiting confirmation, or confirmed
       let statusNormalized = "confirmed";
-      if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+      if (bookingStatus === "awaiting confirmation" || bookingStatus === "awaiting_confirmation") {
+        statusNormalized = "awaiting confirmation";
+      } else if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
         statusNormalized = "waiting";
       } else if ((bookingStatus === "pending" || bookingStatus.includes("pend")) && !bookingStatus.includes("checkin")) {
         statusNormalized = "pending";
       }
+
+      // Cap-hold waiting bookings use the "awaiting confirmation" templates
+      const hold = holdMap.get(String(b.bookingid || b.bookingId || b.id)) || null;
+      const holdReason = b.hold_reason || (hold && hold.hold_reason) || null;
+      const holdMeta = b.hold_reason_meta || (hold && hold.hold_reason_meta) || null;
+      if (statusNormalized === "waiting" && isCapHold(holdReason)) {
+        statusNormalized = "awaiting confirmation";
+      }
+      const holdExtraReason = b.extra_stay_reason || b.extraReason || readHoldUserReason(holdMeta);
 
       const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
       const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
@@ -589,7 +632,11 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
           const bookerName = user.issuedto || "";
           headerParam = attendeeName;
 
-          if (statusNormalized === "waiting") {
+          if (statusNormalized === "awaiting confirmation") {
+            template = "bn_sha_gu_b_awc";
+            const extraReason = holdExtraReason;
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "awaiting confirmation", roomTypeStr, extraReason, attendeeName];
+          } else if (statusNormalized === "waiting") {
             template = "bn_sha_gu_b_w";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
@@ -606,7 +653,11 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
           const attendeeName = user.issuedto || "";
           headerParam = bookerName;
 
-          if (statusNormalized === "waiting") {
+          if (statusNormalized === "awaiting confirmation") {
+            template = "bn_sha_gu_f_awc";
+            const extraReason = holdExtraReason;
+            bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "awaiting confirmation", roomTypeStr, extraReason];
+          } else if (statusNormalized === "waiting") {
             template = "bn_sha_gu_f_wg";
             bodyParams = [attendeeName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
@@ -619,7 +670,11 @@ export async function sendRoomWhatsApp(user, roomBookingDetails = [], bookedForU
         } else {
           const bookerName = user.issuedto || "";
 
-          if (statusNormalized === "waiting") {
+          if (statusNormalized === "awaiting confirmation") {
+            template = "bn_sha_s_b_awc";
+            const extraReason = holdExtraReason;
+            bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "awaiting confirmation", roomTypeStr, extraReason];
+          } else if (statusNormalized === "waiting") {
             template = "bn_sha_s_b_w";
             bodyParams = [bookerName, checkinFormatted, checkoutFormatted, "waiting", roomTypeStr];
           } else if (statusNormalized === "pending") {
@@ -1584,7 +1639,13 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
 
     const rawStatus = (booking.status === undefined || booking.status === null || String(booking.status).trim() === "") ? "pending" : String(booking.status);
     const newStatus = rawStatus.trim().toLowerCase();
-    const prevStatusNormalized = previousStatus ? String(previousStatus).trim().toLowerCase() : "";
+    let prevStatusNormalized = previousStatus ? String(previousStatus).trim().toLowerCase() : "";
+    // A booking that was waiting because of the rolling-night cap was
+    // "awaiting confirmation" from the member's side.
+    if (prevStatusNormalized === "waiting" && isCapHold(booking.hold_reason)) {
+      prevStatusNormalized = "awaiting confirmation";
+    }
+    const holdExtraReason = booking.extra_stay_reason || booking.extraReason || readHoldUserReason(booking.hold_reason_meta);
     const updatedBy = (options.updatedBy || booking.updatedBy || "").trim().toLowerCase();
 
     // Load attendee details
@@ -1631,7 +1692,22 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
       let templateName = null;
       let parameters = [];
 
-      if (prevStatusNormalized === "waiting") {
+      if (prevStatusNormalized === "awaiting confirmation" || prevStatusNormalized === "awaiting_confirmation") {
+        const extraReason = holdExtraReason;
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_s_b_awc2cn";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled"];
+        } else if (newStatus === "admin cancelled" || newStatus === "admin_cancelled") {
+          templateName = "bk_sha_s_b_awc2acn";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled"];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_sha_s_b_awc2ppg";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending", extraReason];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_s_b_ppg2pgci";
+          parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin"];
+        }
+      } else if (prevStatusNormalized === "waiting") {
         if (newStatus === "cancelled") {
           templateName = "bk_sha_s_b_w2cn";
           parameters = [attendeeName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled"];
@@ -1718,7 +1794,22 @@ export async function sendRoomStatusChangeWhatsApp(booking, previousStatus, opti
       let templateName = null;
       let parameters = [];
 
-      if (prevStatusNormalized === "waiting") {
+      if (prevStatusNormalized === "awaiting confirmation" || prevStatusNormalized === "awaiting_confirmation") {
+        if (newStatus === "cancelled") {
+          templateName = "bk_sha_gu_b_awc2cn";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", attendeeName];
+        } else if (newStatus === "admin cancelled" || newStatus === "admin_cancelled") {
+          templateName = "bk_sha_gu_b_awc2acn";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "admin cancelled", attendeeName];
+        } else if (isPendingStatus(newStatus)) {
+          templateName = "bk_sha_gu_b_awc2ppg";
+          const extraReason = holdExtraReason;
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "payment pending", attendeeName, extraReason];
+        } else if (isConfirmedStatus(newStatus)) {
+          templateName = "bk_sha_gu_b_pypnd2pndchki";
+          parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "pending checkin", attendeeName];
+        }
+      } else if (prevStatusNormalized === "waiting") {
         if (newStatus === "cancelled") {
           templateName = "bk_sha_gu_b_wtg2cnfm";
           parameters = [bookerName, roomTypeStr, checkinFormatted, checkoutFormatted, "cancelled", attendeeName];

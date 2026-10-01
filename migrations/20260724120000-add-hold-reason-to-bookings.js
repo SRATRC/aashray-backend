@@ -9,21 +9,28 @@
 module.exports = {
   async up(queryInterface, Sequelize) {
     for (const table of ['room_booking', 'flat_booking']) {
-      await queryInterface.addColumn(table, 'hold_reason', {
-        type: Sequelize.STRING,
-        allowNull: true
-      });
-      await queryInterface.addColumn(table, 'hold_reason_meta', {
-        type: Sequelize.JSON,
-        allowNull: true
-      });
+      // Idempotent: skip columns that already exist.
+      const cols = await queryInterface.describeTable(table);
+      if (!cols.hold_reason) {
+        await queryInterface.addColumn(table, 'hold_reason', {
+          type: Sequelize.STRING,
+          allowNull: true
+        });
+      }
+      if (!cols.hold_reason_meta) {
+        await queryInterface.addColumn(table, 'hold_reason_meta', {
+          type: Sequelize.JSON,
+          allowNull: true
+        });
+      }
     }
   },
 
   async down(queryInterface, Sequelize) {
     for (const table of ['room_booking', 'flat_booking']) {
-      await queryInterface.removeColumn(table, 'hold_reason');
-      await queryInterface.removeColumn(table, 'hold_reason_meta');
+      const cols = await queryInterface.describeTable(table);
+      if (cols.hold_reason) await queryInterface.removeColumn(table, 'hold_reason');
+      if (cols.hold_reason_meta) await queryInterface.removeColumn(table, 'hold_reason_meta');
     }
   }
 };

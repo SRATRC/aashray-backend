@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Environments
 
@@ -37,16 +37,11 @@ Rules that follow from this:
   - API URLs: `https://aashray-backend.onrender.com` and `https://aashray-backend-pr-<N>.onrender.com`.
   - QA database (Aiven MySQL, read-only runner, needs a local gitignored `.env.qa`):
     ```bash
-    node --env-file=.env.qa .claude/skills/aashray-qa-db/qa-db.mjs "SELECT id, name FROM users LIMIT 5"
+    node --env-file=.env.qa .Codex/skills/aashray-qa-db/qa-db.mjs "SELECT id, name FROM users LIMIT 5"
     ```
   - The `aashray-qa-db` skill holds only what Render tooling does not: the QA credential guardrails and the prod-to-QA snapshot refresh.
 
 Never point QA tooling at prod, or vice versa.
-
-Both are local-session tools only. In GitHub Actions (the PR review job, `@claude`) the
-MCP server, the skill, the databases, the installed dependencies and the test suite are all
-out of reach — review from the diff and the checked-out files alone, and do not try to reach
-a database, fetch logs, or run tests there.
 
 ## Project Overview
 

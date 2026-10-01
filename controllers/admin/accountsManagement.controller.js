@@ -72,7 +72,7 @@ export const fetchCompletedTransactions = async (req, res) => {
       CASE WHEN t.category = 'room' THEN rb.checkin
            WHEN t.category = 'flat' THEN fb.checkin
            ELSE '-' END AS checkin,
-      CASE WHEN t.category = 'room' THEN rb.checkout
+      CASE WHEN t.category = 'room' THEN (CASE WHEN rb.nights = 0 THEN rb.checkin ELSE rb.checkout END)
            WHEN t.category = 'flat' THEN fb.checkout
            ELSE '-' END AS checkout,
       bookedby_card.cardno AS bookedBy_cardno,
@@ -163,7 +163,7 @@ export const fetchPendingTransactions = async (req, res) => {
       CASE WHEN t.category = 'room' THEN rb.checkin
            WHEN t.category = 'flat' THEN fb.checkin
            ELSE '-' END AS checkin,
-      CASE WHEN t.category = 'room' THEN rb.checkout
+      CASE WHEN t.category = 'room' THEN (CASE WHEN rb.nights = 0 THEN rb.checkin ELSE rb.checkout END)
            WHEN t.category = 'flat' THEN fb.checkout
            ELSE '-' END AS checkout,
       bookedby_card.cardno AS bookedBy_cardno,
@@ -253,7 +253,7 @@ export const fetchAllCreditTransactions = async (req, res) => {
       CASE WHEN t.category = 'room' THEN rb.checkin
            WHEN t.category = 'flat' THEN fb.checkin
            ELSE '-' END AS checkin,
-      CASE WHEN t.category = 'room' THEN rb.checkout
+      CASE WHEN t.category = 'room' THEN (CASE WHEN rb.nights = 0 THEN rb.checkin ELSE rb.checkout END)
            WHEN t.category = 'flat' THEN fb.checkout
            ELSE '-' END AS checkout,
       bookedby_card.cardno AS bookedBy_cardno,
@@ -617,7 +617,7 @@ export const fetchTransactionsByPaymentId = async (req, res) => {
         END AS checkin,
 
         CASE
-          WHEN t.category = 'room' THEN rb.checkout
+          WHEN t.category = 'room' THEN (CASE WHEN rb.nights = 0 THEN rb.checkin ELSE rb.checkout END)
           WHEN t.category = 'flat' THEN fb.checkout
           ELSE '-'
         END AS checkout,
@@ -914,7 +914,7 @@ export const fetchAllDebitTransactions = async (req, res) => {
       CASE WHEN t.category = 'room' THEN rb.checkin
            WHEN t.category = 'flat' THEN fb.checkin
            ELSE '-' END AS checkin,
-      CASE WHEN t.category = 'room' THEN rb.checkout
+      CASE WHEN t.category = 'room' THEN (CASE WHEN rb.nights = 0 THEN rb.checkin ELSE rb.checkout END)
            WHEN t.category = 'flat' THEN fb.checkout
            ELSE '-' END AS checkout,
       COALESCE(

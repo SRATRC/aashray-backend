@@ -1,4 +1,5 @@
 import { Op } from 'sequelize';
+import logger from '../../config/logger.js';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -250,8 +251,11 @@ export const mumukshuBooking = async (req, res, next) => {
     }
 
     let order = null;
-    if (req.user.country == 'India' && amount > 0) {
-      order = await generateOrderId(amount);
+    if (amount > 0) {
+      // Reused on a deadlock retry so a retry never opens a second Razorpay order.
+      const cache = (req.retryCache ||= {});
+      order = cache.order?.amount === amount ? cache.order.value : await generateOrderId(amount);
+      cache.order = { amount, value: order };
       const bookingIds = retrieveBookingIds(userBookingIdMap);
       await updateRazorpayTransactions(bookingIds, [], order.id, t);
     }
@@ -454,7 +458,7 @@ async function book(
       break;
 
     case TYPE_FLAT:
-      const flatResult = await bookFlat(data, t, user);
+      const flatResult = await bookFlat(body, data, t, user);
       amount += flatResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FLAT, flatResult.userBookingIds);
       break;
@@ -533,15 +537,43 @@ async function validate(body, user, data, utsav, response) {
 
 async function bookRoom(body, data, t, user, utsav) {
   const { checkin_date, checkout_date, mumukshuGroup } = data.details;
+  const extra_stay_reason = body?.extra_stay_reason || data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
   const result = await bookRoomForMumukshus(
     checkin_date,
     checkout_date,
     mumukshuGroup,
     t,
     user,
-    utsav
+    utsav,
+    logger,
+    extra_stay_reason
   );
   return result;
+}
+
+async function bookFlat(body, data, t, user) {
+  const { checkin_date, checkout_date, mumukshus } = data.details;
+
+  if (!checkout_date) {
+    throw new ApiError(400, 'checkout date is required for flat booking');
+  }
+
+  const extra_stay_reason = body?.extra_stay_reason || data?.extra_stay_reason || data?.details?.extra_stay_reason || null;
+
+  const result = await bookFlatForMumukshus(
+    checkin_date,
+    checkout_date,
+    mumukshus,
+    user,
+    t,
+    false,
+    logger,
+    extra_stay_reason
+  );
+  return {
+    amount: result.amount,
+    userBookingIds: result.userBookingIds
+  };
 }
 
 async function bookFood(body, data, t, user) {
@@ -585,7 +617,12 @@ async function checkRoomAvailability(data, user, utsav) {
     checkout_date,
     mumukshuGroup,
     user,
-    utsav
+    utsav,
+    null,
+    // preview: report "cannot be booked" as data on each row instead of throwing,
+    // so the client shows all three answers in one place. The write path still
+    // throws, so a blocked or overlapping stay can never be created.
+    true
   );
 
   return result;
@@ -638,27 +675,6 @@ async function checkTravelAvailability(data) {
   };
 }
 
-async function bookFlat(data, t, user) {
-  const { checkin_date, checkout_date, mumukshus } = data.details;
-
-  if (!checkout_date) {
-    throw new ApiError(400, 'checkout date is required for flat booking');
-  }
-
-  const result = await bookFlatForMumukshus(
-    checkin_date,
-    checkout_date,
-    mumukshus,
-    user,
-    t,
-    false
-  );
-  return {
-    amount: result.amount,
-    userBookingIds: result.userBookingIds
-  };
-}
-
 async function checkFlatAvailability(data, user) {
   const { checkin_date, checkout_date, mumukshus } = data.details;
 
@@ -670,7 +686,10 @@ async function checkFlatAvailability(data, user) {
     checkin_date,
     checkout_date,
     mumukshus,
-    user
+    user,
+    // preview: report an overlapping flat stay as data on the row instead of
+    // throwing. The write path still throws.
+    true
   );
   return result;
 }

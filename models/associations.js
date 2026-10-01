@@ -4,6 +4,8 @@ import FoodDb from './food_db.model.js';
 import FoodPhysicalPlate from './food_physical_plate.model.js';
 import FlatDb from './flatdb.model.js';
 import FlatBooking from './flat_booking.model.js';
+import RoomBookingExemption from './room_booking_exemption.model.js';
+import RoomAllocationPriority from './room_allocation_priority.model.js';
 import RoomBooking from './room_booking.model.js';
 import RoomDb from './roomdb.model.js';
 import ShibirDb from './shibir_db.model.js';
@@ -43,6 +45,11 @@ import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
+import RoomBlock from './room_block.model.js';
+
+// RoomBlock
+RoomDb.hasMany(RoomBlock, { foreignKey: 'roomno', sourceKey: 'roomno', as: 'blocks' });
+RoomBlock.belongsTo(RoomDb, { foreignKey: 'roomno', targetKey: 'roomno' });
 import CustomForm from './custom_form.model.js';
 import CustomFormResponse from './custom_form_response.model.js';
 import CustomFormDraft from './custom_form_draft.model.js';
@@ -695,6 +702,8 @@ Transactions.belongsTo(FlatBooking, {
   targetKey: 'bookingid'
 });
 
+RoomBookingExemption.belongsTo(CardDb, { foreignKey: 'cardno', targetKey: 'cardno' });
+CardDb.hasMany(RoomBookingExemption, { foreignKey: 'cardno', sourceKey: 'cardno' });
 // CustomForm
 CustomForm.belongsTo(Departments, {
   foreignKey: 'dept_name',
@@ -792,6 +801,8 @@ export {
   ShibirAttendanceRecord,
   UtsavFeedback,
   UtsavFeedbackAnswer,
+  RoomBookingExemption,
+  RoomAllocationPriority,
   CustomForm,
   CustomFormResponse,
   CustomFormDraft,

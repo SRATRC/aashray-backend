@@ -48,7 +48,16 @@ const RoomBooking = sequelize.define(
     },
     checkout: {
       type: DataTypes.DATEONLY,
-      allowNull: false
+      allowNull: false,
+      get() {
+        const rawValue = this.getDataValue('checkout');
+        const nights = this.getDataValue('nights');
+        const checkin = this.getDataValue('checkin');
+        if (nights === 0 && checkin) {
+          return checkin;
+        }
+        return rawValue;
+      }
     },
     nights: {
       type: DataTypes.INTEGER,
