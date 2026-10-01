@@ -46,9 +46,7 @@ export function decideUpdate(rows, currentVersion, osVersion) {
     );
 
   let updateType = UPDATE_TYPE_NONE;
-  if (!latest || !isBelow(latest.version)) {
-    updateType = UPDATE_TYPE_NONE;
-  } else if (reachableFloor && isBelow(reachableFloor.version)) {
+  if (reachableFloor && isBelow(reachableFloor.version)) {
     updateType = UPDATE_TYPE_FORCED;
   } else if (floor && isBelow(floor.version)) {
     // Required build exists but this OS can't install it. Never a store
