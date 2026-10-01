@@ -1,70 +1,47 @@
-# Reading the live release config via the aashray MCP
+# Live data via the aashray MCP
 
-All queries are **read-only** (the MCP DB user is SELECT-only). Read the
-`schema://aashray` resource or call `get_schema` once at the start to confirm column
-names, then use `query_db`.
+All read-only (`query_db`; the MCP adds a LIMIT). Never compare versions in SQL:
+`"10" < "4"` as strings. Pull the values, then compare in your head or with
+`utils/versionCompare.js` rules (split on `.`, integer segments, missing = 0).
 
-## Current release picture per platform
-
-The latest build we ship, its OS floor, and its severity tier:
+## Release rows
 
 ```sql
-SELECT os, build_number, version, min_os, tier, createdAt
-FROM updates u
-WHERE build_number = (
-  SELECT MAX(build_number) FROM updates WHERE os = u.os
-);
-```
-
-Full release ladder for one platform (to reason about the OS-ladder):
-
-```sql
-SELECT build_number, version, min_os, tier
+SELECT os, version, min_os, mandatory, createdAt
 FROM updates
-WHERE os = 'android'          -- or 'ios'
-ORDER BY build_number DESC;
+ORDER BY os, createdAt DESC;
 ```
 
-The current **force floor** (newest required build) per platform:
+Sort by `version` yourself, not `createdAt`: staff edit rows by hand. The force
+floor is the highest `version` with `mandatory = 1`. If a platform has only one
+row that keeps being edited, flag it: each edit drops the earlier floor. Each
+store release should be a new row.
 
-```sql
-SELECT os, MAX(build_number) AS highest_required
-FROM updates
-WHERE tier = 'required'
-GROUP BY os;
-```
-
-## Sizing the orphaned population
-
-`device_telemetry` holds last-seen device facts (one row per user+platform). Because
-SQL string comparison is wrong for versions (`"10" < "4"`), pull the distinct OS
-versions and their counts, then compare **app-side** with the numeric comparator:
+## Devices per OS (sizing check A)
 
 ```sql
 SELECT platform, os_version, COUNT(*) AS devices
 FROM device_telemetry
-WHERE platform = 'android'     -- or 'ios'
-  AND os_version IS NOT NULL
+WHERE updatedAt > NOW() - INTERVAL 90 DAY
 GROUP BY platform, os_version;
 ```
 
-Then, in the skill, sum the `devices` for every `os_version` that is numerically
-**below** the candidate floor `F` (using `utils/versionCompare.js` semantics). That
-sum is the number of users the new floor would orphan.
+Sum `devices` whose `os_version` is below the candidate floor. iOS values are
+versions, Android values are API levels.
 
-App builds below a broken contract (for a contract-break hunt):
+## Devices per app version (check B, and the "no headers" guard)
 
 ```sql
-SELECT platform, app_build, COUNT(*) AS devices
+SELECT platform, app_version, COUNT(*) AS devices
 FROM device_telemetry
-WHERE app_build IS NOT NULL
-GROUP BY platform, app_build
-ORDER BY app_build;
+WHERE updatedAt > NOW() - INTERVAL 90 DAY
+GROUP BY platform, app_version;
 ```
 
-## Honest limit
+A row is written only when a logged-in request carries the headers, so users on
+builds older than the header change don't show up at all. Say so whenever you
+report counts.
 
-If `device_telemetry` does not exist yet, or returns no rows, you can flag that a
-release orphans users but **cannot size how many**. Say so; do not estimate. The
-capture middleware (`middleware/DeviceTelemetry.js`) populating this table is the
-prerequisite ("step 1").
+## If `device_telemetry` is missing or empty
+
+Say "flagged, not sized". Do not estimate.

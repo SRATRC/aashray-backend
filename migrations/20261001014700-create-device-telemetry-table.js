@@ -3,6 +3,9 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
+    // The app's startup sync may have created it before migrations ran.
+    const tables = await queryInterface.showAllTables();
+    if (tables.includes('device_telemetry')) return;
     await queryInterface.createTable('device_telemetry', {
       id: {
         type: Sequelize.INTEGER,
@@ -21,8 +24,8 @@ module.exports = {
         allowNull: false
       },
 
-      app_build: {
-        type: Sequelize.INTEGER,
+      app_version: {
+        type: Sequelize.STRING,
         allowNull: true
       },
 

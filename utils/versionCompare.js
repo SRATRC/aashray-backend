@@ -30,19 +30,6 @@ export function compareVersions(a, b) {
 }
 
 /**
- * Convenience: is version `a` greater than or equal to version `b`?
- * Returns false when either input is unparseable.
- *
- * @param {string|number} a
- * @param {string|number} b
- * @returns {boolean}
- */
-export function isAtLeast(a, b) {
-  const cmp = compareVersions(a, b);
-  return cmp === 0 || cmp === 1;
-}
-
-/**
  * Splits a version string into an array of integer segments.
  * Ignores any non-numeric suffix on a segment (e.g. "2-beta" -> 2).
  * Returns null if the input is nullish or yields no numeric segments.

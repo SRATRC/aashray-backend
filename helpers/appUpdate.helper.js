@@ -1,5 +1,4 @@
 import {
-  TIER_REQUIRED,
   UPDATE_TYPE_NONE,
   UPDATE_TYPE_OPTIONAL,
   UPDATE_TYPE_FORCED,
@@ -9,61 +8,55 @@ import { compareVersions } from '../utils/versionCompare.js';
 
 /**
  * The OS-ladder forced-update decision. Pure function — no DB, no I/O.
- * See docs/version-os-compatibility.md for the full contract.
  *
- * Given the release catalogue for a platform and the client's build + device OS,
- * decides whether an update is none / optional / forced / unsupported, and which
- * build the device should actually be sent to (always one it can install).
+ * Given every release row for a platform and the client's app version + device
+ * OS, decides none / optional / forced / unsupported, and which release the
+ * device should be sent to (always one it can install).
  *
- * @param {Array<{version:string, build_number:number, min_os:?string, tier:string}>} rows
- *   Releases for the platform, sorted by build_number DESC (newest first).
- * @param {number} currentBuild - the client's own build_number (integer).
- * @param {string} osVersion - device OS marketing version string (e.g. "13").
- * @returns {{updateType:string, targetBuild:?number, targetVersion:?string, minOsVersion:?string}}
+ * @param {Array<{version:string, min_os:?string, mandatory:boolean, releaseNotes:?string}>} rows
+ *   Releases for the platform, in any order.
+ * @param {string} currentVersion - the client's app version ("1.1.59").
+ * @param {string} osVersion - iOS version ("16.4") or Android API level ("26").
+ * @returns {{updateType:string, targetVersion:?string, releaseNotes:?string, minOsVersion:?string}}
  */
-export function decideUpdate(rows, currentBuild, osVersion) {
-  const latest = rows[0];
+export function decideUpdate(rows, currentVersion, osVersion) {
+  // Newest first. Rows are edited by hand, so order by version, not createdAt.
+  const releases = rows
+    .filter((r) => compareVersions(r.version, '0') !== null)
+    .sort((a, b) => compareVersions(b.version, a.version));
+  const latest = releases[0];
+  const isBelow = (version) => compareVersions(currentVersion, version) < 0;
 
-  // Rungs of the ladder this device can actually install. A NULL floor means
-  // "installable by everyone"; a floor above the device OS is unreachable.
-  const installable = rows.filter((r) => {
-    if (r.min_os == null) return true; // NULL floor = installable by everyone
+  // Releases this device can actually install. An unparseable min_os (bad
+  // data) counts as NOT installable, so we never force onto a build it can't run.
+  const target = releases.find((r) => {
+    if (r.min_os == null) return true;
     const cmp = compareVersions(r.min_os, osVersion);
-    // A NULL comparison means an unparseable min_os (bad data). Per the
-    // versionCompare contract, fall back safely: treat the row as NOT
-    // installable rather than risk sending a device to a build it can't run.
     return cmp !== null && cmp <= 0;
   });
-  const target = installable[0] || null; // newest installable (rows are desc)
-  const targetBuild = target ? target.build_number : null;
 
-  const latestBuild = latest.build_number;
+  // The force floor: the newest release marked mandatory.
+  const floor = releases.find((r) => r.mandatory);
 
-  const requiredRows = rows.filter((r) => r.tier === TIER_REQUIRED);
-  const highestReq = requiredRows.length ? requiredRows[0].build_number : null;
-
-  let updateType;
-  if (currentBuild >= latestBuild) {
+  let updateType = UPDATE_TYPE_NONE;
+  if (!latest || !isBelow(latest.version)) {
     updateType = UPDATE_TYPE_NONE;
-  } else if (highestReq !== null && currentBuild < highestReq) {
-    if (targetBuild !== null && targetBuild >= highestReq) {
-      // Device can reach a build that carries the required fix — force it.
-      updateType = UPDATE_TYPE_FORCED;
-    } else {
-      // Device can't climb high enough to reach the required fix. Never a store
-      // dead-end: soft, dismissable, keep-using notice.
-      updateType = UPDATE_TYPE_UNSUPPORTED;
-    }
-  } else if (targetBuild !== null && targetBuild > currentBuild) {
+  } else if (floor && isBelow(floor.version)) {
+    // Force only if this device can reach a build at or above the floor.
+    // Otherwise never a store dead-end: a dismissable keep-using notice.
+    updateType =
+      target && compareVersions(target.version, floor.version) >= 0
+        ? UPDATE_TYPE_FORCED
+        : UPDATE_TYPE_UNSUPPORTED;
+  } else if (target && isBelow(target.version)) {
     updateType = UPDATE_TYPE_OPTIONAL;
-  } else {
-    updateType = UPDATE_TYPE_NONE;
   }
 
   return {
     updateType,
-    targetBuild,
     targetVersion: target ? target.version : null,
-    minOsVersion: latest.min_os ?? null
+    // Notes for the build we send them to, not for the newest row.
+    releaseNotes: target ? target.releaseNotes : null,
+    minOsVersion: latest?.min_os ?? null
   };
 }

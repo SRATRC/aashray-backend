@@ -1,141 +1,97 @@
 ---
 name: release-orphan-check
 description: >-
-  Pre-release guard that catches any users a release would orphan and steers you
-  to the change that orphans nobody. Use during the plan phase (checks the plan),
-  before a build (checks the git diff), or manually at the end of a feature cycle.
-  Hunts for two things: a native OS-floor bump (raises the minimum OS, orphaning
-  old phones) and an API contract break (changes an endpoint/response old app
-  builds rely on). Validates against the version-os-compatibility model
-  (build_number, min_os, tier, the OS-ladder) and reads the live release config
-  read-only via the aashray MCP. Triggers on "ship a release", "will this orphan
-  users", "OS floor", "min sdk / deployment target bump", "force update",
-  "breaking API change", "release safety check".
+  Pre-release check that finds users a release would strand, and the change that
+  strands nobody. Looks for two things: a raised minimum OS (old phones can no
+  longer install) and an API change old app versions can't handle. Use before
+  shipping an app release, when bumping the Expo SDK / minSdkVersion /
+  deploymentTarget, before marking a release mandatory, or when changing a client
+  API response. Triggers on "ship a release", "will this strand users", "OS floor",
+  "min sdk / deployment target bump", "force update", "breaking API change".
 ---
 
 # Release Orphan Check
 
-**Purpose:** before a release ships, catch any users it would orphan — and steer
-you to the change that orphans nobody. Turn "orphaning a user" from an accident
-into a deliberate, visible choice.
+Before a release ships, find who it strands and how to avoid it. Read-only: you
+recommend, you never write to the DB or edit release rows.
 
-This skill validates against the locked spec in
-`docs/version-os-compatibility.md` (model fields `build_number`, `min_os`, `tier`,
-and the OS-ladder). It reads the live release/config **read-only** via the
-**aashray MCP** (`query_db`, `get_schema`). It runs locally because the ground
-truth for the OS floor lives in native files, not the database.
+## How the update system works (what you are checking against)
 
-## When to run
+- `updates` table, **one row per store release per platform**: `os`, `version`,
+  `min_os`, `mandatory`, `releaseNotes`. `min_os` unit: iOS version (`"16.4"`),
+  Android **API level** (`"26"`, same as `minSdkVersion`). NULL = everyone.
+- The app sends `x-platform`, `x-app-version`, `x-os-version` on every request.
+  The update check (`helpers/appUpdate.helper.js`) then returns, per device:
+  `forced` (below the newest mandatory release and can install it), `unsupported`
+  (below it but this OS can't install it: a dismissable notice, never a block),
+  `optional`, or `none`.
+- App builds older than this system send no headers and get the legacy answer:
+  newest row's `version` + `mandatory`. For them, a mandatory row they can't
+  install **is** a lockout. That is the one way this system can still strand users.
+- `device_telemetry`: last-seen `app_version` + `os_version` per user and platform.
 
-- **Plan phase** — the input is the plan text. Look for changes that would raise
-  the OS floor or alter an API contract.
-- **Before a build** — the input is `git diff <base>...HEAD` of the release branch.
-- **Manually, end of a feature cycle** — re-verify everything against `main`.
+## Step 1: gather (in parallel)
 
-## Inputs to gather
+1. **The change.** The plan text, or `git diff <base>...HEAD --stat` then the
+   relevant files.
+2. **The app's OS floor.** The app is a sibling repo (`../aashray-app` from the
+   backend). Its `ios/` and `android/` folders are generated and gitignored, so the
+   committed truth is only:
+   - `app.config.js`, the `expo-build-properties` plugin: `android.minSdkVersion`,
+     `ios.deploymentTarget`.
+   - `package.json`: the `expo` SDK version. With no `ios.deploymentTarget`, the
+     iOS floor is the SDK's default; read it from the generated `ios/Podfile`
+     line `platform :ios, ... || 'X'`. A local `ios/` may be stale, so if the SDK
+     changed, regenerate it first.
+   A native library that needs a higher OS fails the build (pod install / manifest
+   merge) until one of those two values is raised, so diffing these two files
+   catches every floor bump. Details in `references/native-floor.md`.
+3. **Live data** via the aashray MCP (prod, read-only): the release rows and the
+   telemetry counts. Queries in `references/mcp-queries.md`.
 
-1. **The change**: the plan text, or `git diff` of the branch (prefer `--stat`
-   first, then full diff of native + API-contract files).
-2. **The native OS-floor truth**, in this priority order (a library can raise the
-   floor silently, so check native first):
-   1. `ios/Podfile.lock` + `android/app/build.gradle` (and `gradle.properties`)
-   2. `app.config.js` / `app.json` (Expo `ios.deploymentTarget`,
-      `android.minSdkVersion`, config plugins)
-   3. The Expo SDK default deployment target / minSdk for the pinned SDK version
-   See `references/native-floor.md` for exactly what to read and how to map
-   Android `minSdkVersion` → marketing version.
-3. **The live release config** via the aashray MCP — current `updates` rows and
-   `device_telemetry`. See `references/mcp-queries.md`.
+## Step 2: the two checks
 
-> If the native files are absent (e.g. you are in the backend repo), say so
-> explicitly and run in **degraded mode**: you can still check the API contract
-> and read the DB, but you cannot confirm the OS floor. Recommend re-running from
-> the mobile/Expo repo.
+### A. Minimum OS raised
+Compare the new floor to the `min_os` of the newest `updates` row per platform
+(the floor of the release just before it).
 
-## The two hunts
+- Count active devices below the new floor from `device_telemetry`.
+- **Safer path:** can it ship without the native change? Over-the-air (Expo
+  Update) changes never move the floor. Check that over-the-air updates are
+  actually set up first: `updates.url` in `app.config.js` and a `channel` in the
+  `eas.json` build profiles. If not, say so instead of recommending it.
+- **If the floor must rise:** the new row must carry the new `min_os`. Devices
+  below it then get `optional` or `unsupported`, never a lockout, **as long as**
+  they run a build that sends the headers. If telemetry shows active users on
+  builds that don't send the headers (`app_version` is NULL, or no row at all),
+  do **not** mark this release mandatory.
 
-### 1. OS-floor bump — orphans old-OS phones
-Did a native change raise the minimum OS above what the last shipped build
-required? Compare the new native floor against the `min_os` of the current latest
-`updates` row for each platform.
+### B. API change that breaks old app versions
+Did a client route's request or response change in a way an old app version can't
+handle: a removed or renamed field, a changed type, a new required param, or a
+removed route?
 
-- **Safer path first:** *"Can this ship as JavaScript / over-the-air instead of
-  native?"* An OTA (Expo Update) change never moves the floor. If the dependency
-  can be swapped for a JS implementation or deferred, the release orphans nobody.
-- **If it must ship native and must raise the floor:** mark the release
-  `tier = required` and confirm the OS-ladder + honest `unsupported` screen catch
-  the stranded users (soft, keep-using notice — **not** a store dead-end). Size the
-  impact from `device_telemetry` (see below).
+- Find the oldest app version still in use (telemetry), then read that version's
+  code: `git -C ../aashray-app log --oneline -S"version: '<v>'" -- app.config.js`
+  gives the commit. Grep that commit for the field or route.
+- **Safer path:** make it additive. Add new fields, keep the old ones until
+  telemetry shows no app below that version.
+- **If it must break:** add a mandatory row at the first fixed version, and confirm
+  that version's `min_os` lets the affected devices install it.
 
-### 2. Contract break — orphans old app builds
-Did an endpoint, request shape, or response shape that old app builds depend on
-change incompatibly (removed/renamed field, changed type, new required param,
-removed route)?
-
-- **Safer path:** make the change **additive / versioned** — add new fields
-  instead of renaming, keep old ones until old builds age out, or version the
-  endpoint — so old builds keep working.
-- **If it must break:** it becomes an OS-independent force condition — a
-  `tier = required` release — and old builds below it must be forced. Confirm the
-  forced target is installable for the devices in question (same OS-ladder check).
-
-## Sizing the impact (honest limit)
-
-If `device_telemetry` has rows, quantify the orphaned population (active users on a
-platform whose `os_version` is below the new floor `F`). Pull distinct
-`os_version` values via `query_db` and compare them **app-side** with the same
-numeric comparator the backend uses (`utils/versionCompare.js` — never compare
-version strings in SQL: `"10" < "4"` lexically). See `references/mcp-queries.md`.
-
-**If `device_telemetry` is empty or absent**, state plainly: *"I can flag that this
-release orphans users, but cannot yet size how many — the backend isn't recording
-OS/app-version on normal traffic. Capturing that (the `device_telemetry`
-middleware) is step 1."* Do not invent numbers.
-
-## Output — every run ends with this shape
+## Output (always this shape, short)
 
 ```
-▎ Here's who this release orphans
-    → <who: platforms + OS versions below the floor, and/or app builds below a
-       broken contract; with counts if telemetry exists>
-
-▎ Here's the change that wouldn't
-    → <the JS/OTA alternative, or the additive/versioned API change>
-
-▎ If you must ship it as-is, here's how to force it safely
-    → set tier=required on the release row(s), and confirm the OS-ladder returns
-      `unsupported` (soft, keep-using) — never a brick — for devices that can't
-      reach the fix.
+Who this strands: <platforms + OS / app versions, with counts or "not sized">
+Change that wouldn't: <the over-the-air / additive alternative, or "none">
+If shipping as-is: <the exact updates row to add: version, min_os, mandatory>
 ```
 
-If nothing is orphaned, say so directly and confirm which files you checked.
+If nothing is stranded, say so and list the files and queries you checked. Never
+invent counts. If telemetry is empty, say "flagged, not sized".
 
-## Guardrails
+## Keep this skill current
 
-- Read-only only. Never write to the DB (the MCP user is SELECT-only anyway) and
-  never modify release rows — you *recommend* `tier` changes, you don't apply them.
-- Never fabricate impact numbers; distinguish "flagged" from "sized".
-- Compare versions numerically, per `references/native-floor.md`.
-
-## Keep this skill evolving — live, during the run
-
-This skill is not fixed. The release landscape shifts under it: a new native
-dependency raises the floor in a way this skill didn't look for, the Expo SDK
-changes where the deployment target lives, a new API-contract shape slips
-through, or the `updates` / `device_telemetry` schema grows a field. **When a run
-exposes a gap — a real orphaning path this skill would have missed, a query that's
-now wrong, a file location that moved — fix this SKILL.md (or its `references/`)
-then and there, in the same session.** Don't defer it to "later" or trust memory.
-
-Signals that the file needs an edit:
-- You had to check a native file or config key not listed in "Inputs to gather"
-  or `references/native-floor.md` → add it.
-- An MCP query in `references/mcp-queries.md` returned the wrong shape or errored
-  → correct it against the live schema.
-- A reviewer or a shipped incident revealed an orphaning path (OS-floor or
-  contract) the two hunts don't cover → add the hunt.
-- The output shape didn't fit the decision the user actually had to make → refine it.
-
-When the signal is clear (not a one-off), act in the same session: name the gap in
-one line, propose the exact edit, and on the user's OK apply it — keeping the
-structure, reusing the real moment as the example.
+When a run hits something this file got wrong (a moved config key, a query that
+errors, a stranding path neither check covers), name the gap in one line, propose
+the exact edit, and apply it on the user's OK in the same session.
