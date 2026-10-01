@@ -26,6 +26,7 @@ function listFiles(dir) {
   return out;
 }
 
+const IDENT = /^[A-Za-z_$][\w$]*$/;
 const importRe = /(?:const|let|var)\s*\{([^}]+)\}\s*=\s*await\s+import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
 let checked = 0;
 const problems = [];
@@ -42,17 +43,46 @@ for (const file of listFiles(root)) {
     }
     const t = fs.readFileSync(target, 'utf8');
     if (/^\s*export\s*\*\s*from/m.test(t)) continue; // re-exports: cannot check by text
-    for (const raw of m[1].split(',')) {
-      const name = raw.split(/[:=]/)[0].trim();
-      if (!name) continue;
-      const found =
-        name === 'default'
-          ? /export\s+default\b/.test(t)
-          : new RegExp(`export\\s+(async\\s+)?(const|let|var|function\\*?|class)\\s+${name}\\b`).test(t) ||
-            new RegExp(`export\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`).test(t);
-      if (!found) problems.push(`${where}\t'${name}' is not exported by ${m[2]}`);
+    const exported = exportedNames(t);
+    for (const name of importedNames(m[1])) {
+      if (!exported.has(name)) problems.push(`${where}\t'${name}' is not exported by ${m[2]}`);
     }
   }
+}
+
+// Names bound by `{ a, b: alias, c = 1, ...rest }`. Rest elements and anything
+// that is not a plain identifier (e.g. left over from a comment) are skipped.
+function importedNames(list) {
+  const names = [];
+  for (const raw of stripComments(list).split(',')) {
+    const part = raw.trim();
+    if (!part || part.startsWith('...')) continue;
+    const name = part.split(/[:=]/)[0].trim();
+    if (IDENT.test(name)) names.push(name);
+  }
+  return names;
+}
+
+// Names a module exports: declarations (incl. `function *gen`) and the exported
+// side of `export { a, b as c }`.
+function exportedNames(src) {
+  const code = stripComments(src);
+  const names = new Set();
+  if (/export\s+default\b/.test(code)) names.add('default');
+  const decl = /export\s+(?:async\s+)?(?:(?:const|let|var|class)\s+|function\s*\*?\s*)([A-Za-z_$][\w$]*)/g;
+  for (const d of code.matchAll(decl)) names.add(d[1]);
+  for (const l of code.matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const item of l[1].split(',')) {
+      const parts = item.trim().split(/\s+as\s+/);
+      const name = (parts[1] ?? parts[0]).trim();
+      if (IDENT.test(name)) names.add(name);
+    }
+  }
+  return names;
+}
+
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
 for (const p of problems) console.error(p);
