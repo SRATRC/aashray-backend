@@ -17,7 +17,8 @@ import {
   STATUS_CASH_PENDING,
   STATUS_CASH_COMPLETED,
   ERR_UTSAV_FEEDBACK_ALREADY_SUBMITTED,
-  ROOM_STATUS_CHECKEDIN
+  ROOM_STATUS_CHECKEDIN,
+  ERR_BOOKING_NOT_FOUND
 } from '../config/constants.js';
 import logger from '../config/logger.js';
 import {

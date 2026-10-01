@@ -473,23 +473,6 @@ export async function checkAdhyayanAvailabilityForMumukshus(
   return adhyayanDetails;
 }
 
-export async function getAdhyayanBookings(bookingIds) {
-  const adhyanBookings = await ShibirBookingDb.findOne({
-    include: [
-      {
-        model: ShibirDb,
-        attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
-        where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
-      }
-    ],
-    where: {
-      [Op.in]: bookingIds
-    }
-  });
-
-  return adhyanBookings;
-}
-
 export async function validateFeedbackEligibility(cardno, shibir_id) {
   const adhyayan = await ShibirDb.findOne({
     where: { id: shibir_id }
