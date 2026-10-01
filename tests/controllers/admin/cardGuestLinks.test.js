@@ -87,9 +87,9 @@ describe('Staff card save keeps guest links', () => {
 
   beforeEach(async () => {
     await GuestRelationship.truncate();
+    // Each guest has one host, as bookings create them.
     await link(HOST_A, GUEST_X);
     await link(HOST_A, GUEST_Y);
-    await link(HOST_B, GUEST_X);
   });
 
   it("editing a host's own card keeps that host's guest list", async () => {
@@ -104,7 +104,7 @@ describe('Staff card save keeps guest links', () => {
     expect(guests).toEqual([GUEST_X, GUEST_Y]);
   });
 
-  it('editing a guest card updates its link to the named host only', async () => {
+  it('saving a guest card with the same host updates that one link', async () => {
     const res = await request(app)
       .put('/api/v1/admin/card/update')
       .set(AUTH)
@@ -112,21 +112,24 @@ describe('Staff card save keeps guest links', () => {
 
     expect(res.status).toBe(200);
     const links = await linksOf({ guest: GUEST_X });
-    expect(links.map((l) => [l.cardno, l.type])).toEqual([
-      [HOST_A, 'Family'],
-      [HOST_B, 'Friend']
-    ]);
+    expect(links.map((l) => [l.cardno, l.type])).toEqual([[HOST_A, 'Family']]);
   });
 
-  it('naming a new host adds a link and keeps the existing hosts', async () => {
+  it('naming a new host moves the guest and drops every older host link', async () => {
+    // A leftover second host, as the old save could leave behind.
+    await link(HOST_B, GUEST_X);
+
     const res = await request(app)
       .put('/api/v1/admin/card/update')
       .set(AUTH)
       .send(await saveBody(GUEST_X, { referenceCardno: HOST_C, guestType: 'Driver' }));
 
     expect(res.status).toBe(200);
-    const hosts = (await linksOf({ guest: GUEST_X })).map((l) => l.cardno);
-    expect(hosts).toEqual([HOST_A, HOST_B, HOST_C]);
+    const links = await linksOf({ guest: GUEST_X });
+    expect(links.map((l) => [l.cardno, l.type])).toEqual([[HOST_C, 'Driver']]);
+    // The old host no longer sees the guest, and keeps their other guests.
+    expect((await linksOf({ cardno: HOST_A })).map((l) => l.guest)).toEqual([GUEST_Y]);
+    expect(await linksOf({ cardno: HOST_B })).toHaveLength(0);
   });
 
   it('refuses a host card that does not exist, without saving the card', async () => {
@@ -146,7 +149,7 @@ describe('Staff card save keeps guest links', () => {
     expect(res.status).toBe(400);
     const after = await CardDb.findOne({ where: { cardno: GUEST_X } });
     expect(after.issuedto).toBe(before.issuedto);
-    expect(await linksOf({ guest: GUEST_X })).toHaveLength(2);
+    expect((await linksOf({ guest: GUEST_X })).map((l) => l.cardno)).toEqual([HOST_A]);
   });
 
   it('refuses a guest named as their own host', async () => {
@@ -168,7 +171,7 @@ describe('Staff card save keeps guest links', () => {
     expect(res.status).toBe(200);
     const card = await CardDb.findOne({ where: { cardno: GUEST_X } });
     expect(card.res_status).toBe(STATUS_GUEST);
-    expect((await linksOf({ guest: GUEST_X })).map((l) => l.cardno)).toEqual([HOST_A, HOST_B]);
+    expect((await linksOf({ guest: GUEST_X })).map((l) => l.cardno)).toEqual([HOST_A]);
   });
 
   it('a guest who becomes a Mumukshu loses only the links where they are the guest', async () => {
