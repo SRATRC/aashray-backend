@@ -12,6 +12,11 @@ import {
 // populated req.user) and can never delay or fail the response. Only records
 // authenticated requests, keeping the table bounded to one row per (user,
 // platform).
+// Last value written per member+platform, so a busy session doesn't upsert on
+// every request: write only when it changes or once a day.
+const lastWrite = new Map();
+const REWRITE_AFTER_MS = 24 * 60 * 60 * 1000;
+
 export const deviceTelemetry = (req, res, next) => {
   res.on('finish', () => {
     try {
@@ -27,6 +32,13 @@ export const deviceTelemetry = (req, res, next) => {
         (req.headers[HEADER_APP_VERSION] || '').toString().trim() || null;
       const os_version =
         (req.headers[HEADER_OS_VERSION] || '').toString().trim() || null;
+
+      const key = `${cardno}:${platform}`;
+      const value = `${app_version}|${os_version}`;
+      const prev = lastWrite.get(key);
+      if (prev?.value === value && Date.now() - prev.at < REWRITE_AFTER_MS)
+        return;
+      lastWrite.set(key, { value, at: Date.now() });
 
       DeviceTelemetry.upsert({
         cardno,

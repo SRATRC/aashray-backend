@@ -17,7 +17,7 @@ import { compareVersions } from '../utils/versionCompare.js';
  *   Releases for the platform, in any order.
  * @param {string} currentVersion - the client's app version ("1.1.59").
  * @param {string} osVersion - iOS version ("16.4") or Android API level ("26").
- * @returns {{updateType:string, targetVersion:?string, releaseNotes:?string, minOsVersion:?string}}
+ * @returns {{updateType:string, targetVersion:?string, targetReleaseNotes:?string, minOsVersion:?string}}
  */
 export function decideUpdate(rows, currentVersion, osVersion) {
   // Newest first. Rows are edited by hand, so order by version, not createdAt.
@@ -35,19 +35,25 @@ export function decideUpdate(rows, currentVersion, osVersion) {
     return cmp !== null && cmp <= 0;
   });
 
-  // The force floor: the newest release marked mandatory.
+  // The newest mandatory release overall, and the newest one this device can
+  // reach (at or below its target). A later mandatory release that raised
+  // min_os must not cancel an earlier one the device can still install.
   const floor = releases.find((r) => r.mandatory);
+  const reachableFloor =
+    target &&
+    releases.find(
+      (r) => r.mandatory && compareVersions(r.version, target.version) <= 0
+    );
 
   let updateType = UPDATE_TYPE_NONE;
   if (!latest || !isBelow(latest.version)) {
     updateType = UPDATE_TYPE_NONE;
+  } else if (reachableFloor && isBelow(reachableFloor.version)) {
+    updateType = UPDATE_TYPE_FORCED;
   } else if (floor && isBelow(floor.version)) {
-    // Force only if this device can reach a build at or above the floor.
-    // Otherwise never a store dead-end: a dismissable keep-using notice.
-    updateType =
-      target && compareVersions(target.version, floor.version) >= 0
-        ? UPDATE_TYPE_FORCED
-        : UPDATE_TYPE_UNSUPPORTED;
+    // Required build exists but this OS can't install it. Never a store
+    // dead-end: a dismissable keep-using notice.
+    updateType = UPDATE_TYPE_UNSUPPORTED;
   } else if (target && isBelow(target.version)) {
     updateType = UPDATE_TYPE_OPTIONAL;
   }
@@ -55,8 +61,8 @@ export function decideUpdate(rows, currentVersion, osVersion) {
   return {
     updateType,
     targetVersion: target ? target.version : null,
-    // Notes for the build we send them to, not for the newest row.
-    releaseNotes: target ? target.releaseNotes : null,
+    // Notes for the build we send them to; legacy releaseNotes stays as is.
+    targetReleaseNotes: target ? target.releaseNotes : null,
     minOsVersion: latest?.min_os ?? null
   };
 }
