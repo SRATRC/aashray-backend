@@ -1,94 +1,131 @@
 ---
 name: release-orphan-check
 description: >-
-  Pre-release check that finds users a release would strand, and the change that
-  strands nobody. Looks for two things: a raised minimum OS (old phones can no
-  longer install) and an API change old app versions can't handle. Use before
-  shipping an app release, when bumping the Expo SDK / minSdkVersion /
+  Pre-release check for an app release: who it strands, the change that strands
+  nobody, and the exact `updates` rows to add. Looks for a raised minimum OS (old
+  phones can no longer install) and an API change old app versions can't handle.
+  Use before shipping an app release, when bumping the Expo SDK / minSdkVersion /
   deploymentTarget, before marking a release mandatory, or when changing a client
   API response. Triggers on "ship a release", "will this strand users", "OS floor",
-  "min sdk / deployment target bump", "force update", "breaking API change".
+  "min sdk / deployment target bump", "force update", "breaking API change",
+  "what do I put in the updates table", "new release row".
 ---
 
 # Release Orphan Check
 
-Before a release ships, find who it strands and how to avoid it. Read-only: you
-recommend, you never write to the DB or edit release rows.
+Before an app release ships: who it strands, how to avoid it, and the exact
+`updates` rows to add. Read-only: you recommend and hand over SQL, you never
+write to the DB or edit release rows.
 
-## How the update system works (what you are checking against)
+## How the update system works
 
 - `updates` table, **one row per store release per platform**: `os`, `version`,
   `min_os`, `mandatory`, `releaseNotes`. `min_os` unit: iOS version (`"16.4"`),
   Android **API level** (`"26"`, same as `minSdkVersion`). NULL = everyone.
-- The app sends `x-platform`, `x-app-version`, `x-os-version` on every request.
-  The update check (`helpers/appUpdate.helper.js`) then returns, per device:
-  `forced` (below the newest mandatory release and can install it), `unsupported`
-  (below it but this OS can't install it: a dismissable notice, never a block),
-  `optional`, or `none`.
-- App builds older than this system send no headers and get the legacy answer:
-  newest row's `version` + `mandatory`. For them, a mandatory row they can't
-  install **is** a lockout. That is the one way this system can still strand users.
-- `device_telemetry`: last-seen `app_version` + `os_version` per user and platform.
+- **Apps that send `x-app-version` + `x-os-version`** get a per-device answer
+  (`helpers/appUpdate.helper.js`): `forced` if below a mandatory release this OS
+  can install, `unsupported` (dismissable notice, never a block) if below one it
+  can't, else `optional` or `none`. Every mandatory row counts.
+- **Apps that don't send them** (every build before the header change) get only
+  the **newest row by `createdAt`**: its `version` and `mandatory`. For them:
+  - a new row with `mandatory = 0` drops whatever force they have today;
+  - `mandatory = 1` forces all of them, even phones whose OS can't install it.
+    `min_os` does not protect them.
+- `device_telemetry`: last-seen `app_version` + `os_version` per member and
+  platform, from logged-in requests that send the headers.
 
 ## Step 1: gather (in parallel)
 
-1. **The change.** The plan text, or `git diff <base>...HEAD --stat` then the
-   relevant files.
-2. **The app's OS floor.** The app is a sibling repo (`../aashray-app` from the
-   backend). Its `ios/` and `android/` folders are generated and gitignored, so the
-   committed truth is only:
-   - `app.config.js`, the `expo-build-properties` plugin: `android.minSdkVersion`,
-     `ios.deploymentTarget`.
-   - `package.json`: the `expo` SDK version. With no `ios.deploymentTarget`, the
-     iOS floor is the SDK's default; read it from the generated `ios/Podfile`
-     line `platform :ios, ... || 'X'`. A local `ios/` may be stale, so if the SDK
-     changed, regenerate it first.
-   A native library that needs a higher OS fails the build (pod install / manifest
-   merge) until one of those two values is raised, so diffing these two files
-   catches every floor bump. Details in `references/native-floor.md`.
-3. **Live data** via the aashray MCP (prod, read-only): the release rows and the
-   telemetry counts. Queries in `references/mcp-queries.md`.
+1. **The release.** The app repo is a sibling (`../aashray-app` from the
+   backend). `git -C ../aashray-app fetch origin main`, then read everything at
+   `origin/main` with `git show`, never the local checkout (it may be on another
+   branch with someone's work).
+   **Base**, per platform = the commit that set the last version shipped on
+   that platform: `git -C ../aashray-app log --reverse --oneline
+   -G"^    version: '<v>'" origin/main -- app.config.js | head -1` (the
+   top-level expo `version:`, not the razorpay pod's). `<v>` = that platform's
+   newest `updates` row, unless the user says a newer one shipped (ask Q1 from
+   Step 3 now if the rows look stale: row versions behind `origin/main`).
+2. **The OS floor** at the release and at the base. See
+   `references/native-floor.md`. Read-only; never run `expo prebuild`.
+3. **Does this release send the headers?** `git -C ../aashray-app grep -n
+   x-os-version origin/main -- src`. If not, all of `min_os` protects nobody yet:
+   say so first.
+4. **Live data** via the aashray MCP (prod, read-only):
+   `references/mcp-queries.md`. If `min_os` or `device_telemetry` is missing, the
+   backend change isn't deployed: say so, and give rows without `min_os`.
+   Production runs backend `origin/main`; treat that as what's deployed.
 
 ## Step 2: the two checks
 
 ### A. Minimum OS raised
-Compare the new floor to the `min_os` of the newest `updates` row per platform
-(the floor of the release just before it).
+Raised = the floor at the release is above the floor at the base. Don't use the
+rows for this: older rows have NULL `min_os`.
 
-- Count active devices below the new floor from `device_telemetry`.
-- **Safer path:** can it ship without the native change? Over-the-air (Expo
-  Update) changes never move the floor. Check that over-the-air updates are
-  actually set up first: `updates.url` in `app.config.js` and a `channel` in the
-  `eas.json` build profiles. If not, say so instead of recommending it.
-- **If the floor must rise:** the new row must carry the new `min_os`. Devices
-  below it then get `optional` or `unsupported`, never a lockout, **as long as**
-  they run a build that sends the headers. If telemetry shows active users on
-  builds that don't send the headers (`app_version` is NULL, or no row at all),
-  do **not** mark this release mandatory.
+- **Size it:** active devices below the new floor (telemetry). Always add that
+  builds without the headers aren't counted.
+- **Safer path:** can it ship over the air instead? Only if all hold:
+  `updates.url` is set in `app.config.js`, the `eas.json` build profiles have a
+  `channel`, and the change keeps the same runtime version (`runtimeVersion`
+  policy `sdkVersion`: any SDK bump needs a store build; `appVersion`: any
+  version bump does). Otherwise say over-the-air isn't available and why.
+- **If the floor must rise:** header-sending builds below it get `optional` or
+  `unsupported`, never a lockout. Builds without headers aren't protected: don't
+  make the row mandatory while they may still be in use.
+- **Apps without headers reach further back than the base.** If a row may be
+  mandatory, also find the lowest floor ever shipped: the floor at the oldest
+  version-bump commit of `app.config.js` (and each SDK bump since). Phones on
+  builds older than that with an OS below the new floor can't install it.
 
-### B. API change that breaks old app versions
-Did a client route's request or response change in a way an old app version can't
-handle: a removed or renamed field, a changed type, a new required param, or a
-removed route?
+### B. Change that breaks old app versions
+- **Backend change:** a client route's request or response changed in a way an
+  old app can't handle (removed or renamed field, changed type, new required
+  param, removed route).
+- **App-only release:** does the new app need a backend field or route that
+  isn't deployed yet?
+- To check an old app version: find the oldest one in use (telemetry), get its
+  commit with `git -C ../aashray-app log --reverse --oneline -G"^    version:
+  '<v>'" origin/main -- app.config.js | head -1`, and grep that commit.
+- **Safer path:** additive. New fields beside old ones until no app below that
+  version is active.
+- **If it must break:** a mandatory row at the first fixed version.
 
-- Find the oldest app version still in use (telemetry), then read that version's
-  code: `git -C ../aashray-app log --oneline -S"version: '<v>'" -- app.config.js`
-  gives the commit. Grep that commit for the field or route.
-- **Safer path:** make it additive. Add new fields, keep the old ones until
-  telemetry shows no app below that version.
-- **If it must break:** add a mandatory row at the first fixed version, and confirm
-  that version's `min_os` lets the affected devices install it.
+## Step 3: the rows to add (every run)
+
+One row per platform. Work each value out; don't guess.
+
+| Field | Source |
+|---|---|
+| `version` | Top-level expo `version:` in `app.config.js` at `origin/main`. Must be higher than every row for that platform. **Ask: "Was `<v>` already submitted to either store?"** If yes, the app needs a version bump before this build. |
+| `min_os` iOS / Android | The floor at the release (Step 1.2). |
+| `mandatory` | `1` if check B found a break this release fixes. Otherwise **ask per platform**, and show what each choice does to apps without headers: `0` drops the force the newest row gives today (name it); `1` forces all of them, including phones that can't install it. Never default to `1`. |
+| `releaseNotes` | Ask, or NULL. |
+
+Warn when: the floor rose (check A); or `mandatory = 1` while devices below
+`min_os` are active, or builds without headers may be.
+
+Give the SQL for the user to run. `createdAt`/`updatedAt` have no default.
+
+```sql
+INSERT INTO updates (os, version, min_os, mandatory, releaseNotes, createdAt, updatedAt) VALUES
+  ('ios',     '<version>', '<ios floor>',     <0|1>, <notes or NULL>, NOW(), NOW()),
+  ('android', '<version>', '<android floor>', <0|1>, <notes or NULL>, NOW(), NOW());
+```
+
+Before the backend change is deployed, drop `min_os` from the column list and
+the values. Add rows only; never edit or delete old ones.
 
 ## Output (always this shape, short)
 
 ```
 Who this strands: <platforms + OS / app versions, with counts or "not sized">
-Change that wouldn't: <the over-the-air / additive alternative, or "none">
-If shipping as-is: <the exact updates row to add: version, min_os, mandatory>
+Change that wouldn't: <over-the-air / additive alternative, or why there is none>
+Rows to add: <the INSERT, filled in, with questions as marked placeholders>
+Warnings: <floor raised, mandatory risks, rows edited in place; or "none">
+Questions: <only the ones you need answered, one line each>
 ```
 
-If nothing is stranded, say so and list the files and queries you checked. Never
-invent counts. If telemetry is empty, say "flagged, not sized".
+Never invent counts. If telemetry is empty or missing, say "flagged, not sized".
 
 ## Keep this skill current
 

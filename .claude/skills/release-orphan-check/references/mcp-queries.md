@@ -12,10 +12,16 @@ FROM updates
 ORDER BY os, createdAt DESC;
 ```
 
-Sort by `version` yourself, not `createdAt`: staff edit rows by hand. The force
-floor is the highest `version` with `mandatory = 1`. If a platform has only one
-row that keeps being edited, flag it: each edit drops the earlier floor. Each
-store release should be a new row.
+If this errors on `min_os`, the backend change isn't deployed: re-run without it.
+
+- **Header-sending apps:** the force floor is the highest `version` with
+  `mandatory = 1`. Sort by `version` yourself; staff edit rows by hand.
+- **Apps without headers:** only the newest row by `createdAt` counts. Note its
+  `mandatory`: the new row replaces it for them.
+- **Edited in place:** a row whose `version` was set in git (version-bump commit
+  date) after the row's `createdAt` was edited later; `updatedAt` doesn't show
+  hand edits. Earlier floors were lost. Say so; each store release should be a
+  new row.
 
 ## Devices per OS (sizing check A)
 
