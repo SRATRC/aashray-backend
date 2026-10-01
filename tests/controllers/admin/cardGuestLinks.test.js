@@ -158,6 +158,19 @@ describe('Staff card save keeps guest links', () => {
     expect(res.status).toBe(400);
   });
 
+  it('a guest card saved without its member type keeps all its links', async () => {
+    // A partial save, such as a mobile-number fix, leaves the card a guest.
+    const res = await request(app)
+      .put('/api/v1/admin/card/update')
+      .set(AUTH)
+      .send({ cardno: GUEST_X, city: 'Surat' });
+
+    expect(res.status).toBe(200);
+    const card = await CardDb.findOne({ where: { cardno: GUEST_X } });
+    expect(card.res_status).toBe(STATUS_GUEST);
+    expect((await linksOf({ guest: GUEST_X })).map((l) => l.cardno)).toEqual([HOST_A, HOST_B]);
+  });
+
   it('a guest who becomes a Mumukshu loses only the links where they are the guest', async () => {
     // GUEST_X also books for GUEST_Y; that link is theirs and must stay.
     await link(GUEST_X, GUEST_Y);

@@ -367,9 +367,11 @@ export const updateCard = async (req, res) => {
         updatedBy: req.user.username
       });
     }
-  } else if (wasGuest) {
+  } else if (wasGuest && card.res_status !== STATUS_GUEST) {
     // The card stopped being a guest card: drop the links where it is the
     // guest. Links where it is the host belong to its own guests and stay.
+    // Checked on the saved card, not the request: a save that leaves out the
+    // member type keeps the card a guest.
     await GuestRelationship.destroy({ where: { guest: cardno } });
   }
 
