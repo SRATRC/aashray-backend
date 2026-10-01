@@ -394,8 +394,8 @@ export async function useCredit(card, booking, transaction, amount, updatedBy, t
   );
 
   // After applying credits, if the transaction is complete
-  // then confirm the booking.
-  if (status == STATUS_PAYMENT_COMPLETED) {
+  // then confirm the booking. Meals pass no booking: a meal has no status.
+  if (status == STATUS_PAYMENT_COMPLETED && booking) {
     const bookingStatus =
       bookingType == TYPE_ROOM || bookingType == TYPE_FLAT
         ? ROOM_STATUS_PENDING_CHECKIN
