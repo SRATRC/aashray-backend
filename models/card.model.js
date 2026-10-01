@@ -133,7 +133,16 @@ const CardDb = sequelize.define(
   },
   {
     tableName: 'card_db',
-    timestamps: true
+    timestamps: true,
+    // The password hash never leaves the backend. Leaving it out of every
+    // query by default also keeps it out of cards nested in other results.
+    // Only sign-in and password change read it, through 'withPassword'.
+    defaultScope: {
+      attributes: { exclude: ['password'] }
+    },
+    scopes: {
+      withPassword: {}
+    }
   }
 );
 

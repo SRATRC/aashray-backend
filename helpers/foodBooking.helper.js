@@ -13,11 +13,13 @@ import {
   STATUS_CASH_PENDING,
   STATUS_CONFIRMED,
   STATUS_GUEST,
+  STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_PENDING,
   STATUS_RESIDENT,
   STATUS_SEVA_KUTIR,
   TYPE_GUEST_BREAKFAST,
   TYPE_GUEST_DINNER,
+  TYPE_FOOD,
   TYPE_GUEST_LUNCH,
   TYPE_UTSAV
 } from '../config/constants.js';
@@ -40,7 +42,13 @@ import { sendUtsavStatusChangeWhatsApp } from './whatsapp.helper.js';
 import { validateCards } from './card.helper.js';
 import { checkRoomAlreadyBooked } from './roomBooking.helper.js';
 import { v4 as uuidv4 } from 'uuid';
-import { cancelTransactions } from './transactions.helper.js';
+import {
+  PAYABLE_TRANSACTION_STATUSES,
+  cancelTransactions,
+  parseCredits,
+  usableCredits,
+  useCredit
+} from './transactions.helper.js';
 import ApiError from '../utils/ApiError.js';
 import getDates from '../utils/getDates.js';
 import moment from 'moment-timezone';
@@ -223,6 +231,30 @@ export async function bookFoodForMumukshus(
     transaction: t
   });
   const transactionIds = transactions.map((item) => item.id);
+
+  // Spend the payer's food credit on the new meal charges, as every other
+  // booking type does. The amount returned is what is still owed, so the
+  // payment order matches the charges it is stamped on.
+  if (transactions.length > 0) {
+    const payer = await CardDb.findOne({
+      where: { cardno: bookedBy },
+      attributes: ['cardno', 'credits'],
+      transaction: t
+    });
+    if ((parseCredits(payer?.credits)[TYPE_FOOD] || 0) > 0) {
+      amount = 0;
+      for (const transaction of transactions) {
+        amount += await useCredit(
+          payer,
+          null,
+          transaction,
+          transaction.amount,
+          updatedBy,
+          t
+        );
+      }
+    }
+  }
   log.info('food_booking_result', {
     created: bookingsToCreate.length,
     transactions: transactionIds.length,
@@ -243,7 +275,8 @@ export async function checkFoodAvailabilityForMumumkshus(
   mumukshuGroup,
   primary_booking,
   addons,
-  utsav
+  utsav,
+  payer = null
 ) {
   if (!end_date) {
     end_date = start_date;
@@ -297,10 +330,12 @@ export async function checkFoodAvailabilityForMumumkshus(
   return {
     status: STATUS_AVAILABLE,
     charge,
-    // bookFoodForMumukshus writes meal transactions at full price and never
-    // calls useCredit, so no food credit is ever spent. Reporting a credit here
-    // would show a "pay now" figure below what Razorpay actually collects.
-    availableCredits: 0
+    // The payer's food credit that bookFoodForMumukshus will spend on these
+    // meals. A copy, so the preview does not change the payer's balance.
+    availableCredits:
+      payer && charge > 0
+        ? usableCredits({ credits: payer.credits }, TYPE_FOOD, charge)
+        : 0
   };
 }
 
@@ -454,18 +489,26 @@ export async function cancelFood(user, cardno, food_data, t, admin = false) {
 
     await cancelMeal(user, booking.id, mealType, t);
 
-    // FIXME: guests can book self meals too
-    if (bookedFor) {
-      const transaction = await Transactions.findOne({
-        where: {
-          bookingid: booking.id,
-          category: mealTypeMapping[mealType]
-        }
-      });
+    // Cancel the meal's own charge whoever booked it, so a guest who paid for
+    // their own meal, or spent credit on it, gets credit back too. Only an
+    // open or paid charge counts: a meal booked again after an earlier cancel
+    // has a newer charge, and the old cancelled one must be left alone.
+    const transaction = await Transactions.findOne({
+      where: {
+        bookingid: booking.id,
+        category: mealTypeMapping[mealType],
+        status: [
+          ...PAYABLE_TRANSACTION_STATUSES,
+          STATUS_PAYMENT_COMPLETED,
+          STATUS_CASH_COMPLETED
+        ]
+      },
+      order: [['createdAt', 'DESC']],
+      transaction: t
+    });
 
-      if (transaction) {
-        transactions.push(transaction);
-      }
+    if (transaction) {
+      transactions.push(transaction);
     }
   }
 
