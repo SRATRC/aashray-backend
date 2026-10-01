@@ -600,7 +600,8 @@ async function checkFoodAvailability(body, data, user, utsav) {
     mumukshuGroup,
     body.primary_booking,
     body.addons,
-    utsav
+    utsav,
+    user
   );
 
   return result;

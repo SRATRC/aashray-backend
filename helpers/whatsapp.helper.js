@@ -6,6 +6,7 @@ import moment from "moment-timezone";
 import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD, STATUS_RESIDENT } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { formatWhatsAppPhone } from "../utils/phoneFormatter.js";
+import logger from "../config/logger.js";
 import fs from "fs";
 import path from "path";
 
@@ -21,9 +22,28 @@ const TEMPLATE_PARAM_COUNTS = {
   // add the actual counts for your templates
 };
 
+// A template that tells the member their booking is confirmed: a new-booking
+// confirmation (bn_..._cf), a status change into confirmed or, for stays,
+// into pending check-in (bk_...2conf, bk_...2pgci), or a legacy *_confirmed name.
+const CONFIRMATION_TEMPLATE =
+  /^booking_[a-z]+_.*confirmed|^bn_[a-z]+_[a-z]+_[bf]_(cf|cnf|cnfm|conf)(_|$)|^bk_[a-z]+_[a-z]+_[bf]_[a-z]*2(cf|conf|cnf|cnfm|pgci|pndchki)(_|$)/;
+
+function isConfirmationTemplate(template) {
+  return CONFIRMATION_TEMPLATE.test(String(template || ''));
+}
+
+// Logged to the application log (not the console) so a dropped message can be
+// found in production. The phone number is left out on purpose.
+function logMissingTemplate(template) {
+  logger.error('whatsapp_template_missing_not_sent', {
+    template,
+    domain: String(template || '').split('_')[1] || 'unknown'
+  });
+}
+
 /**
  * Helper that tries primary template and if WhatsApp returns a "template missing" 404,
- * retries with a fallback template (usually a 'confirmed' variant). Non-fatal.
+ * retries with a fallback template of the same meaning. Non-fatal.
  */
 async function sendWithTemplateFallback(phone, template, components) {
   const trySend = async (tpl, comps, lang = null) => {
@@ -58,8 +78,17 @@ async function sendWithTemplateFallback(phone, template, components) {
     if (attempt.ok) return attempt;
   }
 
-  // 3. If still missing, try fallback template
+  // 3. If still missing, try a fallback template with the same meaning
   if (attempt.isTemplateMissing) {
+    // The fallbacks below send "confirmed" messages. Sending one for a
+    // waitlisted, pending or cancelled booking tells the member the wrong
+    // thing, so only a confirmation may fall back to another confirmation.
+    const isSameMeaningSwap = template === "bk_usv_s_b_canc2adcanc_wcre";
+    if (!isSameMeaningSwap && !isConfirmationTemplate(template)) {
+      logMissingTemplate(template);
+      return { ok: false, error: attempt.error };
+    }
+
     let fallbackTemplate = template;
     let fallbackComponents = components;
 
@@ -125,13 +154,10 @@ async function sendWithTemplateFallback(phone, template, components) {
         bodyComp.parameters.push(bodyComp.parameters[0]);
       }
     } else {
-      fallbackTemplate = fallbackTemplate.replace(
-        /_pending_for|_pending|_waiting_for|_waiting/gi,
-        "_confirmed"
-      );
-      if (fallbackTemplate === template) {
-        fallbackTemplate = "booking_adhyayan_self_confirmed";
-      }
+      // No fallback of the same meaning for this domain. The old catch-all
+      // sent an Adhyayan confirmation for any booking type.
+      logMissingTemplate(template);
+      return { ok: false, error: attempt.error };
     }
 
     console.log(`WA SEND: retrying with fallback template '${fallbackTemplate}'`);
