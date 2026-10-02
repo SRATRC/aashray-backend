@@ -246,6 +246,38 @@ export const searchCardsByName = async (req, res) => {
       attributes: { exclude: ['token'] }
     });
 
+    // Staff edit a guest card with its current host filled in, so each guest
+    // card also gets its host's card number, name and guest type.
+    const guestCardnos = data
+      .filter((card) => card.res_status === STATUS_GUEST)
+      .map((card) => card.cardno);
+    if (guestCardnos.length > 0) {
+      const links = await GuestRelationship.findAll({
+        where: { guest: guestCardnos },
+        attributes: ['cardno', 'guest', 'type'],
+        order: [['updatedAt', 'DESC']]
+      });
+      const hosts = await CardDb.findAll({
+        where: { cardno: [...new Set(links.map((link) => link.cardno))] },
+        attributes: ['cardno', 'issuedto']
+      });
+      const hostNames = new Map(hosts.map((host) => [host.cardno, host.issuedto]));
+
+      // A guest has one host. If older data left more than one, the newest wins.
+      const linkOfGuest = new Map();
+      for (const link of links) {
+        if (!linkOfGuest.has(link.guest)) linkOfGuest.set(link.guest, link);
+      }
+
+      for (const card of data) {
+        const link = linkOfGuest.get(card.cardno);
+        if (!link) continue;
+        card.setDataValue('referenceCardno', link.cardno);
+        card.setDataValue('referenceName', hostNames.get(link.cardno) || null);
+        card.setDataValue('guestType', link.type);
+      }
+    }
+
     req.log.info('search_cards_by_name_success', { term, count: data.length });
     return res.status(200).send({ message: 'Fetched all cards', data });
   } catch (err) {
@@ -286,23 +318,37 @@ export const updateCard = async (req, res) => {
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
+  // Read before the update below overwrites it.
+  const wasGuest = card.res_status === STATUS_GUEST;
+
+  // A blank host keeps the guest's links as they are. Many older guest cards
+  // have no host on record, and staff must still be able to fix their details.
+  const hostCardno = String(referenceCardno ?? '').trim();
+  const hostGuestType = String(guestType ?? '').trim();
+
   // Validation for guest. Checked before the card is saved, so a bad host card
   // cannot leave the card half-updated.
   if (res_status === STATUS_GUEST) {
-    if (!referenceCardno || !guestType) {
-      throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
-    }
-    if (String(referenceCardno) === String(cardno)) {
-      throw new ApiError(400, 'A guest cannot be their own reference card');
-    }
-    const hostCard = await CardDb.findOne({ where: { cardno: referenceCardno } });
-    if (!hostCard) {
-      throw new ApiError(400, `Reference card ${referenceCardno} does not exist`);
+    if (!hostCardno) {
+      if (!wasGuest) {
+        throw new ApiError(400, 'Enter the host card number to make this card a guest');
+      }
+      if (hostGuestType) {
+        throw new ApiError(400, 'Enter the host card number to set a guest type');
+      }
+    } else {
+      if (!hostGuestType) {
+        throw new ApiError(400, 'Choose a guest type for the host card');
+      }
+      if (hostCardno === String(cardno)) {
+        throw new ApiError(400, 'A guest cannot be their own reference card');
+      }
+      const hostCard = await CardDb.findOne({ where: { cardno: hostCardno } });
+      if (!hostCard) {
+        throw new ApiError(400, `Reference card ${hostCardno} does not exist`);
+      }
     }
   }
-
-  // Read before the update below overwrites it.
-  const wasGuest = card.res_status === STATUS_GUEST;
 
   // --- Compare to find changed fields ---
   const isChanged = (newVal, oldVal) => {
@@ -349,32 +395,34 @@ export const updateCard = async (req, res) => {
 
   // A guest link stores the host in `cardno` and the guest in `guest`.
   if (res_status === STATUS_GUEST) {
-    // A guest has one host, so naming a different host moves the guest. The
-    // named host's link is saved first and the other links go after it, so a
-    // failed save never leaves the guest with no host.
-    const [relation, created] = await GuestRelationship.findOrCreate({
-      where: { cardno: referenceCardno, guest: cardno },
-      defaults: {
-        cardno: referenceCardno,
-        guest: cardno,
-        type: guestType,
-        updatedBy: req.user.username
-      }
-    });
+    if (hostCardno) {
+      // A guest has one host, so naming a different host moves the guest. The
+      // named host's link is saved first and the other links go after it, so
+      // a failed save never leaves the guest with no host.
+      const [relation, created] = await GuestRelationship.findOrCreate({
+        where: { cardno: hostCardno, guest: cardno },
+        defaults: {
+          cardno: hostCardno,
+          guest: cardno,
+          type: hostGuestType,
+          updatedBy: req.user.username
+        }
+      });
 
-    if (!created) {
-      await relation.update({
-        type: guestType,
-        updatedBy: req.user.username
+      if (!created) {
+        await relation.update({
+          type: hostGuestType,
+          updatedBy: req.user.username
+        });
+      }
+
+      await GuestRelationship.destroy({
+        where: {
+          guest: cardno,
+          cardno: { [Sequelize.Op.ne]: hostCardno }
+        }
       });
     }
-
-    await GuestRelationship.destroy({
-      where: {
-        guest: cardno,
-        cardno: { [Sequelize.Op.ne]: String(referenceCardno) }
-      }
-    });
   } else if (wasGuest && card.res_status !== STATUS_GUEST) {
     // The card stopped being a guest card: drop the links where it is the
     // guest. Links where it is the host belong to its own guests and stay.
