@@ -3,6 +3,7 @@ import { STATUS_CANCELLED, TYPE_ADHYAYAN, TYPE_UTSAV, TYPE_TRAVEL } from '../con
 import { sendUtsavBookingUpdateEmail } from './utsavBooking.helper.js';
 import { sendAdhyayanBookingUpdateNotification } from './adhyayanBooking.helper.js';
 import { sendTravelBookingStatusUpdateMail } from './travelBooking.helper.js';
+import logger from '../config/logger.js';
 export async function sendCancellationEmail(
   cardno,
   bookingIds,
@@ -14,7 +15,8 @@ export async function sendCancellationEmail(
     bookingIds,
     bookedBy,
     STATUS_CANCELLED,
-    'unifiedCancellationEmail'
+    'unifiedCancellationEmail',
+    false
   );
 }
 
@@ -30,6 +32,6 @@ export async function sendOpenBookingEmail(bookingType, openBookings) {
   if (sendEmail && Array.isArray(openBookings)) {
     await Promise.all(openBookings.map(booking => sendEmail(booking)));
   } else {
-    console.log('No email function found for bookingType:', bookingType, 'or openBookings is not an array:', openBookings);
+    logger.warn('send_open_booking_email_skipped', { bookingType, isArray: Array.isArray(openBookings), count: openBookings?.length });
   }
 }

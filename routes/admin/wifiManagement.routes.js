@@ -10,7 +10,9 @@ import {
   updatePermanentCodeRequest,
   uploadPerWiFiCodes,
   addPermanentCodeManually,
-  insertPerWiFiCodesFromExcel
+  insertPerWiFiCodesFromExcel,
+  generateUsername,
+  exportPortalWifiCodes
 } from '../../controllers/admin/wifiManagement.controller.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import multer from 'multer';
@@ -22,10 +24,12 @@ router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_WIFI_ADMIN));
 
 router.post('/uploadcode', upload.single('file'), CatchAsync(uploadWiFiCodes));
 router.get('/wifirecords', CatchAsync(wifiRecord));
+router.get('/permanent/portal-export', CatchAsync(exportPortalWifiCodes));
 router.get('/permanent', CatchAsync(getPermanentCodeRequests));
 router.put('/permanent/:requestId', CatchAsync(updatePermanentCodeRequest));
 router.post('/uploadpercode', upload.single('file'), CatchAsync(uploadPerWiFiCodes));
 router.post('/insertpercode', upload.single('file'), CatchAsync(insertPerWiFiCodesFromExcel));
 router.post('/manual', CatchAsync(addPermanentCodeManually));
+router.get('/generate-username', CatchAsync(generateUsername));
 
 export default router;

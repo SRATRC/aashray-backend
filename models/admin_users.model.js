@@ -24,6 +24,14 @@ const AdminUsers = sequelize.define(
       allowNull: true,
       values: [STATUS_ACTIVE, STATUS_INACTIVE],
       defaultValue: STATUS_ACTIVE
+    },
+    cardno: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      references: {
+        model: 'card_db',
+        key: 'cardno'
+      }
     }
   },
   {

@@ -1,8 +1,10 @@
-import { AdminUsers, AdminRoles, Roles } from '../../models/associations.js';
+import { AdminUsers, AdminRoles, Roles, CardDb } from '../../models/associations.js';
 import { STATUS_ACTIVE, STATUS_INACTIVE } from '../../config/constants.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import { Sequelize } from 'sequelize';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
 export const fetchAllAdmins = async (req, res) => {
@@ -57,39 +59,99 @@ export const updateAdminRoles = async (req, res) => {
 };
 
 export const deactivateAdmin = async (req, res) => {
-  const updatedItems = await AdminUsers.update(
-    {
-      status: STATUS_INACTIVE,
-      updatedBy: req.user.username
-    },
-    {
-      where: {
-        username: req.params.username
-      }
-    }
-  );
+  const username = req.params.username;
 
-  if (updatedItems == 0)
-    throw new ApiError(500, 'error occured while deactivating admin account');
+  const admin = await AdminUsers.findOne({
+    where: { username },
+    include: [
+      {
+        model: CardDb,
+        as: 'card',
+        attributes: ['issuedto', 'mobno', 'country']
+      }
+    ]
+  });
+
+  if (!admin) {
+    throw new ApiError(404, 'Admin user not found');
+  }
+
+  await admin.update({
+    status: STATUS_INACTIVE,
+    updatedBy: req.user.username
+  });
+
+  // Send WhatsApp notification if linked to a card
+  if (admin.card && admin.card.mobno) {
+    try {
+      const phone = admin.card.mobno;
+      const formattedPhone = formatWhatsAppPhone(phone, admin.card.country);
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: admin.card.issuedto || 'Mumukshu' },
+            { type: 'text', text: username },
+            { type: 'text', text: 'deactivated' }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'admin_status_updated', components);
+    } catch (waErr) {
+      console.error('Error triggering WhatsApp notification for admin deactivation:', waErr.message || waErr);
+    }
+  }
 
   return res.status(200).send({ message: 'deactivated admin' });
 };
 
 export const activateAdmin = async (req, res) => {
-  const updatedItems = await AdminUsers.update(
-    {
-      status: STATUS_ACTIVE,
-      updatedBy: req.user.username
-    },
-    {
-      where: {
-        username: req.params.username
-      }
-    }
-  );
+  const username = req.params.username;
 
-  if (updatedItems == 0)
-    throw new ApiError(500, 'error occured while activating admin account');
+  const admin = await AdminUsers.findOne({
+    where: { username },
+    include: [
+      {
+        model: CardDb,
+        as: 'card',
+        attributes: ['issuedto', 'mobno', 'country']
+      }
+    ]
+  });
+
+  if (!admin) {
+    throw new ApiError(404, 'Admin user not found');
+  }
+
+  await admin.update({
+    status: STATUS_ACTIVE,
+    updatedBy: req.user.username
+  });
+
+  // Send WhatsApp notification if linked to a card
+  if (admin.card && admin.card.mobno) {
+    try {
+      const phone = admin.card.mobno;
+      const formattedPhone = formatWhatsAppPhone(phone, admin.card.country);
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: admin.card.issuedto || 'Mumukshu' },
+            { type: 'text', text: username },
+            { type: 'text', text: 'activated' }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'admin_status_updated', components);
+    } catch (waErr) {
+      console.error('Error triggering WhatsApp notification for admin activation:', waErr.message || waErr);
+    }
+  }
 
   return res.status(200).send({ message: 'activated admin' });
 };
