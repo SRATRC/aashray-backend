@@ -41,7 +41,7 @@ export const FetchUpcoming = async (req, res) => {
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * (pageSize - 1);
+  const offset = (page - 1) * pageSize;
 
   const utsavs = await database.query(
     `
@@ -66,7 +66,7 @@ export const FetchUpcoming = async (req, res) => {
     JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
     WHERE t1.registration_deadline IS NULL OR t1.registration_deadline >= :today
     GROUP BY t1.id
-    ORDER BY t1.start_date ASC
+    ORDER BY t1.start_date ASC, t1.id ASC
     LIMIT :limit
     OFFSET :offset;
   `,
