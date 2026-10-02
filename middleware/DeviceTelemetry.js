@@ -17,6 +17,20 @@ import {
 const lastWrite = new Map();
 const REWRITE_AFTER_MS = 24 * 60 * 60 * 1000;
 
+// An entry older than a day is rewritten on the member's next request anyway,
+// so dropping it changes nothing. Check at most once an hour, so the map holds
+// only members seen in about the last day.
+const SWEEP_EVERY_MS = 60 * 60 * 1000;
+let lastSweep = Date.now();
+
+function dropStaleEntries(now) {
+  if (now - lastSweep < SWEEP_EVERY_MS) return;
+  lastSweep = now;
+  for (const [key, entry] of lastWrite) {
+    if (now - entry.at >= REWRITE_AFTER_MS) lastWrite.delete(key);
+  }
+}
+
 export const deviceTelemetry = (req, res, next) => {
   res.on('finish', () => {
     try {
@@ -33,12 +47,14 @@ export const deviceTelemetry = (req, res, next) => {
       const os_version =
         (req.headers[HEADER_OS_VERSION] || '').toString().trim() || null;
 
+      const now = Date.now();
+      dropStaleEntries(now);
+
       const key = `${cardno}:${platform}`;
       const value = `${app_version}|${os_version}`;
       const prev = lastWrite.get(key);
-      if (prev?.value === value && Date.now() - prev.at < REWRITE_AFTER_MS)
-        return;
-      lastWrite.set(key, { value, at: Date.now() });
+      if (prev?.value === value && now - prev.at < REWRITE_AFTER_MS) return;
+      lastWrite.set(key, { value, at: now });
 
       DeviceTelemetry.upsert({
         cardno,
