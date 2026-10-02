@@ -75,12 +75,17 @@ const MEALS = [
   }
 ];
 
-export async function getFoodBookings(allDates, ...cardnos) {
+export async function getFoodBookings(allDates, cardnos, t = null) {
+  // Inside a booking, read and lock the rows this booking will update, so a
+  // concurrent booking for the same card and date waits instead of adding a
+  // second row.
   const bookings = await FoodDb.findAll({
     where: {
       date: allDates,
       cardno: cardnos
-    }
+    },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
   });
 
   const bookingsByCard = {};
@@ -140,7 +145,7 @@ export async function bookFoodForMumukshus(
       : null;
 
   const allDates = getDatesDuringUtsav(start_date, end_date, utsav);
-  const bookings = await getFoodBookings(allDates, mumukshus);
+  const bookings = await getFoodBookings(allDates, mumukshus, t);
 
   const bookingsToCreate = [];
   const transactionsToCreate = [];
