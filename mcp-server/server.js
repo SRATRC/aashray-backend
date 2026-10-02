@@ -9,10 +9,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { logTools } from './tools/logs.js';
 import { dbTools, executeQuery } from './tools/database.js';
+import { processTools } from './tools/processes.js';
+import { systemTools } from './tools/system.js';
 import { SCHEMA_RESOURCE_URI, buildSchemaResource } from './resources/schema.js';
 import logger from './logger.js';
 
-export const allTools = [...logTools, ...dbTools];
+export const allTools = [...logTools, ...dbTools, ...processTools, ...systemTools];
 const toolMap = new Map(allTools.map(t => [t.name, t]));
 
 

@@ -1,0 +1,278 @@
+import { execFile } from 'child_process';
+import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { promisify } from 'util';
+import { APP_DIR, ENV_FILE, LOG_DIR, PM2_HOME } from '../config.js';
+import { PLAIN_KEYS, readEnvFile, stripQuotes } from '../redact.js';
+import { readPm2Processes } from './processes.js';
+
+const execFileAsync = promisify(execFile);
+const scryptAsync = promisify(crypto.scrypt);
+
+const MYSQL_DATA_DIR = '/var/lib/mysql';
+const DISK_WARN_PERCENT = 85;
+const FINGERPRINT_SALT = 'aashray-mcp-fingerprint';
+
+const gb = (bytes) => Math.round((bytes / 1073741824) * 10) / 10;
+
+function errorResult(err) {
+  return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
+}
+
+// One entry per filesystem, listing which of the paths we care about live on it.
+async function diskUsage(paths) {
+  const byDevice = new Map();
+  for (const p of paths) {
+    try {
+      const { dev } = await fs.promises.stat(p);
+      if (byDevice.has(dev)) {
+        byDevice.get(dev).paths.push(p);
+        continue;
+      }
+      const s = await fs.promises.statfs(p);
+      const total = s.blocks * s.bsize;
+      const free = s.bavail * s.bsize;
+      byDevice.set(dev, {
+        paths: [p],
+        totalGb: gb(total),
+        freeGb: gb(free),
+        usedPercent: total ? Math.round(((total - free) / total) * 100) : null,
+      });
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+  }
+  return [...byDevice.values()];
+}
+
+// MemAvailable is what can be handed out without swapping; os.freemem() on Linux
+// is MemFree, which ignores reclaimable page cache and always looks alarming.
+function memory() {
+  try {
+    const info = Object.fromEntries(
+      fs.readFileSync('/proc/meminfo', 'utf8').split('\n')
+        .map((line) => line.match(/^(\w+):\s+(\d+) kB/))
+        .filter(Boolean)
+        .map(([, key, kb]) => [key, Number(kb) * 1024]),
+    );
+    return {
+      totalGb: gb(info.MemTotal),
+      availableGb: gb(info.MemAvailable),
+      availablePercent: Math.round((info.MemAvailable / info.MemTotal) * 100),
+      swapTotalGb: gb(info.SwapTotal),
+      swapUsedGb: gb(info.SwapTotal - info.SwapFree),
+    };
+  } catch {
+    return {
+      totalGb: gb(os.totalmem()),
+      availableGb: gb(os.freemem()),
+      availablePercent: Math.round((os.freemem() / os.totalmem()) * 100),
+    };
+  }
+}
+
+async function dirSize(dir) {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+  let totalBytes = 0;
+  let largest = null;
+  let files = 0;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    let size;
+    try {
+      ({ size } = await fs.promises.stat(path.join(dir, entry.name)));
+    } catch (err) {
+      if (err.code === 'ENOENT') continue; // rotated away between readdir and stat
+      throw err;
+    }
+    files += 1;
+    totalBytes += size;
+    if (!largest || size > largest.bytes) largest = { name: entry.name, bytes: size };
+  }
+  return {
+    dir,
+    files,
+    totalMb: Math.round(totalBytes / 1048576),
+    largest: largest && { name: largest.name, mb: Math.round(largest.bytes / 1048576) },
+  };
+}
+
+const getServerHealth = {
+  name: 'get_server_health',
+  description:
+    'Production server health: disk space for the filesystems holding the app, logs, PM2 and MySQL data; memory and swap; CPU count and load averages; uptime; and how much space the application log folder and the PM2 console-log folder take. ' +
+    '`warnings` lists anything over a threshold (disk 85% full, under 10% memory available, 1-minute load above the CPU count). Read-only.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async () => {
+    try {
+      const disks = await diskUsage(['/', APP_DIR, LOG_DIR, PM2_HOME, MYSQL_DATA_DIR]);
+      const mem = memory();
+      const cpus = os.cpus().length;
+      const [load1, load5, load15] = os.loadavg().map((n) => Math.round(n * 100) / 100);
+      const logDirs = (await Promise.all([dirSize(LOG_DIR), dirSize(path.join(PM2_HOME, 'logs'))])).filter(Boolean);
+
+      const warnings = [];
+      for (const d of disks) {
+        if (d.usedPercent >= DISK_WARN_PERCENT) warnings.push(`Disk holding ${d.paths.join(', ')} is ${d.usedPercent}% full (${d.freeGb} GB free).`);
+      }
+      if (mem.availablePercent < 10) warnings.push(`Only ${mem.availablePercent}% of memory is available.`);
+      if (load1 > cpus) warnings.push(`1-minute load ${load1} is above the CPU count (${cpus}).`);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            checkedAt: new Date().toISOString(),
+            hostUptimeHours: Math.round(os.uptime() / 360) / 10,
+            cpu: { count: cpus, load1, load5, load15 },
+            memory: mem,
+            disks,
+            logDirs,
+            warnings,
+          }),
+        }],
+      };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+};
+
+// The server runs as root while the deploy checkout belongs to the runner user, so
+// git refuses the repo as "dubious ownership" unless told it is safe.
+async function git(args) {
+  // Strictly read-only: --no-optional-locks stops `git status` rewriting .git/index, and
+  // fsmonitor off stops a repo-config command from running (this process may be root).
+  const safeDir = (() => { try { return fs.realpathSync(APP_DIR); } catch { return path.resolve(APP_DIR); } })();
+  const { stdout } = await execFileAsync('git', [
+    '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', `safe.directory=${safeDir}`, '-C', APP_DIR, ...args,
+  ], { timeout: 10000, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
+  // Only the trailing newline goes: `git status` lines start with a meaningful space (" M file").
+  return stdout.replace(/\n+$/, '');
+}
+
+// Fallback when git is missing or refuses: read the checked-out commit straight from .git.
+function readHeadFromDisk() {
+  let gitDir = path.join(APP_DIR, '.git');
+  if (fs.statSync(gitDir).isFile()) {
+    gitDir = path.resolve(APP_DIR, fs.readFileSync(gitDir, 'utf8').replace(/^gitdir:\s*/, '').trim());
+  }
+  const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+  if (!head.startsWith('ref:')) return { commit: head, branch: null };
+  const ref = head.slice(4).trim();
+  const refFile = path.join(gitDir, ref);
+  const commit = fs.existsSync(refFile)
+    ? fs.readFileSync(refFile, 'utf8').trim()
+    : fs.readFileSync(path.join(gitDir, 'packed-refs'), 'utf8').split('\n').find((l) => l.endsWith(` ${ref}`))?.split(' ')[0];
+  return { commit, branch: ref.replace(/^refs\/heads\//, '') };
+}
+
+async function gitState() {
+  try {
+    const [commit, committedAt, author, subject] = (await git(['log', '-1', '--format=%H%x1f%cI%x1f%an%x1f%s'])).split('\x1f');
+    const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
+    const changed = (await git(['status', '--porcelain', '--untracked-files=no'])).split('\n').filter(Boolean);
+    return {
+      commit,
+      committedAt,
+      author,
+      subject,
+      branch: branch === 'HEAD' ? null : branch,
+      locallyModifiedFiles: changed.slice(0, 50).map((l) => l.slice(3)),
+      ...(changed.length > 50 && { locallyModifiedTotal: changed.length }),
+    };
+  } catch (err) {
+    try {
+      return { ...readHeadFromDisk(), note: `git unavailable (${err.message.split('\n')[0]}); commit read from .git directly.` };
+    } catch {
+      return { error: err.message.split('\n')[0] };
+    }
+  }
+}
+
+async function fingerprint(value) {
+  return (await scryptAsync(value, FINGERPRINT_SALT, 16)).toString('hex').slice(0, 8);
+}
+
+async function settingsCheck(fileEnv, proc) {
+  const settings = [];
+  for (const [key, fileValue] of fileEnv) {
+    const running = proc?.env?.[key];
+    const value = running ?? fileValue;
+    const entry = {
+      key,
+      inProcess: running !== undefined,
+      ...(running !== undefined && { matchesFile: running === fileValue }),
+      length: value.length,
+    };
+    if (PLAIN_KEYS.has(key)) {
+      entry.value = value;
+    } else if (value) {
+      entry.fingerprint = await fingerprint(value);
+      if (running !== undefined && running !== fileValue) entry.fileFingerprint = await fingerprint(fileValue);
+    }
+    if (stripQuotes(fileValue) !== fileValue) entry.quotedInFile = true;
+    settings.push(entry);
+  }
+  return settings;
+}
+
+const getDeployInfo = {
+  name: 'get_deploy_info',
+  description:
+    "What is deployed on the production server and how it is configured: the checked-out commit (hash, date, author, subject), any tracked files edited on the server by hand, when each PM2 process last started, and a check of every setting in .env.prod against the environment a process is actually running with. " +
+    'Per setting: whether the process has it, whether it matches the file, its length, and either its value (only for harmless settings such as PORT or AWS_REGION) or an 8-character fingerprint — never a secret itself. ' +
+    "To check a secret against a value you hold (e.g. the Razorpay dashboard's webhook secret), compute its fingerprint locally and compare: " +
+    `node -e "require('crypto').scrypt(process.argv[1],'${FINGERPRINT_SALT}',16,(e,k)=>console.log(k.toString('hex').slice(0,8)))" 'VALUE' . ` +
+    '`quotedInFile` means the deploy exports the line as-is, so the quotes become part of the running value. ' +
+    'A setting missing from the process may still reach the app, which also loads .env.prod itself at startup. Read-only.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      process: {
+        type: 'string',
+        default: 'BackendAPI',
+        description: 'PM2 process whose running settings to compare with .env.prod (default BackendAPI).',
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async ({ process: name = 'BackendAPI' } = {}) => {
+    try {
+      const result = { checkedAt: new Date().toISOString(), git: await gitState() };
+
+      let processes = [];
+      try {
+        processes = await readPm2Processes();
+        result.processesStartedAt = Object.fromEntries(
+          processes.map((p) => [p.name, p.startedAt ? new Date(p.startedAt).toISOString() : null]),
+        );
+      } catch (err) {
+        result.processesError = err.message;
+      }
+
+      const fileEnv = readEnvFile();
+      if (!fileEnv) {
+        result.settingsError = `No env file at ${ENV_FILE}.`;
+      } else {
+        const proc = processes.find((p) => p.name === name);
+        if (!proc && processes.length) result.settingsNote = `No PM2 process named "${name}"; showing the file only.`;
+        result.settings = await settingsCheck(fileEnv, proc);
+      }
+
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+};
+
+export const systemTools = [getServerHealth, getDeployInfo];
