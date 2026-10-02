@@ -630,7 +630,8 @@ export async function bookFoodForAllMeals(
       cardno: cardno,
       date: allDates
     },
-    transaction: t
+    transaction: t,
+    lock: t.LOCK.UPDATE
   });
 
   const bookingsToCreate = [], bookingsToUpdate = [];
