@@ -257,10 +257,13 @@ export const searchCardsByName = async (req, res) => {
         attributes: ['cardno', 'guest', 'type'],
         order: [['updatedAt', 'DESC']]
       });
-      const hosts = await CardDb.findAll({
-        where: { cardno: [...new Set(links.map((link) => link.cardno))] },
-        attributes: ['cardno', 'issuedto']
-      });
+      const hostCardnos = [...new Set(links.map((link) => link.cardno))];
+      const hosts = hostCardnos.length
+        ? await CardDb.findAll({
+            where: { cardno: hostCardnos },
+            attributes: ['cardno', 'issuedto']
+          })
+        : [];
       const hostNames = new Map(hosts.map((host) => [host.cardno, host.issuedto]));
 
       // A guest has one host. If older data left more than one, the newest wins.
