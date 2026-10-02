@@ -53,7 +53,7 @@ export const FetchUpcoming = async (req, res) => {
        t1.location AS utsav_location,
        t1.status AS utsav_status,
        t1.registration_deadline AS registration_deadline,
-       IF(COUNT(t2.id) = 0, JSON_ARRAY(), JSON_ARRAYAGG(
+       JSON_ARRAYAGG(
            JSON_OBJECT(
                'package_id', t2.id,
                'package_name', t2.name,
@@ -61,9 +61,9 @@ export const FetchUpcoming = async (req, res) => {
                'package_end', t2.end_date,
                'package_amount', t2.amount
            )
-       )) AS packages
+       ) AS packages
     FROM utsav_db t1
-    LEFT JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
+    JOIN utsav_packages_db t2 ON t1.id = t2.utsavid
     WHERE t1.registration_deadline IS NULL OR t1.registration_deadline >= :today
     GROUP BY t1.id
     ORDER BY t1.start_date ASC
