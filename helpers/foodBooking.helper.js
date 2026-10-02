@@ -75,10 +75,28 @@ const MEALS = [
   }
 ];
 
+// Lock the cards of the people whose meals a booking is about to change. A
+// card row always exists, so a second booking for the same person waits here
+// even when there is no meal row yet. Locking only the meal rows let two
+// bookings both find nothing, both insert, and one fail with a deadlock.
+// Cards are locked in card-number order, so two group bookings cannot take
+// the same cards in opposite orders.
+async function lockCardsForMeals(cardnos, t) {
+  if (!t) return;
+  await CardDb.findAll({
+    where: { cardno: cardnos },
+    attributes: ['id'],
+    order: [['cardno', 'ASC']],
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+}
+
 export async function getFoodBookings(allDates, cardnos, t = null) {
   // Inside a booking, read and lock the rows this booking will update, so a
   // concurrent booking for the same card and date waits instead of adding a
   // second row.
+  await lockCardsForMeals(cardnos, t);
   const bookings = await FoodDb.findAll({
     where: {
       date: allDates,
@@ -630,6 +648,7 @@ export async function bookFoodForAllMeals(
 
   const allDates = getDates(start_date, end_date);
 
+  await lockCardsForMeals([cardno], t);
   const foodBookings = await FoodDb.findAll({
     where: {
       cardno: cardno,
