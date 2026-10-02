@@ -1628,7 +1628,7 @@ export const resolveIdentity = async (req, res) => {
             }
         }
     } catch (e) {
-        logger.warn('Could not fetch tapp details in resolveIdentity:', e);
+        req.log.warn('tapp_details_fetch_failed', { handler: 'resolveIdentity', error: e?.message });
     }
 
     res.status(200).json({
@@ -1773,7 +1773,7 @@ export const validateGuest = async (req, res) => {
             }
         }
     } catch (e) {
-        logger.warn('Could not fetch tapp details in resolveIdentity:', e);
+        req.log.warn('tapp_details_fetch_failed', { handler: 'validateGuest', error: e?.message });
     }
 
     return res.status(200).json({
