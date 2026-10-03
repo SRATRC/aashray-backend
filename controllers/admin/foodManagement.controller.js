@@ -30,6 +30,7 @@ import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import { getTappDailyAayambilCounts, getVendorFoodSummary } from '../../utils/customFormActions.js';
 
 
 export const issuePlate = async (req, res) => {
@@ -38,15 +39,17 @@ export const issuePlate = async (req, res) => {
 
   req.log.info('issue_plate_start', { cardno: req.params.cardno, meal: req.body.meal });
 
-  const { message, issuedto } = await issueFoodPlate(
+  const { message, issuedto, auto_checkin } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
-    t
+    t,
+    req.body.date,
+    req.body.scannedAt
   );
 
   await t.commit();
-  req.log.info('issue_plate_success', { cardno: req.params.cardno, meal: req.body.meal, issuedto });
-  return res.status(200).send({ message, issuedto });
+  req.log.info('issue_plate_success', { cardno: req.params.cardno, meal: req.body.meal, issuedto, auto_checkin });
+  return res.status(200).send({ message, issuedto, auto_checkin });
 };
 
 
@@ -65,7 +68,7 @@ export const bulkIssuePlate = async (req, res) => {
     res.status(200).send({ message: 'Plates issued successfully' });
   } catch (err) {
     await t.rollback();
-    req.log.error('bulk_issue_plate_error', { meal, error: err.message });
+    req.log.error('bulk_issue_plate_error', { meal: req.body?.meal, error: err.message });
     res.status(400).send({ message: err.message });
   }
 };
@@ -876,6 +879,35 @@ export const foodReport = async (req, res) => {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Attach daily Tapascharya Aayambil counts & full Tapp breakdown
+  try {
+    const aayambilCounts = await getTappDailyAayambilCounts(start_date, end_date);
+    filteredReport = filteredReport.map(row => {
+      const dStr = moment(row.date).format('YYYY-MM-DD');
+      const aCounts = aayambilCounts[dStr] || {
+        upvaas: 0,
+        aayambil: 0,
+        rasTyaag: 0,
+        totalAayambil: 0,
+        ekasna: 0,
+        biyasna: 0,
+        onlyLiquid: 0,
+        regular: 0
+      };
+      const lunchCount = row.lunch || 0;
+      return {
+        ...row,
+        lunch_aayambil: aCounts.totalAayambil || 0,
+        lunch_aayambil_direct: aCounts.aayambil || 0,
+        lunch_ras_tyaag: aCounts.rasTyaag || 0,
+        lunch_regular: Math.max(0, lunchCount - (aCounts.totalAayambil || 0)),
+        tapp: aCounts
+      };
+    });
+  } catch (err) {
+    req.log.warn('food_report_aayambil_enrich_failed', { start_date, end_date, error: err.message });
+  }
+
   req.log.info('food_report_success', { start_date, end_date, count: filteredReport.length });
   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: filteredReport });
 };
@@ -1208,5 +1240,40 @@ export const getMealCountByMobile = async (req, res) => {
     person,
     utsavExcluded: utsavs,
     dailyBookings
+  });
+};
+
+/**
+ * GET /food/vendor-summary
+ * Returns vendor food registration summary for the active vendor form (form_id = 1).
+ * Includes per-vendor breakdown and kitchen-wise totals per meal.
+ */
+export const vendorFoodSummary = async (req, res) => {
+  let formId = 1;
+  if (req.query.form_id !== undefined) {
+    const parsedFormId = parseInt(req.query.form_id, 10);
+    if (Number.isNaN(parsedFormId) || parsedFormId <= 0) {
+      throw new ApiError(400, 'Invalid form_id parameter');
+    }
+    formId = parsedFormId;
+  }
+  const startDate = req.query.start_date || null;
+  const endDate = req.query.end_date || null;
+  req.log.info('vendor_food_summary_start', { formId, startDate, endDate });
+
+  const result = await getVendorFoodSummary(startDate, endDate, formId);
+
+  req.log.info('vendor_food_summary_success', {
+    formId,
+    startDate,
+    endDate,
+    hasData: result.hasData,
+    vendorCount: result.departments?.length || 0,
+    dateCount: result.dates?.length || 0
+  });
+
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    ...result
   });
 };

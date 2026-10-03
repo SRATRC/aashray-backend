@@ -34,7 +34,10 @@ import {
   STATUS_PAYMENT_COMPLETED,
   ERR_TRANSACTION_NOT_FOUND,
   AMT_TYPE_LATE_CHECKOUT_ROOM,
-  STATUS_CONFIRMED
+  STATUS_CONFIRMED,
+  ERR_BOOKING_ALREADY_CANCELLED,
+  ERR_ROOM_FAILED_TO_BOOK,
+  ERR_INVALID_DATE
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -50,6 +53,11 @@ import {
   createRoomBooking,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
+import {
+  getRollingWindowWarning,
+  getPromotionCapWarning,
+  withWarning
+} from '../../helpers/rollingWindow.helper.js';
 import {
   adminCancelTransaction,
   createPendingTransaction
@@ -180,12 +188,13 @@ const handleEarlyCheckout = async ({
   user
 }) => {
   const nights = await calculateNights(booking.checkin, today);
-  const card = await validateCard(transaction.cardno);
+  const cardno = transaction?.cardno || booking.bookedBy || booking.cardno;
+  const card = await validateCard(cardno);
 
   const newAmount = roomCharge(booking.roomtype) * nights;
-  const originalAmount = transaction.amount + transaction.discount;
+  const originalAmount = transaction ? (transaction.amount + transaction.discount) : 0;
 
-  if (newAmount > originalAmount) {
+  if (transaction && newAmount > originalAmount) {
     throw new ApiError(
       400,
       'New amount is more than previously paid. This does not seem right.'
@@ -203,7 +212,9 @@ const handleEarlyCheckout = async ({
     { transaction: t }
   );
 
-  await adminCancelTransaction(user, card, transaction, t);
+  if (transaction) {
+    await adminCancelTransaction(user, card, transaction, t);
+  }
 
   // create a new booking with the new booking dates
   let bookingId = uuidv4();
@@ -228,18 +239,20 @@ const handleEarlyCheckout = async ({
     throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
   }
 
-  const newTransaction = await createPendingTransaction(
-    card,
-    newBooking,
-    TYPE_ROOM,
-    newAmount,
-    user.username,
-    t,
-    true
-  );
+  if (transaction) {
+    const newTransaction = await createPendingTransaction(
+      card,
+      newBooking,
+      TYPE_ROOM,
+      newAmount,
+      user.username,
+      t,
+      true
+    );
 
-  if (!newTransaction) {
-    throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+    if (!newTransaction) {
+      throw new ApiError(400, ERR_ROOM_FAILED_TO_BOOK);
+    }
   }
 
   // need to commit the transaction before
@@ -581,31 +594,86 @@ export const flatCheckout = async (req, res) => {
   }
 
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const originalStatus = booking.status;
 
-  if (today > booking.checkout) {
-    req.log.warn('flat_checkout_overstay', { bookingid: booking.bookingid, plannedCheckout: booking.checkout, today });
-    throw new ApiError(
-      404,
-      `Original check-out date was ${booking.checkout}. Please create ` +
-      `a new booking for the guest for the remaining days and collect the difference.`
+  let creditPayerCard = null;
+
+  if (today < booking.checkout) {
+    // Early Checkout
+    const nights = await calculateNights(booking.checkin, today);
+
+    // Handle early checkout credit adjustment if a paid transaction exists
+    const transaction = await Transactions.findOne({
+      where: { bookingid: booking.bookingid, category: TYPE_FLAT }
+    });
+
+    if (transaction) {
+      const cardno = transaction.cardno || booking.bookedBy || booking.cardno;
+      const card = await validateCard(cardno);
+      const newAmount = roomCharge('nac') * nights;
+      const originalAmount = transaction.amount + transaction.discount;
+
+      if (newAmount > originalAmount) {
+        throw new ApiError(
+          400,
+          'New amount is more than previously paid. This does not seem right.'
+        );
+      }
+
+      if (newAmount < originalAmount) {
+        // Cancel the original transaction (issues room credits to payer)
+        await adminCancelTransaction(req.user, card, transaction, t);
+
+        // Create new transaction for the actual nights stayed if nights > 0
+        if (newAmount > 0) {
+          await createPendingTransaction(
+            card,
+            booking,
+            TYPE_FLAT,
+            newAmount,
+            req.user.username,
+            t,
+            true
+          );
+        }
+
+        creditPayerCard = card;
+      }
+    }
+
+    await booking.update(
+      {
+        nights,
+        checkout: today,
+        status: ROOM_STATUS_CHECKEDOUT,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+  } else {
+    // Same-day or Late/Past Checkout (today >= booking.checkout)
+    await booking.update(
+      {
+        status: ROOM_STATUS_CHECKEDOUT,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
     );
   }
 
-  const nights = await calculateNights(booking.checkin, today);
-  const originalStatus = booking.status;
-
-  await booking.update(
-    {
-      nights,
-      checkout: today,
-      status: ROOM_STATUS_CHECKEDOUT,
-      updatedBy: req.user.username
-    },
-    { transaction: t }
-  );
-
   await t.commit();
   req.log.info('flat_checkout_success', { bookingid: booking.bookingid, cardno: booking.cardno, today });
+
+  if (creditPayerCard) {
+    sendDualUserNotifications({
+      primary: {
+        token: creditPayerCard.token,
+        title: 'Flat early checkout',
+        body: "We noticed your guest checked out early. Adjustment amount has been credited to your account as room credits."
+      },
+      screen: '/bookings'
+    });
+  }
 
   try {
     await sendFlatStatusChangeWhatsApp(booking, originalStatus, { updatedBy: req.user.username });
@@ -644,6 +712,15 @@ export const roomBooking = async (req, res) => {
   req.transaction = t;
 
   const nights = await calculateNights(checkin_date, checkout_date);
+
+  // Non-blocking: admin bookings over the cap still go through; the warning is
+  // returned in the success response so staff are informed.
+  const rollingWarning = await getRollingWindowWarning({
+    card,
+    checkin: checkin_date,
+    checkout: checkout_date,
+    t
+  });
 
   var booking = undefined;
   if (nights == 0) {
@@ -715,7 +792,9 @@ export const roomBooking = async (req, res) => {
     screen: '/bookings'
   });
   req.log.info('room_booking_success', { cardno: card.cardno, checkin_date, checkout_date, bookingId: booking.bookingId });
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(201).send(
+    withWarning({ message: MSG_BOOKING_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 export const flatBooking = async (req, res) => {
@@ -734,7 +813,8 @@ export const flatBooking = async (req, res) => {
       'mobno',
       'email',
       'credits',
-      'token'
+      'token',
+      'res_status'
     ],
     where: {
       mobno: req.params.mobno
@@ -764,6 +844,15 @@ export const flatBooking = async (req, res) => {
 
   const t = await database.transaction();
   req.transaction = t;
+
+  // Non-blocking: admin flat bookings over the cap still go through; the
+  // warning is returned in the success response so staff are informed.
+  const rollingWarning = await getRollingWindowWarning({
+    card,
+    checkin: req.body.checkin_date,
+    checkout: req.body.checkout_date,
+    t
+  });
 
   const booking = await createFlatBooking(
     card.cardno,
@@ -843,7 +932,9 @@ export const flatBooking = async (req, res) => {
   });
 
   req.log.info('flat_booking_success', { cardno: card.cardno, flat_no: req.body.flat_no, checkin: req.body.checkin_date, checkout: req.body.checkout_date, bookingId: booking.bookingId });
-  return res.status(201).send({ message: MSG_BOOKING_SUCCESSFUL });
+  return res.status(201).send(
+    withWarning({ message: MSG_BOOKING_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 export const fetchAllRoomBookings = async (req, res) => {
@@ -1515,6 +1606,7 @@ export const updateBookingStatus = async (req, res) => {
 
   const originalStatus = booking.status;
   let newStatus = originalStatus;
+  let rollingWarning = null;
 
   if (!status || status === originalStatus) {
     req.log.warn('update_room_booking_status_same_or_missing', { bookingid, status, originalStatus });
@@ -1534,6 +1626,16 @@ export const updateBookingStatus = async (req, res) => {
 
       const cardno = booking.bookedBy || booking.cardno;
       const card = await validateCard(cardno);
+
+      // Promotion commits these nights (excluded while waiting) → re-check the
+      // cap for the occupant. Non-blocking: promotion proceeds; the warning is
+      // returned in the success response.
+      rollingWarning = await getPromotionCapWarning({
+        booking,
+        payerCardno: cardno,
+        payerCard: card,
+        t
+      });
 
       const rate = booking.roomtype?.toLowerCase() === 'ac' ? 1100 : 700;
       const baseAmount = rate * booking.nights;
@@ -1751,7 +1853,9 @@ export const updateBookingStatus = async (req, res) => {
     logger.error("Error sending room status update WhatsApp:", waErr);
   }
 
-  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+  return res.status(200).send(
+    withWarning({ message: MSG_UPDATE_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 export async function findAllRoomsForDay(date, room_type, gender) {
@@ -1868,6 +1972,7 @@ export const updateFlatBookingStatus = async (req, res) => {
 
   const originalStatus = booking.status;
   let newStatus = originalStatus;
+  let rollingWarning = null;
 
   if (!status || status === originalStatus) {
     req.log.warn('update_flat_booking_status_same_or_missing', { bookingid, status, originalStatus });
@@ -1887,6 +1992,16 @@ export const updateFlatBookingStatus = async (req, res) => {
 
       const cardno = booking.bookedBy || booking.cardno;
       const card = await validateCard(cardno);
+
+      // Promotion commits these nights (excluded while waiting) → re-check the
+      // cap for the occupant. Non-blocking: promotion proceeds; the warning is
+      // returned in the success response.
+      rollingWarning = await getPromotionCapWarning({
+        booking,
+        payerCardno: cardno,
+        payerCard: card,
+        t
+      });
 
       const rate = 700; // flat rate per night
       const baseAmount = rate * booking.nights;
@@ -2103,7 +2218,9 @@ export const updateFlatBookingStatus = async (req, res) => {
     logger.error('Error sending flat booking update status WhatsApp:', waErr);
   }
 
-  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
+  return res.status(200).send(
+    withWarning({ message: MSG_UPDATE_SUCCESSFUL }, rollingWarning)
+  );
 };
 
 

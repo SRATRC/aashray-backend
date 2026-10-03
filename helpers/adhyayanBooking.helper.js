@@ -158,9 +158,18 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
     const bookingIds = [];
     for (const adhyayan of adhyayans) {
       const bookingId = uuidv4();
-      if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
-        await reserveAdhyayanSeat(adhyayan, t, log);
 
+      // Confirmed-vs-waitlist is decided by whether the seat was actually
+      // taken under the row lock, not by the unlocked count that
+      // validateAdhyayans loaded. Each person in a group re-reads the locked
+      // row inside this same transaction, so N people decrement by N and the
+      // rest spill to the waitlist the moment the seats run out.
+      const seatReserved =
+        adhyayan.status == STATUS_OPEN
+          ? await reserveAdhyayanSeat(adhyayan, t, log)
+          : false;
+
+      if (seatReserved) {
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
@@ -225,21 +234,51 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
   return { amount, userBookingIds, waitingBookingCount };
 }
 
+// Takes the seat, or reports that there was none to take.
+//
+// The seat count is re-read here under a row lock instead of trusting the
+// instance handed in by validateAdhyayans, which is loaded with no transaction
+// and no lock. Two requests racing for the last seat both used to read
+// available_seats = 1, both passed the caller's check, and both wrote 0 — two
+// confirmed bookings for one seat, with the counter showing nothing wrong.
+//
+// Returns true if a seat was taken, false if the session is full. Callers must
+// branch on the return value rather than on their own stale read, so that the
+// decision and the decrement come from the same locked row.
 export async function reserveAdhyayanSeat(adhyayan, t, log = logger) {
-  if (adhyayan.available_seats <= 0) {
-    throw new ApiError(400, ERR_ADHYAYAN_NO_SEATS_AVAILABLE);
+  const freshAdhyayan = await ShibirDb.findOne({
+    where: { id: adhyayan.id },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
+
+  if (!freshAdhyayan) {
+    throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
   }
 
-  await adhyayan.update(
+  if (freshAdhyayan.available_seats <= 0) {
+    log.debug('adhyayan_seat_unavailable', { shibir_id: adhyayan.id });
+    return false;
+  }
+
+  const newSeats = freshAdhyayan.available_seats - 1;
+
+  await freshAdhyayan.update(
     {
-      available_seats: adhyayan.dataValues.available_seats - 1
+      available_seats: newSeats
     },
     { transaction: t }
   );
+
+  // Keep the in-memory instance in sync — callers read it after this returns.
+  adhyayan.available_seats = newSeats;
+
   log.debug('adhyayan_seat_decremented', {
     shibir_id: adhyayan.id,
-    remaining: adhyayan.dataValues.available_seats - 1
+    remaining: newSeats
   });
+
+  return true;
 }
 
 export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
@@ -290,12 +329,25 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
     await createShibirAttendanceEntry(booking, { username: updatedBy }, t);
     return booking;
   } else {
-    await adhyayan.update(
+    const freshAdhyayan = await ShibirDb.findOne({
+      where: { id: adhyayan.id },
+      transaction: t,
+      lock: t ? t.LOCK.UPDATE : undefined
+    });
+
+    if (!freshAdhyayan) {
+      throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
+    }
+
+    const newSeats = Math.min(freshAdhyayan.total_seats, freshAdhyayan.available_seats + 1);
+
+    await freshAdhyayan.update(
       {
-        available_seats: adhyayan.dataValues.available_seats + 1
+        available_seats: newSeats
       },
       { transaction: t }
     );
+    adhyayan.available_seats = newSeats;
     log.debug('adhyayan_seat_opened_no_waiting', { shibir_id: adhyayan.id });
     return null;
   }
@@ -419,23 +471,6 @@ export async function checkAdhyayanAvailabilityForMumukshus(
   }
 
   return adhyayanDetails;
-}
-
-export async function getAdhyayanBookings(bookingIds) {
-  const adhyanBookings = await ShibirBookingDb.findOne({
-    include: [
-      {
-        model: ShibirDb,
-        attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
-        where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
-      }
-    ],
-    where: {
-      [Op.in]: bookingIds
-    }
-  });
-
-  return adhyanBookings;
 }
 
 export async function validateFeedbackEligibility(cardno, shibir_id) {
@@ -685,10 +720,15 @@ export async function createAdhyayanBookingAdmin(
     for (const adhyayan of adhyayans) {
       const bookingId = uuidv4();
 
-      if (adhyayan.available_seats > 0 && adhyayan.status === STATUS_OPEN) {
-        // ✅ Seat reservation
-        await reserveAdhyayanSeat(adhyayan, t);
+      // Same locked decision as the user flow: the seat is taken (or not)
+      // under a row lock, and that result — not a stale count — picks
+      // confirmed vs waitlist.
+      const seatReserved =
+        adhyayan.status === STATUS_OPEN
+          ? await reserveAdhyayanSeat(adhyayan, t)
+          : false;
 
+      if (seatReserved) {
         const status =
           adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED;
 

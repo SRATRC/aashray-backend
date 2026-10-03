@@ -17,6 +17,7 @@ export const TRANSACTION_TYPE_CASH = 'cash';
 export const RAZORPAY_CALLBACK = 'razorpay_callback';
 export const RESEARCH_CENTRE = 'Research Centre';
 export const FEEDBACK_ELIGIBILITY_HOUR = 13;
+export const MAX_APP_PAYMENT_DURATION_MINUTES = 24 * 60;
 
 // PRICES
 export const BREAKFAST_PRICE = 60;
@@ -105,6 +106,7 @@ export const ROLE_UTSAV_READ_ONLY = 'utsavAdminReadOnly';
 export const ROLE_SMILESTONES_ADMIN = 'smilesAdmin';
 export const ROLE_ADHYAYAN_READ_ONLY = 'adhyayanAdminReadOnly';
 export const ROLE_UTSAV_ADMIN_RAJ = 'utsavAdminRaj';
+export const ROLE_SATSHRUT_ADMIN = 'satshrutAdmin';
 
 // ERROR MESSAGES
 export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
@@ -162,6 +164,47 @@ export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
 
+export const ROLLING_WINDOW_DAYS = 30;
+export const ROLLING_WINDOW_NIGHT_LIMIT = 9;
+export const MSG_ROLLING_WINDOW_EXCEEDED = `This stay exceeds the ${ROLLING_WINDOW_NIGHT_LIMIT}-night limit within ${ROLLING_WINDOW_DAYS} days and has been placed on the waitlist for approval.`;
+
+// Why a booking is being held on the waitlist. Orthogonal to `status`:
+// `status` is where the booking is, HOLD_REASON is why it's waiting.
+export const HOLD_REASON = {
+  ROLLING_WINDOW_LIMIT: 'ROLLING_WINDOW_LIMIT',
+  ROOM_UNAVAILABLE: 'ROOM_UNAVAILABLE',
+  UTSAV_BOUNDARY: 'UTSAV_BOUNDARY',
+  MANUAL: 'MANUAL',
+  UNKNOWN: 'UNKNOWN'
+};
+
+// Single source of truth for how each hold reason is presented. Backend-owned
+// so the app and admin render consistent copy — clients display these directly.
+export const HOLD_REASON_COPY = {
+  ROLLING_WINDOW_LIMIT: {
+    adminLabel: `${ROLLING_WINDOW_NIGHT_LIMIT}-night limit`,
+    userMessage: MSG_ROLLING_WINDOW_EXCEEDED
+  },
+  ROOM_UNAVAILABLE: {
+    adminLabel: 'No room available',
+    userMessage:
+      'Rooms are currently full for these dates. You are on the waitlist and will be confirmed if one frees up.'
+  },
+  UTSAV_BOUNDARY: {
+    adminLabel: 'Event boundary date',
+    userMessage:
+      'This single-night stay falls on an event boundary date and is on the waitlist for review.'
+  },
+  MANUAL: {
+    adminLabel: 'Manually waitlisted',
+    userMessage: 'Your booking is on the waitlist and pending review.'
+  },
+  UNKNOWN: {
+    adminLabel: 'Waitlisted',
+    userMessage: 'Your booking is on the waitlist and pending review.'
+  }
+};
+
 export const SUBJECT_BOOKING = 'Vitraag Vigyaan Aashray: ';
 export const BOOKING_STATUS_PENDING = 'pending';
 
@@ -213,4 +256,14 @@ export const DEEP_CLEANING_WA_RECIPIENTS = [
   '0002945068'
 ];
 
+// APP VERSION / FORCED-UPDATE
+// Server-computed update decision returned to the client.
+export const UPDATE_TYPE_NONE = 'none';
+export const UPDATE_TYPE_OPTIONAL = 'optional';
+export const UPDATE_TYPE_FORCED = 'forced';
+export const UPDATE_TYPE_UNSUPPORTED = 'unsupported';
 
+// Compatibility headers the client sends on the updates check.
+export const HEADER_PLATFORM = 'x-platform';
+export const HEADER_APP_VERSION = 'x-app-version';
+export const HEADER_OS_VERSION = 'x-os-version';

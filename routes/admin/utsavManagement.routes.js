@@ -5,7 +5,9 @@ import {
   ROLE_PRA_ACCOUNTS_ADMIN,
   ROLE_ACCOUNTS_ADMIN,
   ROLE_UTSAV_READ_ONLY,
-  ROLE_UTSAV_ADMIN_RAJ
+  ROLE_UTSAV_ADMIN_RAJ,
+  ROLE_OFFICE_ADMIN,
+  ROLE_HOUSEKEEPING_ADMIN
 } from '../../config/constants.js';
 import {
   createUtsav,
@@ -24,16 +26,34 @@ import {
   utsavCheckin,
   utsavCheckinReport,
   fetchUtsavBookingsVolunteer,
-  uploadRoomNoExcel,
-  updateRoomNo,
+  // uploadRoomNoExcel,  // REMOVED: old bulk upload UI replaced by System Room Allocation
+  // updateRoomNo,        // REMOVED: old inline edit UI replaced by System Room Allocation
   fetchVolunteerOptions,
   fetchUtsavByLocation,
   ReservationReport,
   issuePlate,
   createUtsavBookingByAdmin,
   addUtsavPackagesBulk,
-  fetchUtsavFeedbacks
+  fetchUtsavFeedbacks,
+  getSystemRoomAllocations,
+  applyRoomAllocations,
+  getRoomInventory,
+  initRoomInventory,
+  updateRoomConfig,
+  updateRoomInventoryBulk,
+  uploadExternalRooms,
+  runSmartAllocationController,
+  getHousekeepingExtraBedsReport,
+  getUncheckedInBedsReport,
+  reallotBed,
+  getAllottedBedsReport,
+  swapBeds,
+  getParticipantStayHistory,
+  utsavParticipantHistoryReport,
+  utsavGroupAudit,
+  sendUtsavGroupReminder
 } from '../../controllers/admin/utsavManagement.controller.js';
+
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import multer from 'multer';
 import CatchAsync from '../../utils/CatchAsync.js';
@@ -48,6 +68,36 @@ utsavPublicRouter.post('/issue/:cardno', CatchAsync(issuePlate));
 // Protected routes
 const utsavAdminRouter = express.Router();
 utsavAdminRouter.use(auth);
+
+// Routes accessible to Housekeeping in addition to Utsav admins
+utsavAdminRouter.get(
+  '/housekeeping-extra-beds-report',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_UTSAV_ADMIN,
+    ROLE_PRA_ACCOUNTS_ADMIN,
+    ROLE_ACCOUNTS_ADMIN,
+    ROLE_UTSAV_READ_ONLY,
+    ROLE_UTSAV_ADMIN_RAJ,
+    ROLE_HOUSEKEEPING_ADMIN
+  ),
+  CatchAsync(getHousekeepingExtraBedsReport)
+);
+
+utsavAdminRouter.get(
+  '/fetchList',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_UTSAV_ADMIN,
+    ROLE_PRA_ACCOUNTS_ADMIN,
+    ROLE_ACCOUNTS_ADMIN,
+    ROLE_UTSAV_READ_ONLY,
+    ROLE_UTSAV_ADMIN_RAJ,
+    ROLE_HOUSEKEEPING_ADMIN
+  ),
+  CatchAsync(fetchAllUtsavList)
+);
+
 utsavAdminRouter.use(
   authorizeRoles(
     ROLE_UTSAV_ADMIN,
@@ -87,14 +137,19 @@ utsavAdminRouter.get('/fetch/:id', CatchAsync(fetchUtsav));
 utsavAdminRouter.get('/fetchpackage/:id', CatchAsync(fetchPackage));
 utsavAdminRouter.put('/:id/:activate', CatchAsync(activateUtsav));
 utsavAdminRouter.put('/status', CatchAsync(utsavStatusUpdate));
-utsavAdminRouter.get('/fetchList', CatchAsync(fetchAllUtsavList));
 utsavAdminRouter.get('/utsavCheckinReport', CatchAsync(utsavCheckinReport));
-utsavAdminRouter.post(
-  '/uploadRoomNo',
-  upload.single('file'),
-  CatchAsync(uploadRoomNoExcel)
+utsavAdminRouter.get(
+  '/participantHistoryReport',
+  CatchAsync(utsavParticipantHistoryReport)
 );
-utsavAdminRouter.put('/updateRoomNo', CatchAsync(updateRoomNo));
+// REMOVED: old bulk roomno upload UI replaced by System Room Allocation
+// utsavAdminRouter.post(
+//   '/uploadRoomNo',
+//   upload.single('file'),
+//   CatchAsync(uploadRoomNoExcel)
+// );
+// utsavAdminRouter.put('/updateRoomNo', CatchAsync(updateRoomNo));
+
 utsavAdminRouter.get(
   '/fetchVolunteerOptions',
   CatchAsync(fetchVolunteerOptions)
@@ -111,5 +166,33 @@ utsavAdminRouter.get(
   '/utsav-feedback',
   CatchAsync(fetchUtsavFeedbacks)
 );
+utsavAdminRouter.get('/group-audit', CatchAsync(utsavGroupAudit));
+utsavAdminRouter.post(
+  '/send-group-reminder',
+  authorizeRoles(ROLE_SUPER_ADMIN, ROLE_UTSAV_ADMIN, ROLE_OFFICE_ADMIN),
+  CatchAsync(sendUtsavGroupReminder)
+);
+
+
+const ALLOCATION_ROLES = [
+  ROLE_SUPER_ADMIN,
+  ROLE_UTSAV_ADMIN
+];
+
+utsavAdminRouter.get('/system-room-allocation', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getSystemRoomAllocations));
+utsavAdminRouter.post('/apply-room-allocations', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(applyRoomAllocations));
+
+// Smart Room Allocation Engine
+utsavAdminRouter.get('/room-inventory', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getRoomInventory));
+utsavAdminRouter.post('/init-room-inventory', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(initRoomInventory));
+utsavAdminRouter.post('/update-room-config', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(updateRoomConfig));
+utsavAdminRouter.post('/update-room-inventory-bulk', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(updateRoomInventoryBulk));
+utsavAdminRouter.post('/upload-external-rooms', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(uploadExternalRooms));
+utsavAdminRouter.post('/run-smart-allocation', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(runSmartAllocationController));
+utsavAdminRouter.get('/uncheckedin-beds-report', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getUncheckedInBedsReport));
+utsavAdminRouter.post('/reallot-bed', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(reallotBed));
+utsavAdminRouter.get('/allotted-beds-report', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getAllottedBedsReport));
+utsavAdminRouter.post('/swap-beds', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(swapBeds));
+utsavAdminRouter.get('/participant-stay-history', authorizeRoles(...ALLOCATION_ROLES), CatchAsync(getParticipantStayHistory));
 
 export { utsavPublicRouter, utsavAdminRouter };

@@ -10,4 +10,8 @@ logs/
 .env
 
 # Local Claude scratch (docs/plans/ops artifacts — not for the repo)
-.claude/
+.claude/*
+# ...but DO share team skills
+!.claude/skills/
+.superpowers/
+whatsapp_status.json
