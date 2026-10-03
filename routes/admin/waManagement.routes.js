@@ -7,6 +7,21 @@ import {
   syncGroupMembers,
   updateGroupSettings
 } from '../../controllers/admin/waManagement.controller.js';
+import {
+  broadcastMessage,
+  getSentMessages,
+  getFailedJobs,
+  retryJob,
+  retryAllJobs,
+  rescheduleJob,
+  cancelJob,
+  getTemplates,
+  createTemplate,
+  deleteTemplate,
+  uploadMedia,
+  getMedia,
+  handleWaUpload
+} from '../../controllers/admin/waBroadcast.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { 
   ROLE_SUPER_ADMIN, 
@@ -50,5 +65,19 @@ router.post('/groups/trigger-create', CatchAsync(triggerGroupCreation));
 // Member Sync & Group Settings
 router.post('/groups/:groupJid/sync', CatchAsync(syncGroupMembers));
 router.post('/groups/:groupJid/settings', CatchAsync(updateGroupSettings));
+
+// Broadcast, history, templates, uploads, job retry/reschedule/cancel
+router.post('/broadcast', CatchAsync(broadcastMessage));
+router.get('/messages', CatchAsync(getSentMessages));
+router.get('/jobs/failed', CatchAsync(getFailedJobs));
+router.post('/jobs/retry-all', CatchAsync(retryAllJobs));
+router.post('/jobs/retry/:id', CatchAsync(retryJob));
+router.post('/jobs/:id/reschedule', CatchAsync(rescheduleJob));
+router.delete('/jobs/:id/cancel', CatchAsync(cancelJob));
+router.get('/templates', CatchAsync(getTemplates));
+router.post('/templates', CatchAsync(createTemplate));
+router.delete('/templates/:id', CatchAsync(deleteTemplate));
+router.post('/upload', handleWaUpload, CatchAsync(uploadMedia));
+router.get('/media/:filename', CatchAsync(getMedia));
 
 export default router;
