@@ -31,10 +31,10 @@ export const updatePassword = async (req, res) => {
     req.log.warn('update_password_missing_fields', { cardno: req.user.cardno });
     throw new ApiError(404, 'Please provide all the fields');
   }
-  const details = await CardDb.findOne({
+  const details = await CardDb.scope('withPassword').findOne({
     where: { cardno: req.user.cardno },
     attributes: {
-      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
+      exclude: ['id', 'token', 'createdAt', 'updatedAt', 'updatedBy']
     }
   });
 
@@ -118,7 +118,7 @@ export const verifyAndLogin = async (req, res) => {
   const { mobno, token } = req.body;
   req.log.info('login_start', { mobno });
 
-  const details = await CardDb.findOne({
+  const details = await CardDb.scope('withPassword').findOne({
     where: {
       mobno: mobno
     },

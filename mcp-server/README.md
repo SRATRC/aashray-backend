@@ -184,9 +184,9 @@ Connects with a dedicated read-only MySQL user (`mcp_readonly`). Pool is limited
 
 | Tool | What it does |
 |---|---|
-| `get_schema` | Returns all tables and their columns (name, type, nullable). Use this first before writing any query. |
-| `query_db` | Executes a `SELECT`, `SHOW`, or `DESCRIBE` statement. Auto-appends `LIMIT 1000` if no `LIMIT` clause is present. Multi-statement queries (`;`) are rejected. |
-| `get_table_sample` | Returns up to 50 rows from any table — useful for understanding data shape without writing a query. |
+| `get_schema` | No args: a lightweight index of every table (one-line description + column names only). With `tables: [...]`: full per-column detail (types, nullability, defaults, enums, FKs) merged with business annotations, for just those tables. Prefer the `schema://aashray` resource once at session start for the full database; use this tool for a mid-session lookup instead of re-reading everything. |
+| `query_db` | Executes a `SELECT`, `SHOW`, or `DESCRIBE` statement. Auto-appends `LIMIT 1000` if no top-level `LIMIT` clause is present; caps only the row-count of an existing top-level `LIMIT`/`LIMIT offset, count`/`LIMIT count OFFSET offset` clause, never a `LIMIT` inside a subquery. Multi-statement queries (`;`) are rejected. Returns rows columnar — `{"columns": [...], "rows": [[...], ...]}` — instead of repeating column names per row. |
+| `get_table_sample` | Returns up to 50 rows from any table, columnar like `query_db`. Long text is truncated and binary/BLOB cells are replaced with `<binary N bytes>` rather than dumped as byte arrays. |
 
 ---
 

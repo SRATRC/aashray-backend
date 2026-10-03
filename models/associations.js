@@ -33,6 +33,7 @@ import SupportTickets from './support_tickets.model.js';
 import BlockDates from './block_dates.model.js';
 import PermanentWifiCodes from './permanent_wifi_codes.model.js';
 import Updates from './updates.model.js';
+import DeviceTelemetry from './deviceTelemetry.model.js';
 import AdhyayanFeedback from './adhyayan_feedback.model.js';
 import RazorpaySettlementRecon from './razorpay_settlement_recon.model.js';
 import ShibirAttendanceDb from './shibir_attendance_db.model.js';
@@ -43,6 +44,15 @@ import ShibirSession from './shibir_sessions.model.js';
 import ShibirAttendanceRecord from './shibir_attendance_records.model.js';
 import UtsavFeedback from './utsav_feedback.model.js';
 import UtsavFeedbackAnswer from './utsav_feedback_answer.model.js';
+import CustomForm from './custom_form.model.js';
+import CustomFormResponse from './custom_form_response.model.js';
+import CustomFormDraft from './custom_form_draft.model.js';
+import CustomFormOtpAllowlist from './custom_form_otp_allowlist.model.js';
+import UtsavRoomConfig from './utsav_room_config.model.js';
+import WaGroupJob from './waGroupJob.model.js';
+import WaSession from './waSession.model.js';
+import WaSessionKey from './waSessionKey.model.js';
+import WaTemplate from './waTemplate.model.js';
 
 // CardDb
 CardDb.hasOne(AdminUsers, {
@@ -691,6 +701,57 @@ Departments.hasMany(CardDb, {
   as: 'members'
 });
 
+// CustomForm
+CustomForm.belongsTo(Departments, {
+  foreignKey: 'dept_name',
+  targetKey: 'dept_name',
+  as: 'department'
+});
+CustomForm.hasMany(CustomFormResponse, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'responses'
+});
+CustomFormResponse.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
+CustomFormResponse.belongsTo(CardDb, {
+  foreignKey: 'cardno',
+  targetKey: 'cardno',
+  as: 'respondent'
+});
+CustomForm.hasMany(CustomFormDraft, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'drafts'
+});
+CustomFormDraft.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
+CustomForm.hasMany(CustomFormOtpAllowlist, {
+  foreignKey: 'form_id',
+  onDelete: 'CASCADE',
+  as: 'otpAllowlist'
+});
+CustomFormOtpAllowlist.belongsTo(CustomForm, {
+  foreignKey: 'form_id',
+  as: 'form'
+});
+
+WaSession.hasMany(WaSessionKey, {
+  foreignKey: 'session_id',
+  sourceKey: 'id',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+
+WaSessionKey.belongsTo(WaSession, {
+  foreignKey: 'session_id',
+  targetKey: 'id'
+});
+
 export {
   CardDb,
   Transactions,
@@ -727,6 +788,7 @@ export {
   SupportTickets,
   BlockDates,
   Updates,
+  DeviceTelemetry,
   AdhyayanFeedback,
   RazorpaySettlementRecon,
   ShibirAttendanceDb,
@@ -736,5 +798,14 @@ export {
   ShibirSession,
   ShibirAttendanceRecord,
   UtsavFeedback,
-  UtsavFeedbackAnswer
+  UtsavFeedbackAnswer,
+  CustomForm,
+  CustomFormResponse,
+  CustomFormDraft,
+  CustomFormOtpAllowlist,
+  UtsavRoomConfig,
+  WaGroupJob,
+  WaSession,
+  WaSessionKey,
+  WaTemplate
 };

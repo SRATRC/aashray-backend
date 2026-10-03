@@ -2,13 +2,13 @@
 
 ## Context
 
-The cron job (`cron.js`) runs every 30 minutes and cancels bookings where payment has not been completed within 24 hours (`MAX_APP_PAYMENT_DURATION`). This prevents seats, rooms, and event slots from being held indefinitely by users who abandon the payment step.
+The cron job (`cron.js`) runs every 30 minutes and cancels bookings where payment has not been completed within 24 hours (`MAX_APP_PAYMENT_DURATION_MINUTES` in `config/constants.js`). This prevents seats, rooms, and event slots from being held indefinitely by users who abandon the payment step.
 
-However, only **India-based users** are subject to this auto-cancellation. The `getPendingTransactions()` function in `helpers/transactions.helper.js` filters with `country: 'INDIA'` when querying for stale pending transactions.
+However, only **India-based users** are subject to this auto-cancellation. The `getPendingTransactions()` function in `helpers/transactions.helper.js` filters with `country: 'India'` when querying for stale pending transactions.
 
 ## Decision
 
-Auto-cancellation of unpaid bookings applies only to users whose `country` field in `card_db` is `INDIA` and payments does not have `CASH` as payment method. Non-India (international) users and any bookings with cash payment flags are excluded from the cron cancellation cycle entirely.
+Auto-cancellation of unpaid bookings applies only to users whose `country` field in `card_db` is `India` and payments does not have `CASH` as payment method. Non-India (international) users and any bookings with cash payment flags are excluded from the cron cancellation cycle entirely.
 
 ## Why
 
@@ -22,6 +22,6 @@ India-based users pay online via Razorpay. If they don't complete payment within
 
 ## Related Code
 
-- `cron.js` line 35: `MAX_APP_PAYMENT_DURATION = 24 * 60`
-- `helpers/transactions.helper.js` ~line 402: `where: { country: 'INDIA' }`
+- `config/constants.js`: `MAX_APP_PAYMENT_DURATION_MINUTES = 24 * 60`
+- `helpers/transactions.helper.js` line 480: `where: { country: 'India' }`
 - `cron.js` line 86: commented-out `getUnpaidPastBookingsAndTransactions()`

@@ -132,7 +132,7 @@ Some configuration values are hardcoded rather than pulled from environment vari
 - **Prices:** `config/constants.js` contains `AC_ROOM_PRICE` (1100), `NAC_ROOM_PRICE` (700), `BREAKFAST_PRICE` (60), `LUNCH_PRICE` (120), `DINNER_PRICE` (120)
 - **Connection pool:** `config/database.js` has pool settings (max: 25, min: 3, idle: 10000ms)
 - **Cron schedule:** `cron.js` runs every 30 minutes (`*/30 * * * *`)
-- **Payment timeout:** `cron.js` cancels unpaid bookings after 24 hours (`MAX_APP_PAYMENT_DURATION`)
+- **Payment timeout:** `config/constants.js` sets the 24-hour window (`MAX_APP_PAYMENT_DURATION_MINUTES`). `cron.js` and the payment controller both use it.
 - **CORS:** `app.js` allows all origins (`origin: '*'`)
 - **Session cookie:** `app.js` sets maxAge to 86400000ms (24 hours), secure: false
 - **Feedback window:** 15 days from event completion, starting at hour 13 (`FEEDBACK_ELIGIBILITY_HOUR`)

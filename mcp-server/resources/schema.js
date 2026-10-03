@@ -7,7 +7,7 @@ const ANNOTATIONS_PATH = join(__dirname, '..', 'annotations.json');
 
 export const SCHEMA_RESOURCE_URI = 'schema://aashray';
 
-function loadAnnotations() {
+export function loadAnnotations() {
   try {
     return JSON.parse(readFileSync(ANNOTATIONS_PATH, 'utf8'));
   } catch {
@@ -15,42 +15,82 @@ function loadAnnotations() {
   }
 }
 
-export async function buildSchemaResource(executeQuery) {
-  const annotations = loadAnnotations();
+// Pass `tables` (array of table names) to filter both queries in SQL rather than
+// fetching whole-database metadata and discarding most of it in JS. Pass
+// `includeForeignKeys: false` to skip the FK query when the caller won't use it
+// (the lightweight index never does).
+export async function fetchSchemaRows(executeQuery, { tables, includeForeignKeys = true } = {}) {
+  const inClause = tables && tables.length ? `AND TABLE_NAME IN (${tables.map(() => '?').join(', ')})` : '';
+  const params = tables && tables.length ? tables : [];
 
-  const [colRows, fkRows] = await Promise.all([
-    executeQuery(
-      `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE,
-              COLUMN_DEFAULT, COLUMN_KEY
-       FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE()
-       ORDER BY TABLE_NAME, ORDINAL_POSITION`
-    ),
-    executeQuery(
-      `SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
-       FROM information_schema.KEY_COLUMN_USAGE
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND REFERENCED_TABLE_NAME IS NOT NULL`
-    ),
-  ]);
+  const colPromise = executeQuery(
+    `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE,
+            COLUMN_DEFAULT, COLUMN_KEY
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() ${inClause}
+     ORDER BY TABLE_NAME, ORDINAL_POSITION`,
+    params
+  );
+
+  const fkPromise = includeForeignKeys
+    ? executeQuery(
+        `SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+         FROM information_schema.KEY_COLUMN_USAGE
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND REFERENCED_TABLE_NAME IS NOT NULL ${inClause}`,
+        params
+      )
+    : Promise.resolve([]);
+
+  const [colRows, fkRows] = await Promise.all([colPromise, fkPromise]);
+  return { colRows, fkRows };
+}
+
+// One-line-per-table index: name, description, column names only. No types/FKs.
+export function buildSchemaIndex(colRows, annotations) {
+  const tables = {};
+  for (const row of colRows) {
+    const table = row.TABLE_NAME;
+    if (!tables[table]) {
+      tables[table] = {
+        description: annotations.tables?.[table]?.description ?? null,
+        columns: [],
+      };
+    }
+    tables[table].columns.push(row.COLUMN_NAME);
+  }
+  return { tables };
+}
+
+// Full per-column detail (types, nullability, defaults, enums, FKs, annotations).
+// Caller filters colRows/fkRows to the tables it wants before calling this.
+export function buildSchemaDetail(colRows, fkRows, annotations) {
+  const schema = {};
+
+  function ensureTable(table) {
+    if (!schema[table]) {
+      schema[table] = {
+        description: annotations.tables?.[table]?.description ?? null,
+        columns: [],
+        foreignKeys: [],
+      };
+      const statusFlow = annotations.tables?.[table]?.statusFlow;
+      if (statusFlow) schema[table].statusFlow = statusFlow;
+    }
+    return schema[table];
+  }
 
   const fkMap = {};
   for (const fk of fkRows) {
     fkMap[`${fk.TABLE_NAME}.${fk.COLUMN_NAME}`] = `${fk.REFERENCED_TABLE_NAME}.${fk.REFERENCED_COLUMN_NAME}`;
+    ensureTable(fk.TABLE_NAME).foreignKeys.push(
+      `${fk.COLUMN_NAME} → ${fk.REFERENCED_TABLE_NAME}.${fk.REFERENCED_COLUMN_NAME}`
+    );
   }
 
-  const schema = {};
   for (const row of colRows) {
     const table = row.TABLE_NAME;
-    if (!schema[table]) {
-      schema[table] = {
-        description: annotations.tables?.[table]?.description ?? null,
-        statusFlow: annotations.tables?.[table]?.statusFlow ?? undefined,
-        columns: [],
-        foreignKeys: [],
-      };
-      if (!schema[table].statusFlow) delete schema[table].statusFlow;
-    }
+    const entry = ensureTable(table);
 
     const col = {
       column: row.COLUMN_NAME,
@@ -72,19 +112,20 @@ export async function buildSchemaResource(executeQuery) {
     const colAnnotation = annotations.tables?.[table]?.columns?.[row.COLUMN_NAME];
     if (colAnnotation) col.description = colAnnotation;
 
-    schema[table].columns.push(col);
+    entry.columns.push(col);
   }
 
-  for (const fk of fkRows) {
-    schema[fk.TABLE_NAME]?.foreignKeys.push(
-      `${fk.COLUMN_NAME} → ${fk.REFERENCED_TABLE_NAME}.${fk.REFERENCED_COLUMN_NAME}`
-    );
-  }
+  return schema;
+}
 
-  const output = { tables: schema };
+export async function buildSchemaResource(executeQuery) {
+  const annotations = loadAnnotations();
+  const { colRows, fkRows } = await fetchSchemaRows(executeQuery);
+
+  const output = { tables: buildSchemaDetail(colRows, fkRows, annotations) };
   if (annotations.glossary && Object.keys(annotations.glossary).length) {
     output.glossary = annotations.glossary;
   }
 
-  return JSON.stringify(output, null, 2);
+  return JSON.stringify(output);
 }
