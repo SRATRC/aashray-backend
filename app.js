@@ -30,6 +30,7 @@ import mumukshuRoutes from './routes/client/mumukshuBooking.routes.js';
 import paymentRoutes from './routes/client/payment.routes.js';
 import updateRoutes from './routes/client/updates.routes.js';
 import ticketRoutes from './routes/client/ticket.routes.js';
+import ticketStreamManager from './utils/ticketStreamManager.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -247,6 +248,9 @@ if (process.env.NODE_ENV != 'test') {
   // Graceful shutdown handling
   const gracefulShutdown = async (signal) => {
     logger.info(`Received ${signal}. Starting graceful shutdown...`);
+
+    // End open ticket streams, or server.close() waits on them until killed.
+    ticketStreamManager.closeAll();
 
     // Close HTTP server first
     server.close(async () => {

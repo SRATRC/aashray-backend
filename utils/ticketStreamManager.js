@@ -60,6 +60,23 @@ class TicketStreamManager {
     this.broadcastMessage(ticketId, { type: 'status_update', status, updatedBy });
   }
 
+  // Ends every open stream. Called on shutdown: an open SSE response keeps
+  // server.close() waiting until the process is killed.
+  closeAll() {
+    clearInterval(this._hb);
+    this._hb = null;
+    this.clients.forEach((set) =>
+      set.forEach((client) => {
+        try {
+          client.end();
+        } catch (e) {
+          // already gone
+        }
+      })
+    );
+    this.clients.clear();
+  }
+
   // Keep idle SSE connections alive behind proxies (e.g. Render) that
   // drop connections with no traffic for a while.
   //
