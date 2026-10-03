@@ -38,7 +38,8 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
-  validateUtsavs
+  validateUtsavs,
+  validateNoDuplicateUtsavBooking
 } from '../../helpers/utsavBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
@@ -167,6 +168,13 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
 export const validateBooking = async (req, res) => {
   attachUserContext(req);
   const { primary_booking, addons } = req.body;
+
+  // A member can hold only one booking per utsav — reject if the same utsav is
+  // selected more than once for the same person across primary + addons, so the
+  // user is blocked here before proceeding to payment.
+  validateNoDuplicateUtsavBooking(primary_booking, addons);
+  validateFlatBookingConstraints(primary_booking, addons);
+
   req.log.info('validate_mumukshu_booking_start', {
     cardno: req.user.cardno,
     primaryBookingType: primary_booking?.booking_type,
@@ -211,6 +219,7 @@ export const mumukshuBooking = async (req, res, next) => {
   let t;
   try {
     const { primary_booking, addons } = req.body;
+    validateFlatBookingConstraints(primary_booking, addons);
     t = await database.transaction();
     req.transaction = t;
 
@@ -392,6 +401,11 @@ async function book(
 
     case TYPE_FOOD:
       const foodResult = await bookFood(body, data, t, user);
+      // Meals cost money when the card is a GUEST. Leaving this out of `amount`
+      // built a Razorpay order for the other bookings only, while
+      // updateRazorpayTransactions still stamped that order id on the meal
+      // transactions - so the webhook completed meals nobody paid for.
+      amount += foodResult.amount;
       setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
@@ -470,6 +484,7 @@ async function validate(body, user, data, utsav, response) {
         user,
         utsav
       );
+      totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:

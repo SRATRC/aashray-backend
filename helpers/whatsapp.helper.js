@@ -6,6 +6,7 @@ import moment from "moment-timezone";
 import { TYPE_ADHYAYAN, TYPE_TRAVEL, TYPE_ROOM, TYPE_UTSAV, RESEARCH_CENTRE, TYPE_FOOD, STATUS_RESIDENT } from "../config/constants.js";
 import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
 import { formatWhatsAppPhone } from "../utils/phoneFormatter.js";
+import logger from "../config/logger.js";
 import fs from "fs";
 import path from "path";
 
@@ -21,9 +22,28 @@ const TEMPLATE_PARAM_COUNTS = {
   // add the actual counts for your templates
 };
 
+// A template that tells the member their booking is confirmed: a new-booking
+// confirmation (bn_..._cf), a status change into confirmed or, for stays,
+// into pending check-in (bk_...2conf, bk_...2pgci), or a legacy *_confirmed name.
+const CONFIRMATION_TEMPLATE =
+  /^booking_[a-z]+_.*confirmed|^bn_[a-z]+_[a-z]+_[bf]_(cf|cnf|cnfm|conf)(_|$)|^bk_[a-z]+_[a-z]+_[bf]_[a-z]*2(cf|conf|cnf|cnfm|pgci|pndchki)(_|$)/;
+
+function isConfirmationTemplate(template) {
+  return CONFIRMATION_TEMPLATE.test(String(template || ''));
+}
+
+// Logged to the application log (not the console) so a dropped message can be
+// found in production. The phone number is left out on purpose.
+function logMissingTemplate(template) {
+  logger.error('whatsapp_template_missing_not_sent', {
+    template,
+    domain: String(template || '').split('_')[1] || 'unknown'
+  });
+}
+
 /**
  * Helper that tries primary template and if WhatsApp returns a "template missing" 404,
- * retries with a fallback template (usually a 'confirmed' variant). Non-fatal.
+ * retries with a fallback template of the same meaning. Non-fatal.
  */
 async function sendWithTemplateFallback(phone, template, components) {
   const trySend = async (tpl, comps, lang = null) => {
@@ -58,8 +78,17 @@ async function sendWithTemplateFallback(phone, template, components) {
     if (attempt.ok) return attempt;
   }
 
-  // 3. If still missing, try fallback template
+  // 3. If still missing, try a fallback template with the same meaning
   if (attempt.isTemplateMissing) {
+    // The fallbacks below send "confirmed" messages. Sending one for a
+    // waitlisted, pending or cancelled booking tells the member the wrong
+    // thing, so only a confirmation may fall back to another confirmation.
+    const isSameMeaningSwap = template === "bk_usv_s_b_canc2adcanc_wcre";
+    if (!isSameMeaningSwap && !isConfirmationTemplate(template)) {
+      logMissingTemplate(template);
+      return { ok: false, error: attempt.error };
+    }
+
     let fallbackTemplate = template;
     let fallbackComponents = components;
 
@@ -125,13 +154,10 @@ async function sendWithTemplateFallback(phone, template, components) {
         bodyComp.parameters.push(bodyComp.parameters[0]);
       }
     } else {
-      fallbackTemplate = fallbackTemplate.replace(
-        /_pending_for|_pending|_waiting_for|_waiting/gi,
-        "_confirmed"
-      );
-      if (fallbackTemplate === template) {
-        fallbackTemplate = "booking_adhyayan_self_confirmed";
-      }
+      // No fallback of the same meaning for this domain. The old catch-all
+      // sent an Adhyayan confirmation for any booking type.
+      logMissingTemplate(template);
+      return { ok: false, error: attempt.error };
     }
 
     console.log(`WA SEND: retrying with fallback template '${fallbackTemplate}'`);
@@ -886,6 +912,46 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
       let utsavName = b.utsavname || (b.UtsavDb && b.UtsavDb.name) || "";
       let packageName = b.package || (b.UtsavPackagesDb && b.UtsavPackagesDb.name) || "";
 
+      // Calculate meal details for confirmed templates
+      let utsavObj = b.UtsavDb;
+      if (!utsavObj && b.utsavid) {
+        utsavObj = await UtsavDb.findOne({ where: { id: b.utsavid } }).catch(() => null);
+      }
+      utsavObj = utsavObj || {};
+      if (!utsavName && utsavObj.name) utsavName = utsavObj.name;
+
+      let packageObj = b.UtsavPackagesDb;
+      if (!packageObj && b.packageid) {
+        packageObj = await UtsavPackagesDb.findOne({ where: { id: b.packageid } }).catch(() => null);
+      }
+      packageObj = packageObj || {};
+      if (!packageName && packageObj.name) packageName = packageObj.name;
+
+      const utsavIdVal = b.utsavid || utsavObj.id || "";
+      const isRC = utsavObj.location === RESEARCH_CENTRE || utsavObj.location === "Research Centre";
+      const locationName = utsavObj.location || "";
+
+      const pkgStart = packageObj.start_date ? moment(packageObj.start_date).format("DD/MM/YYYY") : (utsavObj.start_date ? moment(utsavObj.start_date).format("DD/MM/YYYY") : "");
+      const pkgEnd = packageObj.end_date ? moment(packageObj.end_date).format("DD/MM/YYYY") : (utsavObj.end_date ? moment(utsavObj.end_date).format("DD/MM/YYYY") : "");
+
+      const getFirstMeal = (arr, defaultVal) => {
+        if (!Array.isArray(arr) || !arr.length) return defaultVal;
+        const m = arr[0];
+        return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+      };
+
+      const getLastMeal = (arr, defaultVal) => {
+        if (!Array.isArray(arr) || !arr.length) return defaultVal;
+        const m = arr[arr.length - 1];
+        return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+      };
+
+      const startMeals = getFirstMeal(utsavObj.starting_meal, "Breakfast");
+      const endMeals = getLastMeal(utsavObj.ending_meal, "Dinner");
+
+      const startingMealText = isRC && pkgStart ? `${pkgStart} (${startMeals})` : "N/A";
+      const endingMealText = isRC && pkgEnd ? `${pkgEnd} (${endMeals})` : "N/A";
+
       // transaction
       const bookingId = String(b.bookingid || b.bookingId || b.id || "");
       const tx = transactionsMap.get(bookingId) || { amount: null, discount: null, razorpay_order_id: null };
@@ -894,6 +960,7 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
       let template = "";
       let bodyParams = [];
       let headerParam = "";
+      let includeButton = false;
 
       const isWaiting = status === "waiting" || status.includes("wait");
       const isPending = status === "pending" || status.includes("pend") || status.includes("pay");
@@ -914,8 +981,14 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           template = isNRI ? "bn_usv_gu_b_pymtpndg_nri" : "bn_usv_gu_b_pymtpndg";
           bodyParams = [bookerName, utsavName, "payment pending", packageName];
         } else {
-          template = "bn_usv_gu_b_cf";
-          bodyParams = [bookerName, utsavName, packageName, paymentId];
+          if (isRC) {
+            template = "bn_usv_gu_b_cf";
+            bodyParams = [bookerName, utsavName, packageName, paymentId, startingMealText, endingMealText, attendeeName];
+          } else {
+            template = "bn_usv_gu_b_cf_nrc";
+            bodyParams = [bookerName, utsavName, packageName, paymentId, locationName];
+          }
+          includeButton = true;
         }
       } else if (isGuestFor) {
         const bookerName = await getCardName(b.bookedBy);
@@ -929,8 +1002,14 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           template = "bn_usv_gu_f_ppg";
           bodyParams = [attendeeName, utsavName, "payment pending", packageName];
         } else {
-          template = "bn_usv_gu_f_cf";
-          bodyParams = [attendeeName, utsavName, packageName];
+          if (isRC) {
+            template = "bn_usv_gu_f_cf";
+            bodyParams = [attendeeName, utsavName, packageName, startingMealText, endingMealText];
+          } else {
+            template = "bn_usv_gu_f_cf_nrc";
+            bodyParams = [attendeeName, utsavName, packageName, locationName];
+          }
+          includeButton = true;
         }
       } else {
         const selfName = user.issuedto || "";
@@ -941,8 +1020,14 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
           template = isNRI ? "bn_usv_s_b_pymtpndg_nri" : "bn_usv_s_b_pymtpndg";
           bodyParams = [selfName, utsavName, "payment pending", packageName];
         } else {
-          template = "bn_usv_s_b_cf";
-          bodyParams = [selfName, utsavName, packageName, paymentId];
+          if (isRC) {
+            template = "bn_usv_s_b_cf";
+            bodyParams = [selfName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          } else {
+            template = "bn_usv_s_b_cf_nrc";
+            bodyParams = [selfName, utsavName, packageName, paymentId, locationName];
+          }
+          includeButton = true;
         }
       }
 
@@ -959,6 +1044,15 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
         ];
       } else {
         components = [bodyComp];
+      }
+
+      if (includeButton && utsavIdVal) {
+        components.push({
+          type: "button",
+          sub_type: "url",
+          index: "1",
+          parameters: [{ type: "text", text: `u${utsavIdVal}` }]
+        });
       }
 
       const result = await (sendWithTemplateFallback ? sendWithTemplateFallback(phone, template, components) : sendWhatsAppMessage(phone, template, components));
@@ -1045,6 +1139,12 @@ export async function sendFlatWhatsApp(user, flatBookingDetails = [], bookedForU
       const rawStatus = (b.status === undefined || b.status === null || String(b.status).trim() === "") ? "pending" : String(b.status);
       const bookingStatus = rawStatus.trim().toLowerCase();
       const isPaymentPending = bookingStatus === "payment pending" || bookingStatus === "pending" || (bookingStatus.includes("payment") && !bookingStatus.includes("checkin"));
+
+      // Phase 1: no correct flat-waiting template yet — skip waiting flats to
+      // avoid sending the wrong "confirmed" message.
+      if (bookingStatus === "waiting" || bookingStatus.startsWith("wait")) {
+        continue;
+      }
 
       const isGuestBy = bookedForUser && bookedForUser.cardno !== user.cardno;
       const isGuestFor = b.bookedBy && b.bookedBy !== user.cardno;
@@ -1217,7 +1317,7 @@ export async function sendWifiRequestWhatsApp(cardno, username, status, code = n
       rejected: 'per_wf_code_req_rej',
       reset: 'per_wf_code_req_res',
       pending: 'per_wf_code_req_pend',
-      approved: 'per_wf_code_req_cnf_ad_m'
+      approved: 'per_wf_code_req_cnf_ad_m_wtl'
     };
 
     const templateName = templateMap[status];
@@ -1236,7 +1336,16 @@ export async function sendWifiRequestWhatsApp(cardno, username, status, code = n
       }
     ];
 
-
+    // Append dynamic store-link buttons for the approved template
+    if (status === 'approved') {
+      const isPR = user.res_status === 'PR';
+      const androidSuffix = isPR ? 'wifiap2' : 'wifiat2';
+      const iosSuffix = isPR ? 'wifiip2' : 'wifiit2';
+      components.push(
+        { type: "button", sub_type: "url", index: 0, parameters: [{ type: "text", text: androidSuffix }] },
+        { type: "button", sub_type: "url", index: 1, parameters: [{ type: "text", text: iosSuffix }] }
+      );
+    }
 
     const sendResult = await sendWhatsAppMessage(phone, templateName, components);
     if (!sendResult.ok) {
@@ -1393,6 +1502,15 @@ export async function sendAdhyayanStatusChangeWhatsApp(booking, adhyayan, previo
         if (templateName) {
           const sanitizedParams = parameters.map(p => sanitizeParamText(p));
           const components = buildBodyComponents(sanitizedParams);
+          const shibirIdVal = adhyayan?.id || booking.shibir_id || "";
+          if (templateName === "bk_adh_s_b_ppg2cnf" && shibirIdVal) {
+            components.push({
+              type: "button",
+              sub_type: "url",
+              index: "1",
+              parameters: [{ type: "text", text: `a${shibirIdVal}` }]
+            });
+          }
           console.log(`WA SENDING ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee cardno=${booking.cardno})`);
           const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
           if (!result || !result.ok) {
@@ -2089,18 +2207,44 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
     }
 
     // 3. Load utsav details
+    let utsav = null;
     let utsavName = "";
     if (booking.utsavid) {
-      const utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
+      utsav = await UtsavDb.findOne({ where: { id: booking.utsavid } });
       utsavName = utsav?.name || "";
     }
 
     // 4. Load package details
+    let pkg = null;
     let packageName = "";
     if (booking.packageid) {
-      const pkg = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
+      pkg = await UtsavPackagesDb.findOne({ where: { id: booking.packageid } });
       packageName = pkg?.name || "";
     }
+
+    // Calculate meal details for confirmed templates
+    const isRC = utsav?.location === RESEARCH_CENTRE || utsav?.location === "Research Centre";
+    const locationName = utsav?.location || "";
+    const pkgStart = pkg?.start_date ? moment(pkg.start_date).format("DD/MM/YYYY") : (utsav?.start_date ? moment(utsav.start_date).format("DD/MM/YYYY") : "");
+    const pkgEnd = pkg?.end_date ? moment(pkg.end_date).format("DD/MM/YYYY") : (utsav?.end_date ? moment(utsav.end_date).format("DD/MM/YYYY") : "");
+
+    const getFirstMeal = (arr, defaultVal) => {
+      if (!Array.isArray(arr) || !arr.length) return defaultVal;
+      const m = arr[0];
+      return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+    };
+
+    const getLastMeal = (arr, defaultVal) => {
+      if (!Array.isArray(arr) || !arr.length) return defaultVal;
+      const m = arr[arr.length - 1];
+      return String(m).charAt(0).toUpperCase() + String(m).slice(1);
+    };
+
+    const startMeals = getFirstMeal(utsav?.starting_meal, "Breakfast");
+    const endMeals = getLastMeal(utsav?.ending_meal, "Dinner");
+
+    const startingMealText = isRC && pkgStart ? `${pkgStart} (${startMeals})` : "N/A";
+    const endingMealText = isRC && pkgEnd ? `${pkgEnd} (${endMeals})` : "N/A";
 
     // 5. Determine credit refunds
     let creditsRefunded = options.credits || 0;
@@ -2147,8 +2291,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           templateName = "bk_usv_s_b_wtng2pymtpndg";
           parameters = [attendeeName, utsavName, packageName, "payment pending"];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_s_b_ppg2cf";
-          parameters = [attendeeName, utsavName, packageName, paymentId];
+          if (isRC) {
+            templateName = "bk_usv_s_b_ppg2cf";
+            parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_s_b_ppg2cf_nrc";
+            parameters = [attendeeName, utsavName, packageName, paymentId, locationName];
+          }
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2162,8 +2311,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           }
           parameters = [attendeeName, utsavName, packageName, "admin cancelled"];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_s_b_ppg2cf";
-          parameters = [attendeeName, utsavName, packageName, paymentId];
+          if (isRC) {
+            templateName = "bk_usv_s_b_ppg2cf";
+            parameters = [attendeeName, utsavName, packageName, paymentId, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_s_b_ppg2cf_nrc";
+            parameters = [attendeeName, utsavName, packageName, paymentId, locationName];
+          }
         }
       } else if (isConfirmedStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2191,6 +2345,15 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
       if (templateName) {
         const sanitizedParams = parameters.map(p => sanitizeParamText(p));
         const components = buildBodyComponents(sanitizedParams);
+        const utsavIdVal = booking.utsavid || utsav?.id || "";
+        if ((templateName === "bk_usv_s_b_ppg2cf" || templateName === "bk_usv_s_b_ppg2cf_nrc") && utsavIdVal) {
+          components.push({
+            type: "button",
+            sub_type: "url",
+            index: "1",
+            parameters: [{ type: "text", text: `u${utsavIdVal}` }]
+          });
+        }
         console.log(`WA UTSAV STATUS ATTENDEE: template=${templateName} to phone=${attendeePhone} (Attendee name=${attendeeName})`);
         const result = await sendWithTemplateFallback(attendeePhone, templateName, components);
         if (!result || !result.ok) {
@@ -2219,8 +2382,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           templateName = "bk_usv_gu_b_w2ppg";
           parameters = [bookerName, utsavName, packageName, "payment pending", attendeeName];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_ppg2cf";
-          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName];
+          if (isRC) {
+            templateName = "bk_usv_gu_b_ppg2cf_wl";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_gu_b_ppg2cf_wl_nrc";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, locationName];
+          }
         }
       } else if (isPendingStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2234,8 +2402,13 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
           }
           parameters = [bookerName, utsavName, packageName, "admin cancelled", attendeeName];
         } else if (isConfirmedStatus(newStatus)) {
-          templateName = "bk_usv_gu_b_ppg2cf";
-          parameters = [bookerName, utsavName, packageName, paymentId, attendeeName];
+          if (isRC) {
+            templateName = "bk_usv_gu_b_ppg2cf_wl";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, startingMealText, endingMealText];
+          } else {
+            templateName = "bk_usv_gu_b_ppg2cf_wl_nrc";
+            parameters = [bookerName, utsavName, packageName, paymentId, attendeeName, locationName];
+          }
         }
       } else if (isConfirmedStatus(prevStatusNormalized)) {
         if (newStatus === "cancelled") {
@@ -2260,6 +2433,15 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
       if (templateName) {
         const sanitizedParams = parameters.map(p => sanitizeParamText(p));
         const components = buildBodyComponents(sanitizedParams);
+        const utsavIdVal = booking.utsavid || utsav?.id || "";
+        if ((templateName === "bk_usv_gu_b_ppg2cf_wl" || templateName === "bk_usv_gu_b_ppg2cf_wl_nrc") && utsavIdVal) {
+          components.push({
+            type: "button",
+            sub_type: "url",
+            index: "1",
+            parameters: [{ type: "text", text: `u${utsavIdVal}` }]
+          });
+        }
         console.log(`WA UTSAV STATUS BOOKER: template=${templateName} to phone=${bookerPhone} (Booker name=${bookerName})`);
         const result = await sendWithTemplateFallback(bookerPhone, templateName, components);
         if (!result || !result.ok) {
@@ -2285,19 +2467,29 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
     return;
   }
 
-  // Skip WhatsApp for PR (Permanent Residents) self food bookings — they book daily, high volume, low value
-  // NOTE: still send if PR is booking food FOR a guest (isGuest check happens below)
-  const firstBookingForPrCheck = Array.isArray(foodBookingDetails) && foodBookingDetails[0];
-  const isSelfBookingForPrCheck = !firstBookingForPrCheck?.bookedBy ||
-    String(firstBookingForPrCheck.bookedBy) === String(firstBookingForPrCheck.cardno);
-  if (user.res_status === STATUS_RESIDENT && isSelfBookingForPrCheck) {
-    console.log(`WA FOOD SKIP: PR self-booking for user ${user.cardno} (${user.issuedto}) — skipping food WhatsApp to reduce cost.`);
+  if (!Array.isArray(foodBookingDetails) || foodBookingDetails.length === 0) return;
+
+  const firstBooking = foodBookingDetails[0];
+  const attendeeCardno = firstBooking?.cardno;
+
+  // Skip WhatsApp if the attendee (person receiving the food) is a PR (Permanent Resident).
+  // PRs stay at the ashram and book daily meals — high volume, low value.
+  // We skip food WA whether the PR booked for themselves or another member booked for them.
+  let attendee = null;
+  if (String(user.cardno) === String(attendeeCardno)) {
+    attendee = user;
+  } else if (bookedForUser && String(bookedForUser.cardno) === String(attendeeCardno)) {
+    attendee = bookedForUser;
+  } else if (attendeeCardno) {
+    attendee = await CardDb.findOne({ where: { cardno: attendeeCardno } }).catch(() => null);
+  }
+
+  if (attendee?.res_status === STATUS_RESIDENT) {
+    console.log(`WA FOOD SKIP: Food booking is for PR user ${attendee.cardno} (${attendee.issuedto}) — skipping food WhatsApp to reduce cost.`);
     return;
   }
 
   const isNRI = user && user.country && String(user.country).trim().toLowerCase() !== 'india';
-
-  if (!Array.isArray(foodBookingDetails) || foodBookingDetails.length === 0) return;
 
   try {
     // 1. Gather all dates and find min/max
@@ -2344,12 +2536,10 @@ export async function sendFoodWhatsApp(user, foodBookingDetails = [], bookedForU
       const isBooker = String(user.cardno) === String(bookedByCardno);
 
       if (isBooker) {
-        let attendeeName = "";
-        if (bookedForUser) {
-          attendeeName = bookedForUser.issuedto || "";
-        } else {
-          const attendee = await CardDb.findOne({ where: { cardno: attendeeCardno } }).catch(() => null);
-          attendeeName = attendee?.issuedto || "";
+        let attendeeName = attendee?.issuedto || bookedForUser?.issuedto || "";
+        if (!attendeeName) {
+          const attendeeRecord = await CardDb.findOne({ where: { cardno: attendeeCardno } }).catch(() => null);
+          attendeeName = attendeeRecord?.issuedto || "";
         }
         headerParam = attendeeName;
 
@@ -2610,6 +2800,42 @@ export async function sendLateCheckoutFeeWaivedWhatsApp(transaction) {
     }
   } catch (err) {
     console.error("Error in sendLateCheckoutFeeWaivedWhatsApp:", err && (err.stack || err.message || err));
+  }
+}
+
+/**
+ * Send WhatsApp Group Join Reminder message to participants.
+ * Template: bn_grp_join_reminder (or fallback bn_usv_s_b_cf with parameters)
+ */
+export async function sendGroupJoinReminderWhatsApp(phone, attendeeName, eventName, slug) {
+  if (!phone) return { ok: false, error: 'No phone number' };
+  try {
+    const formattedPhone = formatWhatsAppPhone(phone, 'India');
+    const sanitizedName = sanitizeParamText(attendeeName || 'Mumukshu');
+    const sanitizedEvent = sanitizeParamText(eventName || 'Event');
+
+    const bodyParams = [sanitizedName, sanitizedEvent];
+    const sanitizedParams = bodyParams.map(p => sanitizeParamText(p));
+    const bodyComp = buildBodyComponents(sanitizedParams)[0];
+
+    const components = [
+      bodyComp,
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', text: slug }]
+      }
+    ];
+
+    // Use bn_utv_wg_rem for Utsav (slug starts with 'u') and bn_adh_wg_rem for Adhyayan (slug starts with 'a')
+    const templateName = slug && slug.startsWith('u') ? 'bn_utv_wg_rem' : 'bn_adh_wg_rem';
+
+    const result = await sendWithTemplateFallback(formattedPhone, templateName, components);
+    return result;
+  } catch (err) {
+    console.error(`Error sending group join reminder to ${phone}:`, err.message || err);
+    return { ok: false, error: err.message };
   }
 }
 

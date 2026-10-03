@@ -3,6 +3,7 @@ const router = express.Router();
 import {
   fetchUpcomingBookings,
   updateBookingStatus,
+  bulkUpdateBookingStatus,
   updateTransactionStatus,
   fetchSummary,
   fetchBookingForDriver,
@@ -37,6 +38,7 @@ router.get('/summary', CatchAsync(fetchSummary));
 router.get('/driver', CatchAsync(fetchBookingForDriver));
 
 router.post('/booking/status', CatchAsync(updateBookingStatus));
+router.post('/booking/bulk-status', CatchAsync(bulkUpdateBookingStatus));
 router.post('/transaction/status', CatchAsync(updateTransactionStatus));
 router.put('/bookingupdate', CatchAsync(updateBooking));
 router.post('/bus-group', CatchAsync(createBusGroup));
