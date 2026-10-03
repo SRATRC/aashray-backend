@@ -263,38 +263,36 @@ export async function cancelTransaction(
   return { credits };
 }
 
-export async function adjustAmount(
-  card,
-  booking,
-  transaction,
-  amount,
-  updatedBy,
-  t
-) {
-  const originalAmount = transaction.amount + transaction.discount;
-  const bookingType = getBookingType(transaction);
-
-  if (originalAmount > amount) {
-    const credits = originalAmount - amount;
-    // adjustAmount only receives updatedBy (string) — construct a minimal user object for addCredit
-    const user = { username: updatedBy };
-    await addCredit(user, card, bookingType, credits, t);
-    await useCredit(card, booking, transaction, amount, updatedBy, t);
-  } else if (originalAmount < amount) {
-    const balance = amount - originalAmount;
-    await transaction.update(
-      {
-        // set status to cash pending as only admin
-        // can call this function
-        status: STATUS_CASH_PENDING,
-        discount: originalAmount,
-        amount: balance,
-        description: `Transaction updated. New Balance ${balance}.`,
-        updatedBy: updatedBy
-      },
-      { transaction: t }
-    );
+/**
+ * Staff edit of the amount on a travel charge.
+ *
+ * `amount` is the NET the member owes: the value the travel report shows
+ * (`transactions.amount`, already after credit) and the staff form sends back.
+ * Credit already applied (`transaction.discount`) stays as it is. This never
+ * adds or refunds wallet credit, so the credit is not counted twice. Sending
+ * the same value again changes nothing. Staff may edit the amount whatever the
+ * payment state; status is left alone (same as before).
+ */
+export async function adjustAmount(transaction, amount, updatedBy, t) {
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new ApiError(400, 'Amount must be a non-negative number');
   }
+
+  if (Number(transaction.amount) === amount) return;
+
+  const discount = Number(transaction.discount) || 0;
+
+  await transaction.update(
+    {
+      amount,
+      description:
+        discount > 0
+          ? `Balance updated to ${amount} (credits used: ${discount})`
+          : `Balance updated to ${amount}`,
+      updatedBy
+    },
+    { transaction: t }
+  );
 }
 
 function getCreditType(bookingType) {
