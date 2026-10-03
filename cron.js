@@ -522,21 +522,40 @@ const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
       where: { status: STATUS_RESOLVED, updatedAt: { [Sequelize.Op.lt]: cutoff } }
     });
 
+    let closedCount = 0;
     if (staleTickets.length > 0) {
       // Single bulk UPDATE instead of one query per ticket — the per-row
       // write here has no row-specific logic that could fail differently per
       // ticket, so there's nothing gained from doing it one at a time.
+      // Re-check status and idle time in the UPDATE itself: a member reply
+      // between the SELECT above and this write moves the ticket to
+      // "in progress" and must not be closed.
+      const closeWhere = {
+        id: { [Sequelize.Op.in]: staleTickets.map((ticket) => ticket.id) },
+        status: STATUS_RESOLVED,
+        updatedAt: { [Sequelize.Op.lt]: cutoff }
+      };
       await Ticket.update(
         { status: STATUS_CLOSED, updatedBy: 'system:auto-close' },
-        { where: { id: { [Sequelize.Op.in]: staleTickets.map((ticket) => ticket.id) } } }
+        { where: closeWhere }
       );
+      // Notify only the tickets this run actually closed.
+      const closedTickets = await Ticket.findAll({
+        where: {
+          id: { [Sequelize.Op.in]: staleTickets.map((ticket) => ticket.id) },
+          status: STATUS_CLOSED,
+          updatedBy: 'system:auto-close'
+        }
+      });
+      closedCount = closedTickets.length;
+      const toNotify = closedTickets;
 
       // notifyCardno never throws (it catches internally and resolves with
       // {success, reason}), so Promise.allSettled here is purely to run the
       // notifications concurrently rather than one after another — a
       // fulfilled-but-unsuccessful result is inspected below, not a rejection.
       const notifyResults = await Promise.allSettled(
-        staleTickets.map((ticket) =>
+        toNotify.map((ticket) =>
           notifyCardno(ticket.issued_by, {
             title: 'Support ticket closed',
             body: `Your ${ticket.service} ticket was automatically closed after ${TICKET_AUTO_CLOSE_GRACE_DAYS} days of inactivity`,
@@ -550,12 +569,12 @@ const ticketAutoCloseJob = cron.schedule('0 2 * * *', async () => {
       ).length;
       if (failedNotifications > 0) {
         logger.warn(
-          `ticketAutoCloseJob: ${failedNotifications} of ${staleTickets.length} notifications failed (best-effort, non-fatal).`
+          `ticketAutoCloseJob: ${failedNotifications} of ${toNotify.length} notifications failed (best-effort, non-fatal).`
         );
       }
     }
 
-    logger.info(`ticketAutoCloseJob finished: closed ${staleTickets.length} ticket(s).`);
+    logger.info(`ticketAutoCloseJob finished: closed ${closedCount} of ${staleTickets.length} stale ticket(s).`);
   } catch (error) {
     logger.error(`ticketAutoCloseJob error: ${error.stack || error.message}`);
   }
