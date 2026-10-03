@@ -4,8 +4,16 @@ import {
   Transactions,
   TravelBusGroup,
   TravelBusPassengers,
-  TravelBusStops
+  TravelBusStops,
+  ShibirBookingDb,
+  ShibirDb
 } from '../../models/associations.js';
+import {
+  matchAdhyayanForLeg,
+  ADHYAYAN_MATCH_WINDOW_DAYS,
+  ATTENDING_EXCLUDED_STATUSES
+} from '../../helpers/adhyayanTravel.helper.js';
+import { Op } from 'sequelize';
 import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
@@ -303,7 +311,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   END AS drop_point`;
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.createdAt,
+    `SELECT t1.bookingid, t1.cardno, t1.trip_group_id, t1.bookedBy, t1.date, t1.createdAt,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        CASE 
          WHEN t1.leaving_post_adhyayan = 1 THEN 1
@@ -391,6 +399,54 @@ LEFT JOIN travel_bus_group tbg
           item.bus_group_id
       );
   }
+
+  const cardnos = [...new Set(data.map((r) => r.cardno).filter(Boolean))];
+  let registrations = [];
+  if (cardnos.length > 0) {
+    // Only shibirs that could match a leg: matchAdhyayanForLeg looks 14 days either side of a
+    // travel date, so skip shibirs that ended before (earliest date - 14) or start after
+    // (latest date + 14). Keeps long-time members' full history out of the query.
+    const travelDates = data.map((r) => moment(r.date).format('YYYY-MM-DD')).filter((d) => d !== 'Invalid date').sort();
+    const windowStart = moment(travelDates[0]).subtract(ADHYAYAN_MATCH_WINDOW_DAYS, 'days').format('YYYY-MM-DD');
+    const windowEnd = moment(travelDates[travelDates.length - 1]).add(ADHYAYAN_MATCH_WINDOW_DAYS, 'days').format('YYYY-MM-DD');
+    const rows = await ShibirBookingDb.findAll({
+      where: {
+        cardno: { [Op.in]: cardnos },
+        status: { [Op.notIn]: ATTENDING_EXCLUDED_STATUSES }
+      },
+      include: [{
+        model: ShibirDb,
+        as: 'ShibirDb',
+        attributes: ['name', 'start_date', 'end_date'],
+        where: travelDates.length
+          ? { end_date: { [Op.gte]: windowStart }, start_date: { [Op.lte]: windowEnd } }
+          : undefined
+      }],
+      // Deterministic order so same-delta ties in matchAdhyayanForLeg resolve stably.
+      order: [[{ model: ShibirDb, as: 'ShibirDb' }, 'start_date', 'ASC']]
+    });
+    registrations = rows
+      .filter((r) => r.ShibirDb)
+      .map((r) => ({
+        cardno: r.cardno,
+        name: r.ShibirDb.name,
+        start_date: r.ShibirDb.start_date,
+        end_date: r.ShibirDb.end_date,
+        status: r.status
+      }));
+  }
+
+  // Index registrations by cardno once so the per-row match is O(rows + registrations).
+  const registrationsByCardno = new Map();
+  for (const reg of registrations) {
+    if (!registrationsByCardno.has(reg.cardno)) registrationsByCardno.set(reg.cardno, []);
+    registrationsByCardno.get(reg.cardno).push(reg);
+  }
+
+  for (const item of data) {
+    item.adhyayan = matchAdhyayanForLeg(item, registrationsByCardno.get(item.cardno) || []);
+  }
+
   req.log.info('travel_fetch_upcoming_bookings_success', { start_date, end_date, count: data.length });
   return res.status(200).send({ message: 'Fetched data', data });
 };
