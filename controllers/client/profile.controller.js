@@ -269,7 +269,7 @@ export const upload = async (req, res) => {
       // Local fallback for development/local testing only. Files here are
       // served by express.static, so it stays off in production.
       const env = process.env.NODE_ENV;
-      if (env && env !== 'development' && env !== 'test') {
+      if (env && !['dev', 'development', 'test'].includes(env)) {
         req.log.error('upload_profile_pic_no_storage', {
           cardno: req.user.cardno
         });
