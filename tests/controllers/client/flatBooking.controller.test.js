@@ -12,6 +12,7 @@ import {
 import { MUMUKSHU_1, TODAY } from '../../testConstants.js';
 import { nDaysFromToday } from '../../helpers/date.helper.js';
 import FlatFactory from '../../factories/flatFactory.js';
+import CardFactory from '../../factories/cardFactory.js';
 
 jest.mock('../../../utils/sendMail.js');
 
@@ -24,6 +25,8 @@ describe('Flat Booking Integration Tests', () => {
 
     // Create a flat for testing
     await FlatFactory.create(MUMUKSHU_1, 101);
+    // A non-owner mumukshu, for the "book a flat you don't own" cases
+    await CardFactory.create('Non_Owner_1');
   });
 
   describe('Mumukshu Flat Booking as Primary Booking', () => {
@@ -226,7 +229,7 @@ describe('Flat Booking Integration Tests', () => {
       const endDay = nDaysFromToday(3);
 
       const res = await request(app)
-        .post('/api/v1/room/flat')
+        .post('/api/v1/stay/flat')
         .send({
           cardno: MUMUKSHU_1,
           mumukshus: [{ cardno: MUMUKSHU_1 }],
@@ -286,8 +289,8 @@ function createFlatBookingJson(cardno, startDay, endDay) {
   return {
     booking_type: TYPE_FLAT,
     details: {
-      startDay: startDay,
-      endDay: endDay,
+      checkin_date: startDay,
+      checkout_date: endDay,
       mumukshus: [cardno]
     }
   };
@@ -297,8 +300,8 @@ function createGuestFlatBookingJson(guests, startDay, endDay) {
   return {
     booking_type: TYPE_FLAT,
     details: {
-      startDay: startDay,
-      endDay: endDay,
+      checkin_date: startDay,
+      checkout_date: endDay,
       guests: guests
     }
   };

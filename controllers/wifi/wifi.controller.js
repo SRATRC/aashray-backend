@@ -23,7 +23,7 @@ import database from '../../config/database.js';
 import moment from 'moment';
 import { sendWifiRequestWhatsApp } from '../../helpers/whatsapp.helper.js';
 
-const MAX_WIFI_PASS_LIMIT = 3;
+const MAX_WIFI_PASS_LIMIT = 1;
 
 export const generateTempCode = async (req, res) => {
   const t = await database.transaction();
@@ -169,8 +169,7 @@ export const requestPermanentCode = async (req, res) => {
     tablet: 'tb'
   };
 
-  const deviceSuffix =
-    DEVICE_SUFFIX_MAP[deviceType.toLowerCase()] || 'ot';
+  const deviceSuffix = DEVICE_SUFFIX_MAP[deviceType.toLowerCase()] || 'ot';
 
   // Prefixes to ignore as first name
   const IGNORE_FIRST_NAMES = [
@@ -200,9 +199,7 @@ export const requestPermanentCode = async (req, res) => {
 
   const firstName = rawNameParts[0];
   const lastName =
-    rawNameParts.length > 1
-      ? rawNameParts[rawNameParts.length - 1]
-      : '';
+    rawNameParts.length > 1 ? rawNameParts[rawNameParts.length - 1] : '';
 
   // Last 4 digits of card number (keeps leading zeros)
   const cardLast4 = req.user.cardno.slice(-4);

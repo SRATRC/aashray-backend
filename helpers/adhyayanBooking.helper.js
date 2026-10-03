@@ -23,7 +23,9 @@ import {
   ShibirDb,
   UtsavPackagesDb,
   CardDb,
-  ShibirAttendanceDb
+  ShibirAttendanceDb,
+  ShibirSession,
+  ShibirAttendanceRecord
 } from '../models/associations.js';
 import sendMail from '../utils/sendMail.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -33,6 +35,7 @@ import ApiError from '../utils/ApiError.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import { sendDualUserNotifications } from './notification.helper.js';
+import { sendAdhyayanStatusChangeWhatsApp } from './whatsapp.helper.js';
 import logger from '../config/logger.js';
 
 export async function bookAdhyayanForMumukshus(
@@ -103,7 +106,7 @@ export async function checkAdhyayanParamGyanSabhaOrUtsav(date) {
 }
 
 export async function validateAdhyayans(...shibirIds) {
-  const sevenDaysAgo = moment().subtract(15, 'days').format('YYYY-MM-DD');
+  const sevenDaysAgo = moment().tz('Asia/Kolkata').subtract(15, 'days').format('YYYY-MM-DD');
 
   const shibirs = await ShibirDb.findAll({
     where: {
@@ -155,9 +158,18 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
     const bookingIds = [];
     for (const adhyayan of adhyayans) {
       const bookingId = uuidv4();
-      if (adhyayan.available_seats > 0 && adhyayan.status == STATUS_OPEN) {
-        await reserveAdhyayanSeat(adhyayan, t, log);
 
+      // Confirmed-vs-waitlist is decided by whether the seat was actually
+      // taken under the row lock, not by the unlocked count that
+      // validateAdhyayans loaded. Each person in a group re-reads the locked
+      // row inside this same transaction, so N people decrement by N and the
+      // rest spill to the waitlist the moment the seats run out.
+      const seatReserved =
+        adhyayan.status == STATUS_OPEN
+          ? await reserveAdhyayanSeat(adhyayan, t, log)
+          : false;
+
+      if (seatReserved) {
         const booking = await ShibirBookingDb.create(
           {
             bookingid: bookingId,
@@ -222,36 +234,68 @@ export async function createAdhyayanBooking(adhyayans, t, user, ...users) {
   return { amount, userBookingIds, waitingBookingCount };
 }
 
+// Takes the seat, or reports that there was none to take.
+//
+// The seat count is re-read here under a row lock instead of trusting the
+// instance handed in by validateAdhyayans, which is loaded with no transaction
+// and no lock. Two requests racing for the last seat both used to read
+// available_seats = 1, both passed the caller's check, and both wrote 0 — two
+// confirmed bookings for one seat, with the counter showing nothing wrong.
+//
+// Returns true if a seat was taken, false if the session is full. Callers must
+// branch on the return value rather than on their own stale read, so that the
+// decision and the decrement come from the same locked row.
 export async function reserveAdhyayanSeat(adhyayan, t, log = logger) {
-  if (adhyayan.available_seats <= 0) {
-    throw new ApiError(400, ERR_ADHYAYAN_NO_SEATS_AVAILABLE);
+  const freshAdhyayan = await ShibirDb.findOne({
+    where: { id: adhyayan.id },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
+
+  if (!freshAdhyayan) {
+    throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
   }
 
-  await adhyayan.update(
+  if (freshAdhyayan.available_seats <= 0) {
+    log.debug('adhyayan_seat_unavailable', { shibir_id: adhyayan.id });
+    return false;
+  }
+
+  const newSeats = freshAdhyayan.available_seats - 1;
+
+  await freshAdhyayan.update(
     {
-      available_seats: adhyayan.dataValues.available_seats - 1
+      available_seats: newSeats
     },
     { transaction: t }
   );
+
+  // Keep the in-memory instance in sync — callers read it after this returns.
+  adhyayan.available_seats = newSeats;
+
   log.debug('adhyayan_seat_decremented', {
     shibir_id: adhyayan.id,
-    remaining: adhyayan.dataValues.available_seats - 1
+    remaining: newSeats
   });
+
+  return true;
 }
 
 export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
   const booking = await ShibirBookingDb.findOne({
-    include: [
-      {
-        model: CardDb,
-        attributes: ['token', 'issuedto']
-      }
-    ],
     where: {
       shibir_id: adhyayan.id,
       status: STATUS_WAITING
     },
-    order: [['createdAt', 'ASC']]
+    order: [['createdAt', 'ASC']],
+    // Run the lookup inside the caller's transaction so sequential promotions
+    // in the same run (e.g. cron cancelling several bookings for one shibir)
+    // see each other's uncommitted WAITING -> PAYMENT_PENDING update, and take
+    // a row lock so any concurrent promotion for the same shibir blocks until
+    // this transaction commits. Without this, the same waiting booking gets
+    // promoted twice, creating duplicate transactions for one bookingid.
+    transaction: t,
+    lock: t.LOCK.UPDATE
   });
 
   if (booking) {
@@ -282,14 +326,28 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
       cardno: booking.cardno,
       shibir_id: adhyayan.id
     });
+    await createShibirAttendanceEntry(booking, { username: updatedBy }, t);
     return booking;
   } else {
-    await adhyayan.update(
+    const freshAdhyayan = await ShibirDb.findOne({
+      where: { id: adhyayan.id },
+      transaction: t,
+      lock: t ? t.LOCK.UPDATE : undefined
+    });
+
+    if (!freshAdhyayan) {
+      throw new ApiError(404, ERR_ADHYAYAN_NOT_FOUND);
+    }
+
+    const newSeats = Math.min(freshAdhyayan.total_seats, freshAdhyayan.available_seats + 1);
+
+    await freshAdhyayan.update(
       {
-        available_seats: adhyayan.dataValues.available_seats + 1
+        available_seats: newSeats
       },
       { transaction: t }
     );
+    adhyayan.available_seats = newSeats;
     log.debug('adhyayan_seat_opened_no_waiting', { shibir_id: adhyayan.id });
     return null;
   }
@@ -298,7 +356,8 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
 export async function sendAdhyayanBookingUpdateNotification(
   newBooking,
   adhyayan,
-  isfromAdmin
+  isfromAdmin,
+  previousStatus
 ) {
   // Build card numbers array efficiently and fetch all cards in single query
   const cardNumbers = [newBooking.cardno, newBooking.bookedBy].filter(Boolean);
@@ -376,6 +435,9 @@ export async function sendAdhyayanBookingUpdateNotification(
       }
     });
   }
+
+  // Send WhatsApp messages for status transitions
+  await sendAdhyayanStatusChangeWhatsApp(newBooking, adhyayan, previousStatus);
 }
 
 export async function checkAdhyayanAvailabilityForMumukshus(
@@ -409,23 +471,6 @@ export async function checkAdhyayanAvailabilityForMumukshus(
   }
 
   return adhyayanDetails;
-}
-
-export async function getAdhyayanBookings(bookingIds) {
-  const adhyanBookings = await ShibirBookingDb.findOne({
-    include: [
-      {
-        model: ShibirDb,
-        attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
-        where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
-      }
-    ],
-    where: {
-      [Op.in]: bookingIds
-    }
-  });
-
-  return adhyanBookings;
 }
 
 export async function validateFeedbackEligibility(cardno, shibir_id) {
@@ -517,7 +562,7 @@ export async function getFeedbackStats(shibir_id) {
 }
 
 export async function createShibirAttendanceEntry(booking, user, transaction) {
-  // 🔒 Prevent duplicates (CRITICAL)
+  // Prevent duplicates (CRITICAL)
   const existing = await ShibirAttendanceDb.findOne({
     where: { bookingid: booking.bookingid },
     transaction
@@ -538,7 +583,7 @@ export async function createShibirAttendanceEntry(booking, user, transaction) {
 
   const days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-  // ✅ Use integers for TINYINT
+  //  Use integers for TINYINT
   const sessionFlags = {};
   for (let i = 1; i <= 9; i++) {
     sessionFlags[`session_${i}`] = 1;
@@ -555,6 +600,86 @@ export async function createShibirAttendanceEntry(booking, user, transaction) {
     },
     { transaction }
   );
+
+  // Initialize dynamic sessions in shibir_sessions table if not already initialized
+  const sessionsExist = await ShibirSession.findOne({
+    where: { shibir_id: booking.shibir_id },
+    transaction
+  });
+
+  if (!sessionsExist) {
+    await initializeShibirSessions(shibir, transaction);
+  }
+}
+
+export async function initializeShibirSessions(shibir, transaction) {
+  const startDate = moment.tz(shibir.start_date, 'Asia/Kolkata').startOf('day');
+  const endDate = moment.tz(shibir.end_date, 'Asia/Kolkata').startOf('day');
+  const days = endDate.diff(startDate, 'days') + 1;
+
+  const totalSessions = days * 3;
+  const sessionsToCreate = [];
+
+  // Generate regular sessions (1 to 2 * days)
+  for (let d = 1; d <= days; d++) {
+    const dateStr = moment.tz(shibir.start_date, 'Asia/Kolkata').add(d - 1, 'days').format('YYYY-MM-DD');
+
+    // Session 1 of day d (Morning regular)
+    sessionsToCreate.push({
+      shibir_id: shibir.id,
+      session_number: (d - 1) * 2 + 1,
+      type: 'regular',
+      date: dateStr,
+      start_time: '10:00:00',
+      updatedBy: 'system'
+    });
+
+    // Session 2 of day d (Afternoon regular)
+    sessionsToCreate.push({
+      shibir_id: shibir.id,
+      session_number: (d - 1) * 2 + 2,
+      type: 'regular',
+      date: dateStr,
+      start_time: '15:45:00',
+      updatedBy: 'system'
+    });
+  }
+
+  // Generate MV sessions (2 * days + 1 to 3 * days)
+  for (let d = 1; d <= days; d++) {
+    const dateStr = moment.tz(shibir.start_date, 'Asia/Kolkata').add(d - 1, 'days').format('YYYY-MM-DD');
+
+    sessionsToCreate.push({
+      shibir_id: shibir.id,
+      session_number: 2 * days + d,
+      type: 'MV',
+      date: dateStr,
+      start_time: '04:30:00',
+      updatedBy: 'system'
+    });
+  }
+
+  // Upsert all required sessions to ensure date/type changes are applied
+  for (const session of sessionsToCreate) {
+    await ShibirSession.upsert(session, { transaction });
+  }
+
+  // Delete any orphaned sessions and their attendance records if the duration decreased
+  await ShibirSession.destroy({
+    where: {
+      shibir_id: shibir.id,
+      session_number: { [Sequelize.Op.gt]: totalSessions }
+    },
+    transaction
+  });
+
+  await ShibirAttendanceRecord.destroy({
+    where: {
+      shibir_id: shibir.id,
+      session_number: { [Sequelize.Op.gt]: totalSessions }
+    },
+    transaction
+  });
 }
 
 export async function bookAdhyayanForMumukshusAdmin(
@@ -595,10 +720,15 @@ export async function createAdhyayanBookingAdmin(
     for (const adhyayan of adhyayans) {
       const bookingId = uuidv4();
 
-      if (adhyayan.available_seats > 0 && adhyayan.status === STATUS_OPEN) {
-        // ✅ Seat reservation
-        await reserveAdhyayanSeat(adhyayan, t);
+      // Same locked decision as the user flow: the seat is taken (or not)
+      // under a row lock, and that result — not a stale count — picks
+      // confirmed vs waitlist.
+      const seatReserved =
+        adhyayan.status === STATUS_OPEN
+          ? await reserveAdhyayanSeat(adhyayan, t)
+          : false;
 
+      if (seatReserved) {
         const status =
           adhyayan.amount > 0 ? STATUS_PAYMENT_PENDING : STATUS_CONFIRMED;
 
@@ -623,8 +753,10 @@ export async function createAdhyayanBookingAdmin(
           { transaction: t }
         );
 
-        // ✅ Attendance entry if confirmed
-        if (booking.status === STATUS_CONFIRMED) {
+        // ✅ Attendance entry if confirmed or payment pending
+        if (
+          [STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)
+        ) {
           await createShibirAttendanceEntry(booking, adminUser, t);
         }
 
@@ -667,22 +799,13 @@ export async function createAdhyayanBookingAdmin(
 }
 
 export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
-  await ShibirAttendanceDb.update(
-    {
-      session_1: 0,
-      session_2: 0,
-      session_3: 0,
-      session_4: 0,
-      session_5: 0,
-      session_6: 0,
-      session_7: 0,
-      session_8: 0,
-      session_9: 0,
-      updatedBy
-    },
-    {
-      where: { bookingid: bookingId },
-      transaction
-    }
-  );
+  await ShibirAttendanceDb.destroy({
+    where: { bookingid: bookingId },
+    transaction
+  });
+
+  await ShibirAttendanceRecord.destroy({
+    where: { bookingid: bookingId },
+    transaction
+  });
 }

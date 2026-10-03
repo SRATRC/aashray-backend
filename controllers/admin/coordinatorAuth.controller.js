@@ -16,6 +16,7 @@ import TravelBusStops
 import CoordinatorOtp from '../../models/coordinatorOtp.model.js';
 import CardDb from '../../models/card.model.js';
 import { sendCoordinatorOtp } from '../../helpers/sendCoordinatorOtp.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
 import crypto from 'crypto';
@@ -169,7 +170,7 @@ export async function sendOtp(
   // SEND WHATSAPP
 
   await sendCoordinatorOtp(
-    mobno,
+    formatWhatsAppPhone(mobno, coordinator.country),
     otp
   );
 
@@ -184,8 +185,6 @@ export async function verifyOtp(
   req,
   res
 ) {
-  console.log('verify otp hit');
-
   const {
     mobno,
     otp,
@@ -618,6 +617,27 @@ export async function
     res
   ) {
 
+  // AUTH: verify coordinator token (same scheme as fetchCoordinatorDashboard)
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    throw new ApiError(401, 'Token missing');
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  if (!token) {
+    throw new ApiError(401, 'Invalid token');
+  }
+
+  let decoded;
+
+  try {
+    decoded = jwt.verify(token, process.env.SECRET);
+  } catch {
+    throw new ApiError(401, 'Invalid token');
+  }
+
   const {
     passenger_id,
     boarded,
@@ -637,6 +657,26 @@ export async function
       404,
       'Passenger not found'
     );
+  }
+
+  // AUTHZ: caller must be the assigned coordinator of this passenger's bus
+  const bus = await TravelBusGroup.findOne({
+    where: { id: passenger.bus_group_id },
+  });
+
+  if (!bus || !bus.coordinator_bookingid) {
+    throw new ApiError(403, 'Not authorized for this bus');
+  }
+
+  const coordinatorBooking = await TravelDb.findOne({
+    where: {
+      bookingid: bus.coordinator_bookingid,
+      cardno: decoded.cardno,
+    },
+  });
+
+  if (!coordinatorBooking) {
+    throw new ApiError(403, 'You are not the coordinator for this bus');
   }
 
   await passenger.update({

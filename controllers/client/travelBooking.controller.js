@@ -1,4 +1,9 @@
-import { TravelDb, TravelBusPassengers, TravelBusGroup } from '../../models/associations.js';
+import {
+  TravelDb,
+  TravelBusPassengers,
+  TravelBusGroup,
+  UtsavDb
+} from '../../models/associations.js';
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
@@ -6,13 +11,15 @@ import {
   RAJ_PRAVAS_EMAIL,
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_AWAITING_CONFIRMATION,
-  ERR_BOOKING_NOT_FOUND
+  ERR_BOOKING_NOT_FOUND,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   updateWaitingTravelBooking,
   sendTravelBookingStatusUpdateMail
 } from '../../helpers/travelBooking.helper.js';
+import { sendTravelStatusChangeWhatsApp } from '../../helpers/whatsapp.helper.js';
 import {
   getOtherBookingUser,
   notifyCardno
@@ -46,10 +53,19 @@ export const FetchUpcoming = async (req, res) => {
        t1.admin_comments,
        t1.status,
        t2.amount,
-       t2.status AS transaction_status
+       t2.status AS transaction_status,
+       t5.bus_name,
+       t6.timing AS departure_time,
+       t8.issuedto AS coordinator_name,
+       t8.mobno AS coordinator_contact
     FROM travel_db t1
     LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
+    LEFT JOIN travel_bus_passengers t4 ON t1.bookingid = t4.bookingid
+    LEFT JOIN travel_bus_group t5 ON t4.bus_group_id = t5.id
+    LEFT JOIN travel_bus_stops t6 ON t5.id = t6.bus_group_id AND TRIM(LOWER(t6.stop_name)) = TRIM(LOWER(t1.pickup_point))
+    LEFT JOIN travel_db t7 ON t5.coordinator_bookingid = t7.bookingid
+    LEFT JOIN card_db t8 ON t7.cardno = t8.cardno
     WHERE t1.cardno = :cardno
       OR t1.bookedBy = :cardno
     ORDER BY t1.date DESC
@@ -125,6 +141,12 @@ export const CancelTravel = async (req, res) => {
   await t.commit();
   req.log.info('cancel_travel_committed', { bookingid });
 
+  try {
+    await sendTravelStatusChangeWhatsApp(booking, bookingStatus);
+  } catch (waErr) {
+    console.error("Error triggering travel status change WhatsApp on cancel:", waErr);
+  }
+
   const cc = process.env.NODE_ENV == 'prod' ? RAJ_PRAVAS_EMAIL : null;
   sendMail({
     email: req.user.email,
@@ -166,4 +188,29 @@ export const CancelTravel = async (req, res) => {
 
   req.log.info('cancel_travel_success', { bookingid, cardno: req.user.cardno });
   return res.status(200).send({ message: MSG_CANCEL_SUCCESSFUL });
+};
+
+export const checkUpcomingEvents = async (req, res) => {
+  attachUserContext(req);
+  const today = moment().format('YYYY-MM-DD');
+  req.log.info('check_upcoming_events_start', { cardno: req.user.cardno, date: today });
+
+  const utsavs = await UtsavDb.findAll({
+    where: {
+      end_date: {
+        [Sequelize.Op.gte]: today
+      },
+      location: RESEARCH_CENTRE
+    }
+  });
+
+  req.log.info('check_upcoming_events_success', {
+    cardno: req.user.cardno,
+    count: utsavs.length
+  });
+
+  return res.status(200).send({
+    message: 'Fetched results',
+    data: utsavs
+  });
 };

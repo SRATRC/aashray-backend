@@ -1,6 +1,7 @@
 import {
   ShibirDb,
   ShibirBookingDb,
+  Transactions,
   AdhyayanFeedback,
   CardDb,
   ShibirAttendanceDb
@@ -19,7 +20,7 @@ import {
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
-import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification } from '../../helpers/adhyayanBooking.helper.js';
+import { openAdhyayanSeat, sendAdhyayanBookingUpdateNotification, resetShibirAttendance } from '../../helpers/adhyayanBooking.helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
 import {
   getOtherBookingUser,
@@ -51,7 +52,10 @@ export const FetchAllShibir = async (req, res) => {
     },
     offset,
     limit: pageSize,
-    order: [['start_date', 'ASC']]
+    order: [
+      ['start_date', 'ASC'],
+      ['id', 'ASC']
+    ]
   });
 
   const groupedByMonth = shibirs.reduce((acc, event) => {
@@ -119,22 +123,36 @@ export const FetchBookedShibir = async (req, res) => {
   );
 
   const currentDate = new Date();
-  shibirs.forEach((shibir) => {
-    const startDate = new Date(shibir.start_date);
-    const feedbackStartDate = new Date(startDate);
-    feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
+  const updatedShibirs = await Promise.all(
+    shibirs.map(async (shibir) => {
+      const startDate = new Date(shibir.start_date);
+      const feedbackStartDate = new Date(startDate);
+      feedbackStartDate.setHours(FEEDBACK_ELIGIBILITY_HOUR, 0, 0, 0);
 
-    const feedbackEndDate = new Date(shibir.end_date);
-    feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
+      const feedbackEndDate = new Date(shibir.end_date);
+      feedbackEndDate.setDate(feedbackEndDate.getDate() + 15);
 
-    shibir.showFeedback =
-      currentDate >= feedbackStartDate &&
-      currentDate <= feedbackEndDate &&
-      shibir.status === STATUS_CONFIRMED;
-  });
+      const existingFeedback = await AdhyayanFeedback.findOne({
+        where: {
+          shibir_id: shibir.shibir_id,
+          cardno: req.user.cardno
+        }
+      });
 
-  req.log.info('fetch_booked_shibir_success', { cardno: req.user.cardno, count: shibirs.length });
-  return res.status(200).send({ data: shibirs });
+      return {
+        ...shibir,
+        hasSubmittedFeedback: !!existingFeedback,
+        showFeedback:
+          !existingFeedback &&
+          currentDate >= feedbackStartDate &&
+          currentDate <= feedbackEndDate &&
+          shibir.status === STATUS_CONFIRMED
+      };
+    })
+  );
+
+  req.log.info('fetch_booked_shibir_success', { cardno: req.user.cardno, count: updatedShibirs.length });
+  return res.status(200).send({ data: updatedShibirs });
 };
 
 export const CancelShibir = async (req, res) => {
@@ -176,12 +194,41 @@ export const CancelShibir = async (req, res) => {
     currentStatus: booking.status
   });
 
+  // The checks above ran on an unlocked read, so two cancels at once (a double
+  // tap) both passed them. Each then freed the seat, and with a waiting list
+  // each promoted someone: two people confirmed for one seat. Lock the session
+  // row, then the payment row, then the booking (the order booking, payment
+  // confirmation and the nightly job use) and re-check.
   const adhyayan = await ShibirDb.findOne({
-    where: { id: booking.shibir_id }
+    where: { id: booking.shibir_id },
+    transaction: t,
+    lock: t.LOCK.UPDATE
   });
+  // transactions.bookingid has no index; lock the payment row by its id only.
+  const paymentRow = await Transactions.findOne({ where: { bookingid }, attributes: ['id'] });
+  if (paymentRow) {
+    await Transactions.findOne({ where: { id: paymentRow.id }, transaction: t, lock: t.LOCK.UPDATE });
+  }
+  const current = await ShibirBookingDb.findOne({
+    where: { bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (!current) {
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
+  }
+  if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(current.status)) {
+    req.log.warn('cancel_shibir_already_cancelled', {
+      bookingid,
+      cardno: req.user.cardno,
+      currentStatus: current.status
+    });
+    throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
+  }
+  const previousStatus = current.status;
 
   let newBooking = null;
-  if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(booking.status)) {
+  if ([STATUS_CONFIRMED, STATUS_PAYMENT_PENDING].includes(previousStatus)) {
     req.log.info('cancel_shibir_opening_seat', { shibirId: booking.shibir_id });
     newBooking = await openAdhyayanSeat(adhyayan, req.user.username, t);
     if (newBooking) {
@@ -192,28 +239,18 @@ export const CancelShibir = async (req, res) => {
     }
   }
 
-  const resetData = {};
-  for (let i = 1; i <= 9; i++) {
-    resetData[`session_${i}`] = 0;
-  }
-  await ShibirAttendanceDb.update(resetData, {
-    where: {
-      shibir_id: booking.shibir_id,
-      cardno: booking.cardno
-    },
-    transaction: t
-  });
+  await resetShibirAttendance(booking.bookingid, req.user.username, t);
 
   await userCancelBooking(req.user, booking, t);
   req.log.info('cancel_shibir_cancelled', { bookingid, cardno: req.user.cardno });
   await t.commit();
   req.log.info('cancel_shibir_committed', { bookingid });
 
-  await sendAdhyayanBookingUpdateNotification(booking, adhyayan);
+  await sendAdhyayanBookingUpdateNotification(booking, adhyayan, false, previousStatus);
 
   if (newBooking) {
     //sending notification and email to user who got moved from waiting to pending and cc to the bookedBy user if any.
-    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan);
+    await sendAdhyayanBookingUpdateNotification(newBooking, adhyayan, false, 'waiting');
   }
 
   req.log.info('cancel_shibir_success', { bookingid, cardno: req.user.cardno });

@@ -14,7 +14,7 @@ Fetch all countries.
 {
   "message": "Fetched results successfully",
   "data": [
-    { "key": 1, "value": "INDIA" },
+    { "key": 1, "value": "India" },
     { "key": 2, "value": "USA" }
   ]
 }

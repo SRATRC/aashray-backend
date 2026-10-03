@@ -13,7 +13,10 @@ import {
   TYPE_ADHYAYAN,
   TYPE_FOOD,
   TYPE_UTSAV,
-  TYPE_TRAVEL
+  TYPE_ROOM,
+  TYPE_FLAT,
+  TYPE_TRAVEL,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from './config/constants.js';
 import RoomBooking from './models/room_booking.model.js';
 import AdminUsers from './models/admin_users.model.js';
@@ -30,36 +33,42 @@ import {
   getBookingTypeFromBooking
 } from './helpers/booking.helper.js';
 import { openAdhyayanSeat } from './helpers/adhyayanBooking.helper.js';
-import { openUtsavSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
+import { openUtsavSeat, utsavBookingHeldSeat, cancelUtsavFoodBookings } from './helpers/utsavBooking.helper.js';
 import { updateWaitingTravelBooking } from './helpers/travelBooking.helper.js';
-const MAX_APP_PAYMENT_DURATION = 24 * 60; // 24 hrs
+import { sendAdhyayanStatusChangeWhatsApp, sendRoomStatusChangeWhatsApp, sendUtsavStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendTomorrowMealsCount, checkAndSendMealsCountUpdate } from './helpers/whatsapp.helper.js';
 
 let isRunning = false; // Track task status
 
 // Schedule the cron job to run every 30 minutes
 const job = cron.schedule('*/30 * * * *', async () => {
+  // A sweep can outlast the 30-minute interval. A second run started on top
+  // of it reads the same unpaid bookings before the first commits them, and
+  // cancels them again, handing their seats back twice.
+  if (isRunning) {
+    logger.warn('Cron job skipped: previous run still in progress.');
+    return;
+  }
   logger.info('Cron job started.');
   isRunning = true;
 
-  await database.authenticate();
+  // runJob owns its own (per-item) transactions now, so there is nothing for
+  // the scheduler to roll back. try/finally instead of .finally() so isRunning
+  // is always cleared — with the setup outside the old promise chain, a throw
+  // from authenticate() left the flag stuck on and hung graceful shutdown.
+  try {
+    await database.authenticate();
 
-  const systemUser = await AdminUsers.findOne({
-    where: { username: 'admin' }
-  });
-
-  const t = await database.transaction();
-
-  runJob(systemUser, t)
-    .then(() => {
-      logger.info('Cron job finished.');
-    })
-    .catch((error) => {
-      logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
-      t.rollback();
-    })
-    .finally(() => {
-      isRunning = false;
+    const systemUser = await AdminUsers.findOne({
+      where: { username: 'admin' }
     });
+
+    await runJob(systemUser);
+    logger.info('Cron job finished.');
+  } catch (error) {
+    logger.error(`Cron job error: ${JSON.stringify(error.stack)}`);
+  } finally {
+    isRunning = false;
+  }
 });
 
 async function cancelMeals(systemUser, transactions, t) {
@@ -76,22 +85,127 @@ async function cancelMeals(systemUser, transactions, t) {
   }
 }
 
-async function runJob(systemUser, t) {
+async function runJob(systemUser) {
   const userBookingIds = {};
   const openBookings = {};
-  const transactions = [];
   const bookings = [];
 
-  await getUnpaidOnlineBookingsAndTransactions(bookings, transactions);
+  const items = await getUnpaidOnlineBookingsAndTransactions();
   // await getUnpaidPastBookingsAndTransactions(bookings, transactions);
+  // ^ still returns the old two-array shape; convert it to items before
+  //   re-enabling it, otherwise its rows never reach the per-item sweep below.
 
-  logger.info(`Cron cancelling bookings: ${JSON.stringify(bookings)}`);
-  logger.info(`Cron cancelling transactions: ${JSON.stringify(transactions)}`);
+  logger.info(
+    `Cron cancelling bookings: ${JSON.stringify(
+      items.map((item) => item.booking).filter(Boolean)
+    )}`
+  );
+  logger.info(
+    `Cron cancelling transactions: ${JSON.stringify(
+      items.map((item) => item.transaction)
+    )}`
+  );
 
-  await cancelBookings(systemUser, bookings, userBookingIds, openBookings, t);
-  await cancelTransactions(systemUser, transactions, t, true);
-  await cancelMeals(systemUser, transactions, t);
-  await t.commit();
+  // One transaction per item instead of one for the whole sweep. The event-row
+  // FOR UPDATE locks mean a sweep-wide transaction held a write lock on every
+  // affected event and every affected member card until the very end, so
+  // members booking those events blocked or hit a lock timeout for as long as
+  // the sweep ran. Each item is still atomic — its booking, its transaction
+  // and its meals commit or roll back together — but a failure now only loses
+  // that item, and the items already committed stay applied.
+  for (const { booking, transaction } of items) {
+    const t = await database.transaction();
+
+    // Collected inside the item transaction, published to the shared maps
+    // below only once that transaction has committed — otherwise a rolled-back
+    // item would still be emailed and WhatsApped as cancelled.
+    const itemOpenBookings = {};
+
+    let fresh;
+    try {
+      fresh = await lockAndRecheckItem(booking, transaction, t);
+      if (!fresh) {
+        await t.rollback();
+        logger.info(
+          `Cron item skipped for bookingid ${transaction.bookingid}: paid or cancelled since the sweep read it`
+        );
+        continue;
+      }
+      if (fresh.booking) {
+        await cancelBookings(systemUser, [fresh.booking], itemOpenBookings, t);
+      }
+      await cancelTransactions(systemUser, [fresh.transaction], t, true);
+      await cancelMeals(systemUser, [fresh.transaction], t);
+      await t.commit();
+    } catch (error) {
+      try {
+        await t.rollback();
+      } catch (rollbackError) {
+        logger.error(
+          `Cron item rollback failed for bookingid ${transaction.bookingid}: ${rollbackError.message}`
+        );
+      }
+      logger.error(
+        `Cron item cancel failed for bookingid ${transaction.bookingid}: ${
+          error.stack || error.message
+        }`
+      );
+      continue;
+    }
+
+    // Past the commit, so a throw here would escape the catch above and kill
+    // the rest of the sweep. The item itself is already durable — only its
+    // notification bookkeeping can fail, so log it and carry on.
+    try {
+      // The re-read copy is the one cancelBookings updated; the sweep's
+      // original copy still says pending.
+      if (fresh.booking) {
+        bookings.push(fresh.booking);
+        addToUserBookingIdMap(userBookingIds, fresh.booking);
+      }
+      for (const bookingType in itemOpenBookings) {
+        for (const openedBooking of itemOpenBookings[bookingType]) {
+          addToOpenBookings(openBookings, openedBooking);
+        }
+      }
+    } catch (error) {
+      logger.error(
+        `Cron item cancelled but notification bookkeeping failed for bookingid ${
+          transaction.bookingid
+        }: ${error.stack || error.message}`
+      );
+    }
+  }
+
+  // Trigger WhatsApp notifications for cancelled bookings
+  for (const booking of bookings) {
+    const bookingType = getBookingTypeFromBooking(booking);
+    if (bookingType === TYPE_ADHYAYAN) {
+      try {
+        await sendAdhyayanStatusChangeWhatsApp(booking, null, 'pending');
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Adhyayan: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_ROOM) {
+      try {
+        await sendRoomStatusChangeWhatsApp(booking, 'pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Room: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_UTSAV) {
+      try {
+        await sendUtsavStatusChangeWhatsApp(booking, 'payment pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Utsav: ${waErr.message}`);
+      }
+    } else if (bookingType === TYPE_FLAT) {
+      try {
+        await sendFlatStatusChangeWhatsApp(booking, 'payment pending', { isCron: true });
+      } catch (waErr) {
+        logger.error(`Error sending cron WhatsApp for Flat: ${waErr.message}`);
+      }
+    }
+  }
 
   for (const cardno in userBookingIds) {
     const bookingIds = userBookingIds[cardno];
@@ -103,35 +217,81 @@ async function runJob(systemUser, t) {
   }
 }
 
-async function getUnpaidOnlineBookingsAndTransactions(bookings, transactions) {
+// The sweep reads every unpaid item up front, before any item's transaction
+// starts. A payment or a member cancel can land in between; acting on the old
+// copy then cancels a booking that was just paid, or hands its seat back twice.
+// Lock and re-read the item inside its own transaction — event row, then
+// payment row, then booking, the same order the member cancel and the payment
+// confirmation use — and return null if either row has moved on.
+async function lockAndRecheckItem(booking, transaction, t) {
+  if (booking) {
+    const bookingType = getBookingTypeFromBooking(booking);
+    if (bookingType === TYPE_UTSAV) {
+      await UtsavDb.findOne({ where: { id: booking.utsavid }, transaction: t, lock: t.LOCK.UPDATE });
+    } else if (bookingType === TYPE_ADHYAYAN) {
+      await ShibirDb.findOne({ where: { id: booking.shibir_id }, transaction: t, lock: t.LOCK.UPDATE });
+    }
+  }
+
+  const freshTransaction = await Transactions.findOne({
+    where: { id: transaction.id },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (!freshTransaction || freshTransaction.status !== transaction.status) return null;
+
+  let freshBooking = null;
+  if (booking) {
+    freshBooking = await booking.constructor.findOne({
+      where: { bookingid: booking.bookingid },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    if (!freshBooking || freshBooking.status !== booking.status) return null;
+  }
+
+  return { booking: freshBooking, transaction: freshTransaction };
+}
+
+// Returns the sweep as a list of { transaction, booking } items. One item is
+// the unit of work for one database transaction, so a booking is paired with
+// the pending transaction it belongs to. booking is null for food, which has
+// no booking row of its own and is cancelled from the transaction instead.
+async function getUnpaidOnlineBookingsAndTransactions() {
   const cancelTimeFilter = moment
     .utc()
-    .subtract(MAX_APP_PAYMENT_DURATION, 'minutes');
+    .subtract(MAX_APP_PAYMENT_DURATION_MINUTES, 'minutes');
   const pendingTransactions = await getPendingTransactions(cancelTimeFilter);
+
+  const items = [];
 
   for (const transaction of pendingTransactions) {
     const bookingType = getBookingType(transaction);
     // TODO: optimize, get all bookings at once
 
     // Food bookings are handled in a special way
+    let booking = null;
     if (bookingType != TYPE_FOOD) {
-      const booking = await getBooking(bookingType, transaction.bookingid);
-      if (booking) {
-        bookings.push(booking);
-      }
+      booking = await getBooking(bookingType, transaction.bookingid);
     }
-    transactions.push(transaction);
+    items.push({ transaction, booking });
   }
+
+  return items;
 }
 
-async function cancelBookings(systemUser, bookings, userBookingIds, openBookings, t) {
+// userBookingIds is no longer collected here: the caller adds each booking to
+// it after that booking's own transaction has committed.
+async function cancelBookings(systemUser, bookings, openBookings, t) {
   for (const booking of bookings) {
     const bookingType = getBookingTypeFromBooking(booking);
 
     switch (bookingType) {
       case TYPE_ADHYAYAN:
         const adhyayan = await ShibirDb.findOne({
-          where: { id: booking.shibir_id }
+          where: { id: booking.shibir_id },
+          transaction: t,
+          lock: t.LOCK.UPDATE
         });
 
         let newBooking = await openAdhyayanSeat(
@@ -156,13 +316,28 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
         }
         break;
       case TYPE_UTSAV:
-        const utsav = await UtsavDb.findOne({
-          where: { id: booking.utsavid }
-        });
         //Not automatically moving from waiting to payment pending for now
-        await cancelUtsavFoodBookings(booking, systemUser.username, t);
-        await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
+        // Only a booking that held a seat was given utsav meals; waiting-list
+        // bookings never are. The cleanup clears every meal in the package dates,
+        // so running it for a booking that never had them wipes meals the member
+        // booked on their own for those days.
+        if (utsavBookingHeldSeat(booking.status)) {
+          await cancelUtsavFoodBookings(booking, systemUser.username, t);
+        }
 
+        // booking.status is still the pre-cancel status here: the update to
+        // 'admin cancelled' happens after this switch. A waiting-list booking
+        // never held a seat, so cancelling it must not hand one back — and
+        // when no seat is freed there is no reason to take the utsav row lock
+        // at all.
+        if (utsavBookingHeldSeat(booking.status)) {
+          const utsav = await UtsavDb.findOne({
+            where: { id: booking.utsavid },
+            transaction: t,
+            lock: t.LOCK.UPDATE
+          });
+          await openUtsavSeat(utsav, booking.cardno, systemUser.username, t);
+        }
 
         break;
       case TYPE_TRAVEL:
@@ -190,7 +365,6 @@ async function cancelBookings(systemUser, bookings, userBookingIds, openBookings
         t
       );
     }
-    addToUserBookingIdMap(userBookingIds, booking);
   }
 }
 
@@ -249,6 +423,47 @@ async function getUnpaidPastBookings() {
  * ==============================
  */
 
+// Schedule the new meals count notification cron jobs with Asia/Kolkata timezone
+const mealsCount9PMJob = cron.schedule('0 21 * * *', async () => {
+  logger.info('mealsCount9PMJob cron job started.');
+  try {
+    const recipients = ['0002849952', '0012754172', '0002823407'];
+    await sendTomorrowMealsCount(recipients);
+    logger.info('mealsCount9PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount9PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+const mealsCount10PMJob = cron.schedule('0 22 * * *', async () => {
+  logger.info('mealsCount10PMJob cron job started.');
+  try {
+    await checkAndSendMealsCountUpdate();
+    logger.info('mealsCount10PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount10PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
+const mealsCount11PMJob = cron.schedule('0 23 * * *', async () => {
+  logger.info('mealsCount11PMJob cron job started.');
+  try {
+    await checkAndSendMealsCountUpdate();
+    logger.info('mealsCount11PMJob finished successfully.');
+  } catch (error) {
+    logger.error(`mealsCount11PMJob error: ${error.stack || error.message}`);
+  }
+}, {
+  scheduled: true,
+  timezone: "Asia/Kolkata"
+});
+
 let isWifiJobRunning = false;
 let isLowWifiAlertSent = false;
 
@@ -285,6 +500,9 @@ const wifiLowAlertJob = cron.schedule('*/30 * * * *', async () => {
 });
 
 job.start();
+mealsCount9PMJob.start();
+mealsCount10PMJob.start();
+mealsCount11PMJob.start();
 wifiLowAlertJob.start();
 
 // Graceful shutdown handler
@@ -293,6 +511,9 @@ const gracefulShutdown = async () => {
 
   // Stop future jobs from being triggered
   job.stop();
+  mealsCount9PMJob.stop();
+  mealsCount10PMJob.stop();
+  mealsCount11PMJob.stop();
   wifiLowAlertJob.stop();
 
   // Wait for the current task to finish if it's running

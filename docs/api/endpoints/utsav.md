@@ -127,3 +127,59 @@ Used from kiosk devices at events:
 | GET | `/fetchVolunteerOptions` | Volunteer option values |
 | GET | `/pre_event_room_occupancy` | Room occupancy before event |
 | GET | `/post_event_room_occupancy` | Room occupancy after event |
+| GET | `/participantHistoryReport` | 1-year historical participation report & Excel download for confirmed participants |
+
+##### GET /participantHistoryReport
+
+Fetch 1-year participation summary (RC stay days, Param Gyaan Sabha adhyayans, Non-PGS adhyayans, and past Utsavs) for confirmed participants of an event.
+
+**Query Parameters:**
+- `utsavid` (required, integer): Target Utsav ID
+- `tag` (optional, string): Filter by engagement tag (`first_timer`, `regular_stay`, `pgs_regular`, `active_adhyayan`, `frequent_visitor`)
+- `search` (optional, string): Search by name, card number, mobile, or center
+- `sort_by` (optional, string): Sort field (`stay_days`, `pgs_adhyayan_count`, `non_pgs_adhyayan_count`, `utsav_count`, `issuedto`)
+- `sort_order` (optional, string): `asc` or `desc`
+- `format` (optional, string): Pass `excel` to download an `.xlsx` file
+- `page` (optional, integer): Page number for pagination
+- `page_size` (optional, integer): Page size for pagination
+
+**Success Response (200 JSON):**
+```json
+{
+  "message": "Fetched Utsav participant history report successfully",
+  "data": [
+    {
+      "bookingid": "UB123456",
+      "utsavid": 3,
+      "cardno": "CARD001",
+      "issuedto": "Rahul Shah",
+      "mobno": "9876543210",
+      "gender": "Male",
+      "center": "Mumbai",
+      "dob": "1990-05-15",
+      "age": 36,
+      "res_status": "MUMUKSHU",
+      "booking_status": "confirmed",
+      "roomno": "101",
+      "history_1yr": {
+        "stay_days": 12,
+        "pgs_adhyayan_count": 4,
+        "non_pgs_adhyayan_count": 2,
+        "total_adhyayan_count": 6,
+        "utsav_count": 1
+      },
+      "tags": ["active_adhyayan"]
+    }
+  ],
+  "meta": {
+    "utsav_id": 3,
+    "utsav_name": "Samvatsari 2026",
+    "utsav_start_date": "2026-04-15",
+    "one_year_ago_date": "2025-04-15",
+    "total_participants": 1,
+    "page": 1,
+    "page_size": 10
+  }
+}
+```
+

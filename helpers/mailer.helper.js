@@ -15,7 +15,8 @@ export async function sendCancellationEmail(
     bookingIds,
     bookedBy,
     STATUS_CANCELLED,
-    'unifiedCancellationEmail'
+    'unifiedCancellationEmail',
+    false
   );
 }
 

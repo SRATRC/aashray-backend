@@ -26,7 +26,8 @@ import {
   BOOKING_STATUS_PENDING,
   STATUS_ADMIN_CANCELLED,
   STATUS_CANCELLED,
-  ROOM_STATUS_CHECKEDOUT
+  ROOM_STATUS_CHECKEDOUT,
+  TYPE_FOOD
 } from '../config/constants.js';
 import Sequelize from 'sequelize';
 import getDates from '../utils/getDates.js';
@@ -214,6 +215,72 @@ export async function checkSpecialAllowance(
   return false;
 }
 
+export async function checkUtsavBookingAllowance(
+  start_date,
+  end_date,
+  primary_booking,
+  addons,
+  cardno
+) {
+  // Check if a utsav booking is being made in the same session (in-progress)
+  const utsavRequests = [];
+  if (primary_booking && primary_booking.booking_type === TYPE_UTSAV) {
+    utsavRequests.push(primary_booking);
+  }
+  if (addons && addons.length > 0) {
+    utsavRequests.push(
+      ...addons.filter((addon) => addon.booking_type === TYPE_UTSAV)
+    );
+  }
+
+  if (utsavRequests.length > 0) {
+    const utsavIds = utsavRequests
+      .map((req) => req.details?.utsavid)
+      .filter(Boolean);
+
+    if (utsavIds.length > 0) {
+      const utsavs = await UtsavDb.findAll({
+        where: { id: utsavIds }
+      });
+
+      const startDate = new Date(start_date);
+      const endDate = new Date(end_date);
+
+      for (const utsav of utsavs) {
+        const utsavStart = new Date(utsav.start_date);
+        const utsavEnd = new Date(utsav.end_date);
+        if (startDate >= utsavStart && endDate <= utsavEnd) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // Check if the user already has a confirmed utsav booking covering the food dates
+  const utsavBookings = await UtsavBooking.findAll({
+    include: [
+      {
+        model: UtsavDb,
+        as: 'UtsavDb',
+        where: {
+          start_date: { [Sequelize.Op.lte]: end_date },
+          end_date: { [Sequelize.Op.gte]: start_date }
+        }
+      }
+    ],
+    where: {
+      cardno: cardno,
+      status: STATUS_CONFIRMED
+    }
+  });
+
+  if (utsavBookings && utsavBookings.length > 0) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function checkRoomBookingProgress(
   start_date,
   end_date,
@@ -287,7 +354,8 @@ export function retrieveBookingIds(userBookingIdMap) {
 export async function sendUnifiedEmailForBookedBy(
   userBookingIdMap,
   bookedBy,
-  bookingStatus
+  bookingStatus,
+  sendWhatsApp = true
 ) {
   const flattenedMap = {};
   let isSelfBooking = true;
@@ -315,7 +383,9 @@ export async function sendUnifiedEmailForBookedBy(
       isSelfBooking ? bookedBy.cardno : null,
       flattenedMap,
       bookedBy,
-      bookingStatus
+      bookingStatus,
+      'unifiedBookingEmail',
+      sendWhatsApp
     );
   }
 }
@@ -351,7 +421,8 @@ export async function sendUnifiedEmail(
   bookingIds,
   bookedBy,
   bookingStatus = STATUS_CONFIRMED,
-  template = 'unifiedBookingEmail'
+  template = 'unifiedBookingEmail',
+  sendWhatsApp = true
 ) {
   let wasAdhyanBooked = bookingIds[TYPE_ADHYAYAN] != null;
   let wasRajprvasBooked = bookingIds[TYPE_TRAVEL] != null;
@@ -359,12 +430,15 @@ export async function sendUnifiedEmail(
   let wasFlatBooked =
     Array.isArray(bookingIds[TYPE_FLAT]) && bookingIds[TYPE_FLAT].length > 0;
   let wasUtsavBooked = bookingIds[TYPE_UTSAV] != null;
+  let wasFoodBooked =
+    Array.isArray(bookingIds[TYPE_FOOD]) && bookingIds[TYPE_FOOD].length > 0;
 
   let adhyanBookingDetails = [],
     roomBookingDetails = [],
     travelBookingDetails = [],
     flatBookingDetails = [],
     utsavBookingDetails = [],
+    foodBookingDetails = [],
     includeProfile = false,
     user;
 
@@ -420,7 +494,9 @@ export async function sendUnifiedEmail(
         ),
         status: utsavBooking.status,
         bookingid: utsavBooking.bookingid,
-        package: utsavBooking.dataValues.UtsavPackagesDb.name
+        package: utsavBooking.dataValues.UtsavPackagesDb.name,
+        bookedBy: utsavBooking.bookedBy,
+        cardno: utsavBooking.cardno
       });
     });
   }
@@ -429,7 +505,7 @@ export async function sendUnifiedEmail(
     let includeOptions = [];
     includeOptions.push({
       model: ShibirDb,
-      attributes: ['name', 'speaker', 'month', 'start_date', 'end_date'],
+      attributes: ['name', 'speaker', 'month', 'start_date', 'end_date', 'location'],
       where: { id: Sequelize.col('ShibirBookingDb.shibir_id') }
     });
     if (includeProfile) {
@@ -462,7 +538,9 @@ export async function sendUnifiedEmail(
         enddate: moment(adhyanBooking.dataValues.ShibirDb.end_date).format(
           'Do MMMM, YYYY'
         ),
-        status: adhyanBooking.status
+        status: adhyanBooking.status,
+        bookedBy: adhyanBooking.bookedBy,
+        ShibirDb: adhyanBooking.ShibirDb || adhyanBooking.dataValues.ShibirDb
       });
     });
   }
@@ -493,7 +571,10 @@ export async function sendUnifiedEmail(
         bookingid: travelBooking.bookingid,
         date: moment(travelBooking.date).format('Do MMMM, YYYY'),
         pickuppoint: travelBooking.pickup_point,
-        dropoffpoint: travelBooking.drop_point
+        dropoffpoint: travelBooking.drop_point,
+        bookedBy: travelBooking.bookedBy,
+        total_people: travelBooking.total_people,
+        cardno: travelBooking.cardno
       });
     });
   }
@@ -524,7 +605,10 @@ export async function sendUnifiedEmail(
         bookingid: roomBooking.bookingid,
         roomno: roomBooking.roomno,
         checkin: moment(roomBooking.checkin).format('Do MMMM, YYYY'),
-        checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY')
+        checkout: moment(roomBooking.checkout).format('Do MMMM, YYYY'),
+        roomtype: roomBooking.roomtype,
+        nights: roomBooking.nights,
+        bookedBy: roomBooking.bookedBy
       });
     });
   }
@@ -556,7 +640,45 @@ export async function sendUnifiedEmail(
         bookingid: flatBooking.bookingid,
         flatno: flatBooking.flatno,
         checkin: moment(flatBooking.checkin).format('Do MMMM, YYYY'),
-        checkout: moment(flatBooking.checkout).format('Do MMMM, YYYY')
+        checkout: moment(flatBooking.checkout).format('Do MMMM, YYYY'),
+        bookedBy: flatBooking.bookedBy
+      });
+    });
+  }
+
+  if (wasFoodBooked) {
+    let includeOptions = [];
+    if (includeProfile) {
+      includeOptions.push({
+        model: CardDb,
+        attributes: ['issuedto'],
+        where: { cardno: Sequelize.col('FoodDb.cardno') }
+      });
+    }
+    const foodBookings = await FoodDb.findAll({
+      include: includeOptions,
+      where: {
+        id: { [Sequelize.Op.in]: bookingIds[TYPE_FOOD] }
+      },
+      order: [
+        ['cardno', 'ASC'],
+        ['date', 'ASC']
+      ]
+    });
+
+    foodBookings.forEach((foodBooking) => {
+      foodBookingDetails.push({
+        id: foodBooking.id,
+        bookingid: foodBooking.id,
+        cardno: foodBooking.cardno,
+        bookedBy: foodBooking.bookedBy,
+        date: foodBooking.date,
+        breakfast: foodBooking.breakfast,
+        lunch: foodBooking.lunch,
+        dinner: foodBooking.dinner,
+        spicy: foodBooking.spicy,
+        hightea: foodBooking.hightea,
+        name: user ? user.issuedto : (foodBooking.dataValues.CardDb ? foodBooking.dataValues.CardDb.issuedto : '')
       });
     });
   }
@@ -611,11 +733,23 @@ export async function sendUnifiedEmail(
       }
     });
   }
-
   // ✅ Also send WhatsApp messages
-  await sendUnifiedWhatsApp(cardno, adhyanBookingDetails, travelBookingDetails, flatBookingDetails, utsavBookingDetails, roomBookingDetails);
+  if (sendWhatsApp) {
+    await sendUnifiedWhatsApp(
+      user || bookedBy,
+      adhyanBookingDetails,
+      travelBookingDetails,
+      flatBookingDetails,
+      utsavBookingDetails,
+      roomBookingDetails,
+      null,
+      foodBookingDetails
+    );
+  }
 
 }
+
+
 
 export async function createGuestsHelper(cardno, guests, t) {
   const registeredGuests = guests.filter((guest) => guest.cardno);

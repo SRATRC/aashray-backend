@@ -38,7 +38,8 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import {
   bookUtsavForMumukshus,
-  validateUtsavs
+  validateUtsavs,
+  validateNoDuplicateUtsavBooking
 } from '../../helpers/utsavBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
 import {
@@ -77,11 +78,12 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
   const typeMap = userBookingIdMap[cardno] || {};
   const adhyanIds = Array.isArray(typeMap[TYPE_ADHYAYAN]) ? typeMap[TYPE_ADHYAYAN].map(String).filter(Boolean) : [];
   const travelIds = Array.isArray(typeMap[TYPE_TRAVEL]) ? typeMap[TYPE_TRAVEL].map(String).filter(Boolean) : [];
-  const roomIds = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
-  const utsavIds = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
-  const flatIds = Array.isArray(typeMap['FLAT']) ? typeMap['FLAT'].map(String).filter(Boolean) : [];
+  const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
+  const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
+  const flatIds   = Array.isArray(typeMap[TYPE_FLAT]) ? typeMap[TYPE_FLAT].map(String).filter(Boolean) : [];
+  const foodIds   = Array.isArray(typeMap[TYPE_FOOD]) ? typeMap[TYPE_FOOD].map(String).filter(Boolean) : [];
 
-  console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)}`);
+  console.log(`WA DIAG: fetchFreshDetailsForCard(${cardno}) adhyanIds=${JSON.stringify(adhyanIds)} roomIds=${JSON.stringify(roomIds)} utsavIds=${JSON.stringify(utsavIds)} foodIds=${JSON.stringify(foodIds)}`);
 
   try {
     const [
@@ -89,36 +91,43 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
       travelBookingDetails,
       roomBookingDetails,
       utsavBookingDetails,
-      flatBookingDetails
+      flatBookingDetails,
+      foodBookingDetails
     ] = await Promise.all([
       adhyanIds.length
         ? ShibirBookingDb.findAll({
-          where: { bookingid: { [Op.in]: adhyanIds } },
-          include: [{ model: ShibirDb, as: 'ShibirDb' }],
-          order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
-        })
+            where: { bookingid: { [Op.in]: adhyanIds } },
+            include: [{ model: ShibirDb, as: 'ShibirDb' }],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
         : [],
       travelIds.length
-        ? TravelDb.findAll({ where: { id: { [Op.in]: travelIds } } })
+        ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })
         : [],
       roomIds.length
         ? RoomBooking.findAll({
-          where: { bookingid: { [Op.in]: roomIds } },
-          order: [['cardno', 'ASC'], ['checkin', 'ASC']]
-        })
+            where: { bookingid: { [Op.in]: roomIds } },
+            order: [['cardno', 'ASC'], ['checkin', 'ASC']]
+          })
         : [],
       utsavIds.length
         ? UtsavBooking.findAll({
-          where: { bookingid: { [Op.in]: utsavIds } },
-          include: [
-            { model: UtsavDb, as: 'UtsavDb' },
-            { model: UtsavPackagesDb, as: 'UtsavPackagesDb' }
-          ],
-          order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
-        })
+            where: { bookingid: { [Op.in]: utsavIds } },
+            include: [
+              { model: UtsavDb, as: 'UtsavDb' },
+              { model: UtsavPackagesDb, as: 'UtsavPackagesDb' }
+            ],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
         : [],
       flatIds.length
         ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
+        : [],
+      foodIds.length
+        ? FoodDb.findAll({
+            where: { id: { [Op.in]: foodIds } },
+            order: [['cardno', 'ASC'], ['date', 'ASC']]
+          })
         : []
     ]);
 
@@ -132,14 +141,15 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
     const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
     const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
 
-    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails || []).length} utsavCount=${(utsavBookingDetails || []).length}`);
+    console.log(`WA DIAG: final adhyanBookingDetails[${cardno}] length=${adhyanBookingDetails.length} roomCount=${(roomBookingDetails||[]).length} utsavCount=${(utsavBookingDetails||[]).length} foodCount=${(foodBookingDetails||[]).length}`);
 
     return {
       adhyanBookingDetails,
       travelBookingDetails,
       roomBookingDetails,
       utsavBookingDetails,
-      flatBookingDetails
+      flatBookingDetails,
+      foodBookingDetails
     };
   } catch (err) {
     console.error(`WA DIAG: fetchFreshDetailsForCard(${cardno}) failed:`, err && (err.stack || err.message || err));
@@ -148,7 +158,8 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
       travelBookingDetails: [],
       roomBookingDetails: [],
       utsavBookingDetails: [],
-      flatBookingDetails: []
+      flatBookingDetails: [],
+      foodBookingDetails: []
     };
   }
 }
@@ -157,6 +168,13 @@ async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
 export const validateBooking = async (req, res) => {
   attachUserContext(req);
   const { primary_booking, addons } = req.body;
+
+  // A member can hold only one booking per utsav — reject if the same utsav is
+  // selected more than once for the same person across primary + addons, so the
+  // user is blocked here before proceeding to payment.
+  validateNoDuplicateUtsavBooking(primary_booking, addons);
+  validateFlatBookingConstraints(primary_booking, addons);
+
   req.log.info('validate_mumukshu_booking_start', {
     cardno: req.user.cardno,
     primaryBookingType: primary_booking?.booking_type,
@@ -165,6 +183,7 @@ export const validateBooking = async (req, res) => {
 
   const response = {
     roomDetails: [],
+    flatDetails: [],
     adhyayanDetails: [],
     foodDetails: {},
     travelDetails: {},
@@ -200,6 +219,7 @@ export const mumukshuBooking = async (req, res, next) => {
   let t;
   try {
     const { primary_booking, addons } = req.body;
+    validateFlatBookingConstraints(primary_booking, addons);
     t = await database.transaction();
     req.transaction = t;
 
@@ -254,7 +274,8 @@ export const mumukshuBooking = async (req, res, next) => {
           details.flatBookingDetails,
           details.utsavBookingDetails,
           details.roomBookingDetails,
-          null
+          null,
+          details.foodBookingDetails
         ));
 
         if (cardno !== bookedByCard) {
@@ -265,7 +286,8 @@ export const mumukshuBooking = async (req, res, next) => {
             details.flatBookingDetails,
             details.utsavBookingDetails,
             details.roomBookingDetails,
-            cardno
+            cardno,
+            details.foodBookingDetails
           ));
         }
       }
@@ -287,12 +309,13 @@ export const mumukshuBooking = async (req, res, next) => {
     sendUnifiedEmailForBookedBy(
       userBookingIdMap,
       req.user,
-      BOOKING_STATUS_PENDING
+      BOOKING_STATUS_PENDING,
+      false
     );
     for (const cardno in userBookingIdMap) {
       if (cardno != req.user.cardno) {
         const bookings = userBookingIdMap[cardno];
-        sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
+        sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING, 'unifiedBookingEmail', false);
       }
     }
 
@@ -377,7 +400,13 @@ async function book(
       break;
 
     case TYPE_FOOD:
-      await bookFood(body, data, t, user);
+      const foodResult = await bookFood(body, data, t, user);
+      // Meals cost money when the card is a GUEST. Leaving this out of `amount`
+      // built a Razorpay order for the other bookings only, while
+      // updateRazorpayTransactions still stamped that order id on the meal
+      // transactions - so the webhook completed meals nobody paid for.
+      amount += foodResult.amount;
+      setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
     case TYPE_TRAVEL:
@@ -455,6 +484,7 @@ async function validate(body, user, data, utsav, response) {
         user,
         utsav
       );
+      totalCharge += response.foodDetails.charge;
       break;
 
     case TYPE_ADHYAYAN:
@@ -516,7 +546,7 @@ async function bookRoom(body, data, t, user, utsav) {
 
 async function bookFood(body, data, t, user) {
   let { start_date, end_date, mumukshuGroup } = data.details;
-  await bookFoodForMumukshus(
+  const result = await bookFoodForMumukshus(
     start_date,
     end_date,
     mumukshuGroup,
@@ -527,7 +557,7 @@ async function bookFood(body, data, t, user) {
     user.cardno
   );
 
-  return t;
+  return result;
 }
 
 async function bookAdhyayan(data, t, user) {
@@ -676,48 +706,4 @@ function validateFlatBookingConstraints(primary_booking, addons) {
   }
 }
 
-async function getBookingDetailsForCard(cardno, userBookingIdMap) {
-  const typeMap = userBookingIdMap[cardno] || {};
-
-  const adhyanIds = typeMap[TYPE_ADHYAYAN] || [];
-  const travelIds = typeMap[TYPE_TRAVEL] || [];
-  const roomIds = typeMap[TYPE_ROOM] || [];
-  const utsavIds = typeMap[TYPE_UTSAV] || [];
-  const flatIds = typeMap["FLAT"] || []; // if used later
-
-
-  const [
-    adhyanBookingDetails,
-    travelBookingDetails,
-    roomBookingDetails,
-    utsavBookingDetails,
-    flatBookingDetails
-  ] = await Promise.all([
-    adhyanIds.length
-      ? ShibirBookingDb.findAll({
-        where: { bookingid: { [Op.in]: adhyanIds } },
-        include: [{ model: ShibirDb, as: "ShibirDb" }]
-      })
-      : [],
-    travelIds.length
-      ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })
-      : [],
-    roomIds.length
-      ? RoomBooking.findAll({ where: { bookingid: { [Op.in]: roomIds } } })
-      : [],
-    utsavIds.length
-      ? UtsavBooking.findAll({ where: { bookingid: { [Op.in]: utsavIds } } })
-      : [],
-    flatIds.length
-      ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
-      : []
-  ]);
-
-  return {
-    adhyanBookingDetails,
-    travelBookingDetails,
-    roomBookingDetails,
-    utsavBookingDetails,
-    flatBookingDetails
-  };
-}
+// (removed unused getBookingDetailsForCard — superseded by fetchFreshDetailsForCard)
