@@ -97,7 +97,7 @@ export const createShortLink = async (req, res, next) => {
         });
 
         if (existing) {
-            throw new ApiError(400, 'Slug already exists');
+            throw new ApiError(409, 'Slug already exists');
         }
 
         const link = await ShortLink.create({
@@ -116,7 +116,7 @@ export const createShortLink = async (req, res, next) => {
         });
     } catch (error) {
         if (error.name === 'SequelizeUniqueConstraintError') {
-            throw new ApiError(400, 'Slug already exists');
+            throw new ApiError(409, 'Slug already exists');
         }
         throw error;
     }
@@ -202,7 +202,7 @@ export const updateShortLink = async (req, res, next) => {
         }
         const formattedSlug =
             slug === undefined ? undefined : slug.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '');
-        if (slug !== undefined && formattedSlug !== link.slug) {
+        if (slug !== undefined && formattedSlug !== link.slug.toLowerCase()) {
             // A temporary-access link carries a signed token and the access
             // check looks the link up by its slug, so renaming it would lock
             // its holders out. The Utsav and Adhyayan group links (u12, a7)
