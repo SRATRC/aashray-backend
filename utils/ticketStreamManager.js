@@ -12,6 +12,11 @@ class TicketStreamManager {
   }
 
   addClient(ticketId, res, type) {
+    // Shutting down: end the stream now so it can't hold server.close() open.
+    if (this._closed) {
+      res.end();
+      return;
+    }
     if (!this.clients.has(ticketId)) {
       this.clients.set(ticketId, new Set());
     }
@@ -63,6 +68,7 @@ class TicketStreamManager {
   // Ends every open stream. Called on shutdown: an open SSE response keeps
   // server.close() waiting until the process is killed.
   closeAll() {
+    this._closed = true;
     clearInterval(this._hb);
     this._hb = null;
     this.clients.forEach((set) =>
