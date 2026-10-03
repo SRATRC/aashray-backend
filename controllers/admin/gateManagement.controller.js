@@ -20,6 +20,7 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
+import { isLegacyListRequest } from '../../utils/listRequest.js';
 
 export const fetchTotal = async (req, res) => {
   const result = await CardDb.findAll({
@@ -47,8 +48,6 @@ const LIST_QUERY_KEYS = [
   'start_date',
   'end_date'
 ];
-export const isLegacyListRequest = (query) =>
-  LIST_QUERY_KEYS.every((key) => query[key] === undefined);
 
 // onPremiseDefault: the old per-group report pages (totalPR etc.) list only
 // people on premises when no status is sent.
@@ -58,7 +57,7 @@ const fetchResidentsByStatus = async (
   resStatus,
   onPremiseDefault = false
 ) => {
-  const legacy = isLegacyListRequest(req.query);
+  const legacy = isLegacyListRequest(req.query, LIST_QUERY_KEYS);
   const search = req.query.search || '';
 
   // Validate sort parameters against allow-list and sanitize inputs
@@ -356,7 +355,7 @@ export const gateExit = async (req, res) => {
 
 export const gateRecord = async (req, res) => {
   // The old staff panel sends no list parameters and expects a flat array.
-  if (isLegacyListRequest(req.query)) {
+  if (isLegacyListRequest(req.query, LIST_QUERY_KEYS)) {
     const result = await database.query(
       `SELECT gr.*, cd.issuedto, cd.mobno
        FROM gate_record AS gr

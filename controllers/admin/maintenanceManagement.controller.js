@@ -16,7 +16,7 @@ import {
   FlatDb
 } from '../../models/associations.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
-import { isLegacyListRequest } from './gateManagement.controller.js';
+import { isLegacyListRequest } from '../../utils/listRequest.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
@@ -34,6 +34,9 @@ const ALLOWED_SORT_COLUMNS = [
   'bookingid'
 ];
 const ALLOWED_SORT_ORDERS = ['ASC', 'DESC'];
+
+// Query keys the maintenance report reads.
+const LIST_QUERY_KEYS = ['page', 'page_size', 'search', 'sort_by', 'sort_order', 'status'];
 
 export const fetchMaintenanceReport = async (req, res) => {
   const { department } = req.params;
@@ -209,7 +212,7 @@ export const fetchMaintenanceReport = async (req, res) => {
     const requests = await MaintenanceDb.findAll(queryOptions);
 
     // The old staff panel sends no list parameters and expects a plain array.
-    if (isLegacyListRequest(req.query)) {
+    if (isLegacyListRequest(req.query, LIST_QUERY_KEYS)) {
       return res.status(200).send({
         message: 'Fetched requests for department',
         data: requests

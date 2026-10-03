@@ -172,6 +172,7 @@ export const getBookingDetails = async (req, res) => {
 
 const HISTORY_DEFAULT_PAGE_SIZE = 20;
 const HISTORY_MAX_PAGE_SIZE = 100;
+const HISTORY_MAX_PAGE = 1000;
 
 export const getBookingHistory = async (req, res) => {
   const { cardno, category } = req.query;
@@ -182,7 +183,7 @@ export const getBookingHistory = async (req, res) => {
   }
 
   const parsedPage = parseInt(req.query.page, 10);
-  const page = parsedPage > 0 ? parsedPage : 1;
+  const page = parsedPage > 0 ? Math.min(parsedPage, HISTORY_MAX_PAGE) : 1;
   const parsedSize = parseInt(req.query.page_size, 10);
   const pageSize = Math.min(
     parsedSize > 0 ? parsedSize : HISTORY_DEFAULT_PAGE_SIZE,

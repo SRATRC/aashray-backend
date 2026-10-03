@@ -195,7 +195,14 @@ export const updateShortLink = async (req, res, next) => {
         }
 
         const updateData = {};
-        if (slug !== undefined && String(slug).trim() !== link.slug) {
+        if (slug !== undefined) {
+            if (typeof slug !== 'string') {
+                throw new ApiError(400, 'Slug must be a string');
+            }
+        }
+        const formattedSlug =
+            slug === undefined ? undefined : slug.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '');
+        if (slug !== undefined && formattedSlug !== link.slug) {
             // A temporary-access link carries a signed token and the access
             // check looks the link up by its slug, so renaming it would lock
             // its holders out. The Utsav and Adhyayan group links (u12, a7)
@@ -203,7 +210,6 @@ export const updateShortLink = async (req, res, next) => {
             if (isTemporaryAccessLink(link) || isSystemGroupSlug(link.slug)) {
                 throw new ApiError(400, 'This link cannot be renamed');
             }
-            const formattedSlug = String(slug).trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '');
             if (!formattedSlug) {
                 throw new ApiError(400, 'Slug cannot be empty');
             }
@@ -212,7 +218,7 @@ export const updateShortLink = async (req, res, next) => {
             }
             const existingSlug = await ShortLink.findOne({ where: { slug: formattedSlug }, transaction: t });
             if (existingSlug && existingSlug.id !== link.id) {
-                throw new ApiError(400, 'Slug already exists');
+                throw new ApiError(409, 'Slug already exists');
             }
             updateData.slug = formattedSlug;
         }
@@ -221,7 +227,15 @@ export const updateShortLink = async (req, res, next) => {
         if (type !== undefined) updateData.type = type;
         if (active !== undefined) updateData.active = active;
 
-        await link.update(updateData, { transaction: t });
+        try {
+            await link.update(updateData, { transaction: t });
+        } catch (error) {
+            // A concurrent rename to the same slug got there first.
+            if (error.name === 'SequelizeUniqueConstraintError') {
+                throw new ApiError(409, 'Slug already exists');
+            }
+            throw error;
+        }
 
         await t.commit();
         req.transaction = null;
