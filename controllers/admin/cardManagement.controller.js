@@ -450,7 +450,10 @@ export const updateCard = async (req, res) => {
     }
   }
 
-  // Validation for seva kutir
+  // Validation for seva kutir (same rule as create: a department is needed)
+  if (res_status === STATUS_SEVA_KUTIR && !department && !card.department) {
+    throw new ApiError(400, 'Department is required for Seva Kutir cards');
+  }
   if (res_status === STATUS_SEVA_KUTIR && department) {
     const dept = await Departments.findOne({
       where: { dept_name: department }

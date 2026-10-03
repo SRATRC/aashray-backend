@@ -148,6 +148,35 @@ export const updateProfile = async (req, res) => {
     .send({ message: 'Profile Updated', data: updatedProfileData });
 };
 
+const IMAGE_EXT = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif'
+};
+
+// First bytes of each allowed type.
+const matchesImageSignature = (buf, mimetype) => {
+  if (!buf || buf.length < 12) return false;
+  switch (mimetype) {
+    case 'image/jpeg':
+      return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    case 'image/png':
+      return buf
+        .subarray(0, 8)
+        .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case 'image/gif':
+      return ['GIF87a', 'GIF89a'].includes(buf.toString('ascii', 0, 6));
+    case 'image/webp':
+      return (
+        buf.toString('ascii', 0, 4) === 'RIFF' &&
+        buf.toString('ascii', 8, 12) === 'WEBP'
+      );
+    default:
+      return false;
+  }
+};
+
 export const upload = async (req, res) => {
   attachUserContext(req);
   req.log.info('upload_profile_pic_start', {
@@ -199,8 +228,22 @@ export const upload = async (req, res) => {
       return res.status(400).json({ error: 'Please upload an image file' });
     }
 
+    // The extension comes from the mimetype allowlist, never from the file
+    // name, and the first bytes must match the type. So an .html file sent as
+    // image/png is refused instead of being stored and served as HTML.
+    const ext = IMAGE_EXT[req.file.mimetype];
+    if (!ext || !matchesImageSignature(req.file.buffer, req.file.mimetype)) {
+      req.log.warn('upload_profile_pic_bad_type', {
+        cardno: req.user.cardno,
+        mimetype: req.file.mimetype
+      });
+      return res
+        .status(400)
+        .json({ error: 'Only JPEG, PNG, WebP or GIF images are allowed' });
+    }
+
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const fileName = `${uniqueSuffix}${path.extname(req.file.originalname)}`;
+    const fileName = `${uniqueSuffix}${ext}`;
     let fileUrl = '';
 
     const isS3Configured =
@@ -223,7 +266,17 @@ export const upload = async (req, res) => {
         fileName
       });
     } else {
-      // Local fallback for development/local testing
+      // Local fallback for development/local testing only. Files here are
+      // served by express.static, so it stays off in production.
+      const env = process.env.NODE_ENV;
+      if (env && env !== 'development' && env !== 'test') {
+        req.log.error('upload_profile_pic_no_storage', {
+          cardno: req.user.cardno
+        });
+        return res
+          .status(503)
+          .json({ error: 'Image storage is not configured' });
+      }
       const uploadPath = path.join(process.cwd(), 'public/uploads', fileName);
       // The folder is not in git, so make it when it is missing.
       await fs.promises.mkdir(path.dirname(uploadPath), { recursive: true });

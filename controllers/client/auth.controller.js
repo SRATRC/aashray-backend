@@ -2,27 +2,20 @@ import {
   MSG_UPDATE_SUCCESSFUL,
   WHATSAPP_SUPPORT_NUMBER,
   STATUS_MUMUKSHU,
-  STATUS_SEVA_KUTIR,
-  STATUS_GUEST,
-  STATUS_OFFPREM,
-  STATUS_PR,
-  GUEST_TYPES
+  STATUS_OFFPREM
 } from '../../config/constants.js';
-import {
-  CardDb,
-  FlatDb,
-  GuestRelationship,
-  Departments
-} from '../../models/associations.js';
+import { CardDb, FlatDb } from '../../models/associations.js';
 import database from '../../config/database.js';
-import { createCardIds } from '../helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import sendMail from '../../utils/sendMail.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment';
+
+const MAX_CARDNO_TRIES = 5;
 
 export const updatePassword = async (req, res) => {
   attachUserContext(req);
@@ -356,26 +349,37 @@ export async function register(req, res) {
   // ── Create records in a transaction ──────────────────────────────────────
   const t = await database.transaction();
   try {
-    // Random 10-digit number, same as guest cards made at booking. It is
-    // checked against all cards; the unique key on cardno stops a clash.
-    const [cardno] = await createCardIds(1);
-    const newCard = await CardDb.create(
-      {
-        cardno,
-        issuedto: issuedto.trim(),
-        gender,
-        dob,
-        mobno,
-        center: center.trim(),
-        res_status: resStatusToUse,
-        status: STATUS_OFFPREM,
-        active: true,
-        password: hashedPassword,
-        ...(token && { token }),
-        updatedBy: 'USER'
-      },
-      { transaction: t }
-    );
+    // One random 10-digit number per try. A clash on the unique key is
+    // retried a few times, so sign-up never reads the whole card table.
+    // (MySQL keeps the transaction open after a failed insert.)
+    let newCard;
+    for (let attempt = 1; !newCard; attempt++) {
+      try {
+        newCard = await CardDb.create(
+          {
+            cardno: String(randomInt(1000000000, 10000000000)),
+            issuedto: issuedto.trim(),
+            gender,
+            dob,
+            mobno,
+            center: center.trim(),
+            res_status: resStatusToUse,
+            status: STATUS_OFFPREM,
+            active: true,
+            password: hashedPassword,
+            ...(token && { token }),
+            updatedBy: 'USER'
+          },
+          { transaction: t }
+        );
+      } catch (e) {
+        const clashOnCardno =
+          e.name === 'SequelizeUniqueConstraintError' &&
+          e.errors?.some((x) => x.path === 'cardno' || x.path?.includes('cardno'));
+        if (!clashOnCardno || attempt >= MAX_CARDNO_TRIES) throw e;
+      }
+    }
+    const cardno = newCard.cardno;
 
     await t.commit();
 
