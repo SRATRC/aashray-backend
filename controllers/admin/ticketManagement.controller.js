@@ -174,7 +174,7 @@ export const streamTicketMessages = async (req, res) => {
   res.flushHeaders();
 
   // Add admin to manager
-  ticketStreamManager.addClient(id, res, 'admin');
+  if (!ticketStreamManager.addClient(id, res, 'admin')) return; // shutting down
 
   // Initial connection message
   res.write(

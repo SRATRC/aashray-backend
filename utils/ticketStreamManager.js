@@ -11,11 +11,13 @@ class TicketStreamManager {
     this.startHeartbeat();
   }
 
+  // Returns false when the stream was refused (server shutting down); the
+  // caller must not write to it.
   addClient(ticketId, res, type) {
     // Shutting down: end the stream now so it can't hold server.close() open.
     if (this._closed) {
       res.end();
-      return;
+      return false;
     }
     if (!this.clients.has(ticketId)) {
       this.clients.set(ticketId, new Set());
@@ -31,6 +33,7 @@ class TicketStreamManager {
     res.on('close', () => {
       this.removeClient(ticketId, res);
     });
+    return true;
   }
 
   removeClient(ticketId, res) {

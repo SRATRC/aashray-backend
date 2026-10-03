@@ -219,7 +219,7 @@ export const streamTicketMessages = async (req, res) => {
   res.flushHeaders();
 
   // Add client to manager
-  ticketStreamManager.addClient(ticket_id, res, 'user');
+  if (!ticketStreamManager.addClient(ticket_id, res, 'user')) return; // shutting down
 
   // Initial connection message (optional, but good for testing)
   res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
