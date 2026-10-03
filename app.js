@@ -3,6 +3,7 @@ import './config/environment.js';
 import express, { urlencoded, json } from 'express';
 import { ErrorHandler } from './middleware/Error.js';
 import { httpLogger } from './middleware/Logger.js';
+import { deviceTelemetry } from './middleware/DeviceTelemetry.js';
 import cors from 'cors';
 import session from 'express-session';
 import sequelize from './config/database.js';
@@ -42,6 +43,8 @@ import travelManagementRoutes from './routes/admin/travelManagement.routes.js';
 import accountsManagementRoutes from './routes/admin/accountsManagement.routes.js';
 import maintenanceManagementRoutes from './routes/admin/maintenanceManagement.routes.js';
 import bookingManagementRoutes from './routes/admin/bookingManagement.routes.js';
+import shortLinkRoutes from './routes/admin/shortLink.routes.js';
+import redirectRoutes from './routes/admin/redirect.routes.js';
 // import utsavManagementRoutes from './routes/admin/utsavManagement.routes.js';
 import {
   utsavPublicRouter,
@@ -50,7 +53,11 @@ import {
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
 import coordinatorAuthRoutes from './routes/admin/coordinatorAuth.routes.js';
+import adminFormRoutes from './routes/admin/customForm.routes.js';
+
 import waManagementRoutes from './routes/admin/waManagement.routes.js';
+import satshrutRoutes from './routes/admin/satshrut.routes.js';
+import temporaryAccessRoutes from './routes/admin/temporaryAccess.routes.js';
 
 // Unified Route Imports
 import unifiedBookingRoutes from './routes/client/unifiedBooking.routes.js';
@@ -102,11 +109,28 @@ const corsOptions = {
 };
 
 const app = express();
+
+// The app runs behind a local reverse proxy, so every request arrives from
+// 127.0.0.1 and req.ip recorded that instead of the caller - for real Razorpay
+// deliveries as much as for anything else. 'loopback' trusts X-Forwarded-For
+// only when the immediate peer is loopback, so a request that ever reached the
+// app directly could not forge its own address.
+app.set('trust proxy', 'loopback');
+
 app.use(urlencoded({ extended: true }));
-app.use(json());
+// Keep the raw bytes: the Razorpay webhook signature is an HMAC over exactly
+// what was sent, and re-serialising the parsed body would not reproduce it.
+// See middleware/verifyRazorpayWebhook.js.
+app.use(
+  json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
 app.use(cors(corsOptions));
 app.use(httpLogger);
-app.use('/public', express.static(path.join(process.cwd(), 'public')));
+app.use(deviceTelemetry);
 
 app.use(
   session({
@@ -192,8 +216,13 @@ app.use('/api/v1/admin/utsav', utsavPublicRouter); // No auth
 app.use('/api/v1/admin/utsav', utsavAdminRouter); // With auth
 app.use('/api/v1/admin/avt', avtManagementRoutes);
 app.use('/api/v1/admin/wifi', wifiManagementRoutes);
+app.use('/api/v1/admin/wa', waManagementRoutes);
+app.use('/api/v1/admin/satshrut', satshrutRoutes);
 app.use('/api/v1/coordinator', coordinatorAuthRoutes);
-app.use('/api/v1/admin/whatsapp', waManagementRoutes);
+app.use('/api/v1/short-links', shortLinkRoutes);
+app.use('/api/v1/admin/temporary-access', temporaryAccessRoutes);
+app.use('/api/v1/admin/forms', adminFormRoutes);
+app.use('/', redirectRoutes);
 
 // Unified Routes
 app.use('/api/v1/unified', unifiedBookingRoutes);

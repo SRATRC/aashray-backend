@@ -18,6 +18,13 @@ const Updates = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false
     },
+    // Lowest OS that can install this release. iOS: version ("16.4").
+    // Android: API level ("26"), same unit as minSdkVersion.
+    // NULL = installable by everyone.
+    min_os: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     mandatory: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

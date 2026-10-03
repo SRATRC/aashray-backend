@@ -30,6 +30,7 @@ import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import { getTappDailyAayambilCounts, getVendorFoodSummary } from '../../utils/customFormActions.js';
 
 
 export const issuePlate = async (req, res) => {
@@ -38,15 +39,17 @@ export const issuePlate = async (req, res) => {
 
   req.log.info('issue_plate_start', { cardno: req.params.cardno, meal: req.body.meal });
 
-  const { message, issuedto } = await issueFoodPlate(
+  const { message, issuedto, auto_checkin } = await issueFoodPlate(
     req.params.cardno,
     req.body.meal,
-    t
+    t,
+    req.body.date,
+    req.body.scannedAt
   );
 
   await t.commit();
-  req.log.info('issue_plate_success', { cardno: req.params.cardno, meal: req.body.meal, issuedto });
-  return res.status(200).send({ message, issuedto });
+  req.log.info('issue_plate_success', { cardno: req.params.cardno, meal: req.body.meal, issuedto, auto_checkin });
+  return res.status(200).send({ message, issuedto, auto_checkin });
 };
 
 
@@ -65,7 +68,7 @@ export const bulkIssuePlate = async (req, res) => {
     res.status(200).send({ message: 'Plates issued successfully' });
   } catch (err) {
     await t.rollback();
-    req.log.error('bulk_issue_plate_error', { meal, error: err.message });
+    req.log.error('bulk_issue_plate_error', { meal: req.body?.meal, error: err.message });
     res.status(400).send({ message: err.message });
   }
 };
@@ -74,6 +77,11 @@ export const bulkIssuePlate = async (req, res) => {
 export const physicalPlatesIssued = async (req, res) => {
   const { date, type, count } = req.body;
   req.log.info('physical_plates_issued_start', { date, type, count });
+
+  if (!['breakfast', 'lunch', 'dinner'].includes(type)) {
+    req.log.warn('physical_plates_issued_invalid_type', { date, type });
+    return res.status(400).json({ message: 'Invalid plate type' });
+  }
 
   const alreadyExists = await FoodPhysicalPlate.findOne({
     where: {
@@ -101,14 +109,37 @@ export const physicalPlatesIssued = async (req, res) => {
 };
 
 export const fetchPhysicalPlateIssued = async (req, res) => {
-  req.log.info('fetch_physical_plate_issued_start');
+  const { date } = req.query;
+  req.log.info('fetch_physical_plate_issued_start', { date });
 
+  const where = date ? { date } : {};
   const data = await FoodPhysicalPlate.findAll({
+    where,
     order: [['date', 'ASC']]
   });
 
   req.log.info('fetch_physical_plate_issued_success', { count: data.length });
   return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: data });
+};
+
+export const updatePhysicalPlate = async (req, res) => {
+  const { date, type, count } = req.body;
+  req.log.info('update_physical_plate_start', { date, type, count });
+
+  if (!['breakfast', 'lunch', 'dinner'].includes(type)) {
+    req.log.warn('update_physical_plate_invalid_type', { date, type });
+    return res.status(400).json({ message: 'Invalid plate type' });
+  }
+
+  const record = await FoodPhysicalPlate.findOne({ where: { date, type } });
+  if (!record) {
+    throw new ApiError(404, `No plate count found for ${type} on ${date}. Use Add instead.`);
+  }
+
+  await record.update({ count, updatedBy: req.user.username });
+
+  req.log.info('update_physical_plate_success', { date, type, count });
+  return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 export const bookFood = async (req, res) => {
@@ -249,6 +280,7 @@ export const cancelBooking = async (req, res) => {
   req.log.info('cancel_food_booking_start', { bookingid, mealType });
 
   const t = await database.transaction();
+  req.transaction = t;
 
   const booking = await FoodDb.findOne({
     where: {
@@ -604,7 +636,7 @@ export const editBulkBooking = async (req, res) => {
 
 export const updatePlateIssued = async (req, res) => {
   const { bookingid } = req.params;
-  const { mealType, plateIssued, updatedBy } = req.body;
+  const { mealType, plateIssued } = req.body;
 
   req.log.info('update_plate_issued_start', { bookingid, mealType, plateIssued });
 
@@ -646,10 +678,9 @@ export const updatePlateIssued = async (req, res) => {
     }
 
     const updateFields = {
-      [`${mealType}_plate_issued`]: plateIssued
+      [`${mealType}_plate_issued`]: plateIssued,
+      updatedBy: req.user.username
     };
-
-    if (updatedBy) updateFields.updatedBy = updatedBy;
 
     await booking.update(updateFields);
 
@@ -755,13 +786,140 @@ export const foodReport = async (req, res) => {
     }
   );
 
-  req.log.info('food_report_success', { start_date, end_date, count: report.length });
-  return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: report });
+  let filteredReport = report;
+
+  // ── Ignore event dates logic ──────────────────────────────────────────────
+  if (req.query.ignore_events === 'true') {
+    // Fetch all utsav events overlapping the requested date range
+    const events = await UtsavDb.findAll({
+      attributes: ['start_date', 'end_date', 'starting_meal', 'ending_meal'],
+      where: {
+        start_date: { [Op.lte]: end_date },
+        end_date:   { [Op.gte]: start_date }
+      }
+    });
+
+    const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
+
+    // Build a map: dateStr → Set of meals to exclude
+    const excludedMeals = {};
+    const addExclude = (dateStr, meal) => {
+      if (!excludedMeals[dateStr]) excludedMeals[dateStr] = new Set();
+      excludedMeals[dateStr].add(meal);
+    };
+
+    for (const event of events) {
+      const evStart = event.start_date.substring(0, 10);
+      const evEnd   = event.end_date.substring(0, 10);
+
+      // First event meal on start date (fallback: breakfast = whole day from start)
+      const startingMeals = Array.isArray(event.starting_meal) && event.starting_meal.length
+        ? event.starting_meal : MEAL_ORDER;
+      const firstEventMeal    = MEAL_ORDER.find(m => startingMeals.includes(m)) || 'breakfast';
+      const firstEventMealIdx = MEAL_ORDER.indexOf(firstEventMeal);
+
+      // Last event meal on end date (fallback: dinner = whole day until end)
+      const endingMeals = Array.isArray(event.ending_meal) && event.ending_meal.length
+        ? event.ending_meal : MEAL_ORDER;
+      const lastEventMeal    = [...MEAL_ORDER].reverse().find(m => endingMeals.includes(m)) || 'dinner';
+      const lastEventMealIdx = MEAL_ORDER.indexOf(lastEventMeal);
+
+      // Walk every date in event range
+      const cursor = new Date(evStart);
+      const endD   = new Date(evEnd);
+      while (cursor <= endD) {
+        const dateStr    = cursor.toISOString().split('T')[0];
+        const isStartDay = dateStr === evStart;
+        const isEndDay   = dateStr === evEnd;
+
+        if (isStartDay && isEndDay) {
+          // Single-day event
+          for (let i = firstEventMealIdx; i <= lastEventMealIdx; i++)
+            addExclude(dateStr, MEAL_ORDER[i]);
+        } else if (isStartDay) {
+          // Exclude from first event meal to end of day
+          for (let i = firstEventMealIdx; i < MEAL_ORDER.length; i++)
+            addExclude(dateStr, MEAL_ORDER[i]);
+        } else if (isEndDay) {
+          // Exclude from start of day up to last event meal
+          for (let i = 0; i <= lastEventMealIdx; i++)
+            addExclude(dateStr, MEAL_ORDER[i]);
+        } else {
+          // Full middle day: exclude all meals
+          MEAL_ORDER.forEach(m => addExclude(dateStr, m));
+        }
+
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    // Zero-out excluded meals per row; drop rows where all 3 meals are excluded
+    filteredReport = report.map(row => {
+      const dateStr = moment(row.date).format('YYYY-MM-DD');
+      const excluded = excludedMeals[dateStr];
+      if (!excluded) return row;
+
+      const r = { ...row };
+      for (const meal of MEAL_ORDER) {
+        if (excluded.has(meal)) {
+          r[meal]                      = 0;
+          r[`${meal}_plate_issued`]    = 0;
+          r[`${meal}_noshow`]          = 0;
+          r[`${meal}_physical_plates`] = 0;
+          r[`${meal}_guest_count`]     = 0;
+          r[`${meal}_guest_issued`]    = 0;
+          r[`${meal}_guest_noshow`]    = 0;
+        }
+      }
+
+      // Drop row entirely if all 3 meals are excluded
+      if (MEAL_ORDER.every(m => excluded.has(m))) return null;
+      return r;
+    }).filter(Boolean);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Attach daily Tapascharya Aayambil counts & full Tapp breakdown
+  try {
+    const aayambilCounts = await getTappDailyAayambilCounts(start_date, end_date);
+    filteredReport = filteredReport.map(row => {
+      const dStr = moment(row.date).format('YYYY-MM-DD');
+      const aCounts = aayambilCounts[dStr] || {
+        upvaas: 0,
+        aayambil: 0,
+        rasTyaag: 0,
+        totalAayambil: 0,
+        ekasna: 0,
+        biyasna: 0,
+        onlyLiquid: 0,
+        regular: 0
+      };
+      const lunchCount = row.lunch || 0;
+      return {
+        ...row,
+        lunch_aayambil: aCounts.totalAayambil || 0,
+        lunch_aayambil_direct: aCounts.aayambil || 0,
+        lunch_ras_tyaag: aCounts.rasTyaag || 0,
+        lunch_regular: Math.max(0, lunchCount - (aCounts.totalAayambil || 0)),
+        tapp: aCounts
+      };
+    });
+  } catch (err) {
+    req.log.warn('food_report_aayambil_enrich_failed', { start_date, end_date, error: err.message });
+  }
+
+  req.log.info('food_report_success', { start_date, end_date, count: filteredReport.length });
+  return res.status(200).send({ message: MSG_FETCH_SUCCESSFUL, data: filteredReport });
 };
 
 export const foodReportDetails = async (req, res) => {
   const { meal, is_issued, date } = req.query;
   req.log.info('food_report_details_start', { meal, is_issued, date });
+
+  if (!['breakfast', 'lunch', 'dinner'].includes(meal)) {
+    req.log.warn('food_report_details_invalid_meal', { meal });
+    return res.status(400).json({ message: 'Invalid meal type' });
+  }
 
   const bookings = await FoodDb.findAll({
     attributes: ['id', 'date'],
@@ -791,6 +949,11 @@ export const foodReportDetailsGuests = async (req, res) => {
   if (!meal || !date) {
     req.log.warn('food_report_details_guests_missing_params', { meal, date });
     return res.status(400).json({ message: 'Missing meal or date parameter' });
+  }
+
+  if (!['breakfast', 'lunch', 'dinner'].includes(meal)) {
+    req.log.warn('food_report_details_guests_invalid_meal', { meal });
+    return res.status(400).json({ message: 'Invalid meal type' });
   }
 
   const mealField = Sequelize.col(`BulkFoodBooking.${meal}`);
@@ -962,7 +1125,7 @@ export const addBulkMenu = async (req, res) => {
         breakfast: item.breakfast || '',
         lunch: item.lunch || '',
         dinner: item.dinner || '',
-        updatedBy: 'admin',
+        updatedBy: req.user.username,
         createdAt: new Date(),
         updatedAt: new Date()
       }));
@@ -990,89 +1153,110 @@ export const addBulkMenu = async (req, res) => {
 
 
 export const getMealCountByMobile = async (req, res) => {
-  try {
-    const { mobno, fromDate, toDate } = req.body;
-    req.log.info('get_meal_count_by_mobile_start', { mobno, fromDate, toDate });
+  const { mobno, fromDate, toDate } = req.body;
+  req.log.info('get_meal_count_by_mobile_start', { mobno, fromDate, toDate });
 
-    // 🔥 STEP 1 — find overlapping utsavs
-    const utsavs = await UtsavDb.findAll({
-  where: {
-    start_date: { [Op.lte]: toDate },
-    end_date: { [Op.gte]: fromDate },
-    location: "Research Centre", // ⭐ NEW FILTER
-  },
-  attributes: ["id", "name", "start_date", "end_date", "location"],
-  raw: true,
-});
-    // 🔥 STEP 2 — build exclusion conditions
-    const exclusionConditions = [];
-
-    if (utsavs.length > 0) {
-      utsavs.forEach((u) => {
-        exclusionConditions.push({
-          date: {
-            [Op.between]: [
-              u.start_date > fromDate ? u.start_date : fromDate,
-              u.end_date < toDate ? u.end_date : toDate,
-            ],
-          },
-        });
-      });
-    }
-
-    // 🔥 STEP 3 — main meal query (excluding utsav dates)
-    const result = await FoodDb.findAll({
-      attributes: [
-        [fn("COALESCE", fn("SUM", col("breakfast")), 0), "breakfastBooked"],
-        [fn("COALESCE", fn("SUM", col("breakfast_plate_issued")), 0), "breakfastIssued"],
-        [fn("COALESCE", fn("SUM", col("lunch")), 0), "lunchBooked"],
-        [fn("COALESCE", fn("SUM", col("lunch_plate_issued")), 0), "lunchIssued"],
-        [fn("COALESCE", fn("SUM", col("dinner")), 0), "dinnerBooked"],
-        [fn("COALESCE", fn("SUM", col("dinner_plate_issued")), 0), "dinnerIssued"],
-      ],
-      include: [
-        {
-          model: CardDb,
-          attributes: [],
-          required: true,
-          where: { mobno },
-        },
-      ],
-      where: {
-        date: {
-          [Op.between]: [fromDate, toDate],
-        },
-        ...(exclusionConditions.length > 0 && {
-          [Op.not]: {
-            [Op.or]: exclusionConditions,
-          },
-        }),
-      },
-      raw: true,
-    });
-
-    const summary = result[0] || {};
-
-    // 🔥 STEP 4 — person info
-    const person = await CardDb.findOne({
-      where: { mobno },
-      attributes: ["issuedto", "mobno", "cardno"],
-      raw: true,
-    });
-
-    req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length });
-    return res.json({
-      success: true,
-      data: summary,
-      person,
-      utsavExcluded: utsavs,
-    });
-
-  } catch (error) {
-    req.log.error('get_meal_count_by_mobile_error', { error: error.message });
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+  if (!mobno || !fromDate || !toDate) {
+    req.log.warn('get_meal_count_by_mobile_missing_params', { mobno, fromDate, toDate });
+    return res.status(400).json({ message: 'mobno, fromDate and toDate are required' });
   }
+
+  // Find utsavs overlapping the requested date range at Research Centre
+  const utsavs = await UtsavDb.findAll({
+    where: {
+      start_date: { [Op.lte]: toDate },
+      end_date: { [Op.gte]: fromDate },
+      location: 'Research Centre'
+    },
+    attributes: ['id', 'name', 'start_date', 'end_date', 'location'],
+    raw: true
+  });
+
+  // Build date exclusion conditions for utsav periods
+  const exclusionConditions = utsavs.map((u) => ({
+    date: {
+      [Op.between]: [
+        u.start_date > fromDate ? u.start_date : fromDate,
+        u.end_date < toDate ? u.end_date : toDate
+      ]
+    }
+  }));
+
+  // Aggregate meal counts excluding utsav dates
+  const result = await FoodDb.findAll({
+    attributes: [
+      [fn('COALESCE', fn('SUM', col('breakfast')), 0), 'breakfastBooked'],
+      [fn('COALESCE', fn('SUM', col('breakfast_plate_issued')), 0), 'breakfastIssued'],
+      [fn('COALESCE', fn('SUM', col('lunch')), 0), 'lunchBooked'],
+      [fn('COALESCE', fn('SUM', col('lunch_plate_issued')), 0), 'lunchIssued'],
+      [fn('COALESCE', fn('SUM', col('dinner')), 0), 'dinnerBooked'],
+      [fn('COALESCE', fn('SUM', col('dinner_plate_issued')), 0), 'dinnerIssued']
+    ],
+    include: [
+      {
+        model: CardDb,
+        attributes: [],
+        required: true,
+        where: { mobno }
+      }
+    ],
+    where: {
+      date: { [Op.between]: [fromDate, toDate] },
+      ...(exclusionConditions.length > 0 && {
+        [Op.not]: { [Op.or]: exclusionConditions }
+      })
+    },
+    raw: true
+  });
+
+  const data = result[0] || {};
+
+  const person = await CardDb.findOne({
+    where: { mobno },
+    attributes: ['issuedto', 'mobno', 'cardno'],
+    raw: true
+  });
+
+  req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length });
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    data,
+    person,
+    utsavExcluded: utsavs
+  });
+};
+
+/**
+ * GET /food/vendor-summary
+ * Returns vendor food registration summary for the active vendor form (form_id = 1).
+ * Includes per-vendor breakdown and kitchen-wise totals per meal.
+ */
+export const vendorFoodSummary = async (req, res) => {
+  let formId = 1;
+  if (req.query.form_id !== undefined) {
+    const parsedFormId = parseInt(req.query.form_id, 10);
+    if (Number.isNaN(parsedFormId) || parsedFormId <= 0) {
+      throw new ApiError(400, 'Invalid form_id parameter');
+    }
+    formId = parsedFormId;
+  }
+  const startDate = req.query.start_date || null;
+  const endDate = req.query.end_date || null;
+  req.log.info('vendor_food_summary_start', { formId, startDate, endDate });
+
+  const result = await getVendorFoodSummary(startDate, endDate, formId);
+
+  req.log.info('vendor_food_summary_success', {
+    formId,
+    startDate,
+    endDate,
+    hasData: result.hasData,
+    vendorCount: result.departments?.length || 0,
+    dateCount: result.dates?.length || 0
+  });
+
+  return res.status(200).send({
+    message: MSG_FETCH_SUCCESSFUL,
+    ...result
+  });
 };

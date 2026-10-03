@@ -305,7 +305,7 @@ Admin cancellation of travel/utsav DOES issue full credits.
 ## Cron Job: Auto-Cancellation
 
 **Schedule:** Every 30 minutes
-**Target:** Transactions with `status IN (pending, failed)` AND `createdAt <= now - 24 hours` AND `card.country = 'INDIA'`
+**Target:** Transactions with `status IN (pending, failed)` AND `createdAt <= now - 24 hours` AND `card.country = 'India'`
 
 Non-India users are excluded because they typically pay cash and need more time.
 

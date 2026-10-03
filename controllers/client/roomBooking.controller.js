@@ -7,7 +7,8 @@ import {
   TYPE_GUEST_ROOM,
   TYPE_FLAT,
   STATUS_PAYMENT_PENDING,
-  BOOKING_STATUS_PENDING
+  BOOKING_STATUS_PENDING,
+  HOLD_REASON_COPY
 } from '../../config/constants.js';
 import { sendUnifiedEmail, sendUnifiedEmailForBookedBy } from '../helper.js';
 import { userCancelBooking } from '../../helpers/transactions.helper.js';
@@ -31,7 +32,7 @@ export const ViewAllBookings = async (req, res) => {
   const { cardno } = req.user;
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
-  const offset = (page - 1) * (pageSize - 1);
+  const offset = (page - 1) * pageSize;
 
   req.log.info('fetch_room_bookings_start', { cardno, page, pageSize });
 
@@ -51,7 +52,9 @@ FROM
           t1.nights,
           t1.roomtype,
           t1.status,
-          t1.gender
+          t1.gender,
+          t1.hold_reason,
+          t1.hold_reason_meta
    FROM room_booking t1
    WHERE t1.cardno = :cardno
      OR t1.bookedBy = :cardno
@@ -64,7 +67,9 @@ FROM
           t4.nights,
           'flat' AS roomtype,
           t4.status,
-          NULL AS gender
+          NULL AS gender,
+          t4.hold_reason,
+          t4.hold_reason_meta
    FROM flat_booking t4
    WHERE t4.cardno = :cardno
     OR t4.bookedBy = :cardno
@@ -87,8 +92,18 @@ FROM
       type: Sequelize.QueryTypes.SELECT
     }
   );
-  req.log.info('fetch_room_bookings_success', { cardno, count: user_bookings.length });
-  return res.status(200).send(user_bookings);
+  // Attach a user-facing explanation for waitlisted bookings, derived from the
+  // backend-owned copy map so the app doesn't hardcode reason text.
+  const enriched = user_bookings.map((b) => {
+    const copy =
+      b.status === STATUS_WAITING && b.hold_reason
+        ? HOLD_REASON_COPY[b.hold_reason] || HOLD_REASON_COPY.UNKNOWN
+        : null;
+    return { ...b, hold_reason_message: copy ? copy.userMessage : null };
+  });
+
+  req.log.info('fetch_room_bookings_success', { cardno, count: enriched.length });
+  return res.status(200).send(enriched);
 };
 
 export const CancelBooking = async (req, res) => {

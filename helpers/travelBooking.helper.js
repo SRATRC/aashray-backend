@@ -18,7 +18,6 @@ import ApiError from '../utils/ApiError.js';
 import moment from 'moment-timezone';
 import Sequelize from 'sequelize';
 import sendMail from '../utils/sendMail.js';
-import { createPendingTransaction } from './transactions.helper.js';
 import logger from '../config/logger.js';
 
 export async function checkTravelAlreadyBooked(

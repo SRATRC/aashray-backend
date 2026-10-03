@@ -67,8 +67,12 @@ const UtsavDb = sequelize.define(
       type: DataTypes.JSON,
       allowNull: true
     },
+    whatsapp_link: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     whatsapp_group_jid: {
-      type: DataTypes.STRING(255),
+      type: DataTypes.STRING,
       allowNull: true
     }
   },

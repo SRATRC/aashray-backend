@@ -48,8 +48,13 @@ import {
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
+  checkRollingWindowLimitForCards,
+  rollingWaitlistFields
+} from '../../helpers/rollingWindow.helper.js';
+import {
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import {
   bookFoodForMumukshus,
@@ -57,7 +62,8 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import {
   validateUtsavs,
-  bookUtsavForMumukshus
+  bookUtsavForMumukshus,
+  validateNoDuplicateUtsavBooking
 } from '../../helpers/utsavBooking.helper.js';
 import {
   bookAdhyayanForMumukshus,
@@ -308,6 +314,12 @@ export const guestBooking = async (req, res) => {
 export const validateBooking = async (req, res) => {
   attachUserContext(req);
   const { primary_booking, addons } = req.body;
+
+  // A member can hold only one booking per utsav — reject if the same utsav is
+  // selected more than once for the same person across primary + addons, so the
+  // user is blocked here before proceeding to payment.
+  validateNoDuplicateUtsavBooking(primary_booking, addons);
+
   req.log.info('validate_guest_booking_start', {
     cardno: req.user.cardno,
     primaryBookingType: primary_booking?.booking_type,
@@ -518,8 +530,7 @@ async function checkFoodAvailability(body, data, user, utsav) {
     body.primary_booking,
     body.addons,
     utsav,
-    user,
-    true
+    user
   );
 
   return result;
@@ -828,7 +839,7 @@ async function checkFlatAvailability(data, user) {
   }
 
   validateDate(checkin_date, checkout_date);
-  await validateCards(guests);
+  const guestCardDb = await validateCards(guests);
 
   // Check if any guest already has a flat booking for these dates
   for (const guest of guests) {
@@ -843,7 +854,32 @@ async function checkFlatAvailability(data, user) {
   const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
 
+  // Preview the 9-night/30-day cap so this matches the actual booking outcome
+  // (createFlatBooking force-waitlists with no charge when exceeded). Guests are
+  // always non-residents, so the cap applies. No transaction (read-only preview).
+  const capByCard = await checkRollingWindowLimitForCards(
+    guestCardDb,
+    checkin_date,
+    checkout_date
+  );
+
+  // Clone credits so this read-only preview loop doesn't mutate the caller's
+  // card (mirrors the mumukshu flat-availability preview in roomBooking.helper.js).
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const guest of guests) {
+    const cap = capByCard.get(guest);
+    if (cap.exceeds) {
+      flatDetails.push({
+        guest: guest,
+        flatno: flat.flatno,
+        nights: nights,
+        availableCredits: 0,
+        ...rollingWaitlistFields(cap)
+      });
+      continue;
+    }
+
     // Check if this guest is the flat owner
     const isFlatOwner = await FlatDb.findOne({
       where: {
@@ -853,12 +889,15 @@ async function checkFlatAvailability(data, user) {
     });
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+    const availableCredits =
+      charge > 0 ? usableCredits(tempUser, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       guest: guest,
       flatno: flat.flatno,
       nights: nights,
       charge: charge,
+      availableCredits: availableCredits,
       status: 'available'
     });
   }

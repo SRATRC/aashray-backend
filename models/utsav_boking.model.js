@@ -68,7 +68,7 @@ const UtsavBooking = sequelize.define(
       allowNull: true
     },
     other: {
-      type: DataTypes.STRING,
+      type: DataTypes.TEXT,
       allowNull: true
     },
     status: {

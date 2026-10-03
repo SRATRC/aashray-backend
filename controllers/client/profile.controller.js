@@ -94,7 +94,7 @@ export const updateProfile = async (req, res) => {
       cardno: req.user.cardno
     },
     attributes: {
-      exclude: ['id', 'createdAt', 'updatedAt', 'updatedBy']
+      exclude: ['id', 'token', 'createdAt', 'updatedAt', 'updatedBy']
     }
   });
 
