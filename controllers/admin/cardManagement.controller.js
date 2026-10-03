@@ -127,12 +127,9 @@ export const createCard = async (req, res) => {
     guestType // guest type: Driver, VIP, Friend, Family
   } = req.body;
 
-  // Staff may type the card number (10 digits). When they send none, a random
+  // Staff may type the card number, as dev allows today. When they send none, a random
   // free 10-digit number is made, the same way as guest cards made at booking.
   let cardno = String(req.body.cardno ?? '').trim();
-  if (cardno && !/^\d{10}$/.test(cardno)) {
-    throw new ApiError(400, 'Card number must be exactly 10 digits');
-  }
   if (cardno) {
     const existingCard = await CardDb.findOne({ where: { cardno } });
     if (existingCard) {

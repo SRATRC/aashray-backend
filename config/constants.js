@@ -63,6 +63,8 @@ export const STATUS_RESIDENT = 'PR';
 export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
+export const STATUS_PR = 'PR';
+export const GUEST_TYPES = ['family', 'friend', 'driver', 'vip'];
 export const AMT_TYPE_LATE_CHECKOUT_ROOM = 'late_checkout_room';
 
 // ROOM

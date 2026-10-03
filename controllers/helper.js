@@ -756,9 +756,9 @@ export async function createGuestsHelper(cardno, guests, t) {
   const unregisteredGuests = guests.filter((guest) => !guest.cardno);
 
   for (const guest of unregisteredGuests) {
-    if (!guest.dob) {
-      throw new ApiError(400, `Date of birth is required for guest ${guest.name || guest.mobno}`);
-    }
+    // Date of birth stays optional: installed apps do not send it yet. When it
+    // is sent, it must be a real date.
+    if (!guest.dob) continue;
     const dobMoment = moment(guest.dob, 'YYYY-MM-DD', true);
     if (!dobMoment.isValid()) {
       throw new ApiError(400, `Invalid date of birth format for guest ${guest.name || guest.mobno}`);

@@ -225,6 +225,8 @@ export const upload = async (req, res) => {
     } else {
       // Local fallback for development/local testing
       const uploadPath = path.join(process.cwd(), 'public/uploads', fileName);
+      // The folder is not in git, so make it when it is missing.
+      await fs.promises.mkdir(path.dirname(uploadPath), { recursive: true });
       await fs.promises.writeFile(uploadPath, req.file.buffer);
       // Build static serving URL
       fileUrl = `${req.protocol}://${req.get('host')}/uploads/${fileName}`;

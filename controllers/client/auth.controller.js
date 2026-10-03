@@ -3,7 +3,10 @@ import {
   WHATSAPP_SUPPORT_NUMBER,
   STATUS_MUMUKSHU,
   STATUS_SEVA_KUTIR,
-  STATUS_GUEST
+  STATUS_GUEST,
+  STATUS_OFFPREM,
+  STATUS_PR,
+  GUEST_TYPES
 } from '../../config/constants.js';
 import {
   CardDb,
@@ -12,6 +15,7 @@ import {
   Departments
 } from '../../models/associations.js';
 import database from '../../config/database.js';
+import { createCardIds } from '../helper.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
@@ -141,7 +145,11 @@ export const verifyAndLogin = async (req, res) => {
   }
 
   const { password } = req.body;
-  const match = bcrypt.compareSync(password, details.password);
+  // Sign-up and password change store the trimmed password, so accept it
+  // trimmed here too. The raw value still works for older passwords.
+  const match =
+    bcrypt.compareSync(password, details.password) ||
+    bcrypt.compareSync(String(password).trim(), details.password);
 
   if (!match) {
     req.log.warn('login_incorrect_password', { mobno });
@@ -272,56 +280,47 @@ export async function forgotPassword(req, res) {
 
 export async function checkMobile(req, res) {
   const { mobno } = req.params;
-  req.log.info('check_mobile_start', { mobno });
+  req.log.info('check_mobile_start');
 
-  if (!mobno || String(mobno).trim().length !== 10) {
+  if (!/^\d{10}$/.test(String(mobno ?? '').trim())) {
     throw new ApiError(400, 'A valid 10-digit phone number is required');
   }
 
+  // Public route: it only says whether the number is taken. No name, no
+  // member type, so it cannot be used to look people up.
   const existing = await CardDb.findOne({
     where: { mobno },
-    attributes: ['id', 'issuedto', 'res_status']
+    attributes: ['id']
   });
 
-  return res.status(200).send({
-    exists: !!existing,
-    name: existing ? existing.issuedto : null,
-    res_status: existing ? existing.res_status : null
-  });
+  return res.status(200).send({ exists: !!existing });
 }
 
 export async function register(req, res) {
-  const {
-    issuedto,
-    mobno,
-    gender,
-    password,
-    res_status,
-    department,
-    ref_mobno,
-    guest_type,
-    dob,
-    center
-  } = req.body;
+  // Public route: only a Mumukshu can sign up here. res_status, department,
+  // ref_mobno and guest_type in the body are ignored. Staff make other member
+  // types through the staff create-card route.
+  const { issuedto, mobno, gender, password, dob, center, token } = req.body;
 
-  const resStatusToUse = res_status || STATUS_MUMUKSHU;
+  const resStatusToUse = STATUS_MUMUKSHU;
 
-  req.log.info('register_start', { mobno, res_status: resStatusToUse });
+  req.log.info('register_start', { res_status: resStatusToUse });
 
-  // ── Basic required field validation ──────────────────────────────────────
-  if (!issuedto || !issuedto.trim()) {
+  // ── Basic required field validation (types first, so bad input is a 400) ──
+  const isText = (v) => typeof v === 'string' && v.trim().length > 0;
+  if (!isText(issuedto)) {
     throw new ApiError(400, 'Full name is required');
   }
-  if (!mobno || String(mobno).trim().length !== 10) {
+  if (typeof mobno !== 'string' || !/^\d{10}$/.test(mobno.trim())) {
     throw new ApiError(400, 'A valid 10-digit phone number is required');
   }
   if (!gender || !['M', 'F'].includes(gender)) {
     throw new ApiError(400, 'Gender must be M or F');
   }
-  if (!password || !password.trim()) {
+  if (!isText(password)) {
     throw new ApiError(400, 'Password is required');
   }
-  if (!dob) {
+  if (typeof dob !== 'string' || !dob) {
     throw new ApiError(400, 'Date of birth is required');
   }
   const dobMoment = moment(dob, 'YYYY-MM-DD', true);
@@ -334,64 +333,11 @@ export async function register(req, res) {
   if (dobMoment.isBefore('1900-01-01')) {
     throw new ApiError(400, 'Please select a valid date of birth');
   }
-  if (!center || !center.trim()) {
+  if (!isText(center)) {
     throw new ApiError(400, 'Centre is required');
   }
-  const validStatuses = [
-    STATUS_MUMUKSHU,
-    'PR',
-    STATUS_SEVA_KUTIR,
-    STATUS_GUEST
-  ];
-  if (!resStatusToUse || !validStatuses.includes(resStatusToUse)) {
-    throw new ApiError(400, 'Invalid residential status');
-  }
-
-  // ── Conditional validation ────────────────────────────────────────────────
-  let refMumukshuCardno = null;
-
-  if (resStatusToUse === STATUS_SEVA_KUTIR) {
-    if (!department || !department.trim()) {
-      throw new ApiError(
-        400,
-        'Department is required for Seva Kutir registration'
-      );
-    }
-    const dept = await Departments.findOne({
-      where: { dept_name: department }
-    });
-    if (!dept) {
-      throw new ApiError(400, 'Invalid department selected');
-    }
-  }
-
-  if (resStatusToUse === STATUS_GUEST) {
-    if (!ref_mobno || String(ref_mobno).trim().length !== 10) {
-      throw new ApiError(
-        400,
-        'A valid 10-digit reference Mumukshu phone number is required'
-      );
-    }
-    if (
-      !guest_type ||
-      !['family', 'friend', 'driver', 'vip'].includes(guest_type)
-    ) {
-      throw new ApiError(
-        400,
-        'Guest type must be family, friend, driver, or vip'
-      );
-    }
-    const refMumukshu = await CardDb.findOne({
-      where: { mobno: ref_mobno, res_status: STATUS_MUMUKSHU },
-      attributes: ['cardno']
-    });
-    if (!refMumukshu) {
-      throw new ApiError(
-        404,
-        'Reference phone number does not belong to a registered Mumukshu'
-      );
-    }
-    refMumukshuCardno = refMumukshu.cardno;
+  if (token !== undefined && token !== null && typeof token !== 'string') {
+    throw new ApiError(400, 'Invalid push token');
   }
 
   // ── Uniqueness check ──────────────────────────────────────────────────────
@@ -403,10 +349,6 @@ export async function register(req, res) {
     throw new ApiError(409, 'An account with this phone number already exists');
   }
 
-  // ── Generate cardno (MAX(id)+1, zero-padded to 10 digits) ─────────────────
-  const maxId = await CardDb.max('id');
-  const cardno = String((maxId || 0) + 1).padStart(10, '0');
-
   // ── Hash password ─────────────────────────────────────────────────────────
   const salt = bcrypt.genSaltSync(10);
   const hashedPassword = bcrypt.hashSync(password.trim(), salt);
@@ -414,6 +356,9 @@ export async function register(req, res) {
   // ── Create records in a transaction ──────────────────────────────────────
   const t = await database.transaction();
   try {
+    // Random 10-digit number, same as guest cards made at booking. It is
+    // checked against all cards; the unique key on cardno stops a clash.
+    const [cardno] = await createCardIds(1);
     const newCard = await CardDb.create(
       {
         cardno,
@@ -423,41 +368,42 @@ export async function register(req, res) {
         mobno,
         center: center.trim(),
         res_status: resStatusToUse,
-        status: 'offprem',
+        status: STATUS_OFFPREM,
         active: true,
         password: hashedPassword,
-        updatedBy: 'USER',
-        ...(resStatusToUse === STATUS_SEVA_KUTIR && { department })
+        ...(token && { token }),
+        updatedBy: 'USER'
       },
       { transaction: t }
     );
-
-    if (resStatusToUse === STATUS_GUEST) {
-      await GuestRelationship.create(
-        {
-          cardno: refMumukshuCardno,
-          guest: cardno,
-          type: guest_type,
-          updatedBy: cardno
-        },
-        { transaction: t }
-      );
-    }
 
     await t.commit();
 
     req.log.info('register_success', { cardno, res_status: resStatusToUse });
 
-    // Return same shape as verifyAndLogin so setUser() works on the app
-    newCard.setDataValue('password', '');
-    newCard.setDataValue('isFlatOwner', false);
+    // Same shape as verifyAndLogin so setUser() works on the app. The
+    // password and the push address stay on the server.
+    const { password: _pw, token: _tk, ...cardData } = newCard.get({
+      plain: true
+    });
 
-    return res
-      .status(201)
-      .send({ message: 'Account created successfully', data: newCard });
+    return res.status(201).send({
+      message: 'Account created successfully',
+      data: { ...cardData, isFlatOwner: false }
+    });
   } catch (err) {
     await t.rollback();
-    req.log.error('register_failed', { mobno, err: err.message });
+    req.log.error('register_failed', { err: err.message });
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      const field = err.errors?.[0]?.path;
+      if (field === 'mobno') {
+        throw new ApiError(
+          409,
+          'An account with this phone number already exists'
+        );
+      }
+      throw new ApiError(409, 'Could not create the account. Please try again.');
+    }
     throw err;
   }
 }
