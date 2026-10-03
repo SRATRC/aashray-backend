@@ -1,5 +1,5 @@
 import { CardDb, GuestRelationship } from '../../models/associations.js';
-import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM } from '../../config/constants.js';
+import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_GUEST, STATUS_OFFPREM } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import bcrypt from 'bcryptjs';
 import ApiError from '../../utils/ApiError.js';
@@ -197,9 +197,12 @@ export const createCard = async (req, res) => {
       }
     }
 
+    // A created record still holds the starter password hash; never send it.
+    const { password, token, ...cardData } = newCard.get({ plain: true });
+
     return res.status(200).json({
       message: 'Card created successfully',
-      data: newCard
+      data: cardData
     });
 
   } catch (error) {
@@ -217,7 +220,9 @@ export const createCard = async (req, res) => {
 
 export const fetchAllCards = async (req, res) => {
   req.log.info('fetch_all_cards_start');
+  // The push address stays in the backend; staff screens never use it.
   const data = await CardDb.findAll({
+    attributes: { exclude: ['token'] }
   });
 
   req.log.info('fetch_all_cards_success', { count: data.length });
@@ -237,8 +242,44 @@ export const searchCardsByName = async (req, res) => {
           { mobno: { [Sequelize.Op.like]: `%${term}%` } },
           { cardno: { [Sequelize.Op.like]: `%${term}%` } } // ✅ added this
         ]
-      }
+      },
+      attributes: { exclude: ['token'] }
     });
+
+    // Staff edit a guest card with its current host filled in, so each guest
+    // card also gets its host's card number, name and guest type.
+    const guestCardnos = data
+      .filter((card) => card.res_status === STATUS_GUEST)
+      .map((card) => card.cardno);
+    if (guestCardnos.length > 0) {
+      const links = await GuestRelationship.findAll({
+        where: { guest: guestCardnos },
+        attributes: ['cardno', 'guest', 'type'],
+        order: [['updatedAt', 'DESC']]
+      });
+      const hostCardnos = [...new Set(links.map((link) => link.cardno))];
+      const hosts = hostCardnos.length
+        ? await CardDb.findAll({
+            where: { cardno: hostCardnos },
+            attributes: ['cardno', 'issuedto']
+          })
+        : [];
+      const hostNames = new Map(hosts.map((host) => [host.cardno, host.issuedto]));
+
+      // A guest has one host. If older data left more than one, the newest wins.
+      const linkOfGuest = new Map();
+      for (const link of links) {
+        if (!linkOfGuest.has(link.guest)) linkOfGuest.set(link.guest, link);
+      }
+
+      for (const card of data) {
+        const link = linkOfGuest.get(card.cardno);
+        if (!link) continue;
+        card.setDataValue('referenceCardno', link.cardno);
+        card.setDataValue('referenceName', hostNames.get(link.cardno) || null);
+        card.setDataValue('guestType', link.type);
+      }
+    }
 
     req.log.info('search_cards_by_name_success', { term, count: data.length });
     return res.status(200).send({ message: 'Fetched all cards', data });
@@ -280,10 +321,35 @@ export const updateCard = async (req, res) => {
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
-  // Validation for guest
-  if (res_status === 'GUEST') {
-    if (!referenceCardno || !guestType) {
-      throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
+  // Read before the update below overwrites it.
+  const wasGuest = card.res_status === STATUS_GUEST;
+
+  // A blank host keeps the guest's links as they are. Many older guest cards
+  // have no host on record, and staff must still be able to fix their details.
+  const hostCardno = String(referenceCardno ?? '').trim();
+  const hostGuestType = String(guestType ?? '').trim();
+
+  // Validation for guest. Checked before the card is saved, so a bad host card
+  // cannot leave the card half-updated.
+  if (res_status === STATUS_GUEST) {
+    if (!hostCardno) {
+      if (!wasGuest) {
+        throw new ApiError(400, 'Enter the host card number to make this card a guest');
+      }
+      if (hostGuestType) {
+        throw new ApiError(400, 'Enter the host card number to set a guest type');
+      }
+    } else {
+      if (!hostGuestType) {
+        throw new ApiError(400, 'Choose a guest type for the host card');
+      }
+      if (hostCardno === String(cardno)) {
+        throw new ApiError(400, 'A guest cannot be their own reference card');
+      }
+      const hostCard = await CardDb.findOne({ where: { cardno: hostCardno } });
+      if (!hostCard) {
+        throw new ApiError(400, `Reference card ${hostCardno} does not exist`);
+      }
     }
   }
 
@@ -330,28 +396,42 @@ export const updateCard = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  // Update or create guest relationship
-  if (res_status === 'GUEST') {
-    const [relation, created] = await GuestRelationship.findOrCreate({
-      where: { cardno: cardno },
-      defaults: {
-        cardno: cardno,
-        referenceCardno,
-        guestType,
-        createdBy: req.user.username
-      }
-    });
+  // A guest link stores the host in `cardno` and the guest in `guest`.
+  if (res_status === STATUS_GUEST) {
+    if (hostCardno) {
+      // A guest has one host, so naming a different host moves the guest. The
+      // named host's link is saved first and the other links go after it, so
+      // a failed save never leaves the guest with no host.
+      const [relation, created] = await GuestRelationship.findOrCreate({
+        where: { cardno: hostCardno, guest: cardno },
+        defaults: {
+          cardno: hostCardno,
+          guest: cardno,
+          type: hostGuestType,
+          updatedBy: req.user.username
+        }
+      });
 
-    if (!created) {
-      await relation.update({
-        referenceCardno,
-        guestType,
-        updatedBy: req.user.username
+      if (!created) {
+        await relation.update({
+          type: hostGuestType,
+          updatedBy: req.user.username
+        });
+      }
+
+      await GuestRelationship.destroy({
+        where: {
+          guest: cardno,
+          cardno: { [Sequelize.Op.ne]: hostCardno }
+        }
       });
     }
-  } else {
-    // If not a guest anymore, remove guest_relationship if it exists
-    await GuestRelationship.destroy({ where: { cardno: cardno } });
+  } else if (wasGuest && card.res_status !== STATUS_GUEST) {
+    // The card stopped being a guest card: drop the links where it is the
+    // guest. Links where it is the host belong to its own guests and stay.
+    // Checked on the saved card, not the request: a save that leaves out the
+    // member type keeps the card a guest.
+    await GuestRelationship.destroy({ where: { guest: cardno } });
   }
 
   req.log.info('update_card_success', { cardno, res_status });

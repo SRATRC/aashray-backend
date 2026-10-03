@@ -23,7 +23,7 @@ Fetch user profile data.
     "mobno": 9876543210,
     "email": "john@example.com",
     "address": "123 Main St",
-    "country": "INDIA",
+    "country": "India",
     "state": "Maharashtra",
     "city": "Mumbai",
     "center": "Research Centre",

@@ -173,6 +173,7 @@ export async function bookTravelForMumukshus(
       type,
       mumukshus,
       arrival_time,
+      leaving_post_adhyayan,
       total_people = 1
     } = group;
 
@@ -189,6 +190,7 @@ export async function bookTravelForMumukshus(
         drop_point,
         luggage,
         arrival_time,
+        leaving_post_adhyayan,
         total_people,
         comments,
         trip_group_id: tripGroupIdByCardno ? tripGroupIdByCardno[mumukshu] : null,
@@ -249,6 +251,17 @@ export async function bookRoundTripTravel(
   return { userBookingIds, waitingBookingCount: 0 };
 }
 
+// A return leg counts only when its group has travelers. An empty array is truthy in JS,
+// so test the length. A return date without a group (or the reverse) is refused.
+function hasReturnLeg(return_date, returnMumukshuGroup) {
+  const hasGroup =
+    Array.isArray(returnMumukshuGroup) && returnMumukshuGroup.length > 0;
+  if (Boolean(return_date) !== hasGroup) {
+    throw new ApiError(400, ERR_TRAVEL_PARTIAL_ROUND_TRIP);
+  }
+  return hasGroup;
+}
+
 // Shared one-way vs round-trip dispatch used by both the mumukshu and guest controllers.
 export async function bookTravelDispatch(
   date,
@@ -258,29 +271,24 @@ export async function bookTravelDispatch(
   t,
   user
 ) {
-  if (Boolean(return_date) !== Boolean(returnMumukshuGroup)) {
-    throw new ApiError(400, ERR_TRAVEL_PARTIAL_ROUND_TRIP);
-  }
-  return return_date && returnMumukshuGroup
+  return hasReturnLeg(return_date, returnMumukshuGroup)
     ? bookRoundTripTravel(date, mumukshuGroup, return_date, returnMumukshuGroup, t, user)
     : bookTravelForMumukshus(date, mumukshuGroup, t, user);
 }
 
 export async function checkTravelAvailability(details) {
   const { date, mumukshuGroup, return_date, returnMumukshuGroup } = details;
-  if (Boolean(return_date) !== Boolean(returnMumukshuGroup)) {
-    throw new ApiError(400, ERR_TRAVEL_PARTIAL_ROUND_TRIP);
-  }
+  const isRoundTrip = hasReturnLeg(return_date, returnMumukshuGroup);
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   if (date < today) throw new ApiError(400, ERR_INVALID_DATE);
-  if (return_date && returnMumukshuGroup && return_date < date) {
+  if (isRoundTrip && return_date < date) {
     throw new ApiError(400, ERR_TRAVEL_RETURN_BEFORE_ONWARD);
   }
 
   // Validate every traveler across both legs in a single query.
   const allCardnos = [
     ...new Set(
-      [...mumukshuGroup, ...(returnMumukshuGroup || [])].flatMap((g) => g.mumukshus)
+      [...mumukshuGroup, ...(isRoundTrip ? returnMumukshuGroup : [])].flatMap((g) => g.mumukshus)
     )
   ];
   await validateCards(allCardnos);
@@ -298,7 +306,7 @@ export async function checkTravelAvailability(details) {
   };
 
   await validateLeg(date, mumukshuGroup);
-  if (return_date && returnMumukshuGroup) {
+  if (isRoundTrip) {
     await validateLeg(return_date, returnMumukshuGroup);
   }
 
