@@ -26,7 +26,13 @@ router.put('/update', CatchAsync(updateCard));
 router.put('/transfer', CatchAsync(transferCard));
 router.get('/transactions/:cardno', CatchAsync(fetchTotalTransactions));
 router.post('/reset-pwd', CatchAsync(resetPasswordDefault));
-router.get('/person-activity', CatchAsync(getPersonActivity));
+// Office, card and super admins only: the same roles the staff panel opens
+// the card screens to. The report shows stays, gate movements and WiFi rows.
+router.get(
+  '/person-activity',
+  authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_CARD_ADMIN),
+  CatchAsync(getPersonActivity)
+);
 
 export default router;
 

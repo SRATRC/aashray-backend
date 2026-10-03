@@ -521,203 +521,113 @@ export const getCardByMobile = async (req, res) => {
 
 
 export const getPersonActivity = async (req, res) => {
-  try {
-    const { cardno } = req.query;
+  const { cardno } = req.query;
+  if (!cardno || typeof cardno !== 'string') {
+    throw new ApiError(400, 'cardno is required');
+  }
+  req.log.info('person_activity_start', { cardno });
 
-    if (!cardno) {
-      return res.status(400).json({ message: "cardno is required" });
-    }
+  const card = await CardDb.findOne({
+    where: { cardno },
+    attributes: ['cardno', 'issuedto', 'res_status']
+  });
+  if (!card) throw new ApiError(404, ERR_CARD_NOT_FOUND);
 
-    const today = moment().format("YYYY-MM-DD");
-    const past30 = moment().subtract(30, "days").format("YYYY-MM-DD");
+  // Dates are calendar days at the Research Centre (IST), as elsewhere in admin.
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const past30 = moment().tz('Asia/Kolkata').subtract(30, 'days').format('YYYY-MM-DD');
 
-    // =================================================
-    // 🚀 PARALLEL QUERIES
-    // =================================================
-
-    const [
-      flats,
-      rooms,
-      food,
-      gate,
-      maintenanceOpen,
-      shibirBookings,
-      travel,
-      utsavBookings,
-      wifiCodes
-    ] = await Promise.all([
-      // 🏠 FLAT
-      FlatBooking.findAll({
-        where: {
-          cardno,
-          [Op.or]: [
-            { checkin: { [Op.gte]: past30 } },
-            { checkout: { [Op.gte]: past30 } }
-          ]
-        },
-        raw: true
-      }),
-
-      // 🛏 ROOM
-      RoomBooking.findAll({
-        where: {
-          cardno,
-          [Op.or]: [
-            { checkin: { [Op.gte]: past30 } },
-            { checkout: { [Op.gte]: past30 } }
-          ]
-        },
-        raw: true
-      }),
-
-      // 🍽 FOOD
-      FoodDb.findAll({
-        where: {
-          cardno,
-          date: { [Op.gte]: past30 }
-        },
-        raw: true
-      }),
-
-      // 🚪 GATE
-      GateRecord.findAll({
-        where: {
-          cardno,
-          createdAt: { [Op.gte]: past30 }
-        },
-        raw: true
-      }),
-
-      // 🔧 MAINTENANCE → ONLY OPEN (NO DATE)
-      MaintenanceDb.findAll({
-        where: {
-          requested_by: cardno,
-          status: STATUS_OPEN
-        },
-        raw: true
-      }),
-
-      // 📿 SHIBIR (JOIN MASTER)
+  const [flats, rooms, food, gate, maintenanceOpen, shibirBookings, travel, utsavBookings, wifiCodes] =
+    await Promise.all([
+      // A stay is in the window when it ends on or after the window start
+      // (checkout is never before checkin).
+      FlatBooking.findAll({ where: { cardno, checkout: { [Op.gte]: past30 } }, raw: true }),
+      RoomBooking.findAll({ where: { cardno, checkout: { [Op.gte]: past30 } }, raw: true }),
+      FoodDb.findAll({ where: { cardno, date: { [Op.gte]: past30 } }, raw: true }),
+      GateRecord.findAll({ where: { cardno, createdAt: { [Op.gte]: past30 } }, raw: true }),
+      MaintenanceDb.findAll({ where: { requested_by: cardno, status: STATUS_OPEN }, raw: true }),
       ShibirBookingDb.findAll({
         where: { cardno },
         include: [
           {
             model: ShibirDb,
-            attributes: ["start_date", "end_date", "name"],
-            required: true
+            attributes: ['start_date', 'end_date', 'name'],
+            required: true,
+            where: { end_date: { [Op.gte]: past30 } }
           }
         ],
         raw: true,
         nest: true
       }),
-
-      // 🚗 TRAVEL
-      TravelDb.findAll({
-        where: {
-          cardno,
-          date: { [Op.gte]: past30 }
-        },
-        raw: true
-      }),
-
-      // 🎉 UTSAV (JOIN MASTER)
+      TravelDb.findAll({ where: { cardno, date: { [Op.gte]: past30 } }, raw: true }),
       UtsavBooking.findAll({
         where: { cardno },
         include: [
           {
             model: UtsavDb,
-            attributes: ["start_date", "end_date", "name"],
-            required: true
+            attributes: ['start_date', 'end_date', 'name'],
+            required: true,
+            where: { end_date: { [Op.gte]: past30 } }
           }
         ],
         raw: true,
         nest: true
       }),
-
-      // 📶 WIFI (NO DATE FILTER)
+      // The WiFi code itself is a credential; the WiFi screens show it, this report does not.
       PermanentWifiCodes.findAll({
         where: { cardno },
+        attributes: ['id', 'username', 'ssid', 'status', 'requested_at', 'reviewed_at'],
         raw: true
       })
     ]);
 
-    // =================================================
-    // 🧩 NORMALIZE
-    // =================================================
+  // The row's own fields go first so they can never overwrite the report's
+  // type and dates (travel rows have their own "type" column).
+  const timeline = [];
+  const pushItem = (type, date, endDate, data) =>
+    timeline.push({ ...data, type, date, end_date: endDate || date });
 
-    const timeline = [];
-    const pushItem = (type, date, data) =>
-      timeline.push({ type, date, ...data });
+  flats.forEach((f) => pushItem('flat_booking', f.checkin, f.checkout, f));
+  rooms.forEach((r) => pushItem('room_booking', r.checkin, r.checkout, r));
+  food.forEach((f) => pushItem('food_booking', f.date, f.date, f));
+  gate.forEach((g) => pushItem('gate_record', g.createdAt, g.createdAt, g));
+  travel.forEach((t) => pushItem('travel_booking', t.date, t.date, t));
+  shibirBookings.forEach((s) => pushItem('shibir_booking', s.ShibirDb?.start_date, s.ShibirDb?.end_date, s));
+  utsavBookings.forEach((u) => pushItem('utsav_booking', u.UtsavDb?.start_date, u.UtsavDb?.end_date, u));
 
-    // ===== DATE BASED =====
+  // Upcoming: starts after today. Past 30 days: everything else still in the
+  // window, including a stay that began earlier and is still going.
+  // Booking dates are already calendar days; only gate times need converting.
+  const day = (d) =>
+    typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : moment(d).tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const upcoming = [];
+  const past30Days = [];
+  timeline.forEach((item) => {
+    if (!item.date) return;
+    if (day(item.date) > today) upcoming.push(item);
+    else if (day(item.end_date) >= past30) past30Days.push(item);
+  });
 
-    flats.forEach(f => pushItem("flat_booking", f.checkin, f));
-    rooms.forEach(r => pushItem("room_booking", r.checkin, r));
-    food.forEach(f => pushItem("food_booking", f.date, f));
-    gate.forEach(g => pushItem("gate_record", g.createdAt, g));
-    travel.forEach(t => pushItem("travel_booking", t.date, t));
+  const sortFn = (a, b) => moment(b.date).valueOf() - moment(a.date).valueOf();
+  upcoming.sort(sortFn);
+  past30Days.sort(sortFn);
 
-    // ✅ SHIBIR (FROM MASTER DATE)
-    shibirBookings.forEach(s =>
-      pushItem(
-        "shibir_booking",
-        s.ShibirDb?.start_date,
-        s
-      )
-    );
-
-    // ✅ UTSAV (FROM MASTER DATE)
-    utsavBookings.forEach(u =>
-      pushItem(
-        "utsav_booking",
-        u.UtsavDb?.start_date,
-        u
-      )
-    );
-
-    // =================================================
-    // 📊 SPLIT
-    // =================================================
-
-    const upcoming = [];
-    const past30Days = [];
-
-    timeline.forEach(item => {
-      if (!item.date) return;
-
-      const d = moment(item.date).format("YYYY-MM-DD");
-
-      if (d > today) upcoming.push(item);
-      else if (d >= past30) past30Days.push(item);
-    });
-
-    const sortFn = (a, b) =>
-      moment(b.date).valueOf() - moment(a.date).valueOf();
-
-    upcoming.sort(sortFn);
-    past30Days.sort(sortFn);
-
-    // =================================================
-    // 🎁 FINAL RESPONSE
-    // =================================================
-
-    return res.json({
-      upcoming,
-      past30Days,
-      maintenanceOpen, // 👈 separate section
-      wifiCodes, // 👈 separate section
-      summary: {
-        totalUpcoming: upcoming.length,
-        totalPast: past30Days.length,
-        openMaintenance: maintenanceOpen.length,
-        wifiCodes: wifiCodes.length
-      }
-    });
-  } catch (error) {
-    console.error("Person activity error:", error);
-    return res.status(500).json({
-      message: "Failed to fetch person activity",
-      error: error.message
-    });
-  }
+  req.log.info('person_activity_success', {
+    cardno,
+    upcoming: upcoming.length,
+    past30Days: past30Days.length
+  });
+  return res.status(200).json({
+    person: card.get({ plain: true }),
+    upcoming,
+    past30Days,
+    maintenanceOpen,
+    wifiCodes,
+    summary: {
+      totalUpcoming: upcoming.length,
+      totalPast: past30Days.length,
+      openMaintenance: maintenanceOpen.length,
+      wifiCodes: wifiCodes.length
+    }
+  });
 };
