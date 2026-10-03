@@ -554,7 +554,15 @@ export const getPersonActivity = async (req, res) => {
       // (checkout is never before checkin).
       FlatBooking.findAll({ where: { cardno, checkout: { [Op.gte]: past30 } }, raw: true }),
       RoomBooking.findAll({ where: { cardno, checkout: { [Op.gte]: past30 } }, raw: true }),
-      FoodDb.findAll({ where: { cardno, date: { [Op.gte]: past30 } }, raw: true }),
+      // A cancelled meal day keeps its row with every meal off: leave those out.
+      FoodDb.findAll({
+        where: {
+          cardno,
+          date: { [Op.gte]: past30 },
+          [Op.or]: [{ breakfast: true }, { lunch: true }, { dinner: true }]
+        },
+        raw: true
+      }),
       // Gate times are timestamps: the window starts at IST midnight, not UTC midnight.
       GateRecord.findAll({
         where: { cardno, createdAt: { [Op.gte]: moment.tz(past30, 'Asia/Kolkata').toDate() } },
