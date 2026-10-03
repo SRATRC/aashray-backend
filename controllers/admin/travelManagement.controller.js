@@ -28,7 +28,8 @@ import {
 import {
   adminCancelTransaction,
   createPendingTransaction,
-  cancelTransaction
+  cancelTransaction,
+  adjustAmount
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
@@ -980,13 +981,33 @@ export async function updateBooking(req, res) {
       throw new ApiError(404, 'Transaction not found');
     }
 
-    await transaction.update(
-      {
-        amount,
-        updatedBy: req.user.username,
-      },
-      { transaction: t }
+    // A blank string would parse as 0, so only a number or a non-blank string
+    // is parsed. adjustAmount refuses NaN and negative numbers with a 400.
+    const isNumeric =
+      typeof amount === 'number' || (typeof amount === 'string' && amount.trim() !== '');
+    const { settled, reopened } = await adjustAmount(
+      transaction,
+      isNumeric ? Number(amount) : NaN,
+      req.user.username,
+      t
     );
+
+    // Same as the webhook and useCredit: a charge that is now paid confirms
+    // the travel booking; a reopened one puts it back to awaiting payment.
+    if (settled || reopened) {
+      const booking = await TravelDb.findOne({ where: { bookingid }, transaction: t });
+      if (settled && booking?.status === STATUS_PROCEED_FOR_PAYMENT) {
+        await booking.update(
+          { status: STATUS_CONFIRMED, updatedBy: req.user.username },
+          { transaction: t }
+        );
+      } else if (reopened && booking?.status === STATUS_CONFIRMED) {
+        await booking.update(
+          { status: STATUS_PROCEED_FOR_PAYMENT, updatedBy: req.user.username },
+          { transaction: t }
+        );
+      }
+    }
 
     updatedFields.push('amount');
   }
