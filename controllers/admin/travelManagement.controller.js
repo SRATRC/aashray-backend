@@ -10,6 +10,7 @@ import {
 } from '../../models/associations.js';
 import {
   matchAdhyayanForLeg,
+  ADHYAYAN_MATCH_WINDOW_DAYS,
   ATTENDING_EXCLUDED_STATUSES
 } from '../../helpers/adhyayanTravel.helper.js';
 import { Op } from 'sequelize';
@@ -402,12 +403,25 @@ LEFT JOIN travel_bus_group tbg
   const cardnos = [...new Set(data.map((r) => r.cardno).filter(Boolean))];
   let registrations = [];
   if (cardnos.length > 0) {
+    // Only shibirs that could match a leg: matchAdhyayanForLeg looks 14 days either side of a
+    // travel date, so skip shibirs that ended before (earliest date - 14) or start after
+    // (latest date + 14). Keeps long-time members' full history out of the query.
+    const travelDates = data.map((r) => moment(r.date).format('YYYY-MM-DD')).filter((d) => d !== 'Invalid date').sort();
+    const windowStart = moment(travelDates[0]).subtract(ADHYAYAN_MATCH_WINDOW_DAYS, 'days').format('YYYY-MM-DD');
+    const windowEnd = moment(travelDates[travelDates.length - 1]).add(ADHYAYAN_MATCH_WINDOW_DAYS, 'days').format('YYYY-MM-DD');
     const rows = await ShibirBookingDb.findAll({
       where: {
         cardno: { [Op.in]: cardnos },
         status: { [Op.notIn]: ATTENDING_EXCLUDED_STATUSES }
       },
-      include: [{ model: ShibirDb, as: 'ShibirDb', attributes: ['name', 'start_date', 'end_date'] }],
+      include: [{
+        model: ShibirDb,
+        as: 'ShibirDb',
+        attributes: ['name', 'start_date', 'end_date'],
+        where: travelDates.length
+          ? { end_date: { [Op.gte]: windowStart }, start_date: { [Op.lte]: windowEnd } }
+          : undefined
+      }],
       // Deterministic order so same-delta ties in matchAdhyayanForLeg resolve stably.
       order: [[{ model: ShibirDb, as: 'ShibirDb' }, 'start_date', 'ASC']]
     });

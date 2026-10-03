@@ -17,7 +17,8 @@ export const ATTENDING_EXCLUDED_STATUSES = [
 // Days of slack around the travel date when matching a session. Travelers routinely
 // arrive a few days before a multi-day shibir and leave a few days after, so a tight
 // window hides real matches; 14 days covers realistic early-arrival / late-departure.
-const WINDOW_DAYS = 14;
+export const ADHYAYAN_MATCH_WINDOW_DAYS = 14;
+const WINDOW_DAYS = ADHYAYAN_MATCH_WINDOW_DAYS;
 
 /**
  * Pick the study session relevant to a single travel leg.
