@@ -276,7 +276,8 @@ const SETTLED_AT_ZERO = 'Balance updated to 0 (settled, nothing to pay)';
  * payment state; status is left alone, with one exception: a net of 0 on a
  * charge that is still pending is settled (cash pending -> cash completed,
  * online pending and payment failed -> completed). Raising a charge that
- * such an edit settled reopens it to pending (no payment was ever received).
+ * such an edit settled reopens it to cash pending (no payment was ever received;
+ * cash pending is skipped by the 24 h cancel job).
  * No payment can ever arrive for 0, so a pending row would stay unpaid until
  * the 24 h job cancelled the booking. Returns { settled, reopened } so the
  * caller can move the booking too.
@@ -300,13 +301,17 @@ export async function adjustAmount(transaction, amount, updatedBy, t) {
   // A charge that a 0 edit settled (marked in its description) was never paid.
   // Raising it again must ask the member to pay and must not leave a refundable
   // "completed" row. A charge that really was paid has no marker and keeps its
-  // status (N11).
+  // status (N11). Reopening relies on the SETTLED_AT_ZERO description mark.
+  // Both kinds reopen to cash pending: the 30-min job only cancels payment
+  // pending / payment failed rows older than 24 h, so reopening an old online
+  // charge as payment pending would cancel the booking at once. The member can
+  // still pay cash pending (it is in PAYABLE_TRANSACTION_STATUSES).
   const reopenStatus =
     amount > 0 &&
     current === 0 &&
     String(transaction.description || '').startsWith(SETTLED_AT_ZERO)
       ? {
-          [STATUS_PAYMENT_COMPLETED]: STATUS_PAYMENT_PENDING,
+          [STATUS_PAYMENT_COMPLETED]: STATUS_CASH_PENDING,
           [STATUS_CASH_COMPLETED]: STATUS_CASH_PENDING
         }[transaction.status]
       : undefined;
