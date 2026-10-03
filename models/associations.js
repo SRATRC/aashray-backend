@@ -392,23 +392,17 @@ TravelBusPassengers.belongsTo(TravelBusGroup, {
 TravelBusPassengers.belongsTo(TravelBusGroup, {
   foreignKey: 'bus_group_id',
   targetKey: 'id',
-  as: 'TravelBusGroup',
+  as: 'TravelBusGroup'
 });
 
-TravelBusGroup.hasMany(
-  TravelBusStops,
-  {
-    foreignKey: 'bus_group_id',
-    as: 'stops',
-  }
-);
+TravelBusGroup.hasMany(TravelBusStops, {
+  foreignKey: 'bus_group_id',
+  as: 'stops'
+});
 
-TravelBusStops.belongsTo(
-  TravelBusGroup,
-  {
-    foreignKey: 'bus_group_id',
-  }
-);
+TravelBusStops.belongsTo(TravelBusGroup, {
+  foreignKey: 'bus_group_id'
+});
 
 // Utsav
 UtsavBooking.belongsTo(CardDb, {
@@ -497,7 +491,6 @@ UtsavFeedbackAnswer.belongsTo(UtsavFeedback, {
   targetKey: 'id',
   as: 'feedback'
 });
-
 
 // Admin Roles
 AdminUsers.hasMany(AdminRoles, {
@@ -694,6 +687,18 @@ FlatBooking.hasMany(Transactions, {
 Transactions.belongsTo(FlatBooking, {
   foreignKey: 'bookingid',
   targetKey: 'bookingid'
+});
+
+// CardDb ↔ Departments (SEVA KUTIR users)
+CardDb.belongsTo(Departments, {
+  foreignKey: 'department',
+  targetKey: 'dept_name',
+  as: 'dept'
+});
+Departments.hasMany(CardDb, {
+  foreignKey: 'department',
+  sourceKey: 'dept_name',
+  as: 'members'
 });
 
 // CustomForm

@@ -130,6 +130,7 @@ app.use(
 );
 app.use(cors(corsOptions));
 app.use(httpLogger);
+app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 app.use(deviceTelemetry);
 
 app.use(

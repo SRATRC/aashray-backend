@@ -76,6 +76,10 @@ const CardDb = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true
     },
+    department: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     pfp: {
       type: DataTypes.TEXT,
       allowNull: true

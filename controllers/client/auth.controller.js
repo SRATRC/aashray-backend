@@ -1,12 +1,21 @@
-import { MSG_UPDATE_SUCCESSFUL, WHATSAPP_SUPPORT_NUMBER } from '../../config/constants.js';
+import {
+  MSG_UPDATE_SUCCESSFUL,
+  WHATSAPP_SUPPORT_NUMBER,
+  STATUS_MUMUKSHU,
+  STATUS_OFFPREM
+} from '../../config/constants.js';
 import { CardDb, FlatDb } from '../../models/associations.js';
+import database from '../../config/database.js';
 import { attachUserContext } from '../../middleware/Logger.js';
 import ApiError from '../../utils/ApiError.js';
 import bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import sendMail from '../../utils/sendMail.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import moment from 'moment';
 
+const MAX_CARDNO_TRIES = 5;
 
 export const updatePassword = async (req, res) => {
   attachUserContext(req);
@@ -28,7 +37,9 @@ export const updatePassword = async (req, res) => {
 
   const match = bcrypt.compareSync(current_password, details.password);
   if (!match) {
-    req.log.warn('update_password_incorrect_current', { cardno: req.user.cardno });
+    req.log.warn('update_password_incorrect_current', {
+      cardno: req.user.cardno
+    });
     throw new ApiError(404, 'incorrect password provided');
   }
 
@@ -57,9 +68,16 @@ export const updatePassword = async (req, res) => {
         }
       ];
 
-      await sendWhatsAppMessage(formattedPhone, 'password_update_app', components);
+      await sendWhatsAppMessage(
+        formattedPhone,
+        'password_update_app',
+        components
+      );
     } catch (err) {
-      console.error('Error sending WhatsApp message in updatePassword:', err.message || err);
+      console.error(
+        'Error sending WhatsApp message in updatePassword:',
+        err.message || err
+      );
     }
   }
 
@@ -69,7 +87,6 @@ export const updatePassword = async (req, res) => {
     .status(200)
     .send({ message: MSG_UPDATE_SUCCESSFUL, data: details });
 };
-
 
 export const logout = async (req, res) => {
   const { cardno } = req.query;
@@ -121,7 +138,11 @@ export const verifyAndLogin = async (req, res) => {
   }
 
   const { password } = req.body;
-  const match = bcrypt.compareSync(password, details.password);
+  // Sign-up and password change store the trimmed password, so accept it
+  // trimmed here too. The raw value still works for older passwords.
+  const match =
+    bcrypt.compareSync(password, details.password) ||
+    bcrypt.compareSync(String(password).trim(), details.password);
 
   if (!match) {
     req.log.warn('login_incorrect_password', { mobno });
@@ -146,7 +167,10 @@ export const verifyAndLogin = async (req, res) => {
   details.setDataValue('isFlatOwner', !!isFlatOwner);
   details.setDataValue('password', '');
 
-  req.log.info('login_success', { cardno: details.cardno, isFlatOwner: !!isFlatOwner });
+  req.log.info('login_success', {
+    cardno: details.cardno,
+    isFlatOwner: !!isFlatOwner
+  });
   return res.status(200).send({ message: 'logged in', data: details });
 };
 
@@ -228,9 +252,16 @@ export async function forgotPassword(req, res) {
         }
       ];
 
-      await sendWhatsAppMessage(formattedPhone, 'password_reset_app', components);
+      await sendWhatsAppMessage(
+        formattedPhone,
+        'password_reset_app',
+        components
+      );
     } catch (err) {
-      console.error('Error sending WhatsApp message in forgotPassword:', err.message || err);
+      console.error(
+        'Error sending WhatsApp message in forgotPassword:',
+        err.message || err
+      );
     }
   }
 
@@ -240,3 +271,143 @@ export async function forgotPassword(req, res) {
   });
 }
 
+export async function checkMobile(req, res) {
+  const { mobno } = req.params;
+  req.log.info('check_mobile_start');
+
+  if (!/^\d{10}$/.test(String(mobno ?? '').trim())) {
+    throw new ApiError(400, 'A valid 10-digit phone number is required');
+  }
+
+  // Public route: it only says whether the number is taken. No name, no
+  // member type, so it cannot be used to look people up.
+  const existing = await CardDb.findOne({
+    where: { mobno },
+    attributes: ['id']
+  });
+
+  return res.status(200).send({ exists: !!existing });
+}
+
+export async function register(req, res) {
+  // Public route: only a Mumukshu can sign up here. res_status, department,
+  // ref_mobno and guest_type in the body are ignored. Staff make other member
+  // types through the staff create-card route.
+  const { issuedto, mobno, gender, password, dob, center, token } = req.body;
+
+  const resStatusToUse = STATUS_MUMUKSHU;
+
+  req.log.info('register_start', { res_status: resStatusToUse });
+
+  // ── Basic required field validation (types first, so bad input is a 400) ──
+  const isText = (v) => typeof v === 'string' && v.trim().length > 0;
+  if (!isText(issuedto)) {
+    throw new ApiError(400, 'Full name is required');
+  }
+  if (typeof mobno !== 'string' || !/^\d{10}$/.test(mobno.trim())) {
+    throw new ApiError(400, 'A valid 10-digit phone number is required');
+  }
+  if (!gender || !['M', 'F'].includes(gender)) {
+    throw new ApiError(400, 'Gender must be M or F');
+  }
+  if (!isText(password)) {
+    throw new ApiError(400, 'Password is required');
+  }
+  if (typeof dob !== 'string' || !dob) {
+    throw new ApiError(400, 'Date of birth is required');
+  }
+  const dobMoment = moment(dob, 'YYYY-MM-DD', true);
+  if (!dobMoment.isValid()) {
+    throw new ApiError(400, 'Invalid date of birth format');
+  }
+  if (dobMoment.isAfter(moment(), 'day')) {
+    throw new ApiError(400, 'Date of birth cannot be in the future');
+  }
+  if (dobMoment.isBefore('1900-01-01')) {
+    throw new ApiError(400, 'Please select a valid date of birth');
+  }
+  if (!isText(center)) {
+    throw new ApiError(400, 'Centre is required');
+  }
+  if (token !== undefined && token !== null && typeof token !== 'string') {
+    throw new ApiError(400, 'Invalid push token');
+  }
+
+  // ── Uniqueness check ──────────────────────────────────────────────────────
+  const existing = await CardDb.findOne({
+    where: { mobno },
+    attributes: ['id']
+  });
+  if (existing) {
+    throw new ApiError(409, 'An account with this phone number already exists');
+  }
+
+  // ── Hash password ─────────────────────────────────────────────────────────
+  const salt = bcrypt.genSaltSync(10);
+  const hashedPassword = bcrypt.hashSync(password.trim(), salt);
+
+  // ── Create records in a transaction ──────────────────────────────────────
+  const t = await database.transaction();
+  try {
+    // One random 10-digit number per try. A clash on the unique key is
+    // retried a few times, so sign-up never reads the whole card table.
+    // (MySQL keeps the transaction open after a failed insert.)
+    let newCard;
+    for (let attempt = 1; !newCard; attempt++) {
+      try {
+        newCard = await CardDb.create(
+          {
+            cardno: String(randomInt(1000000000, 10000000000)),
+            issuedto: issuedto.trim(),
+            gender,
+            dob,
+            mobno,
+            center: center.trim(),
+            res_status: resStatusToUse,
+            status: STATUS_OFFPREM,
+            active: true,
+            password: hashedPassword,
+            ...(token && { token }),
+            updatedBy: 'USER'
+          },
+          { transaction: t }
+        );
+      } catch (e) {
+        const clashOnCardno =
+          e.name === 'SequelizeUniqueConstraintError' &&
+          e.errors?.some((x) => x.path === 'cardno' || x.path?.includes('cardno'));
+        if (!clashOnCardno || attempt >= MAX_CARDNO_TRIES) throw e;
+      }
+    }
+    const cardno = newCard.cardno;
+
+    await t.commit();
+
+    req.log.info('register_success', { cardno, res_status: resStatusToUse });
+
+    // Same shape as verifyAndLogin so setUser() works on the app. The
+    // password and the push address stay on the server.
+    const { password: _pw, token: _tk, ...cardData } = newCard.get({
+      plain: true
+    });
+
+    return res.status(201).send({
+      message: 'Account created successfully',
+      data: { ...cardData, isFlatOwner: false }
+    });
+  } catch (err) {
+    await t.rollback();
+    req.log.error('register_failed', { err: err.message });
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      const field = err.errors?.[0]?.path;
+      if (field === 'mobno') {
+        throw new ApiError(
+          409,
+          'An account with this phone number already exists'
+        );
+      }
+      throw new ApiError(409, 'Could not create the account. Please try again.');
+    }
+    throw err;
+  }
+}

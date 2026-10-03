@@ -5,7 +5,8 @@ import {
   getCountries,
   getStates,
   getCities,
-  getCentres
+  getCentres,
+  getDepartments
 } from '../../controllers/client/location.controller.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 
@@ -14,5 +15,6 @@ router.get('/countries', CatchAsync(getCountries));
 router.get('/states/:country', CatchAsync(getStates));
 router.get('/cities/:country/:state', CatchAsync(getCities));
 router.get('/centres', CatchAsync(getCentres));
+router.get('/departments', CatchAsync(getDepartments));
 
 export default router;

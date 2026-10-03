@@ -13,6 +13,7 @@ import path from 'path';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment-timezone';
+import fs from 'fs';
 
 export const updateProfile = async (req, res) => {
   attachUserContext(req);
@@ -42,7 +43,8 @@ export const updateProfile = async (req, res) => {
   // --- Compare to find changed fields ---
   const isChanged = (newVal, oldVal) => {
     if (newVal === undefined) return false;
-    const normalize = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    const normalize = (v) =>
+      v === null || v === undefined ? '' : String(v).trim();
     return normalize(newVal) !== normalize(oldVal);
   };
 
@@ -105,9 +107,14 @@ export const updateProfile = async (req, res) => {
     const targetPhone = mobno || card.mobno;
     if (targetPhone) {
       try {
-        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
+        const formattedPhone = formatWhatsAppPhone(
+          targetPhone,
+          country || card.country
+        );
 
-        const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
+        const formattedTime = moment()
+          .tz('Asia/Kolkata')
+          .format('DD-MM-YYYY hh:mm A');
 
         const components = [
           {
@@ -122,9 +129,16 @@ export const updateProfile = async (req, res) => {
           }
         ];
 
-        await sendWhatsAppMessage(formattedPhone, 'profile_updated', components);
+        await sendWhatsAppMessage(
+          formattedPhone,
+          'profile_updated',
+          components
+        );
       } catch (waErr) {
-        console.error('Error sending WhatsApp profile_updated message in updateProfile:', waErr.message || waErr);
+        console.error(
+          'Error sending WhatsApp profile_updated message in updateProfile:',
+          waErr.message || waErr
+        );
       }
     }
   }
@@ -134,9 +148,41 @@ export const updateProfile = async (req, res) => {
     .send({ message: 'Profile Updated', data: updatedProfileData });
 };
 
+const IMAGE_EXT = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif'
+};
+
+// First bytes of each allowed type.
+const matchesImageSignature = (buf, mimetype) => {
+  if (!buf || buf.length < 12) return false;
+  switch (mimetype) {
+    case 'image/jpeg':
+      return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    case 'image/png':
+      return buf
+        .subarray(0, 8)
+        .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case 'image/gif':
+      return ['GIF87a', 'GIF89a'].includes(buf.toString('ascii', 0, 6));
+    case 'image/webp':
+      return (
+        buf.toString('ascii', 0, 4) === 'RIFF' &&
+        buf.toString('ascii', 8, 12) === 'WEBP'
+      );
+    default:
+      return false;
+  }
+};
+
 export const upload = async (req, res) => {
   attachUserContext(req);
-  req.log.info('upload_profile_pic_start', { cardno: req.user.cardno, hasPfp: !!req.user.pfp });
+  req.log.info('upload_profile_pic_start', {
+    cardno: req.user.cardno,
+    hasPfp: !!req.user.pfp
+  });
   const doesPfpExist = req.user.pfp;
 
   const s3 = new S3Client({
@@ -164,10 +210,16 @@ export const upload = async (req, res) => {
 
   uploadSingle(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
-      req.log.warn('upload_profile_pic_multer_error', { cardno: req.user.cardno, error: err.message });
+      req.log.warn('upload_profile_pic_multer_error', {
+        cardno: req.user.cardno,
+        error: err.message
+      });
       return res.status(400).json({ error: `Multer error: ${err.message}` });
     } else if (err) {
-      req.log.warn('upload_profile_pic_error', { cardno: req.user.cardno, error: err.message });
+      req.log.warn('upload_profile_pic_error', {
+        cardno: req.user.cardno,
+        error: err.message
+      });
       return res.status(400).json({ error: err.message });
     }
 
@@ -176,19 +228,67 @@ export const upload = async (req, res) => {
       return res.status(400).json({ error: 'Please upload an image file' });
     }
 
+    // The extension comes from the mimetype allowlist, never from the file
+    // name, and the first bytes must match the type. So an .html file sent as
+    // image/png is refused instead of being stored and served as HTML.
+    const ext = IMAGE_EXT[req.file.mimetype];
+    if (!ext || !matchesImageSignature(req.file.buffer, req.file.mimetype)) {
+      req.log.warn('upload_profile_pic_bad_type', {
+        cardno: req.user.cardno,
+        mimetype: req.file.mimetype
+      });
+      return res
+        .status(400)
+        .json({ error: 'Only JPEG, PNG, WebP or GIF images are allowed' });
+    }
+
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const fileName = `${uniqueSuffix}${path.extname(req.file.originalname)}`;
+    const fileName = `${uniqueSuffix}${ext}`;
+    let fileUrl = '';
 
-    const uploadParams = {
-      Bucket: process.env.AWS_S3_BUCKET_NAME,
-      Key: fileName,
-      Body: req.file.buffer,
-      ContentType: req.file.mimetype
-    };
+    const isS3Configured =
+      process.env.AWS_S3_BUCKET_NAME &&
+      process.env.AWS_ACCESS_KEY_ID &&
+      process.env.AWS_SECRET_ACCESS_KEY;
 
-    await s3.send(new PutObjectCommand(uploadParams));
-    const fileUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
-    req.log.info('upload_profile_pic_s3_uploaded', { cardno: req.user.cardno, fileName });
+    if (isS3Configured) {
+      const uploadParams = {
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key: fileName,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype
+      };
+
+      await s3.send(new PutObjectCommand(uploadParams));
+      fileUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+      req.log.info('upload_profile_pic_s3_uploaded', {
+        cardno: req.user.cardno,
+        fileName
+      });
+    } else {
+      // Local fallback for development/local testing only. Files here are
+      // served by express.static, so it stays off in production.
+      const env = process.env.NODE_ENV;
+      if (env && !['dev', 'development', 'test'].includes(env)) {
+        req.log.error('upload_profile_pic_no_storage', {
+          cardno: req.user.cardno
+        });
+        return res
+          .status(503)
+          .json({ error: 'Image storage is not configured' });
+      }
+      const uploadPath = path.join(process.cwd(), 'public/uploads', fileName);
+      // The folder is not in git, so make it when it is missing.
+      await fs.promises.mkdir(path.dirname(uploadPath), { recursive: true });
+      await fs.promises.writeFile(uploadPath, req.file.buffer);
+      // Build static serving URL
+      fileUrl = `${req.protocol}://${req.get('host')}/uploads/${fileName}`;
+      req.log.info('upload_profile_pic_local_saved', {
+        cardno: req.user.cardno,
+        fileName,
+        fileUrl
+      });
+    }
 
     await CardDb.update(
       {
@@ -203,16 +303,50 @@ export const upload = async (req, res) => {
 
     if (doesPfpExist) {
       const oldKey = doesPfpExist.split('/').pop();
-      const deleteParams = {
-        Bucket: process.env.AWS_S3_BUCKET_NAME,
-        Key: oldKey
-      };
+      if (isS3Configured) {
+        const deleteParams = {
+          Bucket: process.env.AWS_S3_BUCKET_NAME,
+          Key: oldKey
+        };
 
-      await s3.send(new DeleteObjectCommand(deleteParams));
-      req.log.info('upload_profile_pic_old_deleted', { cardno: req.user.cardno, oldKey });
+        try {
+          await s3.send(new DeleteObjectCommand(deleteParams));
+          req.log.info('upload_profile_pic_old_deleted', {
+            cardno: req.user.cardno,
+            oldKey
+          });
+        } catch (delErr) {
+          req.log.error('upload_profile_pic_old_delete_failed', {
+            cardno: req.user.cardno,
+            oldKey,
+            error: delErr.message
+          });
+        }
+      } else {
+        // Delete local file
+        const oldPath = path.join(process.cwd(), 'public/uploads', oldKey);
+        try {
+          if (fs.existsSync(oldPath)) {
+            await fs.promises.unlink(oldPath);
+            req.log.info('upload_profile_pic_old_local_deleted', {
+              cardno: req.user.cardno,
+              oldKey
+            });
+          }
+        } catch (delErr) {
+          req.log.error('upload_profile_pic_old_local_delete_failed', {
+            cardno: req.user.cardno,
+            oldKey,
+            error: delErr.message
+          });
+        }
+      }
     }
 
-    req.log.info('upload_profile_pic_success', { cardno: req.user.cardno, fileUrl });
+    req.log.info('upload_profile_pic_success', {
+      cardno: req.user.cardno,
+      fileUrl
+    });
     return res.status(200).json({
       message: 'File uploaded successfully',
       data: fileUrl
@@ -331,7 +465,10 @@ export const transactions = async (req, res) => {
 export const sendNotification = async (req, res) => {
   attachUserContext(req);
   const { tokenData } = req.body;
-  req.log.info('send_notification_start', { cardno: req.user.cardno, tokenCount: tokenData?.length });
+  req.log.info('send_notification_start', {
+    cardno: req.user.cardno,
+    tokenCount: tokenData?.length
+  });
 
   if (!tokenData || !Array.isArray(tokenData) || tokenData.length === 0) {
     req.log.warn('send_notification_invalid_data', { cardno: req.user.cardno });
