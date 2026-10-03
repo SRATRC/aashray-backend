@@ -981,14 +981,11 @@ export async function updateBooking(req, res) {
       throw new ApiError(404, 'Transaction not found');
     }
 
+    // A blank string would parse as 0, so only a number or a non-blank string
+    // is parsed. adjustAmount refuses NaN and negative numbers with a 400.
     const isNumeric =
       typeof amount === 'number' || (typeof amount === 'string' && amount.trim() !== '');
-    const parsedAmount = isNumeric ? Number(amount) : NaN;
-    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
-      throw new ApiError(400, 'Amount must be a non-negative number');
-    }
-
-    await adjustAmount(transaction, parsedAmount, req.user.username, t);
+    await adjustAmount(transaction, isNumeric ? Number(amount) : NaN, req.user.username, t);
 
     updatedFields.push('amount');
   }

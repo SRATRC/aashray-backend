@@ -271,20 +271,29 @@ export async function cancelTransaction(
  * Credit already applied (`transaction.discount`) stays as it is. This never
  * adds or refunds wallet credit, so the credit is not counted twice. Sending
  * the same value again changes nothing. Staff may edit the amount whatever the
- * payment state; status is left alone (same as before).
+ * payment state; status is left alone, with one exception: a net of 0 on a
+ * charge that is still pending is settled (cash pending -> cash completed,
+ * online pending -> completed). No payment can ever arrive for 0, so a pending
+ * row would stay unpaid until the 24 h job cancelled the booking.
  */
 export async function adjustAmount(transaction, amount, updatedBy, t) {
   if (!Number.isFinite(amount) || amount < 0) {
     throw new ApiError(400, 'Amount must be a non-negative number');
   }
 
-  if (Number(transaction.amount) === amount) return;
+  const settleStatus =
+    amount === 0
+      ? { [STATUS_PAYMENT_PENDING]: STATUS_PAYMENT_COMPLETED, [STATUS_CASH_PENDING]: STATUS_CASH_COMPLETED }[transaction.status]
+      : undefined;
+
+  if (Number(transaction.amount) === amount && !settleStatus) return;
 
   const discount = Number(transaction.discount) || 0;
 
   await transaction.update(
     {
       amount,
+      ...(settleStatus && { status: settleStatus }),
       description:
         discount > 0
           ? `Balance updated to ${amount} (credits used: ${discount})`
