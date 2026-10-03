@@ -1,11 +1,14 @@
-import { CardDb,GuestRelationship, FlatBooking, RoomBooking, FoodDb, GateRecord, MaintenanceDb, ShibirBookingDb, TravelDb, UtsavBooking,  PermanentWifiCodes, ShibirDb, UtsavDb } from '../../models/associations.js';
-import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_OFFPREM, STATUS_OPEN } from '../../config/constants.js';
+import { CardDb, GuestRelationship, FlatBooking, RoomBooking, FoodDb, GateRecord, MaintenanceDb, ShibirBookingDb, TravelDb, UtsavBooking, PermanentWifiCodes, ShibirDb, UtsavDb } from '../../models/associations.js';
+import { ERR_CARD_NOT_FOUND, MSG_UPDATE_SUCCESSFUL, STATUS_ACTIVE, STATUS_GUEST, STATUS_OFFPREM, STATUS_OPEN } from '../../config/constants.js';
 import Sequelize from 'sequelize';
 import bcrypt from 'bcryptjs';
 import ApiError from '../../utils/ApiError.js';
 import database from '../../config/database.js';
 import { Op } from 'sequelize';
-import moment from "moment";
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
+import moment from 'moment-timezone';
+
 
 
 export const createCard = async (req, res) => {
@@ -29,9 +32,12 @@ export const createCard = async (req, res) => {
     guestType         // guest type: Driver, VIP, Friend, Family
   } = req.body;
 
+  req.log.info('create_card_start', { cardno, issuedto, res_status });
+
   // --- Check if cardno already exists ---
   const existingCard = await CardDb.findOne({ where: { cardno } });
   if (existingCard) {
+    req.log.warn('create_card_already_exists', { cardno });
     return res.status(400).json({ message: `Card number ${cardno} already exists` });
   }
 
@@ -85,16 +91,43 @@ export const createCard = async (req, res) => {
     // --- Commit everything ---
     await t.commit();
 
+    req.log.info('create_card_success', { cardno, issuedto, res_status });
+
+    // --- Send WhatsApp notification if mobno is present ---
+    const phone = newCard.mobno;
+    if (phone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(phone, newCard.country);
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: newCard.issuedto || 'Mumukshu' },
+              { type: 'text', text: newCard.cardno }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'card_account_created', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp message in createCard:', waErr.message || waErr);
+      }
+    }
+
+    // A created record still holds the starter password hash; never send it.
+    const { password, token, ...cardData } = newCard.get({ plain: true });
+
     return res.status(200).json({
       message: 'Card created successfully',
-      data: newCard
+      data: cardData
     });
 
   } catch (error) {
     // --- Rollback on any error ---
     await t.rollback();
 
-    console.error('Error creating card:', error);
+    req.log.error('create_card_error', { cardno, error: error.message });
     const message = error.name === 'SequelizeUniqueConstraintError'
       ? 'Card number must be unique'
       : error.message || 'Internal server error';
@@ -104,10 +137,13 @@ export const createCard = async (req, res) => {
 };
 
 export const fetchAllCards = async (req, res) => {
-  
+  req.log.info('fetch_all_cards_start');
+  // The push address stays in the backend; staff screens never use it.
   const data = await CardDb.findAll({
+    attributes: { exclude: ['token'] }
   });
 
+  req.log.info('fetch_all_cards_success', { count: data.length });
   return res.status(200).send({ message: 'Fetched all cards', data: data });
 };
 
@@ -115,6 +151,7 @@ export const fetchAllCards = async (req, res) => {
 export const searchCardsByName = async (req, res) => {
   try {
     const term = req.params.name;
+    req.log.info('search_cards_by_name_start', { term });
 
     const data = await CardDb.findAll({
       where: {
@@ -123,12 +160,49 @@ export const searchCardsByName = async (req, res) => {
           { mobno: { [Sequelize.Op.like]: `%${term}%` } },
           { cardno: { [Sequelize.Op.like]: `%${term}%` } } // ✅ added this
         ]
-      }
+      },
+      attributes: { exclude: ['token'] }
     });
 
+    // Staff edit a guest card with its current host filled in, so each guest
+    // card also gets its host's card number, name and guest type.
+    const guestCardnos = data
+      .filter((card) => card.res_status === STATUS_GUEST)
+      .map((card) => card.cardno);
+    if (guestCardnos.length > 0) {
+      const links = await GuestRelationship.findAll({
+        where: { guest: guestCardnos },
+        attributes: ['cardno', 'guest', 'type'],
+        order: [['updatedAt', 'DESC']]
+      });
+      const hostCardnos = [...new Set(links.map((link) => link.cardno))];
+      const hosts = hostCardnos.length
+        ? await CardDb.findAll({
+            where: { cardno: hostCardnos },
+            attributes: ['cardno', 'issuedto']
+          })
+        : [];
+      const hostNames = new Map(hosts.map((host) => [host.cardno, host.issuedto]));
+
+      // A guest has one host. If older data left more than one, the newest wins.
+      const linkOfGuest = new Map();
+      for (const link of links) {
+        if (!linkOfGuest.has(link.guest)) linkOfGuest.set(link.guest, link);
+      }
+
+      for (const card of data) {
+        const link = linkOfGuest.get(card.cardno);
+        if (!link) continue;
+        card.setDataValue('referenceCardno', link.cardno);
+        card.setDataValue('referenceName', hostNames.get(link.cardno) || null);
+        card.setDataValue('guestType', link.type);
+      }
+    }
+
+    req.log.info('search_cards_by_name_success', { term, count: data.length });
     return res.status(200).send({ message: 'Fetched all cards', data });
   } catch (err) {
-    console.error('Error in searchCardsByName:', err);
+    req.log.error('search_cards_by_name_error', { term: req.params.name, error: err.message });
     return res.status(500).send({ message: 'Internal server error' });
   }
 };
@@ -156,18 +230,70 @@ export const updateCard = async (req, res) => {
     guestType
   } = req.body;
 
+  req.log.info('update_card_start', { cardno, res_status, status });
+
   const card = await CardDb.findOne({ where: { cardno } });
 
   if (!card) {
+    req.log.warn('update_card_not_found', { cardno });
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
-  // Validation for guest
-  if (res_status === 'GUEST') {
-    if (!referenceCardno || !guestType) {
-      throw new ApiError(400, 'Missing referenceCardno or guestType for guest');
+  // Read before the update below overwrites it.
+  const wasGuest = card.res_status === STATUS_GUEST;
+
+  // A blank host keeps the guest's links as they are. Many older guest cards
+  // have no host on record, and staff must still be able to fix their details.
+  const hostCardno = String(referenceCardno ?? '').trim();
+  const hostGuestType = String(guestType ?? '').trim();
+
+  // Validation for guest. Checked before the card is saved, so a bad host card
+  // cannot leave the card half-updated.
+  if (res_status === STATUS_GUEST) {
+    if (!hostCardno) {
+      if (!wasGuest) {
+        throw new ApiError(400, 'Enter the host card number to make this card a guest');
+      }
+      if (hostGuestType) {
+        throw new ApiError(400, 'Enter the host card number to set a guest type');
+      }
+    } else {
+      if (!hostGuestType) {
+        throw new ApiError(400, 'Choose a guest type for the host card');
+      }
+      if (hostCardno === String(cardno)) {
+        throw new ApiError(400, 'A guest cannot be their own reference card');
+      }
+      const hostCard = await CardDb.findOne({ where: { cardno: hostCardno } });
+      if (!hostCard) {
+        throw new ApiError(400, `Reference card ${hostCardno} does not exist`);
+      }
     }
   }
+
+  // --- Compare to find changed fields ---
+  const isChanged = (newVal, oldVal) => {
+    if (newVal === undefined) return false;
+    const normalize = (v) => (v === null || v === undefined ? '' : String(v).trim());
+    return normalize(newVal) !== normalize(oldVal);
+  };
+
+  const changed = [];
+  if (isChanged(issuedto, card.issuedto)) changed.push('Name');
+  if (isChanged(gender, card.gender)) changed.push('Gender');
+  if (isChanged(dob, card.dob)) changed.push('Date of Birth');
+  if (isChanged(mobno, card.mobno)) changed.push('Mobile Number');
+  if (isChanged(idType, card.idType)) changed.push('ID Type');
+  if (isChanged(idNo, card.idNo)) changed.push('ID Number');
+  if (isChanged(email, card.email)) changed.push('Email');
+  if (isChanged(address, card.address)) changed.push('Address');
+  if (isChanged(country, card.country)) changed.push('Country');
+  if (isChanged(city, card.city)) changed.push('City');
+  if (isChanged(state, card.state)) changed.push('State');
+  if (isChanged(pin, card.pin)) changed.push('Pin');
+  if (isChanged(centre, card.center)) changed.push('Center');
+  if (isChanged(status, card.status)) changed.push('Status');
+  if (isChanged(res_status, card.res_status)) changed.push('Resident Status');
 
   await card.update({
     issuedto,
@@ -188,28 +314,73 @@ export const updateCard = async (req, res) => {
     updatedBy: req.user.username
   });
 
-  // Update or create guest relationship
-  if (res_status === 'GUEST') {
-    const [relation, created] = await GuestRelationship.findOrCreate({
-      where: { cardno: cardno },
-      defaults: {
-        cardno: cardno,
-        referenceCardno,
-        guestType,
-        createdBy: req.user.username
-      }
-    });
+  // A guest link stores the host in `cardno` and the guest in `guest`.
+  if (res_status === STATUS_GUEST) {
+    if (hostCardno) {
+      // A guest has one host, so naming a different host moves the guest. The
+      // named host's link is saved first and the other links go after it, so
+      // a failed save never leaves the guest with no host.
+      const [relation, created] = await GuestRelationship.findOrCreate({
+        where: { cardno: hostCardno, guest: cardno },
+        defaults: {
+          cardno: hostCardno,
+          guest: cardno,
+          type: hostGuestType,
+          updatedBy: req.user.username
+        }
+      });
 
-    if (!created) {
-      await relation.update({
-        referenceCardno,
-        guestType,
-        updatedBy: req.user.username
+      if (!created) {
+        await relation.update({
+          type: hostGuestType,
+          updatedBy: req.user.username
+        });
+      }
+
+      await GuestRelationship.destroy({
+        where: {
+          guest: cardno,
+          cardno: { [Sequelize.Op.ne]: hostCardno }
+        }
       });
     }
-  } else {
-    // If not a guest anymore, remove guest_relationship if it exists
-    await GuestRelationship.destroy({ where: { cardno: cardno } });
+  } else if (wasGuest && card.res_status !== STATUS_GUEST) {
+    // The card stopped being a guest card: drop the links where it is the
+    // guest. Links where it is the host belong to its own guests and stay.
+    // Checked on the saved card, not the request: a save that leaves out the
+    // member type keeps the card a guest.
+    await GuestRelationship.destroy({ where: { guest: cardno } });
+  }
+
+  req.log.info('update_card_success', { cardno, res_status });
+
+  // --- Send WhatsApp notification if any details were changed ---
+  if (changed.length > 0) {
+    const targetPhone = mobno || card.mobno;
+    if (targetPhone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(targetPhone, country || card.country);
+
+        const formattedTime = moment().tz('Asia/Kolkata').format('DD-MM-YYYY hh:mm A');
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' },
+              { type: 'text', text: card.cardno },
+              { type: 'text', text: formattedTime },
+              { type: 'text', text: changed.join(', ') },
+              { type: 'text', text: issuedto || card.issuedto || 'Mumukshu' }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'profile_updated', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp profile_updated message in updateCard:', waErr.message || waErr);
+      }
+    }
   }
 
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
@@ -217,12 +388,14 @@ export const updateCard = async (req, res) => {
 
 export const transferCard = async (req, res) => {
   const { cardno, new_cardno } = req.body;
+  req.log.info('transfer_card_start', { cardno, new_cardno });
 
   const card = await CardDb.findOne({
     where: { cardno: cardno }
   });
 
   if (!card) {
+    req.log.warn('transfer_card_not_found', { cardno });
     throw new ApiError(400, ERR_CARD_NOT_FOUND);
   }
 
@@ -233,12 +406,14 @@ export const transferCard = async (req, res) => {
     }
   );
 
+  req.log.info('transfer_card_success', { oldCardno: cardno, newCardno: new_cardno });
   return res.status(200).send({ message: MSG_UPDATE_SUCCESSFUL });
 };
 
 // TODO: FIX this
 export const fetchTotalTransactions = async (req, res) => {
   const cardno = req.params.cardno;
+  req.log.info('fetch_total_transactions_start', { cardno });
 
   const [results, _] = await database.query(
     `SELECT 
@@ -258,6 +433,7 @@ export const fetchTotalTransactions = async (req, res) => {
       GROUP BY 
           category) as t;`);
 
+  req.log.info('fetch_total_transactions_success', { cardno });
   return res
     .status(200)
     .send({ message: 'fetched all user transactions', data: results });
@@ -267,14 +443,17 @@ export const fetchTotalTransactions = async (req, res) => {
 
 export const resetPasswordDefault = async (req, res) => {
   const { cardno } = req.body;
+  req.log.info('reset_password_default_start', { cardno });
 
   if (!cardno) {
+    req.log.warn('reset_password_default_missing_cardno');
     throw new ApiError(400, 'cardno is required');
   }
 
   const card = await CardDb.findOne({ where: { cardno } });
 
   if (!card) {
+    req.log.warn('reset_password_default_card_not_found', { cardno });
     throw new ApiError(404, 'Card not found');
   }
 
@@ -286,15 +465,43 @@ export const resetPasswordDefault = async (req, res) => {
     { where: { cardno } }
   );
 
+  req.log.info('reset_password_default_success', { cardno });
+
+  const phone = card.mobno;
+  if (phone) {
+    try {
+      const formattedPhone = formatWhatsAppPhone(phone, card.country);
+
+      const components = [
+        {
+          type: 'body',
+          parameters: [
+            {
+              type: 'text',
+              text: card.issuedto || 'Mumukshu'
+            }
+          ]
+        }
+      ];
+
+      await sendWhatsAppMessage(formattedPhone, 'password_reset_admin', components);
+    } catch (err) {
+      console.error('Error sending WhatsApp message in resetPasswordDefault:', err.message || err);
+    }
+  }
+
   return res
     .status(200)
     .json({ message: 'Password reset successfully to default.' });
 };
 
+
 export const getCardByMobile = async (req, res) => {
   const { mobno } = req.params;
+  req.log.info('get_card_by_mobile_start', { mobno });
 
   if (!mobno) {
+    req.log.warn('get_card_by_mobile_missing_param');
     return res.status(400).json({ message: 'mobno is required' });
   }
 
@@ -304,9 +511,11 @@ export const getCardByMobile = async (req, res) => {
   });
 
   if (!card) {
+    req.log.warn('get_card_by_mobile_not_found', { mobno });
     return res.status(404).json({ message: 'Card not found' });
   }
 
+  req.log.info('get_card_by_mobile_success', { mobno, cardno: card.cardno });
   return res.status(200).json({ message: 'Found card', data: card });
 };
 

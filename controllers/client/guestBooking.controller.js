@@ -1,8 +1,21 @@
 import {
   CardDb,
   GuestRelationship,
-  UtsavDb
+  FlatDb,
+  UtsavDb,
+  ShibirBookingDb,
+  TravelDb,
+  RoomBooking,
+  UtsavBooking,
+  FlatBooking,
+  ShibirDb,
+  UtsavPackagesDb,
+  FoodDb
 } from '../../models/associations.js';
+import { Op } from 'sequelize';
+import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
+import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import {
   TYPE_ROOM,
   TYPE_FOOD,
@@ -13,6 +26,7 @@ import {
   STATUS_GUEST,
   TYPE_UTSAV,
   TYPE_FLAT,
+  TYPE_TRAVEL,
   MSG_BOOKING_WAITING,
   BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
@@ -34,8 +48,13 @@ import {
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
+  checkRollingWindowLimitForCards,
+  rollingWaitlistFields
+} from '../../helpers/rollingWindow.helper.js';
+import {
   generateOrderId,
-  updateRazorpayTransactions
+  updateRazorpayTransactions,
+  usableCredits
 } from '../../helpers/transactions.helper.js';
 import {
   bookFoodForMumukshus,
@@ -43,19 +62,109 @@ import {
 } from '../../helpers/foodBooking.helper.js';
 import {
   validateUtsavs,
-  bookUtsavForMumukshus
+  bookUtsavForMumukshus,
+  validateNoDuplicateUtsavBooking
 } from '../../helpers/utsavBooking.helper.js';
 import {
   bookAdhyayanForMumukshus,
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
+import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
-import logger from '../../config/logger.js';
+
+async function fetchFreshDetailsForCard(cardno, userBookingIdMap) {
+  const typeMap = userBookingIdMap[cardno] || {};
+  const adhyanIds = Array.isArray(typeMap[TYPE_ADHYAYAN]) ? typeMap[TYPE_ADHYAYAN].map(String).filter(Boolean) : [];
+  const travelIds = Array.isArray(typeMap[TYPE_TRAVEL]) ? typeMap[TYPE_TRAVEL].map(String).filter(Boolean) : [];
+  const roomIds   = Array.isArray(typeMap[TYPE_ROOM]) ? typeMap[TYPE_ROOM].map(String).filter(Boolean) : [];
+  const utsavIds  = Array.isArray(typeMap[TYPE_UTSAV]) ? typeMap[TYPE_UTSAV].map(String).filter(Boolean) : [];
+  const flatIds   = Array.isArray(typeMap[TYPE_FLAT]) ? typeMap[TYPE_FLAT].map(String).filter(Boolean) : [];
+  const foodIds   = Array.isArray(typeMap[TYPE_FOOD]) ? typeMap[TYPE_FOOD].map(String).filter(Boolean) : [];
+
+  try {
+    const [
+      adhyanBookingDetailsFromDb,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails,
+      foodBookingDetails
+    ] = await Promise.all([
+      adhyanIds.length
+        ? ShibirBookingDb.findAll({
+            where: { bookingid: { [Op.in]: adhyanIds } },
+            include: [{ model: ShibirDb, as: 'ShibirDb' }],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
+        : [],
+      travelIds.length
+        ? TravelDb.findAll({ where: { bookingid: { [Op.in]: travelIds } } })
+        : [],
+      roomIds.length
+        ? RoomBooking.findAll({
+            where: { bookingid: { [Op.in]: roomIds } },
+            order: [['cardno', 'ASC'], ['checkin', 'ASC']]
+          })
+        : [],
+      utsavIds.length
+        ? UtsavBooking.findAll({
+            where: { bookingid: { [Op.in]: utsavIds } },
+            include: [
+              { model: UtsavDb, as: 'UtsavDb' },
+              { model: UtsavPackagesDb, as: 'UtsavPackagesDb' }
+            ],
+            order: [['cardno', 'ASC'], ['createdAt', 'ASC']]
+          })
+        : [],
+      flatIds.length
+        ? FlatBooking.findAll({ where: { bookingid: { [Op.in]: flatIds } } })
+        : [],
+      foodIds.length
+        ? FoodDb.findAll({
+            where: { id: { [Op.in]: foodIds } },
+            order: [['cardno', 'ASC'], ['date', 'ASC']]
+          })
+        : []
+    ]);
+
+    // Synthesize missing adhyan entries
+    const requested = adhyanIds.map(String);
+    const foundIds = new Set((adhyanBookingDetailsFromDb || []).map((r) => String(r.bookingid || r.bookingId || r.id)));
+    const missing = requested.filter(id => !foundIds.has(id));
+    const synthesized = missing.map(id => ({ bookingid: id, cardno, status: 'pending', ShibirDb: null }));
+    const adhyanBookingDetails = [...(adhyanBookingDetailsFromDb || []), ...synthesized];
+
+    return {
+      adhyanBookingDetails,
+      travelBookingDetails,
+      roomBookingDetails,
+      utsavBookingDetails,
+      flatBookingDetails,
+      foodBookingDetails
+    };
+  } catch (err) {
+    console.error(`WA DIAG: fetchFreshDetailsForCard(${cardno}) failed:`, err && (err.stack || err.message || err));
+    return {
+      adhyanBookingDetails: [],
+      travelBookingDetails: [],
+      roomBookingDetails: [],
+      utsavBookingDetails: [],
+      flatBookingDetails: [],
+      foodBookingDetails: []
+    };
+  }
+}
 
 export const guestBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+  req.log.info('guest_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   validateFlatBookingConstraints(primary_booking, addons);
 
@@ -103,30 +212,98 @@ export const guestBooking = async (req, res) => {
 
   var order = null;
   if (req.user.country == 'India' && amount > 0) {
+    req.log.info('guest_booking_creating_order', { cardno: req.user.cardno, amount });
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
     await updateRazorpayTransactions(bookingIds, transactionIds, order.id, t);
+    req.log.info('guest_booking_order_created', { cardno: req.user.cardno, orderId: order.id, amount });
   }
 
   await t.commit();
+  req.log.info('guest_booking_committed', { cardno: req.user.cardno });
+
+  // --- WhatsApp notifications ---
+  try {
+    const bookedByCard = req.user.cardno;
+    const allCardnos = Object.keys(userBookingIdMap || {});
+    const jobs = [];
+
+    for (const cardno of allCardnos) {
+      const details = await fetchFreshDetailsForCard(cardno, userBookingIdMap);
+
+      jobs.push(sendUnifiedWhatsApp(
+        cardno,
+        details.adhyanBookingDetails,
+        details.travelBookingDetails,
+        details.flatBookingDetails,
+        details.utsavBookingDetails,
+        details.roomBookingDetails,
+        null,
+        details.foodBookingDetails
+      ));
+
+      if (cardno !== bookedByCard) {
+        jobs.push(sendUnifiedWhatsApp(
+          bookedByCard,
+          details.adhyanBookingDetails,
+          details.travelBookingDetails,
+          details.flatBookingDetails,
+          details.utsavBookingDetails,
+          details.roomBookingDetails,
+          cardno,
+          details.foodBookingDetails
+        ));
+      }
+    }
+
+    const results = await Promise.allSettled(jobs);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error(`WhatsApp job #${i} failed:`, r.reason);
+      } else {
+        console.log(`WhatsApp job #${i} succeeded`);
+      }
+    });
+  } catch (waErr) {
+    console.error("Unexpected error in WhatsApp notification block:", waErr);
+    // do not rollback here — WhatsApp failures are non-fatal for the booking flow
+  }
 
   // Sending email to logged in user for self or other mumkshus
   sendUnifiedEmailForBookedBy(
     userBookingIdMap,
     req.user,
-    BOOKING_STATUS_PENDING
+    BOOKING_STATUS_PENDING,
+    false
   );
   for (const cardno in userBookingIdMap) {
     if (cardno != req.user.cardno) {
       const bookings = userBookingIdMap[cardno];
       //Sending email to other mumkshu & Guest
-      sendUnifiedEmail(cardno, bookings, req.user, BOOKING_STATUS_PENDING);
+      sendUnifiedEmail(
+        cardno,
+        bookings,
+        req.user,
+        BOOKING_STATUS_PENDING,
+        'unifiedBookingEmail',
+        false
+      );
     }
   }
   let message = MSG_BOOKING_SUCCESSFUL;
   if (Object.keys(waitingBookingCountMap).length > 0) {
     message = MSG_BOOKING_WAITING;
+    req.log.info('guest_booking_waiting', {
+      cardno: req.user.cardno,
+      waitingBookingCountMap
+    });
   }
+  req.log.info('guest_booking_success', {
+    cardno: req.user.cardno,
+    totalAmount: amount,
+    orderId: order?.id,
+    message
+  });
   return res.status(200).send({
     message: message,
     data: order ? order : { amount: 0 },
@@ -135,10 +312,23 @@ export const guestBooking = async (req, res) => {
 };
 
 export const validateBooking = async (req, res) => {
+  attachUserContext(req);
   const { primary_booking, addons } = req.body;
+
+  // A member can hold only one booking per utsav — reject if the same utsav is
+  // selected more than once for the same person across primary + addons, so the
+  // user is blocked here before proceeding to payment.
+  validateNoDuplicateUtsavBooking(primary_booking, addons);
+
+  req.log.info('validate_guest_booking_start', {
+    cardno: req.user.cardno,
+    primaryBookingType: primary_booking?.booking_type,
+    addonCount: addons?.length || 0
+  });
 
   const response = {
     roomDetails: [],
+    flatDetails: [],
     adhyayanDetails: [],
     foodDetails: {},
     utsavDetails: [],
@@ -163,6 +353,10 @@ export const validateBooking = async (req, res) => {
     }
   }
 
+  req.log.info('validate_guest_booking_success', {
+    cardno: req.user.cardno,
+    totalCharge: response.totalCharge
+  });
   return res.status(200).send({ data: response });
 };
 
@@ -189,6 +383,7 @@ async function book(
       const foodResult = await bookFood(body, data, t, user);
       amount += foodResult.amount;
       transactionIds.push(...foodResult.transactionIds);
+      setBookingIdMap(userBookingIdMap, TYPE_FOOD, foodResult.userBookingIds);
       break;
 
     case TYPE_ADHYAYAN:
@@ -335,8 +530,7 @@ async function checkFoodAvailability(body, data, user, utsav) {
     body.primary_booking,
     body.addons,
     utsav,
-    user,
-    true
+    user
   );
 
   return result;
@@ -368,11 +562,19 @@ async function bookAdhyayan(data, t, user) {
  * @deprecated This endpoint is deprecated. Use the unified booking endpoint with TYPE_FLAT as primary_booking instead.
  */
 export const guestBookingFlat = async (req, res) => {
-  logger.warn(
-    '[DEPRECATED] guestBookingFlat endpoint is deprecated. Use unified booking endpoint instead.'
-  );
+  attachUserContext(req);
+  req.log.warn('guest_booking_flat_deprecated', {
+    cardno: req.user.cardno,
+    message: 'guestBookingFlat endpoint is deprecated. Use unified booking endpoint instead.'
+  });
 
   const { guests, startDay, endDay } = req.body;
+  req.log.info('guest_booking_flat_start', {
+    cardno: req.user.cardno,
+    startDay,
+    endDay,
+    guestCount: guests?.length
+  });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -386,8 +588,72 @@ export const guestBookingFlat = async (req, res) => {
   );
 
   await t.commit();
+  req.log.info('guest_booking_flat_committed', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
 
-  sendUnifiedEmailForBookedBy(userBookingIds, req.user, BOOKING_STATUS_PENDING);
+  const userBookingIdMap = {};
+  for (const cardno in userBookingIds) {
+    userBookingIdMap[cardno] = {
+      [TYPE_FLAT]: userBookingIds[cardno]
+    };
+  }
+
+  // --- WhatsApp notifications ---
+  try {
+    const bookedByCard = req.user.cardno;
+    const allCardnos = Object.keys(userBookingIdMap || {});
+    const jobs = [];
+
+    for (const cardno of allCardnos) {
+      const details = await fetchFreshDetailsForCard(cardno, userBookingIdMap);
+
+      jobs.push(sendUnifiedWhatsApp(
+        cardno,
+        details.adhyanBookingDetails,
+        details.travelBookingDetails,
+        details.flatBookingDetails,
+        details.utsavBookingDetails,
+        details.roomBookingDetails,
+        null,
+        details.foodBookingDetails
+      ));
+
+      if (cardno !== bookedByCard) {
+        jobs.push(sendUnifiedWhatsApp(
+          bookedByCard,
+          details.adhyanBookingDetails,
+          details.travelBookingDetails,
+          details.flatBookingDetails,
+          details.utsavBookingDetails,
+          details.roomBookingDetails,
+          cardno,
+          details.foodBookingDetails
+        ));
+      }
+    }
+
+    const results = await Promise.allSettled(jobs);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.error(`WhatsApp job #${i} failed:`, r.reason);
+      } else {
+        console.log(`WhatsApp job #${i} succeeded`);
+      }
+    });
+  } catch (waErr) {
+    console.error("Unexpected error in WhatsApp notification block:", waErr);
+    // do not rollback here — WhatsApp failures are non-fatal for the booking flow
+  }
+
+  sendUnifiedEmailForBookedBy(
+    userBookingIdMap,
+    req.user,
+    BOOKING_STATUS_PENDING,
+    false
+  );
 
   Object.entries(userBookingIds)
     .filter(([cardno]) => cardno !== req.user.cardno) // Filter out the current user's cardno
@@ -396,10 +662,17 @@ export const guestBookingFlat = async (req, res) => {
         cardno,
         { [TYPE_FLAT]: bookings },
         req.user,
-        BOOKING_STATUS_PENDING
+        BOOKING_STATUS_PENDING,
+        'unifiedBookingEmail',
+        false
       );
     });
 
+  req.log.info('guest_booking_flat_success', {
+    cardno: req.user.cardno,
+    orderId: order?.id,
+    amount: order?.amount
+  });
   return res.status(200).send({
     message: MSG_BOOKING_SUCCESSFUL,
     data: order
@@ -407,7 +680,9 @@ export const guestBookingFlat = async (req, res) => {
 };
 
 export const fetchGuests = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
+  req.log.info('fetch_guests_start', { cardno });
 
   const guests = await CardDb.findAll({
     attributes: ['cardno', 'issuedto', 'mobno', 'gender', 'updatedAt'],
@@ -423,6 +698,7 @@ export const fetchGuests = async (req, res) => {
     limit: 10
   });
 
+  req.log.info('fetch_guests_success', { cardno, count: guests.length });
   return res.status(200).send({
     message: 'fetched results',
     data: guests
@@ -430,8 +706,10 @@ export const fetchGuests = async (req, res) => {
 };
 
 export const createGuests = async (req, res) => {
+  attachUserContext(req);
   const { cardno } = req.user;
   const { guests } = req.body;
+  req.log.info('create_guests_start', { cardno, guestCount: guests?.length });
 
   const t = await database.transaction();
   req.transaction = t;
@@ -439,6 +717,36 @@ export const createGuests = async (req, res) => {
   const allGuests = await createGuestsHelper(cardno, guests, t);
 
   await t.commit();
+  req.log.info('create_guests_success', { cardno, createdCount: allGuests?.length });
+
+  // --- Send WhatsApp notification to newly created guests ---
+  const newlyCreatedGuests = allGuests.filter((guest) => {
+    const wasRegistered = guests.some((g) => g.cardno === guest.cardno);
+    return !wasRegistered;
+  });
+
+  for (const newGuest of newlyCreatedGuests) {
+    const phone = newGuest.mobno;
+    if (phone) {
+      try {
+        const formattedPhone = formatWhatsAppPhone(phone, newGuest.country);
+
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: newGuest.issuedto || 'Mumukshu' },
+              { type: 'text', text: newGuest.cardno }
+            ]
+          }
+        ];
+
+        await sendWhatsAppMessage(formattedPhone, 'card_account_created', components);
+      } catch (waErr) {
+        console.error('Error sending WhatsApp message in createGuests:', waErr.message || waErr);
+      }
+    }
+  }
 
   return res.status(200).send({
     message: MSG_UPDATE_SUCCESSFUL,
@@ -448,6 +756,7 @@ export const createGuests = async (req, res) => {
 
 export const checkGuests = async (req, res) => {
   const { mobno } = req.params;
+  req.log.info('check_guests_start', { mobno });
 
   const user = await CardDb.findOne({
     attributes: [
@@ -461,12 +770,15 @@ export const checkGuests = async (req, res) => {
     where: { mobno: mobno }
   });
   if (!user) {
+    req.log.info('check_guests_not_found', { mobno });
     return res.status(200).send({ message: 'Guest not found', data: null });
   }
 
   if (user.res_status == STATUS_GUEST) {
+    req.log.info('check_guests_found', { mobno, cardno: user.cardno });
     return res.status(200).send({ message: 'Guest found', data: user });
   } else {
+    req.log.warn('check_guests_not_a_guest', { mobno, cardno: user.cardno, resStatus: user.res_status });
     throw new ApiError(401, 'User is not a guest');
   }
 };
@@ -527,7 +839,7 @@ async function checkFlatAvailability(data, user) {
   }
 
   validateDate(checkin_date, checkout_date);
-  await validateCards(guests);
+  const guestCardDb = await validateCards(guests);
 
   // Check if any guest already has a flat booking for these dates
   for (const guest of guests) {
@@ -542,7 +854,32 @@ async function checkFlatAvailability(data, user) {
   const nights = await calculateNights(checkin_date, checkout_date);
   const flatDetails = [];
 
+  // Preview the 9-night/30-day cap so this matches the actual booking outcome
+  // (createFlatBooking force-waitlists with no charge when exceeded). Guests are
+  // always non-residents, so the cap applies. No transaction (read-only preview).
+  const capByCard = await checkRollingWindowLimitForCards(
+    guestCardDb,
+    checkin_date,
+    checkout_date
+  );
+
+  // Clone credits so this read-only preview loop doesn't mutate the caller's
+  // card (mirrors the mumukshu flat-availability preview in roomBooking.helper.js).
+  const tempUser = { ...user, credits: { ...user.credits } };
+
   for (const guest of guests) {
+    const cap = capByCard.get(guest);
+    if (cap.exceeds) {
+      flatDetails.push({
+        guest: guest,
+        flatno: flat.flatno,
+        nights: nights,
+        availableCredits: 0,
+        ...rollingWaitlistFields(cap)
+      });
+      continue;
+    }
+
     // Check if this guest is the flat owner
     const isFlatOwner = await FlatDb.findOne({
       where: {
@@ -552,12 +889,15 @@ async function checkFlatAvailability(data, user) {
     });
 
     const charge = isFlatOwner ? 0 : roomCharge('nac') * nights;
+    const availableCredits =
+      charge > 0 ? usableCredits(tempUser, TYPE_FLAT, charge) : 0;
 
     flatDetails.push({
       guest: guest,
       flatno: flat.flatno,
       nights: nights,
       charge: charge,
+      availableCredits: availableCredits,
       status: 'available'
     });
   }
