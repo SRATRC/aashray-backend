@@ -34,7 +34,31 @@ export const fetchTotal = async (req, res) => {
   return res.status(200).send({ message: 'Success', data: result });
 };
 
-const fetchResidentsByStatus = async (req, res, resStatus) => {
+// Query keys only the paginated screens send. A request with none of them is
+// the old staff panel, which expects a plain array in `data`.
+const LIST_QUERY_KEYS = [
+  'page',
+  'page_size',
+  'search',
+  'sort_by',
+  'sort_order',
+  'status',
+  'res_status',
+  'start_date',
+  'end_date'
+];
+export const isLegacyListRequest = (query) =>
+  LIST_QUERY_KEYS.every((key) => query[key] === undefined);
+
+// onPremiseDefault: the old per-group report pages (totalPR etc.) list only
+// people on premises when no status is sent.
+const fetchResidentsByStatus = async (
+  req,
+  res,
+  resStatus,
+  onPremiseDefault = false
+) => {
+  const legacy = isLegacyListRequest(req.query);
   const search = req.query.search || '';
 
   // Validate sort parameters against allow-list and sanitize inputs
@@ -69,6 +93,8 @@ const fetchResidentsByStatus = async (req, res, resStatus) => {
     whereClause.status = STATUS_ONPREM;
   } else if (statusFilter === 'offprem') {
     whereClause.status = STATUS_OFFPREM;
+  } else if (statusFilter === undefined && onPremiseDefault) {
+    whereClause.status = STATUS_ONPREM;
   }
 
   if (search) {
@@ -154,6 +180,9 @@ const fetchResidentsByStatus = async (req, res, resStatus) => {
     });
   } else {
     const records = await CardDb.findAll(queryOptions);
+    if (legacy) {
+      return res.status(200).send({ message: 'Success', data: records });
+    }
     return res.status(200).send({
       message: 'Success',
       data: {
@@ -165,19 +194,19 @@ const fetchResidentsByStatus = async (req, res, resStatus) => {
 };
 
 export const fetchPR = async (req, res) => {
-  return fetchResidentsByStatus(req, res, STATUS_RESIDENT);
+  return fetchResidentsByStatus(req, res, STATUS_RESIDENT, true);
 };
 
 export const fetchGuest = async (req, res) => {
-  return fetchResidentsByStatus(req, res, STATUS_GUEST);
+  return fetchResidentsByStatus(req, res, STATUS_GUEST, true);
 };
 
 export const fetchMumukshu = async (req, res) => {
-  return fetchResidentsByStatus(req, res, STATUS_MUMUKSHU);
+  return fetchResidentsByStatus(req, res, STATUS_MUMUKSHU, true);
 };
 
 export const fetchSevaKutir = async (req, res) => {
-  return fetchResidentsByStatus(req, res, STATUS_SEVA_KUTIR);
+  return fetchResidentsByStatus(req, res, STATUS_SEVA_KUTIR, true);
 };
 
 export const fetchResidents = async (req, res) => {
@@ -326,6 +355,18 @@ export const gateExit = async (req, res) => {
 };
 
 export const gateRecord = async (req, res) => {
+  // The old staff panel sends no list parameters and expects a flat array.
+  if (isLegacyListRequest(req.query)) {
+    const result = await database.query(
+      `SELECT gr.*, cd.issuedto, cd.mobno
+       FROM gate_record AS gr
+       LEFT JOIN card_db AS cd ON gr.cardno = cd.cardno
+       ORDER BY gr.createdAt DESC`,
+      { type: Sequelize.QueryTypes.SELECT }
+    );
+    return res.status(200).send({ message: 'Success', data: result });
+  }
+
   const search = req.query.search || '';
 
   // Validate sort parameters against allow-list and sanitize inputs

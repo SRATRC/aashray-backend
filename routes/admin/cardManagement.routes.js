@@ -22,11 +22,12 @@ router.post('/create', CatchAsync(createCard));
 router.get('/getAll', CatchAsync(fetchAllCards));
 router.get('/search/:name', CatchAsync(searchCardsByName));
 router.get('/by-mobile/:mobno', CatchAsync(getCardByMobile));
-router.get('/:cardno', CatchAsync(getCardByCardno));
 router.put('/update', CatchAsync(updateCard));
 router.put('/transfer', CatchAsync(transferCard));
 router.get('/transactions/:cardno', CatchAsync(fetchTotalTransactions));
 router.post('/reset-pwd', CatchAsync(resetPasswordDefault));
+// Generic param route goes last so it never shadows a named route above.
+router.get('/:cardno', CatchAsync(getCardByCardno));
 
 export default router;
 

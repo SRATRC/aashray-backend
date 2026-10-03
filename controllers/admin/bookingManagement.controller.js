@@ -6,7 +6,6 @@ import {
   UtsavBooking,
   UtsavDb,
   UtsavPackagesDb,
-  BulkFoodBooking,
   FoodDb,
   ShibirBookingDb,
   ShibirDb,
@@ -19,7 +18,17 @@ import {
   ERR_BOOKING_NOT_FOUND,
   STATUS_ADMIN_CANCELLED,
   TYPE_ROOM,
-  MSG_CANCEL_SUCCESSFUL
+  TYPE_FLAT,
+  TYPE_TRAVEL,
+  TYPE_UTSAV,
+  TYPE_FOOD,
+  TYPE_ADHYAYAN,
+  ERR_INVALID_BOOKING_TYPE,
+  ERR_INVALID_BOOKING_CATEGORY,
+  ERR_BOOKING_HISTORY_PARAMS_REQUIRED,
+  MSG_CANCEL_SUCCESSFUL,
+  MSG_BOOKING_DETAILS_FETCHED,
+  MSG_BOOKING_HISTORY_FETCHED
 } from '../../config/constants.js';
 import { adminCancelTransaction } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
@@ -125,127 +134,143 @@ export const getBookingDetails = async (req, res) => {
   const { type, bookingid } = req.params;
   req.log.info('get_booking_details_start', { type, bookingid });
 
-  let booking = null;
+  const withName = [{ model: CardDb, attributes: ['issuedto'] }];
   const where = { bookingid };
 
+  let booking = null;
   switch (type.toLowerCase()) {
-    case 'room':
-      booking = await RoomBooking.findOne({ where, include: [{ model: CardDb, attributes: ['issuedto'] }] });
-      if (!booking) {
-        booking = await FlatBooking.findOne({ where, include: [{ model: CardDb, attributes: ['issuedto'] }] });
-      }
+    case TYPE_ROOM:
+      // A room booking id may belong to a flat booking.
+      booking =
+        (await RoomBooking.findOne({ where, include: withName })) ||
+        (await FlatBooking.findOne({ where, include: withName }));
       break;
-    case 'flat':
-      booking = await FlatBooking.findOne({ where, include: [{ model: CardDb, attributes: ['issuedto'] }] });
+    case TYPE_FLAT:
+      booking = await FlatBooking.findOne({ where, include: withName });
       break;
-    case 'travel':
+    case TYPE_TRAVEL:
       booking = await TravelDb.findOne({ where });
       break;
-    case 'utsav':
-      booking = await UtsavBooking.findOne({ where, include: [{ model: CardDb, attributes: ['issuedto'] }] });
-      if (!booking) {
-        booking = await UtsavBooking.findOne({ where });
-      }
+    case TYPE_UTSAV:
+      booking = await UtsavBooking.findOne({ where, include: withName });
       break;
-    case 'food':
+    case TYPE_FOOD:
       booking = await FoodDb.findOne({ where: { id: bookingid } });
       break;
     default:
-      return res.status(400).json({ message: 'Invalid booking type' });
+      throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }
 
   if (!booking) {
-    return res.status(404).json({ message: 'Booking not found' });
+    throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  return res.status(200).json({ message: 'Fetched booking details successfully', data: booking });
+  return res
+    .status(200)
+    .json({ message: MSG_BOOKING_DETAILS_FETCHED, data: booking });
 };
+
+const HISTORY_DEFAULT_PAGE_SIZE = 20;
+const HISTORY_MAX_PAGE_SIZE = 100;
 
 export const getBookingHistory = async (req, res) => {
   const { cardno, category } = req.query;
   req.log.info('get_booking_history_start', { cardno, category });
 
   if (!cardno || !category) {
-    return res.status(400).json({ message: 'cardno and category are required' });
+    throw new ApiError(400, ERR_BOOKING_HISTORY_PARAMS_REQUIRED);
   }
 
-  let bookings = [];
+  const parsedPage = parseInt(req.query.page, 10);
+  const page = parsedPage > 0 ? parsedPage : 1;
+  const parsedSize = parseInt(req.query.page_size, 10);
+  const pageSize = Math.min(
+    parsedSize > 0 ? parsedSize : HISTORY_DEFAULT_PAGE_SIZE,
+    HISTORY_MAX_PAGE_SIZE
+  );
+
   const where = {
-    [Sequelize.Op.or]: [
-      { cardno },
-      { bookedBy: cardno }
-    ]
+    [Sequelize.Op.or]: [{ cardno }, { bookedBy: cardno }]
   };
+  const withName = { model: CardDb, attributes: ['issuedto'] };
+  const newestFirst = [['createdAt', 'DESC']];
 
-  try {
-    switch (category.toLowerCase()) {
-      case 'room': {
-        const rooms = await RoomBooking.findAll({
-          where,
-          include: [{ model: CardDb, attributes: ['issuedto'] }],
-          order: [['createdAt', 'DESC']]
-        });
-        const flats = await FlatBooking.findAll({
-          where,
-          include: [{ model: CardDb, attributes: ['issuedto'] }],
-          order: [['createdAt', 'DESC']]
-        });
-        bookings = [...rooms, ...flats];
-        bookings.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        break;
-      }
-      case 'flat': {
-        bookings = await FlatBooking.findAll({
-          where,
-          include: [{ model: CardDb, attributes: ['issuedto'] }],
-          order: [['createdAt', 'DESC']]
-        });
-        break;
-      }
-      case 'travel': {
-        bookings = await TravelDb.findAll({
-          where,
-          order: [['date', 'DESC']]
-        });
-        break;
-      }
-      case 'utsav': {
-        bookings = await UtsavBooking.findAll({
-          where,
-          include: [
-            { model: CardDb, attributes: ['issuedto'] },
-            { model: UtsavDb, attributes: ['name'] },
-            { model: UtsavPackagesDb, attributes: ['name'] }
-          ],
-          order: [['createdAt', 'DESC']]
-        });
-        break;
-      }
-      case 'food': {
-        bookings = await FoodDb.findAll({
-          where,
-          order: [['date', 'DESC']]
-        });
-        break;
-      }
-      case 'adhyayan': {
-        bookings = await ShibirBookingDb.findAll({
-          where,
-          include: [{ model: ShibirDb }],
-          order: [['createdAt', 'DESC']]
-        });
-        break;
-      }
-      default:
-        return res.status(400).json({ message: 'Invalid category' });
-    }
-
-    return res.status(200).json({
-      message: 'Fetched booking history successfully',
-      data: bookings
+  // Each entry is the query for one page of a category.
+  const pageOf = (model, extra = {}, order = newestFirst) =>
+    model.findAndCountAll({
+      where,
+      order,
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+      ...extra
     });
-  } catch (error) {
-    req.log.error('get_booking_history_error', { error: error.message });
-    return res.status(500).json({ message: error.message });
+
+  let rows = [];
+  let count = 0;
+
+  switch (category.toLowerCase()) {
+    case TYPE_ROOM: {
+      // Rooms and flats are two tables shown as one list: take the first
+      // page * pageSize of each, merge by date, then cut out this page.
+      const window = { limit: page * pageSize, offset: 0 };
+      const [rooms, flats] = await Promise.all([
+        RoomBooking.findAndCountAll({
+          where,
+          include: [withName],
+          order: newestFirst,
+          ...window
+        }),
+        FlatBooking.findAndCountAll({
+          where,
+          include: [withName],
+          order: newestFirst,
+          ...window
+        })
+      ]);
+      count = rooms.count + flats.count;
+      rows = [...rooms.rows, ...flats.rows]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice((page - 1) * pageSize, page * pageSize);
+      break;
+    }
+    case TYPE_FLAT:
+      ({ rows, count } = await pageOf(FlatBooking, { include: [withName] }));
+      break;
+    case TYPE_TRAVEL:
+      ({ rows, count } = await pageOf(TravelDb, {}, [['date', 'DESC']]));
+      break;
+    case TYPE_UTSAV:
+      ({ rows, count } = await pageOf(UtsavBooking, {
+        include: [
+          withName,
+          { model: UtsavDb, attributes: ['name'] },
+          { model: UtsavPackagesDb, attributes: ['name'] }
+        ],
+        distinct: true
+      }));
+      break;
+    case TYPE_FOOD:
+      ({ rows, count } = await pageOf(FoodDb, {}, [['date', 'DESC']]));
+      break;
+    case TYPE_ADHYAYAN:
+      ({ rows, count } = await pageOf(ShibirBookingDb, {
+        include: [{ model: ShibirDb }],
+        distinct: true
+      }));
+      break;
+    default:
+      throw new ApiError(400, ERR_INVALID_BOOKING_CATEGORY);
   }
+
+  // `data` stays a plain list so existing callers keep working.
+  return res.status(200).json({
+    message: MSG_BOOKING_HISTORY_FETCHED,
+    data: rows,
+    pagination: {
+      page,
+      page_size: pageSize,
+      totalCount: count,
+      totalPages: Math.ceil(count / pageSize)
+    }
+  });
 };

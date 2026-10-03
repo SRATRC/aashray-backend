@@ -1182,16 +1182,9 @@ export const getMealCountByMobile = async (req, res) => {
     }
   }));
 
-  // Aggregate meal counts excluding utsav dates
-  const result = await FoodDb.findAll({
-    attributes: [
-      [fn('COALESCE', fn('SUM', col('breakfast')), 0), 'breakfastBooked'],
-      [fn('COALESCE', fn('SUM', col('breakfast_plate_issued')), 0), 'breakfastIssued'],
-      [fn('COALESCE', fn('SUM', col('lunch')), 0), 'lunchBooked'],
-      [fn('COALESCE', fn('SUM', col('lunch_plate_issued')), 0), 'lunchIssued'],
-      [fn('COALESCE', fn('SUM', col('dinner')), 0), 'dinnerBooked'],
-      [fn('COALESCE', fn('SUM', col('dinner_plate_issued')), 0), 'dinnerIssued']
-    ],
+  // Both meal queries below read the same rows: this person's meals in the
+  // range, outside Utsav dates.
+  const mealRowsFilter = {
     include: [
       {
         model: CardDb,
@@ -1205,7 +1198,20 @@ export const getMealCountByMobile = async (req, res) => {
       ...(exclusionConditions.length > 0 && {
         [Op.not]: { [Op.or]: exclusionConditions }
       })
-    },
+    }
+  };
+
+  // Aggregate meal counts excluding utsav dates
+  const result = await FoodDb.findAll({
+    attributes: [
+      [fn('COALESCE', fn('SUM', col('breakfast')), 0), 'breakfastBooked'],
+      [fn('COALESCE', fn('SUM', col('breakfast_plate_issued')), 0), 'breakfastIssued'],
+      [fn('COALESCE', fn('SUM', col('lunch')), 0), 'lunchBooked'],
+      [fn('COALESCE', fn('SUM', col('lunch_plate_issued')), 0), 'lunchIssued'],
+      [fn('COALESCE', fn('SUM', col('dinner')), 0), 'dinnerBooked'],
+      [fn('COALESCE', fn('SUM', col('dinner_plate_issued')), 0), 'dinnerIssued']
+    ],
+    ...mealRowsFilter,
     raw: true
   });
 
@@ -1222,13 +1228,7 @@ export const getMealCountByMobile = async (req, res) => {
       'id', 'date', 'breakfast', 'breakfast_plate_issued',
       'lunch', 'lunch_plate_issued', 'dinner', 'dinner_plate_issued'
     ],
-    include: [{ model: CardDb, attributes: [], required: true, where: { mobno } }],
-    where: {
-      date: { [Op.between]: [fromDate, toDate] },
-      ...(exclusionConditions.length > 0 && {
-        [Op.not]: { [Op.or]: exclusionConditions }
-      })
-    },
+    ...mealRowsFilter,
     order: [['date', 'DESC']],
     raw: true
   });

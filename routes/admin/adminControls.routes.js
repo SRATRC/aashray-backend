@@ -8,7 +8,6 @@ import {
   createRole,
   fetchRoles,
   deleteRole,
-  deleteAdmin,
   bulkDeactivateAdmins,
   bulkAssignRoles
 } from '../../controllers/admin/adminControls.controller.js';
@@ -26,7 +25,6 @@ router.put('/activate/:username', CatchAsync(activateAdmin));
 router.post('/role/:name', CatchAsync(createRole));
 router.get('/role', CatchAsync(fetchRoles));
 router.delete('/role/:name', CatchAsync(deleteRole));
-router.delete('/user/:username', CatchAsync(deleteAdmin));
 router.put('/bulk-deactivate', CatchAsync(bulkDeactivateAdmins));
 router.put('/bulk-assign-roles', CatchAsync(bulkAssignRoles));
 export default router;

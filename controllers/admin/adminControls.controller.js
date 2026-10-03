@@ -215,26 +215,6 @@ export const deleteRole = async (req, res) => {
   return res.status(200).send({ message: 'role deleted' });
 };
 
-export const deleteAdmin = async (req, res) => {
-  const username = req.params.username;
-
-  const admin = await AdminUsers.findOne({
-    where: { username }
-  });
-
-  if (!admin) {
-    throw new ApiError(404, 'Admin user not found');
-  }
-
-  if (admin.username === req.user.username) {
-    throw new ApiError(400, 'You cannot delete yourself.');
-  }
-
-  await admin.destroy();
-
-  return res.status(200).send({ message: 'Admin user deleted successfully' });
-};
-
 export const bulkDeactivateAdmins = async (req, res) => {
   const { usernames } = req.body;
   if (!usernames || !Array.isArray(usernames) || usernames.length === 0) {
@@ -306,6 +286,18 @@ export const bulkAssignRoles = async (req, res) => {
   }
   if (!roles || !Array.isArray(roles) || roles.length === 0) {
     throw new ApiError(400, 'Invalid roles array');
+  }
+
+  // An unknown role name would fail on the roles foreign key as a 500.
+  const knownRoles = await Roles.findAll({
+    where: { name: roles, status: STATUS_ACTIVE },
+    attributes: ['name']
+  });
+  const unknownRoles = roles.filter(
+    (role) => !knownRoles.some((known) => known.name === role)
+  );
+  if (unknownRoles.length > 0) {
+    throw new ApiError(400, `Unknown roles: ${unknownRoles.join(', ')}`);
   }
 
   const t = await database.transaction();

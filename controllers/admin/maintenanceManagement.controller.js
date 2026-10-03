@@ -16,6 +16,7 @@ import {
   FlatDb
 } from '../../models/associations.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
+import { isLegacyListRequest } from './gateManagement.controller.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
@@ -206,6 +207,14 @@ export const fetchMaintenanceReport = async (req, res) => {
     });
   } else {
     const requests = await MaintenanceDb.findAll(queryOptions);
+
+    // The old staff panel sends no list parameters and expects a plain array.
+    if (isLegacyListRequest(req.query)) {
+      return res.status(200).send({
+        message: 'Fetched requests for department',
+        data: requests
+      });
+    }
 
     return res.status(200).send({
       message: 'Fetched requests for department',

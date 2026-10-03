@@ -41,6 +41,15 @@ export const TYPE_ROLE_MAP = {
     wifi: [ROLE_SUPER_ADMIN, ROLE_WIFI_ADMIN]
 };
 
+const isSystemGroupSlug = (slug) => /^[ua]\d+$/i.test(slug);
+const isTemporaryAccessLink = (link) => {
+    try {
+        return new URL(link.target_url).searchParams.has('token');
+    } catch (err) {
+        return false;
+    }
+};
+
 const isValidUrl = (url) => {
     try {
         const parsed = new URL(url);
@@ -186,8 +195,21 @@ export const updateShortLink = async (req, res, next) => {
         }
 
         const updateData = {};
-        if (slug !== undefined && slug.trim() !== '' && slug.trim() !== link.slug) {
-            const formattedSlug = slug.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '');
+        if (slug !== undefined && String(slug).trim() !== link.slug) {
+            // A temporary-access link carries a signed token and the access
+            // check looks the link up by its slug, so renaming it would lock
+            // its holders out. The Utsav and Adhyayan group links (u12, a7)
+            // are looked up by slug too.
+            if (isTemporaryAccessLink(link) || isSystemGroupSlug(link.slug)) {
+                throw new ApiError(400, 'This link cannot be renamed');
+            }
+            const formattedSlug = String(slug).trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '');
+            if (!formattedSlug) {
+                throw new ApiError(400, 'Slug cannot be empty');
+            }
+            if (isSystemGroupSlug(formattedSlug)) {
+                throw new ApiError(400, 'This slug is reserved for group links');
+            }
             const existingSlug = await ShortLink.findOne({ where: { slug: formattedSlug }, transaction: t });
             if (existingSlug && existingSlug.id !== link.id) {
                 throw new ApiError(400, 'Slug already exists');
