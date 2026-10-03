@@ -263,6 +263,8 @@ export async function cancelTransaction(
   return { credits };
 }
 
+const SETTLED_AT_ZERO = 'Balance updated to 0 (settled, nothing to pay)';
+
 /**
  * Staff edit of the amount on a travel charge.
  *
@@ -273,35 +275,63 @@ export async function cancelTransaction(
  * the same value again changes nothing. Staff may edit the amount whatever the
  * payment state; status is left alone, with one exception: a net of 0 on a
  * charge that is still pending is settled (cash pending -> cash completed,
- * online pending -> completed). No payment can ever arrive for 0, so a pending
- * row would stay unpaid until the 24 h job cancelled the booking.
+ * online pending and payment failed -> completed). Raising a charge that
+ * such an edit settled reopens it to pending (no payment was ever received).
+ * No payment can ever arrive for 0, so a pending row would stay unpaid until
+ * the 24 h job cancelled the booking. Returns { settled, reopened } so the
+ * caller can move the booking too.
  */
 export async function adjustAmount(transaction, amount, updatedBy, t) {
   if (!Number.isFinite(amount) || amount < 0) {
     throw new ApiError(400, 'Amount must be a non-negative number');
   }
 
+  const current = Number(transaction.amount);
+
   const settleStatus =
     amount === 0
-      ? { [STATUS_PAYMENT_PENDING]: STATUS_PAYMENT_COMPLETED, [STATUS_CASH_PENDING]: STATUS_CASH_COMPLETED }[transaction.status]
+      ? {
+          [STATUS_PAYMENT_PENDING]: STATUS_PAYMENT_COMPLETED,
+          [STATUS_CASH_PENDING]: STATUS_CASH_COMPLETED,
+          [STATUS_PAYMENT_FAILED]: STATUS_PAYMENT_COMPLETED
+        }[transaction.status]
       : undefined;
 
-  if (Number(transaction.amount) === amount && !settleStatus) return;
+  // A charge that a 0 edit settled (marked in its description) was never paid.
+  // Raising it again must ask the member to pay and must not leave a refundable
+  // "completed" row. A charge that really was paid has no marker and keeps its
+  // status (N11).
+  const reopenStatus =
+    amount > 0 &&
+    current === 0 &&
+    String(transaction.description || '').startsWith(SETTLED_AT_ZERO)
+      ? {
+          [STATUS_PAYMENT_COMPLETED]: STATUS_PAYMENT_PENDING,
+          [STATUS_CASH_COMPLETED]: STATUS_CASH_PENDING
+        }[transaction.status]
+      : undefined;
+
+  if (current === amount && !settleStatus) {
+    return { settled: false, reopened: false };
+  }
 
   const discount = Number(transaction.discount) || 0;
+  const credits = discount > 0 ? ` (credits used: ${discount})` : '';
+  const newStatus = settleStatus || reopenStatus;
 
   await transaction.update(
     {
       amount,
-      ...(settleStatus && { status: settleStatus }),
-      description:
-        discount > 0
-          ? `Balance updated to ${amount} (credits used: ${discount})`
-          : `Balance updated to ${amount}`,
+      ...(newStatus && { status: newStatus }),
+      description: settleStatus
+        ? `${SETTLED_AT_ZERO}${credits}`
+        : `Balance updated to ${amount}${credits}`,
       updatedBy
     },
     { transaction: t }
   );
+
+  return { settled: !!settleStatus, reopened: !!reopenStatus };
 }
 
 function getCreditType(bookingType) {
