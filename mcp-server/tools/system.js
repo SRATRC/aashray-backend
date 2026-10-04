@@ -62,7 +62,7 @@ async function diskUsage(paths) {
         totalGb: gb(total),
         freeGb: gb(free),
         // Same as `df`: root-reserved blocks count as neither used nor available.
-        usedPercent: used + free ? Math.round((used / (used + free)) * 100) : null,
+        usedPercent: used + free ? Math.ceil((used / (used + free)) * 100) : null, // df rounds up
       });
     } catch (err) {
       if (err.code !== 'ENOENT') throw err;
