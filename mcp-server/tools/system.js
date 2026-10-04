@@ -6,7 +6,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { APP_DIR, ENV_FILE, LOG_DIR, PM2_HOME } from '../config.js';
 import { PLAIN_KEYS, readEnvFile, stripQuotes } from '../redact.js';
-import { readPm2Processes } from './processes.js';
+import { errorResult, readPm2Processes } from './processes.js';
 
 const execFileAsync = promisify(execFile);
 const scryptAsync = promisify(crypto.scrypt);
@@ -15,11 +15,11 @@ const MYSQL_DATA_DIR = '/var/lib/mysql';
 const DISK_WARN_PERCENT = 85;
 const FINGERPRINT_SALT = 'aashray-mcp-fingerprint';
 
-const gb = (bytes) => Math.round((bytes / 1073741824) * 10) / 10;
+// The server runs as root while the deploy checkout belongs to the runner user, so
+// git refuses the repo as "dubious ownership" unless told it is safe.
+const SAFE_DIR = (() => { try { return fs.realpathSync(APP_DIR); } catch { return path.resolve(APP_DIR); } })();
 
-function errorResult(err) {
-  return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
-}
+const gb = (bytes) => Math.round((bytes / 1073741824) * 10) / 10;
 
 // One entry per filesystem, listing which of the paths we care about live on it.
 async function diskUsage(paths) {
@@ -146,33 +146,14 @@ const getServerHealth = {
   },
 };
 
-// The server runs as root while the deploy checkout belongs to the runner user, so
-// git refuses the repo as "dubious ownership" unless told it is safe.
 async function git(args) {
   // Strictly read-only: --no-optional-locks stops `git status` rewriting .git/index, and
   // fsmonitor off stops a repo-config command from running (this process may be root).
-  const safeDir = (() => { try { return fs.realpathSync(APP_DIR); } catch { return path.resolve(APP_DIR); } })();
   const { stdout } = await execFileAsync('git', [
-    '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', `safe.directory=${safeDir}`, '-C', APP_DIR, ...args,
-  ], { timeout: 10000, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
+    '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', `safe.directory=${SAFE_DIR}`, '-C', APP_DIR, ...args,
+  ], { timeout: 10000 });
   // Only the trailing newline goes: `git status` lines start with a meaningful space (" M file").
   return stdout.replace(/\n+$/, '');
-}
-
-// Fallback when git is missing or refuses: read the checked-out commit straight from .git.
-function readHeadFromDisk() {
-  let gitDir = path.join(APP_DIR, '.git');
-  if (fs.statSync(gitDir).isFile()) {
-    gitDir = path.resolve(APP_DIR, fs.readFileSync(gitDir, 'utf8').replace(/^gitdir:\s*/, '').trim());
-  }
-  const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
-  if (!head.startsWith('ref:')) return { commit: head, branch: null };
-  const ref = head.slice(4).trim();
-  const refFile = path.join(gitDir, ref);
-  const commit = fs.existsSync(refFile)
-    ? fs.readFileSync(refFile, 'utf8').trim()
-    : fs.readFileSync(path.join(gitDir, 'packed-refs'), 'utf8').split('\n').find((l) => l.endsWith(` ${ref}`))?.split(' ')[0];
-  return { commit, branch: ref.replace(/^refs\/heads\//, '') };
 }
 
 async function gitState() {
@@ -190,11 +171,7 @@ async function gitState() {
       ...(changed.length > 50 && { locallyModifiedTotal: changed.length }),
     };
   } catch (err) {
-    try {
-      return { ...readHeadFromDisk(), note: `git unavailable (${err.message.split('\n')[0]}); commit read from .git directly.` };
-    } catch {
-      return { error: err.message.split('\n')[0] };
-    }
+    return { error: err.message.split('\n')[0] };
   }
 }
 
@@ -203,8 +180,7 @@ async function fingerprint(value) {
 }
 
 async function settingsCheck(fileEnv, proc) {
-  const settings = [];
-  for (const [key, fileValue] of fileEnv) {
+  return Promise.all([...fileEnv].map(async ([key, fileValue]) => {
     const running = proc?.env?.[key];
     const value = running ?? fileValue;
     const entry = {
@@ -216,13 +192,14 @@ async function settingsCheck(fileEnv, proc) {
     if (PLAIN_KEYS.has(key)) {
       entry.value = value;
     } else if (value) {
-      entry.fingerprint = await fingerprint(value);
-      if (running !== undefined && running !== fileValue) entry.fileFingerprint = await fingerprint(fileValue);
+      const differs = running !== undefined && running !== fileValue;
+      const [fp, fileFp] = await Promise.all([fingerprint(value), differs ? fingerprint(fileValue) : null]);
+      entry.fingerprint = fp;
+      if (differs) entry.fileFingerprint = fileFp;
     }
     if (stripQuotes(fileValue) !== fileValue) entry.quotedInFile = true;
-    settings.push(entry);
-  }
-  return settings;
+    return entry;
+  }));
 }
 
 const getDeployInfo = {

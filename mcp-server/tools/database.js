@@ -1,22 +1,27 @@
 import mysql from 'mysql2/promise';
 import { DB } from '../config.js';
 import { collectSecretValues, redactText } from '../redact.js';
-import { readPm2Processes } from './processes.js';
+import { errorResult } from './processes.js';
 import logger from '../logger.js';
 import { loadAnnotations, fetchSchemaRows, buildSchemaIndex, buildSchemaDetail } from '../resources/schema.js';
+
+// One connection config for the pool and the fresh activity connection, so they cannot drift.
+const CONNECTION = {
+  host: DB.host,
+  port: DB.port,
+  user: DB.user,
+  password: DB.password,
+  database: DB.database,
+  connectTimeout: 10000,
+};
 
 let pool = null;
 
 function getPool() {
   if (!pool) {
     pool = mysql.createPool({
-      host: DB.host,
-      port: DB.port,
-      user: DB.user,
-      password: DB.password,
-      database: DB.database,
+      ...CONNECTION,
       connectionLimit: 3,
-      connectTimeout: 10000,
       waitForConnections: true,
       queueLimit: 10,
     });
@@ -117,10 +122,7 @@ const getSchema = {
         content: [{ type: 'text', text: JSON.stringify(result) }],
       };
     } catch (err) {
-      return {
-        content: [{ type: 'text', text: `Error: ${err.message}` }],
-        isError: true,
-      };
+      return errorResult(err);
     }
   },
 };
@@ -259,33 +261,10 @@ const getTableSample = {
         content: [{ type: 'text', text: JSON.stringify(toColumnar(rows)) }],
       };
     } catch (err) {
-      return {
-        content: [{ type: 'text', text: `Error: ${err.message}` }],
-        isError: true,
-      };
+      return errorResult(err);
     }
   },
 };
-
-// A global grant like PROCESS only reaches connections opened after it, and the
-// pool keeps its connections for the life of the process — so use a fresh one, or
-// an admin's GRANT would not show up here until the next deploy.
-async function withFreshConnection(fn) {
-  const connection = await mysql.createConnection({
-    host: DB.host,
-    port: DB.port,
-    user: DB.user,
-    password: DB.password,
-    database: DB.database,
-    connectTimeout: 10000,
-  });
-  const run = async (sql, params = []) => (await connection.execute({ sql, timeout: 5000 }, params))[0];
-  try {
-    return await fn(run);
-  } finally {
-    await connection.end();
-  }
-}
 
 // Without PROCESS, MySQL quietly shows only this server's own connections, which
 // reads as "nothing running" — so detect the missing grants and say so instead.
@@ -311,16 +290,6 @@ async function missingActivityGrants(run) {
 
 // Other sessions' SQL can contain secrets (tokens in WHERE clauses, passwords in
 // INSERTs), so every SQL text goes through the same redaction as the logs.
-async function activitySecrets() {
-  let processes = [];
-  try {
-    processes = await readPm2Processes();
-  } catch {
-    // No PM2 here: the env file and MCP's own credentials still count.
-  }
-  return collectSecretValues(processes);
-}
-
 function redactColumns(rows, columns, secrets) {
   return rows.map((row) => {
     const copy = { ...row };
@@ -356,7 +325,12 @@ const getDbActivity = {
   },
   handler: async ({ minSeconds = 0 } = {}) => {
     try {
-      return await withFreshConnection(async (run) => {
+      // A global grant like PROCESS only reaches connections opened after it, and the
+      // pool keeps its connections for the life of the process — so use a fresh one, or
+      // an admin's GRANT would not show up here until the next deploy.
+      const connection = await mysql.createConnection(CONNECTION);
+      try {
+        const run = async (sql, params = []) => (await connection.execute({ sql, timeout: 5000 }, params))[0];
         const grants = await missingActivityGrants(run);
         if (grants) {
           return {
@@ -413,8 +387,8 @@ const getDbActivity = {
             LIMIT 50`,
         );
         const [status] = await run('SHOW ENGINE INNODB STATUS');
-        const secrets = await activitySecrets();
-        const deadlock = latestDeadlock(status?.Status ?? '');
+        const secrets = collectSecretValues(); // env file + MCP's own credentials; no pm2 call
+        const deadlock = latestDeadlock(status.Status);
 
         return {
           content: [{
@@ -429,7 +403,9 @@ const getDbActivity = {
             }),
           }],
         };
-      });
+      } finally {
+        await connection.end();
+      }
     } catch (err) {
       logger.error('get_db_activity_error', { error: err.message });
       return {

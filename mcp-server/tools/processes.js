@@ -2,26 +2,24 @@ import { execFile } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
+import { promisify } from 'util';
 import { PM2_HOME } from '../config.js';
-import { collectSecretValues, redactLogLines } from '../redact.js';
+import { QR_MARKER, collectSecretValues, redactLogLine } from '../redact.js';
+
+const execFileAsync = promisify(execFile);
 
 const PM2_TIMEOUT_MS = 10000;
 const TAIL_BYTES = 5 * 1024 * 1024;
 
-function runPm2Jlist(bin) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      bin,
-      ['jlist'],
-      { env: { ...process.env, PM2_HOME }, timeout: PM2_TIMEOUT_MS, maxBuffer: 50 * 1024 * 1024 },
-      (err, stdout) => (err ? reject(err) : resolve(stdout)),
-    );
+async function runPm2Jlist(bin) {
+  const { stdout } = await execFileAsync(bin, ['jlist'], {
+    env: { ...process.env, PM2_HOME },
+    timeout: PM2_TIMEOUT_MS,
+    maxBuffer: 50 * 1024 * 1024,
   });
+  return stdout;
 }
 
-// Internal view of every PM2 process. `env` holds that process's full environment,
-// secrets included — it feeds redaction and the settings check, and must never be
-// returned to a caller.
 function daemonAnswers(sockPath) {
   return new Promise((resolve) => {
     const sock = net.connect(sockPath);
@@ -32,6 +30,9 @@ function daemonAnswers(sockPath) {
   });
 }
 
+// Internal view of every PM2 process. `env` holds that process's full environment,
+// secrets included — it feeds redaction and the settings check, and must never be
+// returned to a caller.
 export async function readPm2Processes() {
   // `pm2 jlist` starts a fresh daemon when none is running, so a wrong PM2_HOME
   // would quietly launch an empty second PM2 as root. Only talk to a live one.
@@ -96,7 +97,7 @@ async function readTail(filePath, maxBytes) {
   }
 }
 
-function errorResult(err) {
+export function errorResult(err) {
   return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
 }
 
@@ -169,16 +170,21 @@ const getProcessLogs = {
       const limit = Math.min(Math.max(1, Number.isFinite(requested) ? Math.floor(requested) : 100), 500);
       const secrets = collectSecretValues(processes);
 
-      let out;
-      if (keyword) {
-        // Redact first, then filter, so a keyword cannot be used to confirm a secret.
-        const needle = keyword.toLowerCase();
-        out = redactLogLines(tail.lines, secrets).filter((line) => line.toLowerCase().includes(needle));
-      } else {
-        // No keyword: only the last lines can be returned, so only scrub those. The extra
-        // 300 raw lines leave room for collapsed QR runs to still give `limit` output lines.
-        out = redactLogLines(tail.lines.slice(-(limit + 300)), secrets);
+      // Walk the raw lines from the end, collapsing QR runs and redacting each line, then
+      // filter by keyword after redaction (so a keyword cannot confirm a secret). Stop as
+      // soon as `limit` lines are collected. Without a keyword that touches only what it needs.
+      const needle = keyword?.toLowerCase();
+      const out = [];
+      let inQrRun = false;
+      for (let i = tail.lines.length - 1; i >= 0 && out.length < limit; i--) {
+        const line = redactLogLine(tail.lines[i], secrets);
+        const isQr = line === QR_MARKER;
+        const repeat = isQr && inQrRun; // rows of one QR drawing collapse to a single marker
+        inQrRun = isQr;
+        if (repeat || (needle && !line.toLowerCase().includes(needle))) continue;
+        out.push(line);
       }
+      out.reverse();
 
       return {
         content: [{
@@ -190,7 +196,7 @@ const getProcessLogs = {
             sizeBytes: tail.size,
             lastWrittenAt: tail.mtime.toISOString(),
             ...(tail.partial && { note: 'Only the last 5 MB of the file was read.' }),
-            lines: out.slice(-limit),
+            lines: out,
           }),
         }],
       };

@@ -13,11 +13,12 @@ const MIN_SECRET_LEN = 8;
 const MAX_LINE_LEN = 2000;
 
 // Mirrors how the deploy job loads .env.prod: it exports each `KEY=value` line
-// verbatim, so the running value is the raw text after the first `=`, quotes included.
+// verbatim (`IFS= read -r` splits on \n only, so a trailing \r stays), so the running value
+// is the raw text after the first `=`, quotes included.
 export function readEnvFile(filePath = ENV_FILE) {
   if (!fs.existsSync(filePath)) return null;
   const env = new Map();
-  for (const line of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+  for (const line of fs.readFileSync(filePath, 'utf8').split('\n')) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(line)) continue;
     const eq = line.indexOf('=');
     env.set(line.slice(0, eq), line.slice(eq + 1));
@@ -37,7 +38,9 @@ export function collectSecretValues(processes = []) {
   const values = new Map();
   const add = (key, value) => {
     if (PLAIN_KEYS.has(key) || typeof value !== 'string') return;
-    for (const v of [value, stripQuotes(value)]) {
+    // A CRLF env file leaves a trailing \r on the running value; the bare secret must still be redacted.
+    const bare = value.endsWith('\r') ? value.slice(0, -1) : value;
+    for (const v of new Set([value, stripQuotes(value), bare, stripQuotes(bare)])) {
       if (v.length < MIN_SECRET_LEN) continue;
       // The same secret also shows up URL-encoded, JSON-escaped or base64 in logs.
       const forms = [
@@ -47,7 +50,7 @@ export function collectSecretValues(processes = []) {
         Buffer.from(v).toString('base64'),
       ];
       for (const form of forms) {
-        if (form.length >= MIN_SECRET_LEN && !values.has(form)) values.set(form, key);
+        if (!values.has(form)) values.set(form, key);
       }
     }
   };
@@ -71,12 +74,12 @@ const QR_RUN_RE = /[▀▄█ ]{8,}/g;
 
 // The WhatsApp service prints its login QR to stdout. Anyone holding that QR can
 // link a device to the centre's WhatsApp account, so it must never leave the server.
-function isQrRow(line) {
+// `clean` is `line` without ANSI colour codes.
+function isQrRow(line, clean) {
   // Full-size terminal QR rows are coloured spaces: many colour escapes.
   if ((line.match(ANSI_RE)?.length ?? 0) >= 10) return true;
   // Half-block rows, possibly after a timestamp prefix (pm2 --time).
-  const visible = line.replace(ANSI_RE, '');
-  for (const [run] of visible.matchAll(QR_RUN_RE)) {
+  for (const [run] of clean.matchAll(QR_RUN_RE)) {
     if (run.replace(/ /g, '').length >= 4) return true;
   }
   return false;
@@ -105,15 +108,10 @@ export function redactText(text, secrets) {
   return total > MAX_LINE_LEN ? `${out}… (truncated, ${total} chars)` : out;
 }
 
-// Collapses each run of QR rows into one marker, then scrubs every other line.
-export function redactLogLines(lines, secrets) {
-  const out = [];
-  for (const line of lines) {
-    if (isQrRow(line)) {
-      if (out[out.length - 1] !== '[QR code redacted]') out.push('[QR code redacted]');
-      continue;
-    }
-    out.push(redactText(line.replace(ANSI_RE, ''), secrets));
-  }
-  return out;
+export const QR_MARKER = '[QR code redacted]';
+
+// One log line: the QR marker for a QR row, otherwise the line scrubbed of secrets.
+export function redactLogLine(line, secrets) {
+  const clean = line.replace(ANSI_RE, '');
+  return isQrRow(line, clean) ? QR_MARKER : redactText(clean, secrets);
 }
