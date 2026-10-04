@@ -16,7 +16,11 @@ import {
   FlatDb
 } from '../../models/associations.js';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
-import { isLegacyListRequest } from '../../utils/listRequest.js';
+import {
+  isLegacyListRequest,
+  escapeLike,
+  MAX_UNPAGED_ROWS
+} from '../../utils/listRequest.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 
@@ -76,45 +80,49 @@ export const fetchMaintenanceReport = async (req, res) => {
   }
 
   if (search) {
+    const likeTerm = escapeLike(search);
     whereClause[Sequelize.Op.or] = [
-      { work_detail: { [Sequelize.Op.like]: `%${search}%` } },
-      { area_of_work: { [Sequelize.Op.like]: `%${search}%` } },
-      { comments: { [Sequelize.Op.like]: `%${search}%` } },
-      { '$CardDb.issuedto$': { [Sequelize.Op.like]: `%${search}%` } },
-      { '$CardDb.mobno$': { [Sequelize.Op.like]: `%${search}%` } }
+      { work_detail: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { area_of_work: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { comments: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { '$CardDb.issuedto$': { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { '$CardDb.mobno$': { [Sequelize.Op.like]: `%${likeTerm}%` } }
     ];
   }
 
-  // Get status counts for the department
-  const statusCountsData = await MaintenanceDb.findAll({
-    attributes: [
-      'status',
-      [Sequelize.fn('COUNT', Sequelize.col('bookingid')), 'count']
-    ],
-    where: {
-      department,
-      status: [STATUS_OPEN, STATUS_INPROGRESS, STATUS_CLOSED]
-    },
-    group: ['status']
-  });
-
+  // The old staff panel gets a plain array and never reads the counts.
+  const legacy = isLegacyListRequest(req.query, LIST_QUERY_KEYS);
   const statusCounts = {
     all: 0,
     [STATUS_OPEN]: 0,
     [STATUS_INPROGRESS]: 0,
     [STATUS_CLOSED]: 0
   };
+  if (!legacy) {
+    // Get status counts for the department
+    const statusCountsData = await MaintenanceDb.findAll({
+      attributes: [
+        'status',
+        [Sequelize.fn('COUNT', Sequelize.col('bookingid')), 'count']
+      ],
+      where: {
+        department,
+        status: [STATUS_OPEN, STATUS_INPROGRESS, STATUS_CLOSED]
+      },
+      group: ['status']
+    });
 
-  let totalCountAll = 0;
-  statusCountsData.forEach(item => {
-    const status = item.getDataValue('status');
-    const count = parseInt(item.getDataValue('count'), 10) || 0;
-    if (statusCounts.hasOwnProperty(status)) {
-      statusCounts[status] = count;
-    }
-    totalCountAll += count;
-  });
-  statusCounts.all = totalCountAll;
+    let totalCountAll = 0;
+    statusCountsData.forEach(item => {
+      const status = item.getDataValue('status');
+      const count = parseInt(item.getDataValue('count'), 10) || 0;
+      if (statusCounts.hasOwnProperty(status)) {
+        statusCounts[status] = count;
+      }
+      totalCountAll += count;
+    });
+    statusCounts.all = totalCountAll;
+  }
 
   let orderClause = [];
   if (sortBy === 'requested_by') {
@@ -209,23 +217,25 @@ export const fetchMaintenanceReport = async (req, res) => {
       }
     });
   } else {
-    const requests = await MaintenanceDb.findAll(queryOptions);
-
     // The old staff panel sends no list parameters and expects a plain array.
-    if (isLegacyListRequest(req.query, LIST_QUERY_KEYS)) {
+    if (legacy) {
+      const requests = await MaintenanceDb.findAll(queryOptions);
       return res.status(200).send({
         message: 'Fetched requests for department',
         data: requests
       });
     }
 
+    queryOptions.limit = MAX_UNPAGED_ROWS;
+    const { count, rows } = await MaintenanceDb.findAndCountAll(queryOptions);
+    const data = { requests: rows, pagination: null, statusCounts };
+    if (count > rows.length) {
+      data.truncated = true;
+      data.totalCount = count;
+    }
     return res.status(200).send({
       message: 'Fetched requests for department',
-      data: {
-        requests,
-        pagination: null,
-        statusCounts
-      }
+      data
     });
   }
 };

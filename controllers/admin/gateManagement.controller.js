@@ -20,7 +20,11 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
 import moment from 'moment';
-import { isLegacyListRequest } from '../../utils/listRequest.js';
+import {
+  isLegacyListRequest,
+  escapeLike,
+  MAX_UNPAGED_ROWS
+} from '../../utils/listRequest.js';
 
 export const fetchTotal = async (req, res) => {
   const result = await CardDb.findAll({
@@ -48,6 +52,28 @@ const LIST_QUERY_KEYS = [
   'start_date',
   'end_date'
 ];
+
+// Reply for a non-legacy request with no page. Flags a cut-off list.
+const unpagedData = (records, totalCount) => {
+  const data = { records, pagination: null };
+  if (totalCount > records.length) {
+    data.truncated = true;
+    data.totalCount = totalCount;
+  }
+  return data;
+};
+
+// Same alias values for /residents and /record: 'pr', 'mumukshu', 'guest',
+// 'seva' (or 'seva_kutir'), 'all'. Anything else means no filter.
+const resolveResStatus = (value) => {
+  const upper = String(value || '').toUpperCase();
+  if (upper === 'PR') return STATUS_RESIDENT;
+  if (upper === 'MUMUKSHU') return STATUS_MUMUKSHU;
+  if (upper === 'GUEST') return STATUS_GUEST;
+  if (upper === 'SEVA' || upper === 'SEVA_KUTIR' || upper === 'SEVA KUTIR')
+    return STATUS_SEVA_KUTIR;
+  return 'all';
+};
 
 // onPremiseDefault: the old per-group report pages (totalPR etc.) list only
 // people on premises when no status is sent.
@@ -96,11 +122,12 @@ const fetchResidentsByStatus = async (
     whereClause.status = STATUS_ONPREM;
   }
 
+  const likeTerm = escapeLike(search);
   if (search) {
     whereClause[Sequelize.Op.or] = [
-      { cardno: { [Sequelize.Op.like]: `%${search}%` } },
-      { issuedto: { [Sequelize.Op.like]: `%${search}%` } },
-      { mobno: { [Sequelize.Op.like]: `%${search}%` } }
+      { cardno: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { issuedto: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { mobno: { [Sequelize.Op.like]: `%${likeTerm}%` } }
     ];
   }
 
@@ -178,16 +205,15 @@ const fetchResidentsByStatus = async (
       }
     });
   } else {
-    const records = await CardDb.findAll(queryOptions);
     if (legacy) {
+      const records = await CardDb.findAll(queryOptions);
       return res.status(200).send({ message: 'Success', data: records });
     }
+    queryOptions.limit = MAX_UNPAGED_ROWS;
+    const { count, rows } = await CardDb.findAndCountAll(queryOptions);
     return res.status(200).send({
       message: 'Success',
-      data: {
-        records,
-        pagination: null
-      }
+      data: unpagedData(rows, count)
     });
   }
 };
@@ -209,16 +235,7 @@ export const fetchSevaKutir = async (req, res) => {
 };
 
 export const fetchResidents = async (req, res) => {
-  const reqStatus = req.query.res_status; // 'pr', 'mumukshu', 'guest', 'seva', or 'all'
-  let resStatus = 'all';
-  if (reqStatus) {
-    const statusUpper = reqStatus.toUpperCase();
-    if (statusUpper === 'PR') resStatus = STATUS_RESIDENT;
-    else if (statusUpper === 'MUMUKSHU') resStatus = STATUS_MUMUKSHU;
-    else if (statusUpper === 'GUEST') resStatus = STATUS_GUEST;
-    else if (statusUpper === 'SEVA' || statusUpper === 'SEVA_KUTIR' || statusUpper === 'SEVA KUTIR') resStatus = STATUS_SEVA_KUTIR;
-  }
-  return fetchResidentsByStatus(req, res, resStatus);
+  return fetchResidentsByStatus(req, res, resolveResStatus(req.query.res_status));
 };
 
 export const gateEntry = async (req, res) => {
@@ -392,12 +409,13 @@ export const gateRecord = async (req, res) => {
 
   const whereClause = {};
 
+  const likeTerm = escapeLike(search);
   if (search) {
     whereClause[Sequelize.Op.or] = [
-      { cardno: { [Sequelize.Op.like]: `%${search}%` } },
-      { status: { [Sequelize.Op.like]: `%${search}%` } },
-      { '$CardDb.issuedto$': { [Sequelize.Op.like]: `%${search}%` } },
-      { '$CardDb.mobno$': { [Sequelize.Op.like]: `%${search}%` } }
+      { cardno: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { status: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { '$CardDb.issuedto$': { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { '$CardDb.mobno$': { [Sequelize.Op.like]: `%${likeTerm}%` } }
     ];
   }
 
@@ -405,17 +423,24 @@ export const gateRecord = async (req, res) => {
   const endDate = req.query.end_date;
 
   if (startDate || endDate) {
+    const parse = (d) => moment(String(d), 'YYYY-MM-DD', true);
+    if (
+      (startDate && !parse(startDate).isValid()) ||
+      (endDate && !parse(endDate).isValid())
+    ) {
+      throw new ApiError(400, 'start_date and end_date must be YYYY-MM-DD');
+    }
     whereClause.createdAt = {};
     if (startDate) {
-      whereClause.createdAt[Sequelize.Op.gte] = moment(startDate).startOf('day').toDate();
+      whereClause.createdAt[Sequelize.Op.gte] = parse(startDate).startOf('day').toDate();
     }
     if (endDate) {
-      whereClause.createdAt[Sequelize.Op.lte] = moment(endDate).endOf('day').toDate();
+      whereClause.createdAt[Sequelize.Op.lte] = parse(endDate).endOf('day').toDate();
     }
   }
 
-  const resStatus = req.query.res_status;
-  if (resStatus) {
+  const resStatus = resolveResStatus(req.query.res_status);
+  if (resStatus !== 'all') {
     whereClause['$CardDb.res_status$'] = resStatus;
   }
 
@@ -459,13 +484,11 @@ export const gateRecord = async (req, res) => {
       }
     });
   } else {
-    const records = await GateRecord.findAll(queryOptions);
+    queryOptions.limit = MAX_UNPAGED_ROWS;
+    const { count, rows } = await GateRecord.findAndCountAll(queryOptions);
     return res.status(200).send({
       message: 'Success',
-      data: {
-        records,
-        pagination: null
-      }
+      data: unpagedData(rows, count)
     });
   }
 };

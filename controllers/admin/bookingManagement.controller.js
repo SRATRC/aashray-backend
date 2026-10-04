@@ -157,6 +157,12 @@ export const getBookingDetails = async (req, res) => {
     case TYPE_FOOD:
       booking = await FoodDb.findOne({ where: { id: bookingid } });
       break;
+    case TYPE_ADHYAYAN:
+      booking = await ShibirBookingDb.findOne({
+        where,
+        include: [...withName, { model: ShibirDb }]
+      });
+      break;
     default:
       throw new ApiError(400, ERR_INVALID_BOOKING_TYPE);
   }

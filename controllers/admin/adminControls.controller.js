@@ -221,62 +221,73 @@ export const bulkDeactivateAdmins = async (req, res) => {
     throw new ApiError(400, 'Invalid usernames array');
   }
 
+  // Usernames match regardless of case, as MySQL's collation does, so a
+  // different-case spelling can't slip past the self-check.
+  const lower = (name) => String(name).toLowerCase();
+
+  // Check if superadmin is trying to deactivate themselves
+  if (usernames.some((name) => lower(name) === lower(req.user.username))) {
+    throw new ApiError(400, 'You cannot deactivate yourself.');
+  }
+
+  const knownAdmins = await AdminUsers.findAll({
+    where: { username: usernames },
+    attributes: ['username']
+  });
+  const knownNames = new Set(knownAdmins.map((known) => lower(known.username)));
+  const unknownUsernames = [...new Set(usernames)].filter((name) => !knownNames.has(lower(name)));
+  if (unknownUsernames.length > 0) {
+    throw new ApiError(400, `Unknown usernames: ${unknownUsernames.join(', ')}`);
+  }
+
   const t = await database.transaction();
   req.transaction = t;
 
-  try {
-    // Check if superadmin is trying to deactivate themselves
-    if (usernames.includes(req.user.username)) {
-      throw new ApiError(400, 'You cannot deactivate yourself.');
+  // Update users status
+  await AdminUsers.update(
+    {
+      status: STATUS_INACTIVE,
+      updatedBy: req.user.username
+    },
+    {
+      where: { username: usernames },
+      transaction: t
     }
+  );
 
-    // Update users status
-    await AdminUsers.update(
-      {
-        status: STATUS_INACTIVE,
-        updatedBy: req.user.username
-      },
-      {
-        where: { username: usernames },
-        transaction: t
+  await t.commit();
+  req.transaction = null;
+
+  // Trigger WhatsApp notification for each deactivated admin asynchronously:
+  // once per real admin, using the stored username
+  for (const { username } of knownAdmins) {
+    AdminUsers.findOne({
+      where: { username },
+      include: [{ model: CardDb, as: 'card', attributes: ['issuedto', 'mobno', 'country'] }]
+    }).then(admin => {
+      if (admin && admin.card && admin.card.mobno) {
+        const phone = admin.card.mobno;
+        const formattedPhone = formatWhatsAppPhone(phone, admin.card.country);
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: admin.card.issuedto || 'Mumukshu' },
+              { type: 'text', text: username },
+              { type: 'text', text: 'deactivated' }
+            ]
+          }
+        ];
+        sendWhatsAppMessage(formattedPhone, 'admin_status_updated', components).catch(err => {
+          console.error(`Error sending WA notification for bulk deactivate of ${username}:`, err.message || err);
+        });
       }
-    );
-
-    await t.commit();
-
-    // Trigger WhatsApp notification for each deactivated admin asynchronously
-    for (const username of usernames) {
-      AdminUsers.findOne({
-        where: { username },
-        include: [{ model: CardDb, as: 'card', attributes: ['issuedto', 'mobno', 'country'] }]
-      }).then(admin => {
-        if (admin && admin.card && admin.card.mobno) {
-          const phone = admin.card.mobno;
-          const formattedPhone = formatWhatsAppPhone(phone, admin.card.country);
-          const components = [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: admin.card.issuedto || 'Mumukshu' },
-                { type: 'text', text: username },
-                { type: 'text', text: 'deactivated' }
-              ]
-            }
-          ];
-          sendWhatsAppMessage(formattedPhone, 'admin_status_updated', components).catch(err => {
-            console.error(`Error sending WA notification for bulk deactivate of ${username}:`, err.message || err);
-          });
-        }
-      }).catch(err => {
-        console.error(`Error fetching user details for WA notification of ${username}:`, err.message || err);
-      });
-    }
-
-    return res.status(200).send({ message: 'Successfully deactivated selected administrators' });
-  } catch (error) {
-    await t.rollback();
-    throw error;
+    }).catch(err => {
+      console.error(`Error fetching user details for WA notification of ${username}:`, err.message || err);
+    });
   }
+
+  return res.status(200).send({ message: 'Successfully deactivated selected administrators' });
 };
 
 export const bulkAssignRoles = async (req, res) => {
@@ -300,48 +311,55 @@ export const bulkAssignRoles = async (req, res) => {
     throw new ApiError(400, `Unknown roles: ${unknownRoles.join(', ')}`);
   }
 
+  const knownAdmins = await AdminUsers.findAll({
+    where: { id: userids },
+    attributes: ['id']
+  });
+  const unknownIds = [...new Set(userids)].filter(
+    (id) => !knownAdmins.some((known) => String(known.id) === String(id))
+  );
+  if (unknownIds.length > 0) {
+    throw new ApiError(400, `Unknown admin ids: ${unknownIds.join(', ')}`);
+  }
+
   const t = await database.transaction();
   req.transaction = t;
 
-  try {
-    for (const userid of userids) {
-      // Fetch active roles
-      const currentRoles = await AdminRoles.findAll({
-        where: { user_id: userid, status: STATUS_ACTIVE },
-        transaction: t
-      });
-      const currentRoleNames = currentRoles.map(r => r.role_name);
+  for (const userid of userids) {
+    // Fetch active roles
+    const currentRoles = await AdminRoles.findAll({
+      where: { user_id: userid, status: STATUS_ACTIVE },
+      transaction: t
+    });
+    const currentRoleNames = currentRoles.map(r => r.role_name);
 
-      // Append new roles and remove duplicates
-      const updatedRoles = [...new Set([...currentRoleNames, ...roles])];
+    // Append new roles and remove duplicates
+    const updatedRoles = [...new Set([...currentRoleNames, ...roles])];
 
-      // Mark all current roles as inactive
-      await AdminRoles.update(
-        {
-          status: STATUS_INACTIVE,
-          updatedBy: req.user.username
-        },
-        {
-          where: { user_id: userid },
-          transaction: t
-        }
-      );
-
-      // Bulk create new set of roles
-      const admin_roles_data = updatedRoles.map(role => ({
-        user_id: userid,
-        role_name: role,
+    // Mark all current roles as inactive
+    await AdminRoles.update(
+      {
+        status: STATUS_INACTIVE,
         updatedBy: req.user.username
-      }));
+      },
+      {
+        where: { user_id: userid },
+        transaction: t
+      }
+    );
 
-      await AdminRoles.bulkCreate(admin_roles_data, { transaction: t });
-    }
+    // Bulk create new set of roles
+    const admin_roles_data = updatedRoles.map(role => ({
+      user_id: userid,
+      role_name: role,
+      updatedBy: req.user.username
+    }));
 
-    await t.commit();
-    return res.status(200).send({ message: 'Successfully updated roles for selected administrators' });
-  } catch (error) {
-    await t.rollback();
-    throw error;
+    await AdminRoles.bulkCreate(admin_roles_data, { transaction: t });
   }
+
+  await t.commit();
+  req.transaction = null;
+  return res.status(200).send({ message: 'Successfully updated roles for selected administrators' });
 };
 
