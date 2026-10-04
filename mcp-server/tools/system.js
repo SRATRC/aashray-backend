@@ -16,9 +16,30 @@ const MYSQL_DATA_DIR = '/var/lib/mysql';
 const DISK_WARN_PERCENT = 85;
 const FINGERPRINT_SALT = 'aashray-mcp-fingerprint';
 
-// The server runs as root while the deploy checkout belongs to the runner user, so
-// git refuses the repo as "dubious ownership" unless told it is safe.
+// The server may run as root while the deploy checkout belongs to the runner user.
+// A repo's own config can make git run commands (filters, hooks, gpg.program), so as root
+// we run git AS THE CHECKOUT'S OWNER: any such command then has only the rights the owner
+// already has, and the owner needs no safe.directory exception. When we are not switching
+// user (local dev, non-root), safe.directory covers the "dubious ownership" check instead.
 const SAFE_DIR = (() => { try { return fs.realpathSync(APP_DIR); } catch { return path.resolve(APP_DIR); } })();
+
+function ownerHome(uid) {
+  try {
+    for (const line of fs.readFileSync('/etc/passwd', 'utf8').split('\n')) {
+      const f = line.split(':');
+      if (f.length >= 6 && Number(f[2]) === uid && f[5]) return f[5];
+    }
+  } catch { /* fall through */ }
+  return APP_DIR;
+}
+
+const GIT_RUN_AS = (() => {
+  try {
+    if (process.getuid?.() !== 0) return null;
+    const { uid, gid } = fs.statSync(APP_DIR);
+    return uid === 0 ? null : { uid, gid, home: ownerHome(uid) };
+  } catch { return null; }
+})();
 
 const gb = (bytes) => Math.round((bytes / 1073741824) * 10) / 10;
 
@@ -35,11 +56,13 @@ async function diskUsage(paths) {
       const s = await fs.promises.statfs(p);
       const total = s.blocks * s.bsize;
       const free = s.bavail * s.bsize;
+      const used = (s.blocks - s.bfree) * s.bsize;
       byDevice.set(dev, {
         paths: [p],
         totalGb: gb(total),
         freeGb: gb(free),
-        usedPercent: total ? Math.round(((total - free) / total) * 100) : null,
+        // Same as `df`: root-reserved blocks count as neither used nor available.
+        usedPercent: used + free ? Math.ceil((used / (used + free)) * 100) : null, // df rounds up
       });
     } catch (err) {
       if (err.code !== 'ENOENT') throw err;
@@ -150,9 +173,17 @@ const getServerHealth = {
 async function git(args) {
   // Strictly read-only: --no-optional-locks stops `git status` rewriting .git/index, and
   // fsmonitor off stops a repo-config command from running (this process may be root).
-  const { stdout } = await execFileAsync('git', [
-    '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', `safe.directory=${SAFE_DIR}`, '-C', APP_DIR, ...args,
-  ], { timeout: 10000 });
+  const base = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false'];
+  const opts = { timeout: 10000, cwd: APP_DIR };
+  if (GIT_RUN_AS) {
+    // Owner's uid/gid, and an env that does not touch root's HOME/XDG paths.
+    opts.uid = GIT_RUN_AS.uid;
+    opts.gid = GIT_RUN_AS.gid;
+    opts.env = { PATH: process.env.PATH, HOME: GIT_RUN_AS.home, GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0' };
+  } else {
+    base.push('-c', `safe.directory=${SAFE_DIR}`);
+  }
+  const { stdout } = await execFileAsync('git', [...base, '-C', APP_DIR, ...args], opts);
   // Only the trailing newline goes: `git status` lines start with a meaningful space (" M file").
   return stdout.replace(/\n+$/, '');
 }

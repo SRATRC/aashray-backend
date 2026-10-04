@@ -254,10 +254,10 @@ const getTableSample = {
       };
     }
 
-    const cap = Math.min(Math.max(1, parseInt(limit, 10) || 10), 50);
+    const rowLimit = Math.min(Math.max(1, parseInt(limit, 10) || 10), 50);
 
     try {
-      const rows = await executeQuery(`SELECT * FROM \`${table}\` LIMIT ${cap}`);
+      const rows = await executeQuery(`SELECT * FROM \`${table}\` LIMIT ${rowLimit}`);
       return {
         content: [{ type: 'text', text: JSON.stringify(toColumnar(rows)) }],
       };
@@ -391,7 +391,10 @@ const getDbActivity = {
             ORDER BY waitingSeconds DESC
             LIMIT 50`,
         );
-        const [status] = await run('SHOW ENGINE INNODB STATUS');
+        // Best effort: a failure here must not lose the rest of the result.
+        let status = null;
+        let statusError = null;
+        try { [status] = await run('SHOW ENGINE INNODB STATUS'); } catch (err) { statusError = err.message; }
         const secrets = collectSecretValues(); // env file + MCP's own credentials; no pm2 call
 
         return {
@@ -403,7 +406,9 @@ const getDbActivity = {
               running: toColumnar(redactColumns(running, ['query'], secrets)),
               openTransactions: toColumnar(redactColumns(transactions, ['query'], secrets)),
               lockWaits: toColumnar(redactColumns(lockWaits, ['waitingQuery', 'blockingQuery'], secrets)),
-              latestDeadlock: latestDeadlock(status.Status, secrets),
+              latestDeadlock: status ? latestDeadlock(status.Status, secrets) : null,
+              // null above means "no deadlock recorded" unless this says the status could not be read.
+              ...(statusError && { latestDeadlockError: redactText(statusError, secrets) }),
             }),
           }],
         };
