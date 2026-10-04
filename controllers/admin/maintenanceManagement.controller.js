@@ -80,12 +80,13 @@ export const fetchMaintenanceReport = async (req, res) => {
   }
 
   if (search) {
+    const likeTerm = escapeLike(search);
     whereClause[Sequelize.Op.or] = [
-      { work_detail: { [Sequelize.Op.like]: `%${escapeLike(search)}%` } },
-      { area_of_work: { [Sequelize.Op.like]: `%${escapeLike(search)}%` } },
-      { comments: { [Sequelize.Op.like]: `%${escapeLike(search)}%` } },
-      { '$CardDb.issuedto$': { [Sequelize.Op.like]: `%${escapeLike(search)}%` } },
-      { '$CardDb.mobno$': { [Sequelize.Op.like]: `%${escapeLike(search)}%` } }
+      { work_detail: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { area_of_work: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { comments: { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { '$CardDb.issuedto$': { [Sequelize.Op.like]: `%${likeTerm}%` } },
+      { '$CardDb.mobno$': { [Sequelize.Op.like]: `%${likeTerm}%` } }
     ];
   }
 

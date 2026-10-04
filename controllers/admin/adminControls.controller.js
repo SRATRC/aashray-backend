@@ -221,8 +221,12 @@ export const bulkDeactivateAdmins = async (req, res) => {
     throw new ApiError(400, 'Invalid usernames array');
   }
 
+  // Usernames match regardless of case, as MySQL's collation does, so a
+  // different-case spelling can't slip past the self-check.
+  const lower = (name) => String(name).toLowerCase();
+
   // Check if superadmin is trying to deactivate themselves
-  if (usernames.includes(req.user.username)) {
+  if (usernames.some((name) => lower(name) === lower(req.user.username))) {
     throw new ApiError(400, 'You cannot deactivate yourself.');
   }
 
@@ -230,9 +234,8 @@ export const bulkDeactivateAdmins = async (req, res) => {
     where: { username: usernames },
     attributes: ['username']
   });
-  const unknownUsernames = [...new Set(usernames)].filter(
-    (name) => !knownAdmins.some((known) => known.username === name)
-  );
+  const knownNames = new Set(knownAdmins.map((known) => lower(known.username)));
+  const unknownUsernames = [...new Set(usernames)].filter((name) => !knownNames.has(lower(name)));
   if (unknownUsernames.length > 0) {
     throw new ApiError(400, `Unknown usernames: ${unknownUsernames.join(', ')}`);
   }
