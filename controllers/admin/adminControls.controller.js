@@ -258,8 +258,9 @@ export const bulkDeactivateAdmins = async (req, res) => {
   await t.commit();
   req.transaction = null;
 
-  // Trigger WhatsApp notification for each deactivated admin asynchronously
-  for (const username of usernames) {
+  // Trigger WhatsApp notification for each deactivated admin asynchronously:
+  // once per real admin, using the stored username
+  for (const { username } of knownAdmins) {
     AdminUsers.findOne({
       where: { username },
       include: [{ model: CardDb, as: 'card', attributes: ['issuedto', 'mobno', 'country'] }]
