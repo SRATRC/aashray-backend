@@ -232,13 +232,16 @@ export const bulkDeactivateAdmins = async (req, res) => {
 
   const knownAdmins = await AdminUsers.findAll({
     where: { username: usernames },
-    attributes: ['username']
+    attributes: ['username', 'status']
   });
   const knownNames = new Set(knownAdmins.map((known) => lower(known.username)));
   const unknownUsernames = [...new Set(usernames)].filter((name) => !knownNames.has(lower(name)));
   if (unknownUsernames.length > 0) {
     throw new ApiError(400, `Unknown usernames: ${unknownUsernames.join(', ')}`);
   }
+  // Only admins who were active get the "deactivated" message; one who was
+  // already inactive isn't told again.
+  const newlyDeactivated = knownAdmins.filter((known) => known.status !== STATUS_INACTIVE);
 
   const t = await database.transaction();
   req.transaction = t;
@@ -258,9 +261,9 @@ export const bulkDeactivateAdmins = async (req, res) => {
   await t.commit();
   req.transaction = null;
 
-  // Trigger WhatsApp notification for each deactivated admin asynchronously:
-  // once per real admin, using the stored username
-  for (const { username } of knownAdmins) {
+  // Trigger WhatsApp notification for each newly deactivated admin
+  // asynchronously: once per real admin, using the stored username
+  for (const { username } of newlyDeactivated) {
     AdminUsers.findOne({
       where: { username },
       include: [{ model: CardDb, as: 'card', attributes: ['issuedto', 'mobno', 'country'] }]

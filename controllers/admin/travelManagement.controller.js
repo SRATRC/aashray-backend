@@ -23,13 +23,16 @@ import {
   STATUS_PROCEED_FOR_PAYMENT,
   STATUS_SEATSFULL_CANCELLED,
   STATUS_WRONGFORM_CANCELLED,
-  STATUS_PAYMENT_PENDING
+  STATUS_PAYMENT_PENDING,
+  STATUS_PAYMENT_FAILED,
+  STATUS_CREDITED
 } from '../../config/constants.js';
 import {
   adminCancelTransaction,
   createPendingTransaction,
   cancelTransaction,
-  adjustAmount
+  adjustTravelAmount,
+  cancelPendingTopUps
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
@@ -260,6 +263,8 @@ export const fetchUpcomingBookings = async (req, res) => {
     startDate: start_date,
     endDate: end_date,
     category: TYPE_TRAVEL,
+    closedTxnStatuses: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_CREDITED],
+    unpaidTxnStatuses: [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED],
     shibirConfirmed: STATUS_CONFIRMED,
     shibirDeleted: STATUS_DELETED
   };
@@ -336,9 +341,16 @@ tbg.bus_name,
 tbg.capacity AS bus_capacity,
 tbg.coordinator_bookingid,
        t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
-       t2.amount, DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
+       COALESCE((SELECT SUM(x.amount) FROM transactions x
+                 WHERE x.bookingid = t1.bookingid AND x.category = :category
+                   AND x.status NOT IN (:closedTxnStatuses)), t2.amount) AS amount,
+       (SELECT SUM(x.amount) FROM transactions x
+         WHERE x.bookingid = t1.bookingid AND x.category = :category
+           AND x.id <> t2.id AND x.status IN (:unpaidTxnStatuses)) AS topUpDue,
+       DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
-     LEFT JOIN transactions t2 ON t2.bookingid = t1.bookingId AND t2.category = :category
+     LEFT JOIN transactions t2 ON t2.id = (
+       SELECT MIN(m.id) FROM transactions m WHERE m.bookingid = t1.bookingid AND m.category = :category)
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
       LEFT JOIN travel_bus_passengers tbp
     ON t1.bookingid = tbp.bookingid
@@ -571,7 +583,7 @@ async function executeTravelStatusUpdate({
   const cardno = booking.bookedBy || booking.cardno;
   const bookedByCard = await validateCard(cardno);
   let bookingWhichCameOutOfWaiting = null;
-  let transaction = await Transactions.findOne({ where: { bookingid }, transaction: t });
+  let transaction = await Transactions.findOne({ where: { bookingid }, order: [['id', 'ASC']], transaction: t });
 
   switch (status) {
     case STATUS_PROCEED_FOR_PAYMENT:
@@ -656,6 +668,34 @@ async function executeTravelStatusUpdate({
     case STATUS_WAITING:
     default:
       throw new ApiError(400, 'Invalid status provided');
+  }
+
+  // Extra charges raised by a fare increase (see adjustTravelAmount) follow the
+  // booking: pending ones are cancelled, and a paid one is refunded together with
+  // the main charge when the cancel issues credits.
+  if (
+    [STATUS_ADMIN_CANCELLED, STATUS_SEATSFULL_CANCELLED, STATUS_WRONGFORM_CANCELLED].includes(status) &&
+    transaction
+  ) {
+    await cancelPendingTopUps(bookingid, transaction.category, user.username, t, logger);
+    const refunds =
+      status !== STATUS_ADMIN_CANCELLED || issueCredits === 'yes';
+    if (refunds) {
+      const paidExtras = await Transactions.findAll({
+        where: {
+          bookingid,
+          category: transaction.category,
+          id: { [Sequelize.Op.ne]: transaction.id },
+          status: [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED]
+        },
+        order: [['id', 'ASC']],
+        lock: t.LOCK.UPDATE,
+        transaction: t
+      });
+      for (const extraTxn of paidExtras) {
+        await cancelTransaction(user, bookedByCard, extraTxn, t, true);
+      }
+    }
   }
 
   await booking.update(
@@ -922,7 +962,8 @@ export const updateTransactionStatus = async (req, res) => {
   req.transaction = t;
 
   const transaction = await Transactions.findOne({
-    where: { cardno, bookingid, type }
+    where: { cardno, bookingid, type },
+    order: [['id', 'ASC']]
   });
 
   if (!transaction) {
@@ -972,24 +1013,31 @@ export async function updateBooking(req, res) {
 
   /* 1️⃣ TRANSACTION TABLE (amount) */
   if (amount !== undefined) {
-    const transaction = await Transactions.findOne({
+    // A cancelled booking's charges are closed: a member cancel of a paid booking
+    // keeps the money by rule, so a fare edit here must not raise a top-up or
+    // give credit.
+    const current = await TravelDb.findOne({
       where: { bookingid },
-      transaction: t,
+      attributes: ['status'],
+      lock: t.LOCK.UPDATE,
+      transaction: t
     });
-
-    if (!transaction) {
-      throw new ApiError(404, 'Transaction not found');
+    if (
+      current &&
+      [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_SEATSFULL_CANCELLED, STATUS_WRONGFORM_CANCELLED].includes(current.status)
+    ) {
+      throw new ApiError(400, 'The fare of a cancelled booking cannot be changed');
     }
-
     // A blank string would parse as 0, so only a number or a non-blank string
-    // is parsed. adjustAmount refuses NaN and negative numbers with a 400.
+    // is parsed. adjustTravelAmount refuses NaN and negative numbers with a 400.
     const isNumeric =
       typeof amount === 'number' || (typeof amount === 'string' && amount.trim() !== '');
-    const { settled, reopened } = await adjustAmount(
-      transaction,
+    const { settled, reopened } = await adjustTravelAmount(
+      bookingid,
       isNumeric ? Number(amount) : NaN,
-      req.user.username,
-      t
+      req.user,
+      t,
+      req.log
     );
 
     // Same as the webhook and useCredit: a charge that is now paid confirms
