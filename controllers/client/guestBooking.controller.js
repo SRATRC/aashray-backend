@@ -211,11 +211,7 @@ export const guestBooking = async (req, res) => {
   }
 
   var order = null;
-  if (
-    req.user.country == 'India' &&
-    amount > 0 &&
-    req.body.pay_later !== true
-  ) {
+  if (amount > 0 && req.body.pay_later !== true) {
     req.log.info('guest_booking_creating_order', { cardno: req.user.cardno, amount });
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
@@ -802,6 +798,9 @@ async function bookFlat(data, t, user) {
     );
   }
 
+  // createOrder must stay false: the caller creates one order for the whole
+  // booking. Creating one here too would overwrite it, and result.order.amount
+  // is in paise, which the caller would then multiply by 100 again.
   const result = await bookFlatForMumukshus(
     checkin_date,
     checkout_date,

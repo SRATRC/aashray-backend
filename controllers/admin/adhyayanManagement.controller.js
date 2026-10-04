@@ -66,7 +66,7 @@ export const createAdhyayan = async (req, res) => {
     whatsapp_link
   } = req.body;
 
-  req.log.info('create_adhyayan_start', { name, speaker, start_date, end_date, total_seats, amount });
+  req.log.info('create_adhyayan_start', { name, speaker, start_date, end_date, total_seats, amount, whatsapp_link });
 
   const alreadyExists = await ShibirDb.findOne({
     where: {
@@ -164,8 +164,8 @@ export const fetchALLAdhyayan = async (req, res) => {
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_PAYMENT_PENDING}' THEN 1 END) AS pending_count,
       shibir_db.food_allowed,
       shibir_db.comments,
-      shibir_db.status,
       shibir_db.whatsapp_link,
+      shibir_db.status,
       shibir_db.whatsapp_group_jid,
       shibir_db.updatedBy
     FROM 
@@ -186,8 +186,8 @@ export const fetchALLAdhyayan = async (req, res) => {
       shibir_db.available_seats,
       shibir_db.food_allowed,
       shibir_db.comments,
-      shibir_db.status,
       shibir_db.whatsapp_link,
+      shibir_db.status,
       shibir_db.whatsapp_group_jid,
       shibir_db.updatedBy
     ORDER BY 
@@ -228,6 +228,7 @@ export const fetchAdhyayanByLocation = async (req, res) => {
       COUNT(CASE WHEN shibir_booking_db.status = '${STATUS_ADMIN_CANCELLED}' THEN 1 END) AS admin_cancelled_count,
       shibir_db.food_allowed,
       shibir_db.comments,
+      shibir_db.whatsapp_link,
       shibir_db.status,
       shibir_db.updatedBy
     FROM 
@@ -249,6 +250,7 @@ export const fetchAdhyayanByLocation = async (req, res) => {
       shibir_db.available_seats,
       shibir_db.food_allowed,
       shibir_db.comments,
+      shibir_db.whatsapp_link,
       shibir_db.status,
       shibir_db.updatedBy
     ORDER BY
@@ -447,7 +449,7 @@ export const updateAdhyayan = async (req, res) => {
   } = req.body;
 
   const adhyayanId = req.params.id;
-  req.log.info('update_adhyayan_start', { adhyayanId, name, total_seats, amount });
+  req.log.info('update_adhyayan_start', { adhyayanId, name, total_seats, amount, whatsapp_link });
   const adhyayan = (await validateAdhyayans(adhyayanId))[0];
 
   const month = moment(start_date).format('MMMM');

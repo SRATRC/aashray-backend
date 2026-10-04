@@ -37,6 +37,15 @@ describe('utsavParticipantHistoryReport Controller', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // clearAllMocks keeps queued mockResolvedValueOnce values; a test that
+    // does not use them all would feed them to the next test, so the result
+    // depended on test order. Reset drops them.
+    database.query.mockReset();
+    // Default answer for any query a test does not queue itself (queued
+    // once-values win). Earlier this default leaked from the 'empty report'
+    // test, so the other tests only passed when it ran first.
+    database.query.mockResolvedValue([]);
+    UtsavDb.findOne.mockReset();
     req = {
       query: {},
       log: {
