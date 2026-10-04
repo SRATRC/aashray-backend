@@ -411,6 +411,11 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
   if (rows.length === 0) {
     throw new ApiError(404, 'Transaction not found');
   }
+  // An authorized payment is neither pending nor paid yet: editing now could
+  // raise a second top-up for money that is about to be captured.
+  if (rows.some((r) => r.status === STATUS_PAYMENT_AUTHORIZED)) {
+    throw new ApiError(409, 'A payment for this booking is in progress. Try again in a few minutes.');
+  }
 
   const main = rows[0];
   const completed = rows.filter((r) =>
