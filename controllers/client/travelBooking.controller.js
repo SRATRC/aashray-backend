@@ -72,7 +72,7 @@ export const FetchUpcoming = async (req, res) => {
        t8.mobno AS coordinator_contact
     FROM travel_db t1
     LEFT JOIN transactions t2 ON t2.id = (
-      SELECT MIN(m.id) FROM transactions m WHERE m.bookingid = t1.bookingid)
+      SELECT MIN(m.id) FROM transactions m WHERE m.bookingid = t1.bookingid AND m.category = :category)
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
     LEFT JOIN travel_bus_passengers t4 ON t1.bookingid = t4.bookingid
     LEFT JOIN travel_bus_group t5 ON t4.bus_group_id = t5.id
