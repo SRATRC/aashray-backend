@@ -32,7 +32,8 @@ import {
   createPendingTransaction,
   cancelTransaction,
   adjustTravelAmount,
-  cancelPendingTopUps
+  cancelPendingTopUps,
+  toPaise
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
@@ -1012,7 +1013,42 @@ export async function updateBooking(req, res) {
   const updatedFields = [];
 
   /* 1️⃣ TRANSACTION TABLE (amount) */
-  if (amount !== undefined) {
+  // The staff panel's edit form always sends the fare it shows, even when only a
+  // comment or the pickup changed. That fare is the travel report's amount: the
+  // sum of the open travel charges, or the main charge when none is open. Sending
+  // it back unchanged is not a fare edit, so none of the fare rules below apply.
+  const amountIsNumeric =
+    typeof amount === 'number' || (typeof amount === 'string' && amount.trim() !== '');
+  let fareUnchanged = false;
+  if (amount !== undefined && amountIsNumeric) {
+    const charges = await Transactions.findAll({
+      where: { bookingid, category: TYPE_TRAVEL },
+      order: [['id', 'ASC']],
+      lock: t.LOCK.UPDATE,
+      transaction: t
+    });
+    const open = charges.filter(
+      (c) => ![STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_CREDITED].includes(c.status)
+    );
+    const shown = open.length
+      ? open.reduce((sum, c) => sum + toPaise(Number(c.amount)), 0)
+      : charges.length
+        ? toPaise(Number(charges[0].amount))
+        : null;
+    // Saving 0 on an unpaid ₹0 charge settles it (adjustAmount), so that is still a fare edit.
+    const settlesAtZero =
+      shown === 0 &&
+      open.some((c) => [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING, STATUS_PAYMENT_FAILED].includes(c.status));
+    fareUnchanged = shown !== null && !settlesAtZero && toPaise(Number(amount)) === shown;
+    if (fareUnchanged) {
+      // Still a saved field, as before: a request carrying only the same fare
+      // gets 200, not "No fields provided to update".
+      req.log.info('travel_amount_unchanged', { bookingid, amount });
+      updatedFields.push('amount');
+    }
+  }
+
+  if (amount !== undefined && !fareUnchanged) {
     // A cancelled booking's charges are closed: a member cancel of a paid booking
     // keeps the money by rule, so a fare edit here must not raise a top-up or
     // give credit.
@@ -1030,11 +1066,9 @@ export async function updateBooking(req, res) {
     }
     // A blank string would parse as 0, so only a number or a non-blank string
     // is parsed. adjustTravelAmount refuses NaN and negative numbers with a 400.
-    const isNumeric =
-      typeof amount === 'number' || (typeof amount === 'string' && amount.trim() !== '');
     const { settled, reopened } = await adjustTravelAmount(
       bookingid,
-      isNumeric ? Number(amount) : NaN,
+      amountIsNumeric ? Number(amount) : NaN,
       req.user,
       t,
       req.log
