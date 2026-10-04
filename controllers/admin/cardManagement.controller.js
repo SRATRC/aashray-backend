@@ -19,6 +19,7 @@ import { Op } from 'sequelize';
 import { sendWhatsAppMessage } from '../../utils/sendWhatsAppMessage.js';
 import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 import moment from 'moment-timezone';
+import { escapeLike } from '../../utils/listRequest.js';
 
 
 
@@ -167,9 +168,9 @@ export const searchCardsByName = async (req, res) => {
     const data = await CardDb.findAll({
       where: {
         [Sequelize.Op.or]: [
-          { issuedto: { [Sequelize.Op.like]: `%${term}%` } },
-          { mobno: { [Sequelize.Op.like]: `%${term}%` } },
-          { cardno: { [Sequelize.Op.like]: `%${term}%` } } // ✅ added this
+          { issuedto: { [Sequelize.Op.like]: `%${escapeLike(term)}%` } },
+          { mobno: { [Sequelize.Op.like]: `%${escapeLike(term)}%` } },
+          { cardno: { [Sequelize.Op.like]: `%${escapeLike(term)}%` } }
         ]
       },
       attributes: { exclude: ['token'] }
