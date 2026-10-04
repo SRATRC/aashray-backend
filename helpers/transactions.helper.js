@@ -76,7 +76,9 @@ export async function userCancelBooking(user, booking, t) {
   if (transaction) {
     await userCancelTransaction(user, null, transaction, t);
     // A pending fare top-up (see adjustTravelAmount) must not outlive the booking.
-    await cancelPendingTopUps(booking.bookingid, transaction.category, user.username, t);
+    await cancelPendingTopUps(booking.bookingid, transaction.category, user.username, t, {
+      status: STATUS_CANCELLED
+    });
   }
 
   await booking.update(
@@ -351,29 +353,42 @@ const isReallyPaid = (txn) =>
   [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(txn.status) &&
   !String(txn.description || '').startsWith(SETTLED_AT_ZERO);
 
+// A top-up that has not received money yet. Never the main charge (rows[0]).
+const isPendingTopUp = (r) =>
+  [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED].includes(r.status) &&
+  String(r.description || '').startsWith(TOP_UP_MARK);
+
+async function cancelTopUpRows(rows, status, updatedBy, t, log) {
+  for (const row of rows) {
+    await row.update(
+      { status, description: `${TOP_UP_MARK} cancelled`, updatedBy },
+      { transaction: t }
+    );
+    log.info('travel_top_up_cancelled', { bookingid: row.bookingid, transactionId: row.id, amount: row.amount, status });
+  }
+}
+
 /**
  * Cancels the pending extra charges of a booking (see adjustTravelAmount).
  * They never received money and carry no credit, so nothing is refunded. A top-up
  * that was already paid is left alone: the caller decides what to do with money.
+ * `status` follows who cancelled: a member cancel passes STATUS_CANCELLED.
  */
-export async function cancelPendingTopUps(bookingid, category, updatedBy, t, log = logger) {
+export async function cancelPendingTopUps(
+  bookingid,
+  category,
+  updatedBy,
+  t,
+  { status = STATUS_ADMIN_CANCELLED, log = logger } = {}
+) {
   const rows = await Transactions.findAll({
     where: { bookingid, category },
     order: [['id', 'ASC']],
     lock: t.LOCK.UPDATE,
     transaction: t
   });
-  const pending = rows
-    .slice(1)
-    .filter((r) => [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED].includes(r.status) &&
-      String(r.description || '').startsWith(TOP_UP_MARK));
-  for (const row of pending) {
-    await row.update(
-      { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, updatedBy },
-      { transaction: t }
-    );
-    log.info('travel_top_up_cancelled', { bookingid, transactionId: row.id, amount: row.amount });
-  }
+  const pending = rows.slice(1).filter(isPendingTopUp);
+  await cancelTopUpRows(pending, status, updatedBy, t, log);
   return pending.length;
 }
 
@@ -432,22 +447,13 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
   const amountP = toPaise(amount);
   const paidP = completed.reduce((sum, r) => sum + toPaise(Number(r.amount)), 0);
   const paid = paidP / 100;
-  const pendingTopUps = rows.slice(1).filter(
-    (r) =>
-      [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED].includes(r.status) &&
-      String(r.description || '').startsWith(TOP_UP_MARK)
-  );
+  const pendingTopUps = rows.slice(1).filter(isPendingTopUp);
   const base = { settled: false, reopened: false };
 
   if (amountP > paidP) {
     const diff = (amountP - paidP) / 100;
     const [keep, ...extra] = pendingTopUps;
-    for (const row of extra) {
-      await row.update(
-        { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, updatedBy: user.username },
-        { transaction: t }
-      );
-    }
+    await cancelTopUpRows(extra, STATUS_ADMIN_CANCELLED, user.username, t, log);
     if (keep) {
       if (toPaise(Number(keep.amount)) !== toPaise(diff)) {
         // The Razorpay order stays on the row, as on any edited charge: /pay
@@ -477,13 +483,7 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
     return { ...base, topUp: 'created' };
   }
 
-  for (const row of pendingTopUps) {
-    await row.update(
-      { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, updatedBy: user.username },
-      { transaction: t }
-    );
-    log.info('travel_top_up_cancelled', { bookingid, transactionId: row.id, amount: row.amount });
-  }
+  await cancelTopUpRows(pendingTopUps, STATUS_ADMIN_CANCELLED, user.username, t, log);
 
   if (amountP === paidP) {
     log.info('travel_amount_edit_same_as_paid', { bookingid, paid, cancelledTopUps: pendingTopUps.length });

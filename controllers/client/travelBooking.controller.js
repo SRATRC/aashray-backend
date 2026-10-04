@@ -10,6 +10,9 @@ import {
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
   STATUS_CREDITED,
+  STATUS_CASH_PENDING,
+  STATUS_PAYMENT_PENDING,
+  STATUS_PAYMENT_FAILED,
   TYPE_TRAVEL,
   MSG_CANCEL_SUCCESSFUL,
   RAJ_PRAVAS_EMAIL,
@@ -59,6 +62,9 @@ export const FetchUpcoming = async (req, res) => {
        COALESCE((SELECT SUM(x.amount) FROM transactions x
                  WHERE x.bookingid = t1.bookingid AND x.category = :category
                    AND x.status NOT IN (:closedTxnStatuses)), t2.amount) AS amount,
+       (SELECT SUM(x.amount) FROM transactions x
+         WHERE x.bookingid = t1.bookingid AND x.category = :category
+           AND x.id <> t2.id AND x.status IN (:unpaidTxnStatuses)) AS topUpDue,
        t2.status AS transaction_status,
        t5.bus_name,
        t6.timing AS departure_time,
@@ -83,6 +89,7 @@ export const FetchUpcoming = async (req, res) => {
         cardno: req.user.cardno,
         category: TYPE_TRAVEL,
         closedTxnStatuses: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_CREDITED],
+        unpaidTxnStatuses: [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED],
         limit: pageSize,
         offset: offset
       },
