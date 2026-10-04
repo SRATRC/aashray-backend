@@ -677,7 +677,7 @@ async function executeTravelStatusUpdate({
     [STATUS_ADMIN_CANCELLED, STATUS_SEATSFULL_CANCELLED, STATUS_WRONGFORM_CANCELLED].includes(status) &&
     transaction
   ) {
-    await cancelPendingTopUps(bookingid, transaction.category, user.username, t, logger);
+    await cancelPendingTopUps(bookingid, transaction.category, user.username, t, { log: logger });
     const refunds =
       status !== STATUS_ADMIN_CANCELLED || issueCredits === 'yes';
     if (refunds) {
