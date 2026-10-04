@@ -76,9 +76,12 @@ export async function userCancelBooking(user, booking, t) {
   if (transaction) {
     await userCancelTransaction(user, null, transaction, t);
     // A pending fare top-up (see adjustTravelAmount) must not outlive the booking.
-    await cancelPendingTopUps(booking.bookingid, transaction.category, user.username, t, {
-      status: STATUS_CANCELLED
-    });
+    // Only travel fares get top-ups, so other booking types skip the sweep.
+    if (transaction.category === TYPE_TRAVEL) {
+      await cancelPendingTopUps(booking.bookingid, transaction.category, user.username, t, {
+        status: STATUS_CANCELLED
+      });
+    }
   }
 
   await booking.update(
@@ -353,19 +356,38 @@ const isReallyPaid = (txn) =>
   [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(txn.status) &&
   !String(txn.description || '').startsWith(SETTLED_AT_ZERO);
 
+const UNPAID_TOP_UP_STATUSES = [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED];
+
 // A top-up that has not received money yet. Never the main charge (rows[0]).
 const isPendingTopUp = (r) =>
-  [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED].includes(r.status) &&
-  String(r.description || '').startsWith(TOP_UP_MARK);
+  UNPAID_TOP_UP_STATUSES.includes(r.status) && String(r.description || '').startsWith(TOP_UP_MARK);
 
+// transactions has no index on bookingid, so a locking read by booking would
+// lock every row in the table (and deadlock parallel cancels). The booking's
+// charges are found with a plain read and then locked or updated by id only.
+async function findTravelChargeRows(bookingid, category, t) {
+  return Transactions.findAll({
+    where: { bookingid, category },
+    order: [['id', 'ASC']],
+    transaction: t
+  });
+}
+
+// Cancels by id, and only while the row is still unpaid: a top-up the webhook
+// completed a moment ago keeps its payment.
 async function cancelTopUpRows(rows, status, updatedBy, t, log) {
+  let cancelled = 0;
   for (const row of rows) {
-    await row.update(
+    const [affected] = await Transactions.update(
       { status, description: `${TOP_UP_MARK} cancelled`, updatedBy },
-      { transaction: t }
+      { where: { id: row.id, status: UNPAID_TOP_UP_STATUSES }, transaction: t }
     );
-    log.info('travel_top_up_cancelled', { bookingid: row.bookingid, transactionId: row.id, amount: row.amount, status });
+    if (affected) {
+      cancelled += 1;
+      log.info('travel_top_up_cancelled', { bookingid: row.bookingid, transactionId: row.id, amount: row.amount, status });
+    }
   }
+  return cancelled;
 }
 
 /**
@@ -381,20 +403,15 @@ export async function cancelPendingTopUps(
   t,
   { status = STATUS_ADMIN_CANCELLED, log = logger } = {}
 ) {
-  const rows = await Transactions.findAll({
-    where: { bookingid, category },
-    order: [['id', 'ASC']],
-    lock: t.LOCK.UPDATE,
-    transaction: t
-  });
+  const rows = await findTravelChargeRows(bookingid, category, t);
   const pending = rows.slice(1).filter(isPendingTopUp);
-  await cancelTopUpRows(pending, status, updatedBy, t, log);
-  return pending.length;
+  return cancelTopUpRows(pending, status, updatedBy, t, log);
 }
 
 /**
  * Staff edit of the amount on a travel booking (all amounts are net of applied
- * credit, i.e. the `amount` field). Locks the booking's transactions.
+ * credit, i.e. the `amount` field). Locks the booking's transactions by id.
+ * The caller must hold the travel booking's row lock (updateBooking does).
  *
  * Nothing really paid yet: same as adjustAmount (edit, 0 settles, reopen).
  * Really paid (a completed row without the settled-at-zero mark), with
@@ -417,12 +434,17 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
     throw new ApiError(400, 'Amount must be a whole number of rupees');
   }
 
-  const rows = await Transactions.findAll({
-    where: { bookingid, category: TYPE_TRAVEL },
-    order: [['id', 'ASC']],
-    lock: t.LOCK.UPDATE,
-    transaction: t
-  });
+  // The caller holds the travel booking's row lock, so no other fare change on
+  // this booking can add a charge between the plain read and the lock by id.
+  const found = await findTravelChargeRows(bookingid, TYPE_TRAVEL, t);
+  const rows = found.length
+    ? await Transactions.findAll({
+        where: { id: found.map((r) => r.id) },
+        order: [['id', 'ASC']],
+        lock: t.LOCK.UPDATE,
+        transaction: t
+      })
+    : [];
   if (rows.length === 0) {
     throw new ApiError(404, 'Transaction not found');
   }

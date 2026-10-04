@@ -21,7 +21,7 @@ import {
   ERR_BOOKING_NOT_FOUND,
   RESEARCH_CENTRE
 } from '../../config/constants.js';
-import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { userCancelBooking, TOP_UP_MARK } from '../../helpers/transactions.helper.js';
 import {
   updateWaitingTravelBooking,
   sendTravelBookingStatusUpdateMail
@@ -59,20 +59,24 @@ export const FetchUpcoming = async (req, res) => {
        t1.comments,
        t1.admin_comments,
        t1.status,
-       COALESCE((SELECT SUM(x.amount) FROM transactions x
-                 WHERE x.bookingid = t1.bookingid AND x.category = :category
-                   AND x.status NOT IN (:closedTxnStatuses)), t2.amount) AS amount,
-       (SELECT SUM(x.amount) FROM transactions x
-         WHERE x.bookingid = t1.bookingid AND x.category = :category
-           AND x.id <> t2.id AND x.status IN (:unpaidTxnStatuses)) AS topUpDue,
+       COALESCE(tx.open_total, t2.amount) AS amount,
+       tx.top_up_due AS topUpDue,
        t2.status AS transaction_status,
        t5.bus_name,
        t6.timing AS departure_time,
        t8.issuedto AS coordinator_name,
        t8.mobno AS coordinator_contact
     FROM travel_db t1
-    LEFT JOIN transactions t2 ON t2.id = (
-      SELECT MIN(m.id) FROM transactions m WHERE m.bookingid = t1.bookingid AND m.category = :category)
+    LEFT JOIN (
+      SELECT bookingid,
+             MIN(id) AS main_id,
+             SUM(CASE WHEN status NOT IN (:closedTxnStatuses) THEN amount END) AS open_total,
+             SUM(CASE WHEN status IN (:unpaidTxnStatuses) AND description LIKE :topUpLike THEN amount END) AS top_up_due
+        FROM transactions
+       WHERE category = :category
+       GROUP BY bookingid
+    ) tx ON tx.bookingid = t1.bookingid
+    LEFT JOIN transactions t2 ON t2.id = tx.main_id
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
     LEFT JOIN travel_bus_passengers t4 ON t1.bookingid = t4.bookingid
     LEFT JOIN travel_bus_group t5 ON t4.bus_group_id = t5.id
@@ -90,6 +94,8 @@ export const FetchUpcoming = async (req, res) => {
         category: TYPE_TRAVEL,
         closedTxnStatuses: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_CREDITED],
         unpaidTxnStatuses: [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED],
+        // Read once, grouped by booking (see the staff travel report).
+        topUpLike: `${TOP_UP_MARK}%`,
         limit: pageSize,
         offset: offset
       },
@@ -110,6 +116,8 @@ export const CancelTravel = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  // Locked first, inside t: a staff fare edit takes the same one-row lock, so it
+  // cannot add a top-up that the cancel's top-up sweep would miss.
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
@@ -119,7 +127,9 @@ export const CancelTravel = async (req, res) => {
         STATUS_PROCEED_FOR_PAYMENT,
         STATUS_WAITING
       ]
-    }
+    },
+    lock: t.LOCK.UPDATE,
+    transaction: t
   });
 
   if (!booking) {

@@ -33,7 +33,8 @@ import {
   cancelTransaction,
   adjustTravelAmount,
   cancelPendingTopUps,
-  toPaise
+  toPaise,
+  TOP_UP_MARK
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { updateWaitingTravelBooking, sendTravelBookingStatusUpdateMail } from '../../helpers/travelBooking.helper.js';
@@ -266,6 +267,10 @@ export const fetchUpcomingBookings = async (req, res) => {
     category: TYPE_TRAVEL,
     closedTxnStatuses: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_CREDITED],
     unpaidTxnStatuses: [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED],
+    // The tx join reads the travel charges once, grouped by booking: a subquery
+    // per row would scan the whole transactions table once per booking (it has
+    // no bookingid index). main_id is the main charge; top-ups carry the mark.
+    topUpLike: `${TOP_UP_MARK}%`,
     shibirConfirmed: STATUS_CONFIRMED,
     shibirDeleted: STATUS_DELETED
   };
@@ -342,16 +347,20 @@ tbg.bus_name,
 tbg.capacity AS bus_capacity,
 tbg.coordinator_bookingid,
        t1.comments, t1.admin_comments, t1.status, t3.issuedto, t3.mobno, t3.center,
-       COALESCE((SELECT SUM(x.amount) FROM transactions x
-                 WHERE x.bookingid = t1.bookingid AND x.category = :category
-                   AND x.status NOT IN (:closedTxnStatuses)), t2.amount) AS amount,
-       (SELECT SUM(x.amount) FROM transactions x
-         WHERE x.bookingid = t1.bookingid AND x.category = :category
-           AND x.id <> t2.id AND x.status IN (:unpaidTxnStatuses)) AS topUpDue,
+       COALESCE(tx.open_total, t2.amount) AS amount,
+       tx.top_up_due AS topUpDue,
        DATE(t2.updatedAt) as paymentDate, t2.status as paymentStatus, t3.res_status
       FROM travel_db t1
-     LEFT JOIN transactions t2 ON t2.id = (
-       SELECT MIN(m.id) FROM transactions m WHERE m.bookingid = t1.bookingid AND m.category = :category)
+     LEFT JOIN (
+      SELECT bookingid,
+             MIN(id) AS main_id,
+             SUM(CASE WHEN status NOT IN (:closedTxnStatuses) THEN amount END) AS open_total,
+             SUM(CASE WHEN status IN (:unpaidTxnStatuses) AND description LIKE :topUpLike THEN amount END) AS top_up_due
+        FROM transactions
+       WHERE category = :category
+       GROUP BY bookingid
+    ) tx ON tx.bookingid = t1.bookingid
+    LEFT JOIN transactions t2 ON t2.id = tx.main_id
      LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
       LEFT JOIN travel_bus_passengers tbp
     ON t1.bookingid = tbp.bookingid
@@ -549,6 +558,17 @@ async function executeTravelStatusUpdate({
 
   logger.info('travel_update_booking_status_start', { bookingid, status, adminComments, issueCredits });
 
+  // First statement in t: lock the booking row (one row, keyed on bookingid).
+  // A staff fare edit takes the same lock, so it cannot add or change a top-up
+  // while this status change sweeps and refunds them. Locked on its own, so the
+  // card row joined below is not locked too.
+  await TravelDb.findOne({
+    where: { bookingid },
+    attributes: ['bookingid'],
+    lock: t.LOCK.UPDATE,
+    transaction: t
+  });
+
   const booking = await TravelDb.findOne({
     include: [
       {
@@ -682,17 +702,23 @@ async function executeTravelStatusUpdate({
     const refunds =
       status !== STATUS_ADMIN_CANCELLED || issueCredits === 'yes';
     if (refunds) {
-      const paidExtras = await Transactions.findAll({
-        where: {
-          bookingid,
-          category: transaction.category,
-          id: { [Sequelize.Op.ne]: transaction.id },
-          status: [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED]
-        },
-        order: [['id', 'ASC']],
-        lock: t.LOCK.UPDATE,
-        transaction: t
-      });
+      // Found without a lock (no bookingid index: a locking read here would
+      // lock the whole transactions table), then locked by id, still paid.
+      const extraIds = (
+        await Transactions.findAll({
+          where: { bookingid, category: transaction.category, id: { [Sequelize.Op.ne]: transaction.id } },
+          attributes: ['id'],
+          transaction: t
+        })
+      ).map((r) => r.id);
+      const paidExtras = extraIds.length
+        ? await Transactions.findAll({
+            where: { id: extraIds, status: [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED] },
+            order: [['id', 'ASC']],
+            lock: t.LOCK.UPDATE,
+            transaction: t
+          })
+        : [];
       for (const extraTxn of paidExtras) {
         await cancelTransaction(user, bookedByCard, extraTxn, t, true);
       }
@@ -1019,12 +1045,24 @@ export async function updateBooking(req, res) {
   // it back unchanged is not a fare edit, so none of the fare rules below apply.
   const amountIsNumeric =
     typeof amount === 'number' || (typeof amount === 'string' && amount.trim() !== '');
+  // Fare changes on one booking run one at a time: travel_db is keyed on
+  // bookingid, so this locks one row. The charges are then read without a lock
+  // (transactions has no bookingid index, so a locking read there would lock
+  // the whole table) and locked by id inside adjustTravelAmount.
+  const lockedBooking =
+    amount !== undefined
+      ? await TravelDb.findOne({
+          where: { bookingid },
+          attributes: ['status'],
+          lock: t.LOCK.UPDATE,
+          transaction: t
+        })
+      : null;
   let fareUnchanged = false;
   if (amount !== undefined && amountIsNumeric) {
     const charges = await Transactions.findAll({
       where: { bookingid, category: TYPE_TRAVEL },
       order: [['id', 'ASC']],
-      lock: t.LOCK.UPDATE,
       transaction: t
     });
     const open = charges.filter(
@@ -1052,15 +1090,9 @@ export async function updateBooking(req, res) {
     // A cancelled booking's charges are closed: a member cancel of a paid booking
     // keeps the money by rule, so a fare edit here must not raise a top-up or
     // give credit.
-    const current = await TravelDb.findOne({
-      where: { bookingid },
-      attributes: ['status'],
-      lock: t.LOCK.UPDATE,
-      transaction: t
-    });
     if (
-      current &&
-      [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_SEATSFULL_CANCELLED, STATUS_WRONGFORM_CANCELLED].includes(current.status)
+      lockedBooking &&
+      [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_SEATSFULL_CANCELLED, STATUS_WRONGFORM_CANCELLED].includes(lockedBooking.status)
     ) {
       throw new ApiError(400, 'The fare of a cancelled booking cannot be changed');
     }
