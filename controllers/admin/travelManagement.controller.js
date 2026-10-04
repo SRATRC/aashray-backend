@@ -1035,7 +1035,11 @@ export async function updateBooking(req, res) {
       : charges.length
         ? toPaise(Number(charges[0].amount))
         : null;
-    fareUnchanged = shown !== null && toPaise(Number(amount)) === shown;
+    // Saving 0 on an unpaid ₹0 charge settles it (adjustAmount), so that is still a fare edit.
+    const settlesAtZero =
+      shown === 0 &&
+      open.some((c) => [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING, STATUS_PAYMENT_FAILED].includes(c.status));
+    fareUnchanged = shown !== null && !settlesAtZero && toPaise(Number(amount)) === shown;
     if (fareUnchanged) {
       // Still a saved field, as before: a request carrying only the same fare
       // gets 200, not "No fields provided to update".
