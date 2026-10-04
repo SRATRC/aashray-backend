@@ -1,20 +1,27 @@
 import mysql from 'mysql2/promise';
 import { DB } from '../config.js';
+import { collectSecretValues, redactText, cap } from '../redact.js';
+import { errorResult } from './result.js';
 import logger from '../logger.js';
 import { loadAnnotations, fetchSchemaRows, buildSchemaIndex, buildSchemaDetail } from '../resources/schema.js';
+
+// One connection config for the pool and the fresh activity connection, so they cannot drift.
+const CONNECTION = {
+  host: DB.host,
+  port: DB.port,
+  user: DB.user,
+  password: DB.password,
+  database: DB.database,
+  connectTimeout: 10000,
+};
 
 let pool = null;
 
 function getPool() {
   if (!pool) {
     pool = mysql.createPool({
-      host: DB.host,
-      port: DB.port,
-      user: DB.user,
-      password: DB.password,
-      database: DB.database,
+      ...CONNECTION,
       connectionLimit: 3,
-      connectTimeout: 10000,
       waitForConnections: true,
       queueLimit: 10,
     });
@@ -22,11 +29,15 @@ function getPool() {
   return pool;
 }
 
+async function queryOn(connection, sql, params = []) {
+  const [rows] = await connection.execute({ sql, timeout: 5000 }, params);
+  return rows;
+}
+
 export async function executeQuery(sql, params = []) {
   const connection = await getPool().getConnection();
   try {
-    const [rows] = await connection.execute({ sql, timeout: 5000 }, params);
-    return rows;
+    return await queryOn(connection, sql, params);
   } finally {
     connection.release();
   }
@@ -36,10 +47,7 @@ const MAX_CELL_LEN = 500;
 
 function sanitizeCell(value) {
   if (Buffer.isBuffer(value)) return `<binary ${value.length} bytes>`;
-  if (typeof value === 'string' && value.length > MAX_CELL_LEN) {
-    return `${value.slice(0, MAX_CELL_LEN)}… (truncated, ${value.length} chars total)`;
-  }
-  return value;
+  return typeof value === 'string' ? cap(value, MAX_CELL_LEN) : value;
 }
 
 // Row objects repeat every column name per row — columnar form drops that repetition,
@@ -115,10 +123,7 @@ const getSchema = {
         content: [{ type: 'text', text: JSON.stringify(result) }],
       };
     } catch (err) {
-      return {
-        content: [{ type: 'text', text: `Error: ${err.message}` }],
-        isError: true,
-      };
+      return errorResult(err);
     }
   },
 };
@@ -257,9 +262,158 @@ const getTableSample = {
         content: [{ type: 'text', text: JSON.stringify(toColumnar(rows)) }],
       };
     } catch (err) {
+      return errorResult(err);
+    }
+  },
+};
+
+// Without PROCESS, MySQL quietly shows only this server's own connections, which
+// reads as "nothing running" — so detect the missing grants and say so instead.
+async function missingActivityGrants(run) {
+  const missing = [];
+  for (const [privilege, probe] of [
+    ['PROCESS ON *.*', 'SELECT 1 FROM information_schema.INNODB_TRX LIMIT 1'],
+    ['SELECT ON performance_schema.*', 'SELECT 1 FROM performance_schema.data_lock_waits LIMIT 1'],
+  ]) {
+    try {
+      await run(probe);
+    } catch (err) {
+      if (!/denied/i.test(err.message)) throw err;
+      missing.push(privilege);
+    }
+  }
+  if (!missing.length) return null;
+  const [{ me }] = await run('SELECT CURRENT_USER() AS me');
+  const at = me.lastIndexOf('@');
+  const account = `'${me.slice(0, at)}'@'${me.slice(at + 1)}'`;
+  return missing.map((privilege) => `GRANT ${privilege} TO ${account};`);
+}
+
+// Other sessions' SQL can contain secrets (tokens in WHERE clauses, passwords in
+// INSERTs), so every SQL text goes through the same redaction as the logs.
+function redactColumns(rows, columns, secrets) {
+  return rows.map((row) => {
+    const copy = { ...row };
+    for (const col of columns) {
+      if (typeof copy[col] === 'string') copy[col] = redactText(copy[col], secrets, MAX_CELL_LEN);
+    }
+    return copy;
+  });
+}
+
+// Redact line by line, and cut only after redaction so a secret straddling the cut cannot leave a partial value behind.
+function latestDeadlock(innodbStatus, secrets) {
+  const match = innodbStatus.match(/LATEST DETECTED DEADLOCK\n-+\n([\s\S]*?)\n-+\nTRANSACTIONS/);
+  if (!match) return null;
+  return cap(match[1].split('\n').map((line) => redactText(line, secrets, 4000)).join('\n'), 4000);
+}
+
+// Deliberately longer than the MAX_CELL_LEN shown: redaction must see whole secrets at the cut.
+const ACTIVITY_SQL_LEN = 4000;
+
+const getDbActivity = {
+  name: 'get_db_activity',
+  description:
+    'What the production MySQL server is doing right now: connection counts by user and state, queries currently running (longest first), open transactions with their age — including ones idle while still holding locks — which transaction is blocking which on a row lock, and the most recent deadlock InnoDB recorded. ' +
+    'Use it for "the app is hanging", lock-wait timeouts, deadlocks, or two bookings racing for the same row. Needs the PROCESS privilege and SELECT on performance_schema; without them it returns the exact GRANT statements a MySQL admin must run. Read-only.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      minSeconds: {
+        type: 'integer',
+        default: 0,
+        minimum: 0,
+        description: 'Only list queries and transactions that have been running at least this many seconds (default 0).',
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async ({ minSeconds = 0 } = {}) => {
+    try {
+      // A global grant like PROCESS only reaches connections opened after it, and the
+      // pool keeps its connections for the life of the process — so use a fresh one, or
+      // an admin's GRANT would not show up here until the next deploy.
+      const connection = await mysql.createConnection(CONNECTION);
+      try {
+        const run = (sql, params) => queryOn(connection, sql, params);
+        const grants = await missingActivityGrants(run);
+        if (grants) {
+          return {
+            isError: true,
+            content: [{
+              type: 'text',
+              text: `The MCP database user cannot see other connections. A MySQL admin needs to run:\n${grants.join('\n')}`,
+            }],
+          };
+        }
+
+        const min = Math.max(0, parseInt(minSeconds, 10) || 0);
+        const connections = await run(
+          `SELECT USER AS user, COMMAND AS command, COUNT(*) AS count
+             FROM information_schema.PROCESSLIST
+            GROUP BY USER, COMMAND
+            ORDER BY count DESC`,
+        );
+        const running = await run(
+          `SELECT ID AS id, USER AS user, DB AS db, TIME AS seconds, STATE AS state, LEFT(INFO, ${ACTIVITY_SQL_LEN}) AS query
+             FROM information_schema.PROCESSLIST
+            WHERE COMMAND NOT IN ('Sleep', 'Daemon', 'Binlog Dump') AND ID <> CONNECTION_ID() AND TIME >= ?
+            ORDER BY TIME DESC
+            LIMIT 50`,
+          [min],
+        );
+        const transactions = await run(
+          `SELECT t.trx_id AS trxId, t.trx_mysql_thread_id AS connectionId, p.USER AS user,
+                  t.trx_state AS state, t.trx_started AS startedAt,
+                  TIMESTAMPDIFF(SECOND, t.trx_started, NOW()) AS ageSeconds,
+                  p.COMMAND = 'Sleep' AS idleInTransaction,
+                  t.trx_rows_locked AS rowsLocked, t.trx_tables_locked AS tablesLocked,
+                  LEFT(t.trx_query, ${ACTIVITY_SQL_LEN}) AS query
+             FROM information_schema.INNODB_TRX t
+             LEFT JOIN information_schema.PROCESSLIST p ON p.ID = t.trx_mysql_thread_id
+            WHERE t.trx_mysql_thread_id <> CONNECTION_ID()
+              AND TIMESTAMPDIFF(SECOND, t.trx_started, NOW()) >= ?
+            ORDER BY t.trx_started
+            LIMIT 50`,
+          [min],
+        );
+        const lockWaits = await run(
+          `SELECT r.trx_mysql_thread_id AS waitingConnection,
+                  TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS waitingSeconds,
+                  LEFT(r.trx_query, ${ACTIVITY_SQL_LEN}) AS waitingQuery,
+                  b.trx_mysql_thread_id AS blockingConnection,
+                  LEFT(b.trx_query, ${ACTIVITY_SQL_LEN}) AS blockingQuery,
+                  l.OBJECT_NAME AS tableName, l.INDEX_NAME AS indexName, l.LOCK_MODE AS lockMode
+             FROM performance_schema.data_lock_waits w
+             JOIN information_schema.INNODB_TRX r ON r.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
+             JOIN information_schema.INNODB_TRX b ON b.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
+             JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.BLOCKING_ENGINE_LOCK_ID
+            ORDER BY waitingSeconds DESC
+            LIMIT 50`,
+        );
+        const [status] = await run('SHOW ENGINE INNODB STATUS');
+        const secrets = collectSecretValues(); // env file + MCP's own credentials; no pm2 call
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              checkedAt: new Date().toISOString(),
+              connections: toColumnar(connections),
+              running: toColumnar(redactColumns(running, ['query'], secrets)),
+              openTransactions: toColumnar(redactColumns(transactions, ['query'], secrets)),
+              lockWaits: toColumnar(redactColumns(lockWaits, ['waitingQuery', 'blockingQuery'], secrets)),
+              latestDeadlock: latestDeadlock(status.Status, secrets),
+            }),
+          }],
+        };
+      } finally {
+        await connection.end().catch(() => connection.destroy());
+      }
+    } catch (err) {
       return {
-        content: [{ type: 'text', text: `Error: ${err.message}` }],
         isError: true,
+        content: [{ type: 'text', text: `Database error: ${err.message}` }],
       };
     }
   },
@@ -269,4 +423,4 @@ export async function closePool() {
   if (pool) await pool.end();
 }
 
-export const dbTools = [getSchema, queryDb, getTableSample];
+export const dbTools = [getSchema, queryDb, getTableSample, getDbActivity];
