@@ -6,6 +6,7 @@ import {
   fetchGuest,
   fetchPR,
   fetchSevaKutir,
+  fetchResidents,
   gateEntry,
   gateRecord,
   gateExit,
@@ -19,6 +20,7 @@ router.use(auth);
 router.use(authorizeRoles(ROLE_GATE_ADMIN, ROLE_SUPER_ADMIN));
 
 router.get('/total', CatchAsync(fetchTotal));
+router.get('/residents', CatchAsync(fetchResidents));
 router.get('/totalPR', CatchAsync(fetchPR));
 router.get('/totalGuest', CatchAsync(fetchGuest));
 router.get('/totalMumukshu', CatchAsync(fetchMumukshu));
