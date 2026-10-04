@@ -99,8 +99,8 @@ const PATTERNS = [
 
 // Cut text to at most `max` characters in total, suffix included. N is the length of the text passed in
 // (or `total`, when the caller already shortened it).
-export function cap(text, max, total = text.length) {
-  if (text.length <= max) return text;
+export function cap(text, max, total = text.length, cut = text.length > max) {
+  if (!cut) return text;
   const suffix = `… (truncated, ${total} chars)`;
   return text.slice(0, Math.max(0, max - suffix.length)) + suffix;
 }
@@ -114,9 +114,11 @@ export function redactText(text, secrets, max = MAX_LINE_LEN) {
     if (out.includes(value)) out = out.split(value).join(`[redacted:${key}]`);
   }
   const total = out.length;
+  const sliced = total > max + PATTERN_MARGIN;
   out = out.slice(0, max + PATTERN_MARGIN);
   for (const [re, replacement] of PATTERNS) out = out.replace(re, replacement);
-  return cap(out, max, total);
+  // The slice already dropped text even if the patterns shrank what is left under `max`.
+  return cap(out, max, total, sliced || out.length > max);
 }
 
 export const QR_MARKER = '[QR code redacted]';
