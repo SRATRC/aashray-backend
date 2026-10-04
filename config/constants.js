@@ -113,6 +113,9 @@ export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
 export const ERR_CARD_NOT_FOUND = 'User not found';
 
 export const ERR_INVALID_BOOKING_TYPE = 'Invalid booking type';
+export const ERR_INVALID_BOOKING_CATEGORY = 'Invalid category';
+export const ERR_BOOKING_HISTORY_PARAMS_REQUIRED =
+  'cardno and category are required';
 export const ERR_INVALID_DATE = 'Invalid date';
 export const ERR_INVALID_MEAL_TIME = 'Invalid meal time';
 export const ERR_BLOCKED_DATES = 'Dates are blocked';
@@ -163,6 +166,10 @@ export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
+export const MSG_BOOKING_DETAILS_FETCHED =
+  'Fetched booking details successfully';
+export const MSG_BOOKING_HISTORY_FETCHED =
+  'Fetched booking history successfully';
 
 export const ROLLING_WINDOW_DAYS = 30;
 export const ROLLING_WINDOW_NIGHT_LIMIT = 9;

@@ -1182,16 +1182,9 @@ export const getMealCountByMobile = async (req, res) => {
     }
   }));
 
-  // Aggregate meal counts excluding utsav dates
-  const result = await FoodDb.findAll({
-    attributes: [
-      [fn('COALESCE', fn('SUM', col('breakfast')), 0), 'breakfastBooked'],
-      [fn('COALESCE', fn('SUM', col('breakfast_plate_issued')), 0), 'breakfastIssued'],
-      [fn('COALESCE', fn('SUM', col('lunch')), 0), 'lunchBooked'],
-      [fn('COALESCE', fn('SUM', col('lunch_plate_issued')), 0), 'lunchIssued'],
-      [fn('COALESCE', fn('SUM', col('dinner')), 0), 'dinnerBooked'],
-      [fn('COALESCE', fn('SUM', col('dinner_plate_issued')), 0), 'dinnerIssued']
-    ],
+  // Both meal queries below read the same rows: this person's meals in the
+  // range, outside Utsav dates.
+  const mealRowsFilter = {
     include: [
       {
         model: CardDb,
@@ -1205,7 +1198,20 @@ export const getMealCountByMobile = async (req, res) => {
       ...(exclusionConditions.length > 0 && {
         [Op.not]: { [Op.or]: exclusionConditions }
       })
-    },
+    }
+  };
+
+  // Aggregate meal counts excluding utsav dates
+  const result = await FoodDb.findAll({
+    attributes: [
+      [fn('COALESCE', fn('SUM', col('breakfast')), 0), 'breakfastBooked'],
+      [fn('COALESCE', fn('SUM', col('breakfast_plate_issued')), 0), 'breakfastIssued'],
+      [fn('COALESCE', fn('SUM', col('lunch')), 0), 'lunchBooked'],
+      [fn('COALESCE', fn('SUM', col('lunch_plate_issued')), 0), 'lunchIssued'],
+      [fn('COALESCE', fn('SUM', col('dinner')), 0), 'dinnerBooked'],
+      [fn('COALESCE', fn('SUM', col('dinner_plate_issued')), 0), 'dinnerIssued']
+    ],
+    ...mealRowsFilter,
     raw: true
   });
 
@@ -1217,12 +1223,23 @@ export const getMealCountByMobile = async (req, res) => {
     raw: true
   });
 
-  req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length });
+  const dailyBookings = await FoodDb.findAll({
+    attributes: [
+      'id', 'date', 'breakfast', 'breakfast_plate_issued',
+      'lunch', 'lunch_plate_issued', 'dinner', 'dinner_plate_issued'
+    ],
+    ...mealRowsFilter,
+    order: [['date', 'DESC']],
+    raw: true
+  });
+
+  req.log.info('get_meal_count_by_mobile_success', { mobno, fromDate, toDate, utsavExcludedCount: utsavs.length, dailyCount: dailyBookings.length });
   return res.status(200).send({
     message: MSG_FETCH_SUCCESSFUL,
     data,
     person,
-    utsavExcluded: utsavs
+    utsavExcluded: utsavs,
+    dailyBookings
   });
 };
 

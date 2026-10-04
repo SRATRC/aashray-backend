@@ -507,29 +507,36 @@ export const resetPasswordDefault = async (req, res) => {
 };
 
 
-export const getCardByMobile = async (req, res) => {
-  const { mobno } = req.params;
-  req.log.info('get_card_by_mobile_start', { mobno });
+const CARD_LOOKUP_ATTRIBUTES = ['cardno', 'issuedto', 'center', 'mobno', 'res_status', 'gender', 'status'];
 
-  if (!mobno) {
-    req.log.warn('get_card_by_mobile_missing_param');
-    return res.status(400).json({ message: 'mobno is required' });
+const findCardBy = async (req, res, field, logName) => {
+  const value = req.params[field];
+  req.log.info(`${logName}_start`, { [field]: value });
+
+  if (!value) {
+    req.log.warn(`${logName}_missing_param`);
+    throw new ApiError(400, `${field} is required`);
   }
 
   const card = await CardDb.findOne({
-    attributes: ['cardno', 'issuedto', 'center', 'mobno', 'res_status', 'gender'],
-    where: { mobno }
+    attributes: CARD_LOOKUP_ATTRIBUTES,
+    where: { [field]: value }
   });
 
   if (!card) {
-    req.log.warn('get_card_by_mobile_not_found', { mobno });
-    return res.status(404).json({ message: 'Card not found' });
+    req.log.warn(`${logName}_not_found`, { [field]: value });
+    throw new ApiError(404, 'Card not found');
   }
 
-  req.log.info('get_card_by_mobile_success', { mobno, cardno: card.cardno });
+  req.log.info(`${logName}_success`, { [field]: value, cardno: card.cardno });
   return res.status(200).json({ message: 'Found card', data: card });
 };
 
+export const getCardByMobile = (req, res) =>
+  findCardBy(req, res, 'mobno', 'get_card_by_mobile');
+
+export const getCardByCardno = (req, res) =>
+  findCardBy(req, res, 'cardno', 'get_card_by_cardno');
 
 export const getPersonActivity = async (req, res) => {
   const { cardno } = req.query;

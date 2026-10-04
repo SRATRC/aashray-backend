@@ -9,6 +9,7 @@ import {
   fetchTotalTransactions,
   resetPasswordDefault,
   getCardByMobile,
+  getCardByCardno,
   getPersonActivity
 } from '../../controllers/admin/cardManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
@@ -33,6 +34,8 @@ router.get(
   authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_CARD_ADMIN),
   CatchAsync(getPersonActivity)
 );
+// Generic param route goes last so it never shadows a named route above.
+router.get('/:cardno', CatchAsync(getCardByCardno));
 
 export default router;
 
