@@ -7,6 +7,10 @@ import {
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CREDITED,
+  TYPE_TRAVEL,
   MSG_CANCEL_SUCCESSFUL,
   RAJ_PRAVAS_EMAIL,
   STATUS_PROCEED_FOR_PAYMENT,
@@ -52,14 +56,17 @@ export const FetchUpcoming = async (req, res) => {
        t1.comments,
        t1.admin_comments,
        t1.status,
-       t2.amount,
+       COALESCE((SELECT SUM(x.amount) FROM transactions x
+                 WHERE x.bookingid = t1.bookingid AND x.category = :category
+                   AND x.status NOT IN (:closedTxnStatuses)), t2.amount) AS amount,
        t2.status AS transaction_status,
        t5.bus_name,
        t6.timing AS departure_time,
        t8.issuedto AS coordinator_name,
        t8.mobno AS coordinator_contact
     FROM travel_db t1
-    LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid
+    LEFT JOIN transactions t2 ON t2.id = (
+      SELECT MIN(m.id) FROM transactions m WHERE m.bookingid = t1.bookingid)
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
     LEFT JOIN travel_bus_passengers t4 ON t1.bookingid = t4.bookingid
     LEFT JOIN travel_bus_group t5 ON t4.bus_group_id = t5.id
@@ -74,6 +81,8 @@ export const FetchUpcoming = async (req, res) => {
     {
       replacements: {
         cardno: req.user.cardno,
+        category: TYPE_TRAVEL,
+        closedTxnStatuses: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_CREDITED],
         limit: pageSize,
         offset: offset
       },
