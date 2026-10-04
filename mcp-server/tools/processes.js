@@ -4,6 +4,7 @@ import net from 'net';
 import path from 'path';
 import { promisify } from 'util';
 import { PM2_HOME } from '../config.js';
+import { errorResult } from './result.js';
 import { QR_MARKER, collectSecretValues, redactLogLine } from '../redact.js';
 
 const execFileAsync = promisify(execFile);
@@ -87,18 +88,14 @@ async function readTail(filePath, maxBytes) {
   const handle = await fs.promises.open(filePath, 'r');
   try {
     const buf = Buffer.alloc(size - start);
-    await handle.read(buf, 0, buf.length, start);
-    const lines = buf.toString('utf8').split('\n');
+    const { bytesRead } = await handle.read(buf, 0, buf.length, start);
+    const lines = buf.subarray(0, bytesRead).toString('utf8').split('\n');
     if (start > 0) lines.shift(); // first line is cut mid-way
     if (lines[lines.length - 1] === '') lines.pop();
     return { lines, size, mtime, partial: start > 0 };
   } finally {
     await handle.close();
   }
-}
-
-export function errorResult(err) {
-  return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
 }
 
 const getProcesses = {

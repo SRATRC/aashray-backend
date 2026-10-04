@@ -6,7 +6,8 @@ import path from 'path';
 import { promisify } from 'util';
 import { APP_DIR, ENV_FILE, LOG_DIR, PM2_HOME } from '../config.js';
 import { PLAIN_KEYS, readEnvFile, stripQuotes } from '../redact.js';
-import { errorResult, readPm2Processes } from './processes.js';
+import { readPm2Processes } from './processes.js';
+import { errorResult } from './result.js';
 
 const execFileAsync = promisify(execFile);
 const scryptAsync = promisify(crypto.scrypt);
@@ -187,11 +188,14 @@ async function settingsCheck(fileEnv, proc) {
       key,
       inProcess: running !== undefined,
       ...(running !== undefined && { matchesFile: running === fileValue }),
-      length: value.length,
     };
     if (PLAIN_KEYS.has(key)) {
+      entry.length = value.length;
       entry.value = value;
-    } else if (value) {
+    } else {
+      entry.lengthRange = value.length < 8 ? '<8' : value.length < 16 ? '8-15' : '16+';
+    }
+    if (!PLAIN_KEYS.has(key) && value) {
       const differs = running !== undefined && running !== fileValue;
       const [fp, fileFp] = await Promise.all([fingerprint(value), differs ? fingerprint(fileValue) : null]);
       entry.fingerprint = fp;
@@ -206,7 +210,7 @@ const getDeployInfo = {
   name: 'get_deploy_info',
   description:
     "What is deployed on the production server and how it is configured: the checked-out commit (hash, date, author, subject), any tracked files edited on the server by hand, when each PM2 process last started, and a check of every setting in .env.prod against the environment a process is actually running with. " +
-    'Per setting: whether the process has it, whether it matches the file, its length, and either its value (only for harmless settings such as PORT or AWS_REGION) or an 8-character fingerprint — never a secret itself. ' +
+    'Per setting: whether the process has it, whether it matches the file, and either its exact length and value (only for harmless settings such as PORT or AWS_REGION) or a length range (`lengthRange`: <8, 8-15 or 16+) and an 8-character fingerprint — never a secret itself. ' +
     "To check a secret against a value you hold (e.g. the Razorpay dashboard's webhook secret), compute its fingerprint locally and compare: " +
     `node -e "require('crypto').scrypt(process.argv[1],'${FINGERPRINT_SALT}',16,(e,k)=>console.log(k.toString('hex').slice(0,8)))" 'VALUE' . ` +
     '`quotedInFile` means the deploy exports the line as-is, so the quotes become part of the running value. ' +

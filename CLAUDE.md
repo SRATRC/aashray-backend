@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `get_processes` — are the PM2 processes up, and did any restart or crash-loop?
   - `get_process_logs` — console stderr/stdout of one process (crashes, WhatsApp service); secrets and QR codes redacted.
   - `get_server_health` — disk, memory, load, log-folder size, with warnings.
-  - `get_deploy_info` — deployed commit, hand-edited files, and each `.env.prod` setting vs the running process (value only if harmless, else an 8-char fingerprint; the tool description has a local one-liner to fingerprint a secret you hold).
+  - `get_deploy_info` — deployed commit, hand-edited files, and each `.env.prod` setting vs the running process (exact length and value only if harmless, else a length range `<8`/`8-15`/`16+` and an 8-char fingerprint; the tool description has a local one-liner to fingerprint a secret you hold).
   - `get_db_activity` — running queries, open transactions, lock waits, latest deadlock. Needs a one-time MySQL grant (`PROCESS` + `SELECT` on `performance_schema` for `mcp_readonly`); the tool prints the exact statements if missing.
 - **QA / staging / PR previews** (Render, `dev` branch) — use the **`aashray-qa` skill** (`.claude/skills/aashray-qa/`). It covers the QA MySQL DB (read-only runner), Render logs, the QA/PR API URLs, and deploy status. Trigger it for anything like "query the QA db", "check PR 285 logs", or "is the QA deploy up".
 

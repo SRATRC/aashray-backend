@@ -1,7 +1,7 @@
 import mysql from 'mysql2/promise';
 import { DB } from '../config.js';
 import { collectSecretValues, redactText } from '../redact.js';
-import { errorResult } from './processes.js';
+import { errorResult } from './result.js';
 import logger from '../logger.js';
 import { loadAnnotations, fetchSchemaRows, buildSchemaIndex, buildSchemaDetail } from '../resources/schema.js';
 
@@ -303,7 +303,12 @@ function redactColumns(rows, columns, secrets) {
 function latestDeadlock(innodbStatus) {
   const match = innodbStatus.match(/LATEST DETECTED DEADLOCK\n-+\n([\s\S]*?)\n-+\nTRANSACTIONS/);
   if (!match) return null;
-  return match[1].length > 4000 ? `${match[1].slice(0, 4000)}… (truncated)` : match[1];
+  return match[1];
+}
+
+// Cut only after redaction, so a secret straddling the cut cannot leave a partial value behind.
+function cutDeadlock(text) {
+  return text.length > 4000 ? `${text.slice(0, 4000)}… (truncated)` : text;
 }
 
 const getDbActivity = {
@@ -350,7 +355,7 @@ const getDbActivity = {
             ORDER BY count DESC`,
         );
         const running = await run(
-          `SELECT ID AS id, USER AS user, DB AS db, TIME AS seconds, STATE AS state, LEFT(INFO, 500) AS query
+          `SELECT ID AS id, USER AS user, DB AS db, TIME AS seconds, STATE AS state, LEFT(INFO, 4000) AS query
              FROM information_schema.PROCESSLIST
             WHERE COMMAND NOT IN ('Sleep', 'Daemon', 'Binlog Dump') AND ID <> CONNECTION_ID() AND TIME >= ?
             ORDER BY TIME DESC
@@ -363,7 +368,7 @@ const getDbActivity = {
                   TIMESTAMPDIFF(SECOND, t.trx_started, NOW()) AS ageSeconds,
                   p.COMMAND = 'Sleep' AS idleInTransaction,
                   t.trx_rows_locked AS rowsLocked, t.trx_tables_locked AS tablesLocked,
-                  LEFT(t.trx_query, 500) AS query
+                  LEFT(t.trx_query, 4000) AS query
              FROM information_schema.INNODB_TRX t
              LEFT JOIN information_schema.PROCESSLIST p ON p.ID = t.trx_mysql_thread_id
             WHERE t.trx_mysql_thread_id <> CONNECTION_ID()
@@ -375,9 +380,9 @@ const getDbActivity = {
         const lockWaits = await run(
           `SELECT r.trx_mysql_thread_id AS waitingConnection,
                   TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS waitingSeconds,
-                  LEFT(r.trx_query, 300) AS waitingQuery,
+                  LEFT(r.trx_query, 4000) AS waitingQuery,
                   b.trx_mysql_thread_id AS blockingConnection,
-                  LEFT(b.trx_query, 300) AS blockingQuery,
+                  LEFT(b.trx_query, 4000) AS blockingQuery,
                   l.OBJECT_NAME AS tableName, l.INDEX_NAME AS indexName, l.LOCK_MODE AS lockMode
              FROM performance_schema.data_lock_waits w
              JOIN information_schema.INNODB_TRX r ON r.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
@@ -399,12 +404,12 @@ const getDbActivity = {
               running: toColumnar(redactColumns(running, ['query'], secrets)),
               openTransactions: toColumnar(redactColumns(transactions, ['query'], secrets)),
               lockWaits: toColumnar(redactColumns(lockWaits, ['waitingQuery', 'blockingQuery'], secrets)),
-              latestDeadlock: deadlock && deadlock.split('\n').map((line) => redactText(line, secrets)).join('\n'),
+              latestDeadlock: deadlock && cutDeadlock(deadlock.split('\n').map((line) => redactText(line, secrets)).join('\n')),
             }),
           }],
         };
       } finally {
-        await connection.end();
+        await connection.end().catch(() => connection.destroy());
       }
     } catch (err) {
       logger.error('get_db_activity_error', { error: err.message });
