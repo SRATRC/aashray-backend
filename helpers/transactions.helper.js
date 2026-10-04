@@ -369,7 +369,7 @@ export async function cancelPendingTopUps(bookingid, category, updatedBy, t, log
       String(r.description || '').startsWith(TOP_UP_MARK));
   for (const row of pending) {
     await row.update(
-      { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, razorpay_order_id: null, updatedBy },
+      { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, updatedBy },
       { transaction: t }
     );
     log.info('travel_top_up_cancelled', { bookingid, transactionId: row.id, amount: row.amount });
@@ -396,6 +396,11 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
   if (!Number.isFinite(amount) || amount < 0) {
     throw new ApiError(400, 'Amount must be a non-negative number');
   }
+  // transactions.amount is DECIMAL(10,0): a fraction would be rounded silently
+  // by MySQL, so the stored charge would not match what staff typed.
+  if (!Number.isInteger(amount)) {
+    throw new ApiError(400, 'Amount must be a whole number of rupees');
+  }
 
   const rows = await Transactions.findAll({
     where: { bookingid, category: TYPE_TRAVEL },
@@ -417,7 +422,11 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
     return { ...(await adjustAmount(main, amount, user.username, t)), topUp: null };
   }
 
-  const paid = completed.reduce((sum, r) => sum + Number(r.amount), 0);
+  // All sums and compares are in paise: DECIMAL amounts summed as floats drift
+  // (100.1 + 50.2 !== 150.3), which would raise a tiny top-up on a same-fare edit.
+  const amountP = toPaise(amount);
+  const paidP = completed.reduce((sum, r) => sum + toPaise(Number(r.amount)), 0);
+  const paid = paidP / 100;
   const pendingTopUps = rows.slice(1).filter(
     (r) =>
       [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED].includes(r.status) &&
@@ -425,21 +434,22 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
   );
   const base = { settled: false, reopened: false };
 
-  if (amount > paid) {
-    const diff = amount - paid;
+  if (amountP > paidP) {
+    const diff = (amountP - paidP) / 100;
     const [keep, ...extra] = pendingTopUps;
     for (const row of extra) {
       await row.update(
-        { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, razorpay_order_id: null, updatedBy: user.username },
+        { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, updatedBy: user.username },
         { transaction: t }
       );
     }
     if (keep) {
-      if (Number(keep.amount) !== diff) {
-        // The order id is dropped: an order made for the old amount must not be
-        // reused for the new one.
+      if (toPaise(Number(keep.amount)) !== toPaise(diff)) {
+        // The Razorpay order stays on the row, as on any edited charge: /pay
+        // always makes a fresh order, and a payment already in progress must
+        // still find this row in the webhook, which then checks paid vs owed.
         await keep.update(
-          { amount: diff, description: `${TOP_UP_MARK}: ${diff} (fare ${amount}, paid ${paid})`, razorpay_order_id: null, status: STATUS_CASH_PENDING, updatedBy: user.username },
+          { amount: diff, description: `${TOP_UP_MARK}: ${diff} (fare ${amount}, paid ${paid})`, status: STATUS_CASH_PENDING, updatedBy: user.username },
           { transaction: t }
         );
       }
@@ -464,36 +474,38 @@ export async function adjustTravelAmount(bookingid, amount, user, t, log = logge
 
   for (const row of pendingTopUps) {
     await row.update(
-      { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, razorpay_order_id: null, updatedBy: user.username },
+      { status: STATUS_ADMIN_CANCELLED, description: `${TOP_UP_MARK} cancelled`, updatedBy: user.username },
       { transaction: t }
     );
     log.info('travel_top_up_cancelled', { bookingid, transactionId: row.id, amount: row.amount });
   }
 
-  if (amount === paid) {
+  if (amountP === paidP) {
     log.info('travel_amount_edit_same_as_paid', { bookingid, paid, cancelledTopUps: pendingTopUps.length });
     return { ...base, topUp: pendingTopUps.length ? 'cancelled' : null };
   }
 
   // amount < paid: refund the difference, newest paid row first.
-  let refund = paid - amount;
+  const refundTotal = (paidP - amountP) / 100;
+  let refundP = paidP - amountP;
   const card = await validateCard(main.cardno);
-  await addCredit(user, card, TYPE_TRAVEL, refund, t);
+  await addCredit(user, card, TYPE_TRAVEL, refundTotal, t);
   for (const row of [...completed].reverse()) {
-    if (refund <= 0) break;
-    const cut = Math.min(Number(row.amount), refund);
-    if (cut <= 0) continue;
-    refund -= cut;
+    if (refundP <= 0) break;
+    const rowP = toPaise(Number(row.amount));
+    const cutP = Math.min(rowP, refundP);
+    if (cutP <= 0) continue;
+    refundP -= cutP;
     await row.update(
       {
-        amount: Number(row.amount) - cut,
-        description: `Fare lowered from ${paid} to ${amount}: ${cut} refunded as travel credit`,
+        amount: (rowP - cutP) / 100,
+        description: `Fare lowered from ${paid} to ${amount}: ${cutP / 100} refunded as travel credit`,
         updatedBy: user.username
       },
       { transaction: t }
     );
   }
-  log.info('travel_amount_edit_refunded', { bookingid, paid, amount, refunded: paid - amount, cardno: main.cardno });
+  log.info('travel_amount_edit_refunded', { bookingid, paid, amount, refunded: refundTotal, cardno: main.cardno });
   return { ...base, topUp: 'refunded' };
 }
 

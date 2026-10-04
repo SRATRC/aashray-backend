@@ -677,7 +677,7 @@ async function executeTravelStatusUpdate({
     [STATUS_ADMIN_CANCELLED, STATUS_SEATSFULL_CANCELLED, STATUS_WRONGFORM_CANCELLED].includes(status) &&
     transaction
   ) {
-    await cancelPendingTopUps(bookingid, transaction.category, user.username, t);
+    await cancelPendingTopUps(bookingid, transaction.category, user.username, t, logger);
     const refunds =
       status !== STATUS_ADMIN_CANCELLED || issueCredits === 'yes';
     if (refunds) {
@@ -962,7 +962,8 @@ export const updateTransactionStatus = async (req, res) => {
   req.transaction = t;
 
   const transaction = await Transactions.findOne({
-    where: { cardno, bookingid, type }
+    where: { cardno, bookingid, type },
+    order: [['id', 'ASC']]
   });
 
   if (!transaction) {
@@ -1012,6 +1013,21 @@ export async function updateBooking(req, res) {
 
   /* 1️⃣ TRANSACTION TABLE (amount) */
   if (amount !== undefined) {
+    // A cancelled booking's charges are closed: a member cancel of a paid booking
+    // keeps the money by rule, so a fare edit here must not raise a top-up or
+    // give credit.
+    const current = await TravelDb.findOne({
+      where: { bookingid },
+      attributes: ['status'],
+      lock: t.LOCK.UPDATE,
+      transaction: t
+    });
+    if (
+      current &&
+      [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_SEATSFULL_CANCELLED, STATUS_WRONGFORM_CANCELLED].includes(current.status)
+    ) {
+      throw new ApiError(400, 'The fare of a cancelled booking cannot be changed');
+    }
     // A blank string would parse as 0, so only a number or a non-blank string
     // is parsed. adjustTravelAmount refuses NaN and negative numbers with a 400.
     const isNumeric =
