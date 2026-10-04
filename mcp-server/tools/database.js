@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { DB } from '../config.js';
-import { collectSecretValues, redactText } from '../redact.js';
+import { collectSecretValues, redactText, cap } from '../redact.js';
 import { errorResult } from './result.js';
 import logger from '../logger.js';
 import { loadAnnotations, fetchSchemaRows, buildSchemaIndex, buildSchemaDetail } from '../resources/schema.js';
@@ -29,11 +29,15 @@ function getPool() {
   return pool;
 }
 
+async function queryOn(connection, sql, params = []) {
+  const [rows] = await connection.execute({ sql, timeout: 5000 }, params);
+  return rows;
+}
+
 export async function executeQuery(sql, params = []) {
   const connection = await getPool().getConnection();
   try {
-    const [rows] = await connection.execute({ sql, timeout: 5000 }, params);
-    return rows;
+    return await queryOn(connection, sql, params);
   } finally {
     connection.release();
   }
@@ -43,10 +47,7 @@ const MAX_CELL_LEN = 500;
 
 function sanitizeCell(value) {
   if (Buffer.isBuffer(value)) return `<binary ${value.length} bytes>`;
-  if (typeof value === 'string' && value.length > MAX_CELL_LEN) {
-    return `${value.slice(0, MAX_CELL_LEN)}… (truncated, ${value.length} chars total)`;
-  }
-  return value;
+  return typeof value === 'string' ? cap(value, MAX_CELL_LEN) : value;
 }
 
 // Row objects repeat every column name per row — columnar form drops that repetition,
@@ -294,22 +295,21 @@ function redactColumns(rows, columns, secrets) {
   return rows.map((row) => {
     const copy = { ...row };
     for (const col of columns) {
-      if (typeof copy[col] === 'string') copy[col] = redactText(copy[col], secrets);
+      if (typeof copy[col] === 'string') copy[col] = redactText(copy[col], secrets, MAX_CELL_LEN);
     }
     return copy;
   });
 }
 
-function latestDeadlock(innodbStatus) {
+// Redact line by line, and cut only after redaction so a secret straddling the cut cannot leave a partial value behind.
+function latestDeadlock(innodbStatus, secrets) {
   const match = innodbStatus.match(/LATEST DETECTED DEADLOCK\n-+\n([\s\S]*?)\n-+\nTRANSACTIONS/);
   if (!match) return null;
-  return match[1];
+  return cap(match[1].split('\n').map((line) => redactText(line, secrets, 4000)).join('\n'), 4000);
 }
 
-// Cut only after redaction, so a secret straddling the cut cannot leave a partial value behind.
-function cutDeadlock(text) {
-  return text.length > 4000 ? `${text.slice(0, 4000)}… (truncated)` : text;
-}
+// Deliberately longer than the MAX_CELL_LEN shown: redaction must see whole secrets at the cut.
+const ACTIVITY_SQL_LEN = 4000;
 
 const getDbActivity = {
   name: 'get_db_activity',
@@ -335,7 +335,7 @@ const getDbActivity = {
       // an admin's GRANT would not show up here until the next deploy.
       const connection = await mysql.createConnection(CONNECTION);
       try {
-        const run = async (sql, params = []) => (await connection.execute({ sql, timeout: 5000 }, params))[0];
+        const run = (sql, params) => queryOn(connection, sql, params);
         const grants = await missingActivityGrants(run);
         if (grants) {
           return {
@@ -355,7 +355,7 @@ const getDbActivity = {
             ORDER BY count DESC`,
         );
         const running = await run(
-          `SELECT ID AS id, USER AS user, DB AS db, TIME AS seconds, STATE AS state, LEFT(INFO, 4000) AS query
+          `SELECT ID AS id, USER AS user, DB AS db, TIME AS seconds, STATE AS state, LEFT(INFO, ${ACTIVITY_SQL_LEN}) AS query
              FROM information_schema.PROCESSLIST
             WHERE COMMAND NOT IN ('Sleep', 'Daemon', 'Binlog Dump') AND ID <> CONNECTION_ID() AND TIME >= ?
             ORDER BY TIME DESC
@@ -368,7 +368,7 @@ const getDbActivity = {
                   TIMESTAMPDIFF(SECOND, t.trx_started, NOW()) AS ageSeconds,
                   p.COMMAND = 'Sleep' AS idleInTransaction,
                   t.trx_rows_locked AS rowsLocked, t.trx_tables_locked AS tablesLocked,
-                  LEFT(t.trx_query, 4000) AS query
+                  LEFT(t.trx_query, ${ACTIVITY_SQL_LEN}) AS query
              FROM information_schema.INNODB_TRX t
              LEFT JOIN information_schema.PROCESSLIST p ON p.ID = t.trx_mysql_thread_id
             WHERE t.trx_mysql_thread_id <> CONNECTION_ID()
@@ -380,9 +380,9 @@ const getDbActivity = {
         const lockWaits = await run(
           `SELECT r.trx_mysql_thread_id AS waitingConnection,
                   TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS waitingSeconds,
-                  LEFT(r.trx_query, 4000) AS waitingQuery,
+                  LEFT(r.trx_query, ${ACTIVITY_SQL_LEN}) AS waitingQuery,
                   b.trx_mysql_thread_id AS blockingConnection,
-                  LEFT(b.trx_query, 4000) AS blockingQuery,
+                  LEFT(b.trx_query, ${ACTIVITY_SQL_LEN}) AS blockingQuery,
                   l.OBJECT_NAME AS tableName, l.INDEX_NAME AS indexName, l.LOCK_MODE AS lockMode
              FROM performance_schema.data_lock_waits w
              JOIN information_schema.INNODB_TRX r ON r.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
@@ -393,7 +393,6 @@ const getDbActivity = {
         );
         const [status] = await run('SHOW ENGINE INNODB STATUS');
         const secrets = collectSecretValues(); // env file + MCP's own credentials; no pm2 call
-        const deadlock = latestDeadlock(status.Status);
 
         return {
           content: [{
@@ -404,7 +403,7 @@ const getDbActivity = {
               running: toColumnar(redactColumns(running, ['query'], secrets)),
               openTransactions: toColumnar(redactColumns(transactions, ['query'], secrets)),
               lockWaits: toColumnar(redactColumns(lockWaits, ['waitingQuery', 'blockingQuery'], secrets)),
-              latestDeadlock: deadlock && cutDeadlock(deadlock.split('\n').map((line) => redactText(line, secrets)).join('\n')),
+              latestDeadlock: latestDeadlock(status.Status, secrets),
             }),
           }],
         };
@@ -412,7 +411,6 @@ const getDbActivity = {
         await connection.end().catch(() => connection.destroy());
       }
     } catch (err) {
-      logger.error('get_db_activity_error', { error: err.message });
       return {
         isError: true,
         content: [{ type: 'text', text: `Database error: ${err.message}` }],

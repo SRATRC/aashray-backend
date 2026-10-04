@@ -184,24 +184,26 @@ async function settingsCheck(fileEnv, proc) {
   return Promise.all([...fileEnv].map(async ([key, fileValue]) => {
     const running = proc?.env?.[key];
     const value = running ?? fileValue;
+    const differs = running !== undefined && running !== fileValue;
     const entry = {
       key,
       inProcess: running !== undefined,
-      ...(running !== undefined && { matchesFile: running === fileValue }),
+      ...(running !== undefined && { matchesFile: !differs }),
     };
     if (PLAIN_KEYS.has(key)) {
       entry.length = value.length;
       entry.value = value;
     } else {
       entry.lengthRange = value.length < 8 ? '<8' : value.length < 16 ? '8-15' : '16+';
+      if (value) {
+        const [fp, fileFp] = await Promise.all([fingerprint(value), differs ? fingerprint(fileValue) : null]);
+        entry.fingerprint = fp;
+        if (differs) entry.fileFingerprint = fileFp;
+      }
     }
-    if (!PLAIN_KEYS.has(key) && value) {
-      const differs = running !== undefined && running !== fileValue;
-      const [fp, fileFp] = await Promise.all([fingerprint(value), differs ? fingerprint(fileValue) : null]);
-      entry.fingerprint = fp;
-      if (differs) entry.fileFingerprint = fileFp;
-    }
-    if (stripQuotes(fileValue) !== fileValue) entry.quotedInFile = true;
+    // A CRLF env file leaves a trailing \r after the closing quote.
+    const bare = fileValue.replace(/\r$/, '');
+    if (stripQuotes(bare) !== bare) entry.quotedInFile = true;
     return entry;
   }));
 }

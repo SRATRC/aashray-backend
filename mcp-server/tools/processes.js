@@ -163,8 +163,7 @@ const getProcessLogs = {
       }
 
       const tail = await readTail(filePath, TAIL_BYTES);
-      const requested = Number(lines);
-      const limit = Math.min(Math.max(1, Number.isFinite(requested) ? Math.floor(requested) : 100), 500);
+      const limit = Math.min(Math.max(1, parseInt(lines, 10) || 100), 500);
       const secrets = collectSecretValues(processes);
 
       // Walk the raw lines from the end, collapsing QR runs and redacting each line, then

@@ -11,6 +11,7 @@ export const PLAIN_KEYS = new Set([
 const SECRET_NAME_RE = /SECRET|PASSWORD|PASSWD|TOKEN|KEY|AUTH|CREDENTIAL|PRIVATE/i;
 const MIN_SECRET_LEN = 8;
 const MAX_LINE_LEN = 2000;
+const PATTERN_MARGIN = 256;
 
 // Mirrors how the deploy job loads .env.prod: it exports each `KEY=value` line
 // verbatim (`IFS= read -r` splits on \n only, so a trailing \r stays), so the running value
@@ -96,16 +97,26 @@ const PATTERNS = [
   ],
 ];
 
-export function redactText(text, secrets) {
+// Cut text to at most `max` characters in total, suffix included. N is the length of the text passed in
+// (or `total`, when the caller already shortened it).
+export function cap(text, max, total = text.length) {
+  if (text.length <= max) return text;
+  const suffix = `… (truncated, ${total} chars)`;
+  return text.slice(0, Math.max(0, max - suffix.length)) + suffix;
+}
+
+// The one redact-then-cap step: exact secret values on the full text, then the pattern
+// regexes on a bounded slice, then the visible cut. The slice is `max` plus a margin so a
+// token straddling the cut is still seen whole by the patterns before it is cut away.
+export function redactText(text, secrets, max = MAX_LINE_LEN) {
   let out = text;
   for (const [value, key] of secrets) {
     if (out.includes(value)) out = out.split(value).join(`[redacted:${key}]`);
   }
-  // Cut long lines before the pattern regexes so no regex ever sees more than MAX_LINE_LEN.
   const total = out.length;
-  if (total > MAX_LINE_LEN) out = out.slice(0, MAX_LINE_LEN);
+  out = out.slice(0, max + PATTERN_MARGIN);
   for (const [re, replacement] of PATTERNS) out = out.replace(re, replacement);
-  return total > MAX_LINE_LEN ? `${out}… (truncated, ${total} chars)` : out;
+  return cap(out, max, total);
 }
 
 export const QR_MARKER = '[QR code redacted]';
