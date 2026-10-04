@@ -558,6 +558,17 @@ async function executeTravelStatusUpdate({
 
   logger.info('travel_update_booking_status_start', { bookingid, status, adminComments, issueCredits });
 
+  // First statement in t: lock the booking row (one row, keyed on bookingid).
+  // A staff fare edit takes the same lock, so it cannot add or change a top-up
+  // while this status change sweeps and refunds them. Locked on its own, so the
+  // card row joined below is not locked too.
+  await TravelDb.findOne({
+    where: { bookingid },
+    attributes: ['bookingid'],
+    lock: t.LOCK.UPDATE,
+    transaction: t
+  });
+
   const booking = await TravelDb.findOne({
     include: [
       {

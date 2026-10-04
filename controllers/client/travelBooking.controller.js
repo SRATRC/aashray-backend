@@ -116,6 +116,8 @@ export const CancelTravel = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  // Locked first, inside t: a staff fare edit takes the same one-row lock, so it
+  // cannot add a top-up that the cancel's top-up sweep would miss.
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
@@ -125,7 +127,9 @@ export const CancelTravel = async (req, res) => {
         STATUS_PROCEED_FOR_PAYMENT,
         STATUS_WAITING
       ]
-    }
+    },
+    lock: t.LOCK.UPDATE,
+    transaction: t
   });
 
   if (!booking) {
