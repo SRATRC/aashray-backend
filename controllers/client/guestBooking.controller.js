@@ -211,7 +211,11 @@ export const guestBooking = async (req, res) => {
   }
 
   var order = null;
-  if (req.user.country == 'India' && amount > 0) {
+  if (
+    req.user.country == 'India' &&
+    amount > 0 &&
+    req.body.pay_later !== true
+  ) {
     req.log.info('guest_booking_creating_order', { cardno: req.user.cardno, amount });
     order = await generateOrderId(amount);
     const bookingIds = retrieveBookingIds(userBookingIdMap);
