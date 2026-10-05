@@ -26,42 +26,58 @@ export const fetchAllAdmins = async (req, res) => {
 };
 
 export const updateAdminRoles = async (req, res) => {
+  const { userid, roles } = req.body;
+  if (!userid) {
+    throw new ApiError(400, 'Invalid userid');
+  }
+  if (!roles || !Array.isArray(roles) || roles.length === 0) {
+    throw new ApiError(400, 'Invalid roles array');
+  }
+
+  // An unknown role name would fail on the roles foreign key as a 500.
+  const knownRoles = await Roles.findAll({
+    where: { name: roles, status: STATUS_ACTIVE },
+    attributes: ['name']
+  });
+  const unknownRoles = roles.filter(
+    (role) => !knownRoles.some((known) => known.name === role)
+  );
+  if (unknownRoles.length > 0) {
+    throw new ApiError(400, `Unknown roles: ${unknownRoles.join(', ')}`);
+  }
+
+  const admin = await AdminUsers.findOne({ where: { id: userid }, attributes: ['id'] });
+  if (!admin) {
+    throw new ApiError(400, `Unknown admin ids: ${userid}`);
+  }
+
   const t = await database.transaction();
   req.transaction = t;
 
-  const { userid, roles } = req.body;
-
-  // await AdminRoles.destroy({
-  //   where: {
-  //     user_id: userid
-  //   },
-  //   transaction: t
-  // });
-
+  // admin_roles is keyed on (user_id, role_name): keep one row per role.
+  // Mark every row inactive, then insert-or-reactivate the requested ones.
   await AdminRoles.update(
     {
       status: STATUS_INACTIVE,
       updatedBy: req.user.username
     },
-    { where: { user_id: userid }, transaction: t }
+    { where: { user_id: admin.id }, transaction: t }
   );
 
-  const admin_roles_data = [];
-  for (let i of roles) {
-    admin_roles_data.push({
-      user_id: userid,
-      role_name: i,
-      updatedBy: req.user.username
-    });
-  }
+  const admin_roles_data = [...new Set(roles)].map((role) => ({
+    user_id: admin.id,
+    role_name: role,
+    status: STATUS_ACTIVE,
+    updatedBy: req.user.username
+  }));
 
-  const admin_roles = await AdminRoles.bulkCreate(admin_roles_data, {
+  await AdminRoles.bulkCreate(admin_roles_data, {
+    updateOnDuplicate: ['status', 'updatedBy', 'updatedAt'],
     transaction: t
   });
-  if (admin_roles.length == 0)
-    throw new ApiError(500, 'Unexpected error occured while creating admin');
 
   await t.commit();
+  req.transaction = null;
   return res.status(200).send({ message: 'updated admin roles' });
 };
 
@@ -351,14 +367,18 @@ export const bulkAssignRoles = async (req, res) => {
       }
     );
 
-    // Bulk create new set of roles
+    // Insert new rows or reactivate existing ones (primary key is user_id + role_name)
     const admin_roles_data = updatedRoles.map(role => ({
       user_id: userid,
       role_name: role,
+      status: STATUS_ACTIVE,
       updatedBy: req.user.username
     }));
 
-    await AdminRoles.bulkCreate(admin_roles_data, { transaction: t });
+    await AdminRoles.bulkCreate(admin_roles_data, {
+      updateOnDuplicate: ['status', 'updatedBy', 'updatedAt'],
+      transaction: t
+    });
   }
 
   await t.commit();
