@@ -33,13 +33,14 @@ function ownerHome(uid) {
   return APP_DIR;
 }
 
-const GIT_RUN_AS = (() => {
-  try {
-    if (process.getuid?.() !== 0) return null;
-    const { uid, gid } = fs.statSync(APP_DIR);
-    return uid === 0 ? null : { uid, gid, home: ownerHome(uid) };
-  } catch { return null; }
-})();
+// Looked up on every call, and fails closed: null means no switch is needed (not root, or
+// root owns the checkout). If we are root and cannot tell who owns the checkout (e.g. it is
+// mid re-clone), statSync throws and git does not run — never fall back to running as root.
+function gitRunAs() {
+  if (process.getuid?.() !== 0) return null;
+  const { uid, gid } = fs.statSync(APP_DIR);
+  return uid === 0 ? null : { uid, gid, home: ownerHome(uid) };
+}
 
 const gb = (bytes) => Math.round((bytes / 1073741824) * 10) / 10;
 
@@ -171,15 +172,17 @@ const getServerHealth = {
 };
 
 async function git(args) {
-  // Strictly read-only: --no-optional-locks stops `git status` rewriting .git/index, and
-  // fsmonitor off stops a repo-config command from running (this process may be root).
+  // Strictly read-only: --no-optional-locks stops `git status` rewriting .git/index. As root we
+  // run as the checkout's owner, so commands set in the repo's config never get root; the -c
+  // flags are extra cover.
   const base = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false'];
   const opts = { timeout: 10000, cwd: APP_DIR };
-  if (GIT_RUN_AS) {
+  const runAs = gitRunAs();
+  if (runAs) {
     // Owner's uid/gid, and an env that does not touch root's HOME/XDG paths.
-    opts.uid = GIT_RUN_AS.uid;
-    opts.gid = GIT_RUN_AS.gid;
-    opts.env = { PATH: process.env.PATH, HOME: GIT_RUN_AS.home, GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0' };
+    opts.uid = runAs.uid;
+    opts.gid = runAs.gid;
+    opts.env = { PATH: process.env.PATH, HOME: runAs.home, GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0' };
   } else {
     base.push('-c', `safe.directory=${SAFE_DIR}`);
   }
