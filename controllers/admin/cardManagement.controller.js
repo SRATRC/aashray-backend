@@ -556,7 +556,7 @@ export const getPersonActivity = async (req, res) => {
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const past30 = moment().tz('Asia/Kolkata').subtract(30, 'days').format('YYYY-MM-DD');
 
-  const [flats, rooms, food, gate, maintenanceOpen, shibirBookings, travel, utsavBookings, wifiRows] =
+  const [flats, rooms, food, gate, maintenanceOpen, shibirBookings, travel, utsavBookings, wifiCodes] =
     await Promise.all([
       // A stay is in the window when it ends on or after the window start
       // (checkout is never before checkin).
@@ -605,21 +605,12 @@ export const getPersonActivity = async (req, res) => {
         nest: true
       }),
       // The WiFi code itself is a credential; the WiFi screens show it, this report does not.
-      // `code` is read only to blank a username that equals it (see below).
       PermanentWifiCodes.findAll({
         where: { cardno },
-        attributes: ['id', 'username', 'code', 'ssid', 'status', 'requested_at', 'reviewed_at'],
+        attributes: ['id', 'username', 'ssid', 'status', 'requested_at', 'reviewed_at'],
         raw: true
       })
     ]);
-
-  // A spreadsheet import (301 rows on 28 Dec 2025) used the code as the username,
-  // so such a username is the credential itself: it is not sent. `code` never is.
-  const sameText = (a, b) =>
-    a != null && b != null && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-  const wifiCodes = wifiRows.map(({ code, ...row }) =>
-    sameText(row.username, code) ? { ...row, username: null } : row
-  );
 
   // The row's own fields go first so they can never overwrite the report's
   // type and dates (travel rows have their own "type" column).
