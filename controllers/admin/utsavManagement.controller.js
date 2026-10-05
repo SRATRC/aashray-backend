@@ -1143,12 +1143,20 @@ export const utsavStatusUpdate = async (req, res) => {
         transaction: t,
         lock: t.LOCK.UPDATE
       });
-      await CardDb.findOne({
-        where: { cardno: booking.cardno },
-        attributes: ['id'],
-        transaction: t,
-        lock: t.LOCK.UPDATE
-      });
+      // Lock every card this cancel may touch: the attendee's, and the payer's
+      // (credits go back to transaction.cardno). Sorted so two cancels for the
+      // same pair take the locks in the same order.
+      const cardsToLock = [
+        ...new Set([booking.cardno, transaction?.cardno].filter(Boolean))
+      ].sort();
+      for (const cardno of cardsToLock) {
+        await CardDb.findOne({
+          where: { cardno },
+          attributes: ['id'],
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        });
+      }
       // Only a booking that held a seat was given utsav meals; waiting-list
       // bookings never are. The cleanup clears every meal in the package dates,
       // so running it for a booking that never had them wipes meals the member
