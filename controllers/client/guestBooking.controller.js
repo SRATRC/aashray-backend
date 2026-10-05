@@ -807,10 +807,11 @@ async function bookFlat(data, t, user) {
     checkout_date,
     guests,
     user,
-    t
+    t,
+    false
   );
   return {
-    amount: result.order.amount,
+    amount: result.amount,
     userBookingIds: result.userBookingIds
   };
 }
