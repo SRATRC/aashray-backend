@@ -33,12 +33,12 @@ export const HOLD_MS = 700;
 export const DEFAULT_FIXED_APP_VERSION = '1.1.60';
 const HEADER_VALIDATE_MODE = 'x-aashray-validate-mode';
 
-// "1.1.60" -> [1, 1, 60]. Returns null if the text is not dotted numbers.
+// "1.1.60" -> [1, 1, 60]. Reads the leading dotted numbers, so "v1.2.0", "1.2.0-beta"
+// and "1.2.0 (45)" all read as 1.2.0. Returns null if there are none.
 const parseVersion = (text) => {
   if (typeof text !== 'string') return null;
-  const parts = text.trim().split('.');
-  if (!parts.every((p) => /^\d+$/.test(p))) return null;
-  return parts.map(Number);
+  const match = text.trim().match(/^v?(\d+(?:\.\d+)*)/i);
+  return match ? match[1].split('.').map(Number) : null;
 };
 
 // Numeric compare (1.1.9 < 1.1.60). Missing parts count as 0. Returns -1, 0 or 1.
@@ -86,7 +86,17 @@ export const holdValidateErrorsForOldApps = (req, res, next) => {
         platform: req.headers[HEADER_PLATFORM] || null,
         appVersion: req.headers[HEADER_APP_VERSION] || null
       });
-      setTimeout(() => originalSend.apply(this, args), wait);
+      setTimeout(() => {
+        // The client may have gone away, or something else may have replied during the wait.
+        if (res.headersSent || res.writableEnded) return;
+        try {
+          originalSend.apply(this, args);
+        } catch (err) {
+          (req.log || console).error('validate_error_held_send_failed', {
+            error: err.message
+          });
+        }
+      }, wait);
       return this;
     }
     return originalSend.apply(this, args);
