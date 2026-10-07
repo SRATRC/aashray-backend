@@ -13,7 +13,6 @@ import {
   STATUS_DELETED,
   STATUS_RESET,
   STATUS_ACTIVE,
-  STATUS_INACTIVE,
   STATUS_DEACTIVATED
 } from '../../config/constants.js';
 import ApiError from '../../utils/ApiError.js';
@@ -1354,7 +1353,10 @@ export const bulkActionTempWiFiCodes = async (req, res) => {
           pwd_id: eligibleIds,
           cardno: null,
           roombookingid: null,
-          status: { [Op.ne]: newStatus }
+          status: {
+            [Op.notIn]:
+              action === 'delete' ? [newStatus] : [newStatus, STATUS_DELETED]
+          }
         }
       }
     );
