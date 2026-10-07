@@ -250,11 +250,7 @@ export const mumukshuBooking = async (req, res, next) => {
     }
 
     let order = null;
-    if (
-      req.user.country == 'India' &&
-      amount > 0 &&
-      req.body.pay_later !== true
-    ) {
+    if (amount > 0 && req.body.pay_later !== true) {
       order = await generateOrderId(amount);
       const bookingIds = retrieveBookingIds(userBookingIdMap);
       await updateRazorpayTransactions(bookingIds, [], order.id, t);

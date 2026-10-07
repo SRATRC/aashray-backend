@@ -1343,12 +1343,16 @@ export const unblockRC = async (req, res) => {
 };
 
 export const occupancyReport = async (req, res) => {
-  req.log.info('occupancy_report_start');
+  const { date } = req.query;
+  if (date && !moment(date, 'YYYY-MM-DD', true).isValid()) {
+    throw new ApiError(400, 'Invalid date format, must be YYYY-MM-DD');
+  }
+  const todayIST = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const targetDate = date || todayIST;
 
-  const today = moment().tz('Asia/Kolkata').startOf('day').toDate(); // today's 00:00 IST
-  const tomorrow = moment().tz('Asia/Kolkata').add(1, 'day').startOf('day').toDate(); // tomorrow 00:00 IST
+  req.log.info('occupancy_report_start', { targetDate });
 
-  const result = await RoomBooking.findAll({
+  const rooms = await RoomBooking.findAll({
     attributes: [
       'bookingid',
       'roomtype',
@@ -1366,14 +1370,58 @@ export const occupancyReport = async (req, res) => {
       }
     ],
     where: {
-      status: ROOM_STATUS_CHECKEDIN,
-      checkin: { [Op.lte]: today },
-      checkout: { [Op.gt]: today }
+      [Op.or]: [
+        {
+          status: ROOM_STATUS_CHECKEDIN,
+          checkin: { [Op.lte]: targetDate },
+          // Stays covering the date (checkin <= date <= checkout). Only for
+          // today, guests still checked in past their checkout are also in
+          // the building, so today does not cap on checkout.
+          ...(targetDate === todayIST ? {} : { checkout: { [Op.gte]: targetDate } })
+        },
+        // Departures on the date, and (for a past date) stays that ended
+        // later: their status is "checkedout" today but they were in then.
+        // A future date has no checked-out guests.
+        ...(targetDate > todayIST
+          ? []
+          : [
+              {
+                status: ROOM_STATUS_CHECKEDOUT,
+                ...(targetDate === todayIST
+                  ? { checkout: targetDate }
+                  : { checkin: { [Op.lte]: targetDate }, checkout: { [Op.gte]: targetDate } })
+              }
+            ]),
+        {
+          status: ROOM_STATUS_PENDING_CHECKIN,
+          ...(targetDate > todayIST
+            ? // Future date: expected stays (arriving today or later, covering the date)
+              { checkin: { [Op.between]: [todayIST, targetDate] }, checkout: { [Op.gte]: targetDate } }
+            : { checkin: targetDate })
+        }
+      ]
     }
   });
 
-  req.log.info('occupancy_report_success', { count: result.length });
-  return res.status(200).send({ message: 'Success', data: result });
+  const combined = rooms
+    .filter(r => r.nights > 0 && r.checkin !== r.checkout && r.roomno && String(r.roomno).trim().toUpperCase() !== 'NA')
+    .map(r => {
+      const j = r.toJSON();
+      // The admin UI compares checkin/checkout with string equality, so emit
+      // plain YYYY-MM-DD (Asia/Kolkata) strings regardless of the raw DATEONLY
+      // serialization.
+      return {
+        ...j,
+        checkin: j.checkin ? moment(j.checkin).format('YYYY-MM-DD') : j.checkin,
+        checkout: j.checkout ? moment(j.checkout).format('YYYY-MM-DD') : j.checkout,
+        type: 'Room'
+      };
+    });
+
+  combined.sort((a, b) => String(a.roomno).localeCompare(String(b.roomno), undefined, { numeric: true }));
+
+  req.log.info('occupancy_report_success', { count: combined.length });
+  return res.status(200).send({ message: 'Success', data: combined });
 };
 
 export const ReservationReport = async (req, res) => {
