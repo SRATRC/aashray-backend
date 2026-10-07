@@ -1221,7 +1221,9 @@ export const exportPortalWifiCodes = async (req, res) => {
 
 export const bulkActionTempWiFiCodes = async (req, res) => {
   const { action, passwords, dryRun } = req.body;
-  req.log.info('bulk_action_temp_wifi_codes_start', { action, count: passwords?.length, dryRun });
+  const isDryRun = dryRun === true || dryRun === 'true';
+
+  req.log.info('bulk_action_temp_wifi_codes_start', { action, count: passwords?.length, dryRun: isDryRun });
 
   if (!['deactivate', 'reactivate', 'delete'].includes(action)) {
     return res.status(400).json({
@@ -1235,9 +1237,24 @@ export const bulkActionTempWiFiCodes = async (req, res) => {
     });
   }
 
-  const cleanPasswords = Array.from(
-    new Set(passwords.map((p) => String(p).trim()).filter(Boolean))
-  );
+  const MAX_PASSWORDS = 5000;
+  if (passwords.length > MAX_PASSWORDS) {
+    return res.status(400).json({
+      error: `Cannot process more than ${MAX_PASSWORDS} passwords at a time.`
+    });
+  }
+
+  const seen = new Set();
+  const cleanPasswords = [];
+  for (const p of passwords) {
+    const trimmed = String(p || '').trim();
+    if (!trimmed) continue;
+    const lower = trimmed.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      cleanPasswords.push(trimmed);
+    }
+  }
 
   if (cleanPasswords.length === 0) {
     return res.status(400).json({
@@ -1250,7 +1267,13 @@ export const bulkActionTempWiFiCodes = async (req, res) => {
   });
 
   const existingMap = new Map();
-  existingRecords.forEach((r) => existingMap.set(r.password, r));
+  existingRecords.forEach((r) => {
+    const normKey = String(r.password || '').trim().toLowerCase();
+    if (!existingMap.has(normKey)) {
+      existingMap.set(normKey, []);
+    }
+    existingMap.get(normKey).push(r);
+  });
 
   const notFound = [];
   const skippedUsed = [];
@@ -1258,60 +1281,84 @@ export const bulkActionTempWiFiCodes = async (req, res) => {
   const eligible = [];
 
   for (const pwd of cleanPasswords) {
-    const record = existingMap.get(pwd);
-    if (!record) {
+    const normKey = pwd.toLowerCase();
+    const records = existingMap.get(normKey);
+    if (!records || records.length === 0) {
       notFound.push(pwd);
       continue;
     }
 
-    // Safety rule: never modify or delete used codes (issued to guests)
-    if (record.cardno || record.roombookingid) {
-      skippedUsed.push(pwd);
-      continue;
-    }
+    for (const record of records) {
+      // Safety rule: never modify or delete used codes (issued to guests)
+      if (record.cardno || record.roombookingid) {
+        skippedUsed.push(record.password || pwd);
+        continue;
+      }
 
-    if (action === 'delete') {
-      if (record.status === STATUS_DELETED) {
-        skippedStatus.push({ password: pwd, reason: 'Already deleted' });
-      } else {
-        eligible.push(record);
-      }
-    } else if (action === 'deactivate') {
-      if (record.status === STATUS_DEACTIVATED) {
-        skippedStatus.push({ password: pwd, reason: 'Already deactivated' });
-      } else if (record.status === STATUS_DELETED) {
-        skippedStatus.push({
-          password: pwd,
-          reason: 'Cannot deactivate deleted code'
-        });
-      } else {
-        eligible.push(record);
-      }
-    } else if (action === 'reactivate') {
-      if (record.status === STATUS_ACTIVE) {
-        skippedStatus.push({ password: pwd, reason: 'Already active' });
-      } else {
-        eligible.push(record);
+      if (action === 'delete') {
+        if (record.status === STATUS_DELETED) {
+          skippedStatus.push({ password: record.password || pwd, reason: 'Already deleted' });
+        } else {
+          eligible.push(record);
+        }
+      } else if (action === 'deactivate') {
+        if (record.status === STATUS_DEACTIVATED) {
+          skippedStatus.push({ password: record.password || pwd, reason: 'Already deactivated' });
+        } else if (record.status === STATUS_DELETED) {
+          skippedStatus.push({
+            password: record.password || pwd,
+            reason: 'Cannot deactivate deleted code'
+          });
+        } else {
+          eligible.push(record);
+        }
+      } else if (action === 'reactivate') {
+        if (record.status === STATUS_ACTIVE) {
+          skippedStatus.push({ password: record.password || pwd, reason: 'Already active' });
+        } else if (record.status === STATUS_DELETED) {
+          skippedStatus.push({
+            password: record.password || pwd,
+            reason: 'Cannot reactivate deleted code'
+          });
+        } else {
+          eligible.push(record);
+        }
       }
     }
   }
+
+  // Deduplicate eligible by pwd_id
+  const uniqueEligibleMap = new Map();
+  eligible.forEach((r) => {
+    if (!uniqueEligibleMap.has(r.pwd_id)) {
+      uniqueEligibleMap.set(r.pwd_id, r);
+    }
+  });
+  const uniqueEligible = Array.from(uniqueEligibleMap.values());
 
   let newStatus;
   if (action === 'delete') newStatus = STATUS_DELETED;
   else if (action === 'deactivate') newStatus = STATUS_DEACTIVATED;
   else if (action === 'reactivate') newStatus = STATUS_ACTIVE;
 
-  if (!dryRun && eligible.length > 0) {
-    const eligibleIds = eligible.map((r) => r.pwd_id);
-    await WifiDb.update(
+  let affectedCount = 0;
+  if (!isDryRun && uniqueEligible.length > 0) {
+    const eligibleIds = uniqueEligible.map((r) => r.pwd_id);
+    const [affected] = await WifiDb.update(
       {
         status: newStatus,
         updatedBy: req.user?.username || 'wifiAdmin'
       },
       {
-        where: { pwd_id: eligibleIds }
+        where: {
+          pwd_id: eligibleIds,
+          cardno: null,
+          roombookingid: null,
+          status: { [Op.ne]: newStatus }
+        }
       }
     );
+    affectedCount = affected;
   }
 
   const pastTense =
@@ -1323,29 +1370,31 @@ export const bulkActionTempWiFiCodes = async (req, res) => {
 
   req.log.info('bulk_action_temp_wifi_codes_done', {
     action,
-    eligibleCount: eligible.length,
-    dryRun: !!dryRun
+    eligibleCount: uniqueEligible.length,
+    affectedCount,
+    dryRun: isDryRun
   });
 
   return res.status(200).json({
-    message: dryRun
-      ? `Dry Run: ${eligible.length} code(s) would be ${pastTense}.`
-      : `Successfully ${pastTense} ${eligible.length} code(s).`,
-    dryRun: !!dryRun,
+    message: isDryRun
+      ? `Dry Run: ${uniqueEligible.length} code(s) would be ${pastTense}.`
+      : `Successfully ${pastTense} ${affectedCount} code(s).`,
+    dryRun: isDryRun,
     action,
     summary: {
       totalSubmitted: cleanPasswords.length,
-      found: existingRecords.length,
+      found: cleanPasswords.length - notFound.length,
       notFound: notFound.length,
-      eligible: eligible.length,
+      eligible: uniqueEligible.length,
+      affected: isDryRun ? uniqueEligible.length : affectedCount,
       skippedUsed: skippedUsed.length,
       skippedStatus: skippedStatus.length
     },
     details: {
-      eligible: eligible.map((r) => r.password),
+      eligible: uniqueEligible.map((r) => r.password),
       skippedUsed,
       skippedStatus,
       notFound
     }
   });
-};
+};

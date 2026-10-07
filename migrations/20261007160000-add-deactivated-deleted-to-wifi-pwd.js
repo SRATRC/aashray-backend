@@ -15,6 +15,10 @@ module.exports = {
 
   async down(queryInterface, Sequelize) {
     await queryInterface.sequelize.query(`
+      UPDATE wifi_pwd SET status = 'inactive'
+      WHERE status IN ('deactivated', 'deleted');
+    `);
+    await queryInterface.sequelize.query(`
       ALTER TABLE wifi_pwd
       MODIFY COLUMN status ENUM(
         'active',
