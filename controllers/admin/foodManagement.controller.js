@@ -849,7 +849,7 @@ export const foodReport = async (req, res) => {
           MEAL_ORDER.forEach(m => addExclude(dateStr, m));
         }
 
-        cursor.setDate(cursor.getDate() + 1);
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
       }
     }
 

@@ -3,6 +3,8 @@ const getDates = (start_date, end_date) => {
   const endDate = new Date(end_date);
 
   const dateArray = [];
+  // Step in UTC, the same clock formatDate reads. Local-time stepping skips a
+  // day across a daylight-saving change on a server in such a zone.
   let currentDate = startDate;
 
   const formatDate = (date) => {
@@ -14,7 +16,7 @@ const getDates = (start_date, end_date) => {
 
   while (currentDate <= endDate) {
     dateArray.push(formatDate(currentDate));
-    currentDate.setDate(currentDate.getDate() + 1);
+    currentDate.setUTCDate(currentDate.getUTCDate() + 1);
   }
 
   return dateArray;
