@@ -2306,13 +2306,13 @@ export const fetchLateCheckoutFees = async (req, res) => {
           rb_from_txn.cardno
         )
 
-      WHERE (t.amt_type = 'late_checkout_room' OR t.description LIKE 'Late checkout fee for booking %')
+      WHERE (t.amt_type = :lateCheckoutType OR t.description LIKE 'Late checkout fee for booking %')
         AND t.status IN (:statuses)
 
       ORDER BY t.createdAt DESC
       `,
       {
-        replacements: { statuses },
+        replacements: { statuses, lateCheckoutType: AMT_TYPE_LATE_CHECKOUT_ROOM },
         type: QueryTypes.SELECT
       }
     );
