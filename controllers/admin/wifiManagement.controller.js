@@ -12,7 +12,9 @@ import {
   STATUS_REJECTED,
   STATUS_DELETED,
   STATUS_RESET,
-  STATUS_ACTIVE
+  STATUS_ACTIVE,
+  STATUS_INACTIVE,
+  STATUS_DEACTIVATED
 } from '../../config/constants.js';
 import ApiError from '../../utils/ApiError.js';
 import { sendWifiRequestWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -1216,3 +1218,134 @@ export const exportPortalWifiCodes = async (req, res) => {
     return res.status(500).json({ error: 'Failed to export portal WiFi codes: ' + err.message });
   }
 };
+
+export const bulkActionTempWiFiCodes = async (req, res) => {
+  const { action, passwords, dryRun } = req.body;
+  req.log.info('bulk_action_temp_wifi_codes_start', { action, count: passwords?.length, dryRun });
+
+  if (!['deactivate', 'reactivate', 'delete'].includes(action)) {
+    return res.status(400).json({
+      error: 'Invalid action. Must be deactivate, reactivate, or delete.'
+    });
+  }
+
+  if (!Array.isArray(passwords) || passwords.length === 0) {
+    return res.status(400).json({
+      error: 'Please provide a non-empty array of passwords.'
+    });
+  }
+
+  const cleanPasswords = Array.from(
+    new Set(passwords.map((p) => String(p).trim()).filter(Boolean))
+  );
+
+  if (cleanPasswords.length === 0) {
+    return res.status(400).json({
+      error: 'No valid passwords found.'
+    });
+  }
+
+  const existingRecords = await WifiDb.findAll({
+    where: { password: cleanPasswords }
+  });
+
+  const existingMap = new Map();
+  existingRecords.forEach((r) => existingMap.set(r.password, r));
+
+  const notFound = [];
+  const skippedUsed = [];
+  const skippedStatus = [];
+  const eligible = [];
+
+  for (const pwd of cleanPasswords) {
+    const record = existingMap.get(pwd);
+    if (!record) {
+      notFound.push(pwd);
+      continue;
+    }
+
+    // Safety rule: never modify or delete used codes (issued to guests)
+    if (record.cardno || record.roombookingid) {
+      skippedUsed.push(pwd);
+      continue;
+    }
+
+    if (action === 'delete') {
+      if (record.status === STATUS_DELETED) {
+        skippedStatus.push({ password: pwd, reason: 'Already deleted' });
+      } else {
+        eligible.push(record);
+      }
+    } else if (action === 'deactivate') {
+      if (record.status === STATUS_DEACTIVATED) {
+        skippedStatus.push({ password: pwd, reason: 'Already deactivated' });
+      } else if (record.status === STATUS_DELETED) {
+        skippedStatus.push({
+          password: pwd,
+          reason: 'Cannot deactivate deleted code'
+        });
+      } else {
+        eligible.push(record);
+      }
+    } else if (action === 'reactivate') {
+      if (record.status === STATUS_ACTIVE) {
+        skippedStatus.push({ password: pwd, reason: 'Already active' });
+      } else {
+        eligible.push(record);
+      }
+    }
+  }
+
+  let newStatus;
+  if (action === 'delete') newStatus = STATUS_DELETED;
+  else if (action === 'deactivate') newStatus = STATUS_DEACTIVATED;
+  else if (action === 'reactivate') newStatus = STATUS_ACTIVE;
+
+  if (!dryRun && eligible.length > 0) {
+    const eligibleIds = eligible.map((r) => r.pwd_id);
+    await WifiDb.update(
+      {
+        status: newStatus,
+        updatedBy: req.user?.username || 'wifiAdmin'
+      },
+      {
+        where: { pwd_id: eligibleIds }
+      }
+    );
+  }
+
+  const pastTense =
+    action === 'delete'
+      ? 'deleted'
+      : action === 'deactivate'
+        ? 'deactivated'
+        : 'reactivated';
+
+  req.log.info('bulk_action_temp_wifi_codes_done', {
+    action,
+    eligibleCount: eligible.length,
+    dryRun: !!dryRun
+  });
+
+  return res.status(200).json({
+    message: dryRun
+      ? `Dry Run: ${eligible.length} code(s) would be ${pastTense}.`
+      : `Successfully ${pastTense} ${eligible.length} code(s).`,
+    dryRun: !!dryRun,
+    action,
+    summary: {
+      totalSubmitted: cleanPasswords.length,
+      found: existingRecords.length,
+      notFound: notFound.length,
+      eligible: eligible.length,
+      skippedUsed: skippedUsed.length,
+      skippedStatus: skippedStatus.length
+    },
+    details: {
+      eligible: eligible.map((r) => r.password),
+      skippedUsed,
+      skippedStatus,
+      notFound
+    }
+  });
+};
