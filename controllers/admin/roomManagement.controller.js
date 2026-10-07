@@ -2306,7 +2306,7 @@ export const fetchLateCheckoutFees = async (req, res) => {
           rb_from_txn.cardno
         )
 
-      WHERE t.amt_type = 'late_checkout_room'
+      WHERE (t.amt_type = 'late_checkout_room' OR t.description LIKE 'Late checkout fee for booking %')
         AND t.status IN (:statuses)
 
       ORDER BY t.createdAt DESC

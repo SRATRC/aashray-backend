@@ -64,6 +64,13 @@ export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
 export const AMT_TYPE_LATE_CHECKOUT_ROOM = 'late_checkout_room';
+export const AMT_TYPE_NO_SHOW_FOOD = 'no_show_food';
+export const AMT_TYPE_CREDITS_ADDED = 'credits_added';
+export const AMT_TYPE_CREDITS_USED = 'credits_used';
+export const AMT_TYPE_CASH_TXN = 'cash_txn';
+export const AMT_TYPE_UPI_TXN = 'upi_txn';
+export const AMT_TYPE_DEPARTMENT_TXN = 'department_txn';
+export const AMT_TYPE_NO_CREDITS = 'no_credits';
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
