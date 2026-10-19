@@ -237,13 +237,8 @@ export const createUtsav = async (req, res) => {
     total_seats,
     location,
     registration_deadline,
-    starting_meal,
-    ending_meal,
     whatsapp_link
   } = req.body;
-
-  validateMealField(starting_meal, 'starting_meal');
-  validateMealField(ending_meal, 'ending_meal');
 
   req.log.info('create_utsav_start', { name, start_date, end_date, total_seats, location });
 
@@ -287,8 +282,6 @@ export const createUtsav = async (req, res) => {
       available_seats: total_seats,
       status: STATUS_OPEN,
       registration_deadline,
-      starting_meal,
-      ending_meal,
       whatsapp_link,
       updatedBy: req.user.username
     },
@@ -383,8 +376,13 @@ export const addUtsavPackagesBulk = async (req, res) => {
         name,
         start_date,
         end_date,
-        amount
+        amount,
+        starting_meal,
+        ending_meal
       } = pkg;
+
+      validateMealField(starting_meal, 'starting_meal');
+      validateMealField(ending_meal, 'ending_meal');
 
       // ✅ Required field validation (NEW)
       if (!utsavid || !name || !start_date || !end_date || !amount) {
@@ -421,6 +419,13 @@ export const addUtsavPackagesBulk = async (req, res) => {
         );
       }
 
+      if (utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
+        throw new ApiError(
+          400,
+          `Starting and ending meals can only be configured for Research Centre utsavs (package "${name}")`
+        );
+      }
+
       // ✅ End >= Start
       if (packageEnd.isBefore(packageStart, 'day')) {
         throw new ApiError(
@@ -453,6 +458,8 @@ export const addUtsavPackagesBulk = async (req, res) => {
           start_date,
           end_date,
           amount,
+          starting_meal,
+          ending_meal,
           updatedBy: req.user.username
         },
         { transaction: t }
@@ -473,7 +480,10 @@ export const addUtsavPackagesBulk = async (req, res) => {
 };
 
 export const addUtsavPackage = async (req, res) => {
-  const { utsavid, name, start_date, end_date, amount } = req.body;
+  const { utsavid, name, start_date, end_date, amount, starting_meal, ending_meal } = req.body;
+
+  validateMealField(starting_meal, 'starting_meal');
+  validateMealField(ending_meal, 'ending_meal');
 
   req.log.info('add_utsav_package_start', { utsavid, name, start_date, end_date, amount });
 
@@ -506,6 +516,12 @@ export const addUtsavPackage = async (req, res) => {
       message: 'Package end date cannot be before start date'
     });
   }
+
+  if (utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
+    return res.status(400).send({
+      message: 'Starting and ending meals can only be configured for Research Centre utsavs'
+    });
+  }
   // 4. Check for duplicate package name in the same Utsav
   const alreadyExists = await UtsavPackagesDb.findOne({
     where: {
@@ -528,6 +544,8 @@ export const addUtsavPackage = async (req, res) => {
     start_date,
     end_date,
     amount,
+    starting_meal,
+    ending_meal,
     updatedBy: req.user.username
   });
 
@@ -554,13 +572,8 @@ export const updateUtsav = async (req, res) => {
     comments,
     location,
     registration_deadline,
-    starting_meal,
-    ending_meal,
     whatsapp_link
   } = req.body;
-
-  validateMealField(starting_meal, 'starting_meal');
-  validateMealField(ending_meal, 'ending_meal');
 
   const utsavId = req.params.id;
   req.log.info('update_utsav_start', { utsavId, name, start_date, end_date, status, total_seats });
@@ -617,8 +630,6 @@ export const updateUtsav = async (req, res) => {
     comments,
     location,
     registration_deadline,
-    starting_meal,
-    ending_meal,
     whatsapp_link,
     updatedBy: req.user.username
   }, { transaction: t });
@@ -1292,8 +1303,11 @@ export const fetchUtsav = async (req, res) => {
 };
 
 export const updateUtsavPackage = async (req, res) => {
-  const { name, start_date, end_date, amount } = req.body;
+  const { name, start_date, end_date, amount, starting_meal, ending_meal } = req.body;
   const { id: packageId } = req.params;
+
+  validateMealField(starting_meal, 'starting_meal');
+  validateMealField(ending_meal, 'ending_meal');
 
   req.log.info('update_utsav_package_start', { packageId, name, amount });
 
@@ -1304,11 +1318,20 @@ export const updateUtsavPackage = async (req, res) => {
     return res.status(404).send({ message: 'Package not found' });
   }
 
+  const utsav = await UtsavDb.findOne({ where: { id: utsavPackage.utsavid } });
+  if (utsav && utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
+    return res.status(400).send({
+      message: 'Starting and ending meals can only be configured for Research Centre utsavs'
+    });
+  }
+
   await utsavPackage.update({
     name,
     start_date,
     end_date,
     amount,
+    starting_meal,
+    ending_meal,
     updatedBy: req.user.username
   });
 
@@ -1327,6 +1350,8 @@ export const fetchAllPackages = async (req, res) => {
         up.start_date,
         up.end_date,
         up.amount,
+        up.starting_meal,
+        up.ending_meal,
         u.name AS utsav_name,
         COUNT(
           CASE WHEN ub.status = '${STATUS_WAITING}' THEN 1 END
@@ -1344,6 +1369,8 @@ export const fetchAllPackages = async (req, res) => {
         up.start_date,
         up.end_date,
         up.amount,
+        up.starting_meal,
+        up.ending_meal,
         u.name
      ORDER BY up.start_date ASC`,
     {
@@ -1391,10 +1418,20 @@ export const fetchPackage = async (req, res) => {
     return res.status(404).send({ message: 'Package not found' });
   }
 
+  const utsav = await UtsavDb.findOne({
+    where: { id: packageData.utsavid },
+    attributes: ['id', 'name', 'location']
+  });
+
+  const responseData = {
+    ...packageData.toJSON(),
+    location: utsav?.location || null
+  };
+
   req.log.info('fetch_utsav_package_success', { id });
   return res
     .status(200)
-    .send({ message: 'Fetched Package', data: packageData });
+    .send({ message: 'Fetched Package', data: responseData });
 };
 
 export const fetchAllUtsavList = async (req, res) => {
