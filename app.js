@@ -28,8 +28,9 @@ import locationRoutes from './routes/client/location.routes.js';
 import guestRoutes from './routes/client/guestBooking.routes.js';
 import mumukshuRoutes from './routes/client/mumukshuBooking.routes.js';
 import paymentRoutes from './routes/client/payment.routes.js';
-import supportRoutes from './routes/client/support.routes.js';
 import updateRoutes from './routes/client/updates.routes.js';
+import ticketRoutes from './routes/client/ticket.routes.js';
+import ticketStreamManager from './utils/ticketStreamManager.js';
 
 // Admin Route Imports
 import authRoutes from './routes/admin/auth.routes.js';
@@ -53,6 +54,7 @@ import {
 import avtManagementRoutes from './routes/admin/avtManagement.routes.js';
 import wifiManagementRoutes from './routes/admin/wifiManagement.routes.js';
 import coordinatorAuthRoutes from './routes/admin/coordinatorAuth.routes.js';
+import ticketManagementRoutes from './routes/admin/ticketManagement.routes.js';
 import adminFormRoutes from './routes/admin/customForm.routes.js';
 
 import waManagementRoutes from './routes/admin/waManagement.routes.js';
@@ -197,7 +199,7 @@ app.use('/api/v1/maintenance', maintenanceRoutes);
 app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/location', locationRoutes);
 app.use('/api/v1/razorpay', paymentRoutes);
-app.use('/api/v1/support', supportRoutes);
+app.use('/api/v1/tickets', ticketRoutes);
 
 // Admin Routes
 app.use('/api/v1/admin/sudo', adminControlRoutes);
@@ -219,6 +221,7 @@ app.use('/api/v1/admin/wifi', wifiManagementRoutes);
 app.use('/api/v1/admin/wa', waManagementRoutes);
 app.use('/api/v1/admin/satshrut', satshrutRoutes);
 app.use('/api/v1/coordinator', coordinatorAuthRoutes);
+app.use('/api/v1/admin/tickets', ticketManagementRoutes);
 app.use('/api/v1/short-links', shortLinkRoutes);
 app.use('/api/v1/admin/temporary-access', temporaryAccessRoutes);
 app.use('/api/v1/admin/forms', adminFormRoutes);
@@ -245,6 +248,9 @@ if (process.env.NODE_ENV != 'test') {
   // Graceful shutdown handling
   const gracefulShutdown = async (signal) => {
     logger.info(`Received ${signal}. Starting graceful shutdown...`);
+
+    // End open ticket streams, or server.close() waits on them until killed.
+    ticketStreamManager.closeAll();
 
     // Close HTTP server first
     server.close(async () => {
