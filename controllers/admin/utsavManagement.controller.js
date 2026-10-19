@@ -1319,7 +1319,12 @@ export const updateUtsavPackage = async (req, res) => {
   }
 
   const utsav = await UtsavDb.findOne({ where: { id: utsavPackage.utsavid } });
-  if (utsav && utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
+  if (!utsav) {
+    req.log.warn('update_utsav_package_utsav_not_found', { packageId, utsavid: utsavPackage.utsavid });
+    return res.status(404).send({ message: 'Associated utsav not found' });
+  }
+
+  if (utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
     return res.status(400).send({
       message: 'Starting and ending meals can only be configured for Research Centre utsavs'
     });

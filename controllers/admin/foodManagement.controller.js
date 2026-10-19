@@ -13,7 +13,8 @@ import {
   ERR_BOOKING_NOT_FOUND,
   MSG_BOOKING_SUCCESSFUL,
   MSG_FETCH_SUCCESSFUL,
-  MSG_UPDATE_SUCCESSFUL
+  MSG_UPDATE_SUCCESSFUL,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
@@ -797,10 +798,7 @@ export const foodReport = async (req, res) => {
       include: [{
         model: UtsavDb,
         attributes: [],
-        where: {
-          start_date: { [Op.lte]: end_date },
-          end_date:   { [Op.gte]: start_date }
-        }
+        where: { location: RESEARCH_CENTRE }
       }],
       where: {
         start_date: { [Op.lte]: end_date },

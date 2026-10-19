@@ -23,11 +23,11 @@ module.exports = {
       UPDATE utsav_packages_db AS p
       INNER JOIN utsav_db AS u ON p.utsavid = u.id
       SET p.starting_meal = CASE
-            WHEN p.start_date = u.start_date THEN u.starting_meal
+            WHEN DATE(p.start_date) = DATE(u.start_date) THEN u.starting_meal
             ELSE NULL
           END,
           p.ending_meal = CASE
-            WHEN p.end_date = u.end_date THEN u.ending_meal
+            WHEN DATE(p.end_date) = DATE(u.end_date) THEN u.ending_meal
             ELSE NULL
           END
       WHERE u.starting_meal IS NOT NULL OR u.ending_meal IS NOT NULL
