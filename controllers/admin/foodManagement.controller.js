@@ -5,14 +5,16 @@ import {
   FoodPhysicalPlate,
   Menu,
   Transactions,
-  UtsavDb
+  UtsavDb,
+  UtsavPackagesDb
 } from '../../models/associations.js';
 import {
   MSG_CANCEL_SUCCESSFUL,
   ERR_BOOKING_NOT_FOUND,
   MSG_BOOKING_SUCCESSFUL,
   MSG_FETCH_SUCCESSFUL,
-  MSG_UPDATE_SUCCESSFUL
+  MSG_UPDATE_SUCCESSFUL,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import { v4 as uuidv4 } from 'uuid';
 import database from '../../config/database.js';
@@ -790,9 +792,14 @@ export const foodReport = async (req, res) => {
 
   // ── Ignore event dates logic ──────────────────────────────────────────────
   if (req.query.ignore_events === 'true') {
-    // Fetch all utsav events overlapping the requested date range
-    const events = await UtsavDb.findAll({
+    // Fetch all utsav packages overlapping the requested date range (only RC utsavs)
+    const packages = await UtsavPackagesDb.findAll({
       attributes: ['start_date', 'end_date', 'starting_meal', 'ending_meal'],
+      include: [{
+        model: UtsavDb,
+        attributes: [],
+        where: { location: RESEARCH_CENTRE }
+      }],
       where: {
         start_date: { [Op.lte]: end_date },
         end_date:   { [Op.gte]: start_date }
@@ -801,6 +808,23 @@ export const foodReport = async (req, res) => {
 
     const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
 
+    // Pre-collect explicit meals across packages by start and end dates
+    const explicitStartMealsByDate = {};
+    const explicitEndMealsByDate = {};
+
+    for (const pkg of packages) {
+      const pkgStart = pkg.start_date.substring(0, 10);
+      const pkgEnd   = pkg.end_date.substring(0, 10);
+      if (Array.isArray(pkg.starting_meal) && pkg.starting_meal.length) {
+        if (!explicitStartMealsByDate[pkgStart]) explicitStartMealsByDate[pkgStart] = [];
+        explicitStartMealsByDate[pkgStart].push(...pkg.starting_meal);
+      }
+      if (Array.isArray(pkg.ending_meal) && pkg.ending_meal.length) {
+        if (!explicitEndMealsByDate[pkgEnd]) explicitEndMealsByDate[pkgEnd] = [];
+        explicitEndMealsByDate[pkgEnd].push(...pkg.ending_meal);
+      }
+    }
+
     // Build a map: dateStr → Set of meals to exclude
     const excludedMeals = {};
     const addExclude = (dateStr, meal) => {
@@ -808,32 +832,34 @@ export const foodReport = async (req, res) => {
       excludedMeals[dateStr].add(meal);
     };
 
-    for (const event of events) {
-      const evStart = event.start_date.substring(0, 10);
-      const evEnd   = event.end_date.substring(0, 10);
+    for (const pkg of packages) {
+      const pkgStart = pkg.start_date.substring(0, 10);
+      const pkgEnd   = pkg.end_date.substring(0, 10);
 
-      // First event meal on start date (fallback: breakfast = whole day from start)
-      const startingMeals = Array.isArray(event.starting_meal) && event.starting_meal.length
-        ? event.starting_meal : MEAL_ORDER;
+      // First event meal on start date (fallback: use other packages on same day if available, else whole day)
+      const startingMeals = Array.isArray(pkg.starting_meal) && pkg.starting_meal.length
+        ? pkg.starting_meal
+        : (explicitStartMealsByDate[pkgStart] || MEAL_ORDER);
       const firstEventMeal    = MEAL_ORDER.find(m => startingMeals.includes(m)) || 'breakfast';
       const firstEventMealIdx = MEAL_ORDER.indexOf(firstEventMeal);
 
-      // Last event meal on end date (fallback: dinner = whole day until end)
-      const endingMeals = Array.isArray(event.ending_meal) && event.ending_meal.length
-        ? event.ending_meal : MEAL_ORDER;
+      // Last event meal on end date (fallback: use other packages on same day if available, else whole day)
+      const endingMeals = Array.isArray(pkg.ending_meal) && pkg.ending_meal.length
+        ? pkg.ending_meal
+        : (explicitEndMealsByDate[pkgEnd] || MEAL_ORDER);
       const lastEventMeal    = [...MEAL_ORDER].reverse().find(m => endingMeals.includes(m)) || 'dinner';
       const lastEventMealIdx = MEAL_ORDER.indexOf(lastEventMeal);
 
-      // Walk every date in event range
-      const cursor = new Date(evStart);
-      const endD   = new Date(evEnd);
+      // Walk every date in package range
+      const cursor = new Date(pkgStart);
+      const endD   = new Date(pkgEnd);
       while (cursor <= endD) {
         const dateStr    = cursor.toISOString().split('T')[0];
-        const isStartDay = dateStr === evStart;
-        const isEndDay   = dateStr === evEnd;
+        const isStartDay = dateStr === pkgStart;
+        const isEndDay   = dateStr === pkgEnd;
 
         if (isStartDay && isEndDay) {
-          // Single-day event
+          // Single-day package
           for (let i = firstEventMealIdx; i <= lastEventMealIdx; i++)
             addExclude(dateStr, MEAL_ORDER[i]);
         } else if (isStartDay) {
