@@ -808,6 +808,23 @@ export const foodReport = async (req, res) => {
 
     const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
 
+    // Pre-collect explicit meals across packages by start and end dates
+    const explicitStartMealsByDate = {};
+    const explicitEndMealsByDate = {};
+
+    for (const pkg of packages) {
+      const pkgStart = pkg.start_date.substring(0, 10);
+      const pkgEnd   = pkg.end_date.substring(0, 10);
+      if (Array.isArray(pkg.starting_meal) && pkg.starting_meal.length) {
+        if (!explicitStartMealsByDate[pkgStart]) explicitStartMealsByDate[pkgStart] = [];
+        explicitStartMealsByDate[pkgStart].push(...pkg.starting_meal);
+      }
+      if (Array.isArray(pkg.ending_meal) && pkg.ending_meal.length) {
+        if (!explicitEndMealsByDate[pkgEnd]) explicitEndMealsByDate[pkgEnd] = [];
+        explicitEndMealsByDate[pkgEnd].push(...pkg.ending_meal);
+      }
+    }
+
     // Build a map: dateStr → Set of meals to exclude
     const excludedMeals = {};
     const addExclude = (dateStr, meal) => {
@@ -819,15 +836,17 @@ export const foodReport = async (req, res) => {
       const pkgStart = pkg.start_date.substring(0, 10);
       const pkgEnd   = pkg.end_date.substring(0, 10);
 
-      // First event meal on start date (fallback: breakfast = whole day from start)
+      // First event meal on start date (fallback: use other packages on same day if available, else whole day)
       const startingMeals = Array.isArray(pkg.starting_meal) && pkg.starting_meal.length
-        ? pkg.starting_meal : MEAL_ORDER;
+        ? pkg.starting_meal
+        : (explicitStartMealsByDate[pkgStart] || MEAL_ORDER);
       const firstEventMeal    = MEAL_ORDER.find(m => startingMeals.includes(m)) || 'breakfast';
       const firstEventMealIdx = MEAL_ORDER.indexOf(firstEventMeal);
 
-      // Last event meal on end date (fallback: dinner = whole day until end)
+      // Last event meal on end date (fallback: use other packages on same day if available, else whole day)
       const endingMeals = Array.isArray(pkg.ending_meal) && pkg.ending_meal.length
-        ? pkg.ending_meal : MEAL_ORDER;
+        ? pkg.ending_meal
+        : (explicitEndMealsByDate[pkgEnd] || MEAL_ORDER);
       const lastEventMeal    = [...MEAL_ORDER].reverse().find(m => endingMeals.includes(m)) || 'dinner';
       const lastEventMealIdx = MEAL_ORDER.indexOf(lastEventMeal);
 
