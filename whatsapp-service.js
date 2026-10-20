@@ -12,6 +12,8 @@ import qrcodeTerminal from 'qrcode-terminal';
 import { Op } from 'sequelize';
 import moment from 'moment-timezone';
 import cron from 'node-cron';
+import { recoverStuckJobs } from './helpers/waJobRecovery.helper.js';
+import { runCreateGroupJob } from './helpers/waCreateGroup.helper.js';
 
 const STATUS_FILE = path.join(process.cwd(), 'whatsapp_status.json');
 
@@ -69,38 +71,7 @@ async function processQueue(sock) {
     console.log(`[WA Queue] Processing job ${job.id}: ${job.action}`);
 
     if (job.action === 'create_group') {
-      const { name, type, eventId } = job.payload || {};
-      if (!name || !type || !eventId) {
-        throw new Error('Invalid payload for create_group action');
-      }
-
-      console.log(`[WA Queue] Creating group: "${name}"`);
-      try {
-        // Create empty group
-        const group = await sock.groupCreate(name, []);
-        const groupJid = group.id;
-
-        // Restrict message sending to admins only (announcement mode)
-        await sock.groupSettingUpdate(groupJid, 'announcement');
-
-        // Update database model with the new group JID
-        if (type === 'utsav') {
-          await UtsavDb.update({ whatsapp_group_jid: groupJid }, { where: { id: eventId } });
-        } else if (type === 'shibir') {
-          await ShibirDb.update({ whatsapp_group_jid: groupJid }, { where: { id: eventId } });
-        }
-
-        await job.update({ status: 'success', groupJid });
-        console.log(`[WA Queue] Group created successfully: "${name}" -> JID: ${groupJid}`);
-      } catch (createErr) {
-        console.error(`[WA Queue] Failed to create group:`, createErr.message);
-        if (createErr.message && (createErr.message.includes('bad-request') || createErr.message.includes('400'))) {
-          await job.update({ status: 'failed', error: `WhatsApp rejected creation: ${createErr.message}` });
-          console.log(`[WA Queue] Job marked as failed due to rejection (non-retryable).`);
-        } else {
-          throw createErr;
-        }
-      }
+      await runCreateGroupJob(sock, job, { UtsavDb, ShibirDb });
 
     } else if (job.action === 'add_member') {
       const { phone, groupJid } = job;
@@ -511,7 +482,7 @@ async function connectToWhatsApp() {
 cron.schedule('0 0 * * *', () => {
   console.log('[WA Service] Starting daily media cleanup...');
   try {
-    const uploadDir = path.join(process.cwd(), 'public/uploads/whatsapp');
+    const uploadDir = path.join(process.cwd(), 'uploads/whatsapp');
     if (fs.existsSync(uploadDir)) {
       const files = fs.readdirSync(uploadDir);
       const now = Date.now();
@@ -532,6 +503,8 @@ cron.schedule('0 0 * * *', () => {
     console.error('[WA Service] Media cleanup failed:', err.message);
   }
 });
+
+cron.schedule('*/5 * * * *', recoverStuckJobs);
 
 // Graceful shutdown handling
 const handleShutdown = async (signal) => {
@@ -554,6 +527,7 @@ process.on('SIGTERM', () => handleShutdown('SIGTERM'));
   try {
     await database.authenticate();
     console.log('[WA Service] Database connected successfully.');
+    await recoverStuckJobs();
     await connectToWhatsApp();
   } catch (error) {
     console.error('[WA Service] Initialization failed:', error);
