@@ -39,7 +39,9 @@ import ApiError from '../utils/ApiError.js';
 import {
   getBlockedDates,
   isDateRangeOverlapping,
-  validateBlockedDates
+  validateBlockedDates,
+  isBlockFromUtsav,
+  isDateBlocked
 } from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
@@ -604,23 +606,64 @@ export async function getDateRangesDuringUtsav(
 
   const blockedDates = await getBlockedDates(startDate, endDate);
 
+  const activeUtsavsAtRC = await UtsavDb.findAll({
+    where: {
+      location: RESEARCH_CENTRE,
+      [Sequelize.Op.and]: [
+        { start_date: { [Sequelize.Op.lte]: endDate } },
+        {
+          end_date: {
+            [Sequelize.Op.gte]: moment(startDate).subtract(1, 'day').format('YYYY-MM-DD')
+          }
+        }
+      ]
+    }
+  });
+
+  const allRCUtsavs = [...activeUtsavsAtRC];
+  if (utsav && (utsav.location || RESEARCH_CENTRE) === RESEARCH_CENTRE) {
+    if (!allRCUtsavs.some((u) => u.id === utsav.id)) {
+      allRCUtsavs.push(utsav);
+    }
+  }
+
+  const utsavBlockedDates = [];
+  const manualBlockedDates = [];
+  for (const b of blockedDates) {
+    if (isBlockFromUtsav(b, allRCUtsavs)) {
+      utsavBlockedDates.push(b);
+    } else {
+      manualBlockedDates.push(b);
+    }
+  }
+
   const dateRangesByMumukshu = {};
   for (const mumukshu of mumukshus) {
     const isDayVisit = startDate === endDate;
 
     const dateRanges = [];
 
-    // A day visit is one whole range and is never split around an utsav. It used
-    // to return here, BEFORE the blocked-date validation below, so a day visit
-    // onto a blocked date was never checked for anyone. It now falls through to
-    // the same validation as every other stay.
+    // A day visit is one whole range and is never split around an utsav.
+    // If it falls on an utsav blocked date, validateBlockedDates rejects it with 400.
+    // If it falls on a manual RC block, it is tagged as manualRCBlocked so it can be waitlisted.
     if (isDayVisit) {
       dateRanges.push({
         start: startDate,
         end: endDate,
         overlappingWithUtsav: false
       });
-      validateBlockedDates(blockedDates, dateRanges);
+      validateBlockedDates(utsavBlockedDates, dateRanges);
+
+      for (const range of dateRanges) {
+        const matchingManualBlock = manualBlockedDates.find((b) =>
+          isDateBlocked(b, range.start, range.end, range.overlappingWithUtsav)
+        );
+        if (matchingManualBlock) {
+          range.manualRCBlocked = true;
+          range.blockedDate = matchingManualBlock;
+        }
+      }
+
       dateRangesByMumukshu[mumukshu] = dateRanges;
       continue;
     }
@@ -668,8 +711,19 @@ export async function getDateRangesDuringUtsav(
       });
     }
 
-    // validate blockedDates
-    validateBlockedDates(blockedDates, dateRanges);
+    // Utsav blocked dates strictly reject room bookings with 400
+    validateBlockedDates(utsavBlockedDates, dateRanges);
+
+    // Manual RC blocks tag ranges so they can be placed on the waiting list
+    for (const range of dateRanges) {
+      const matchingManualBlock = manualBlockedDates.find((b) =>
+        isDateBlocked(b, range.start, range.end, range.overlappingWithUtsav)
+      );
+      if (matchingManualBlock) {
+        range.manualRCBlocked = true;
+        range.blockedDate = matchingManualBlock;
+      }
+    }
 
     dateRangesByMumukshu[mumukshu] = dateRanges;
   }
