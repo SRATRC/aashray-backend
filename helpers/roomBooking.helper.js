@@ -542,8 +542,12 @@ async function getManualRCBlockForFlat(checkin, checkout) {
   // Only genuine manual RC blocks trigger waitlisting for flats.
   const manualBlockedDates = blockedDates.filter((b) => !isBlockFromUtsav(b, activeUtsavsAtRC));
 
-  // Use isDateBlocked with boundaryAllowed = true so edge-touching dates do not match
-  return manualBlockedDates.find((b) => isDateBlocked(b, checkin, checkout, true)) || null;
+  // Overnight stays: edge-touching blocks don't count. Same-day visits use the strict check,
+  // matching the room flow, so a visit on the block's first day is still caught.
+  const boundaryAllowed = checkin !== checkout;
+  return (
+    manualBlockedDates.find((b) => isDateBlocked(b, checkin, checkout, boundaryAllowed)) || null
+  );
 }
 
 export async function bookFlatForMumukshus(

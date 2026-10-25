@@ -10,12 +10,16 @@
 // was checked and nothing was rejected.
 //
 // Second hole in the same function: a day visit returned before the blocked-date
-// validation entirely, so a day visit onto a blocked date was never checked.
+// validation entirely, so a day visit onto an utsav blocked date was never checked
+// (while manual closures waitlist it).
 import request from 'supertest';
 import moment from 'moment';
 import { app } from '../../../app.js';
 import {
   CardDb,
+  FlatDb,
+  FlatBooking,
+  RoomBooking,
   UtsavDb,
   UtsavBooking,
   UtsavPackagesDb
@@ -28,9 +32,11 @@ import {
   STATUS_ACTIVE,
   STATUS_CONFIRMED,
   STATUS_WAITING,
+  ROOM_STATUS_PENDING_CHECKIN,
   HOLD_REASON,
   RESEARCH_CENTRE,
-  TYPE_ROOM
+  TYPE_ROOM,
+  TYPE_FLAT
 } from '../../../config/constants.js';
 
 jest.mock('../../../utils/sendMail.js');
@@ -44,6 +50,14 @@ const roomBookingJson = (cardno, checkin, checkout) => ({
     checkin_date: checkin,
     checkout_date: checkout,
     mumukshuGroup: [{ roomType: 'ac', floorType: '', mumukshus: [cardno] }]
+  }
+});
+const flatBookingJson = (cardno, checkin, checkout) => ({
+  booking_type: TYPE_FLAT,
+  details: {
+    checkin_date: checkin,
+    checkout_date: checkout,
+    mumukshus: [cardno]
   }
 });
 
@@ -66,6 +80,7 @@ const UTSAV_BLOCK_POST = fmt(moment(U_END).add(3, 'day'));
 const CLOSURE_START = fmt(moment().add(160, 'day'));
 const CLOSURE_END = fmt(moment().add(165, 'day'));
 const CLOSURE_DAY = fmt(moment().add(162, 'day'));
+const CLOSURE_PRE_EDGE = fmt(moment(CLOSURE_START).subtract(2, 'day'));
 
 let utsav;
 let pkg;
@@ -120,9 +135,18 @@ describe('room stay inside an event span is blocked for everyone', () => {
       status: STATUS_CONFIRMED,
       updatedBy: 'test'
     });
+    // Create a flat owned by OUTSIDER for flat-booking tests
+    await FlatDb.create({
+      flatno: 'EVT_FLAT_1',
+      owner: OUTSIDER,
+      updatedBy: 'test'
+    });
   });
 
   afterAll(async () => {
+    await FlatBooking.destroy({ where: { cardno: [ATTENDEE, OUTSIDER] } });
+    await RoomBooking.destroy({ where: { cardno: [ATTENDEE, OUTSIDER] } });
+    await FlatDb.destroy({ where: { flatno: 'EVT_FLAT_1' } });
     await UtsavBooking.destroy({ where: { bookingid: 'EVT_IN_UB_1' } });
     await BlockDates.destroy({
       where: { comments: ['EVT_IN utsav auto-block', 'EVT_IN plain closure'] }
@@ -213,6 +237,76 @@ describe('room stay inside an event span is blocked for everyone', () => {
       primary_booking: roomBookingJson(OUTSIDER, UTSAV_BLOCK_END, UTSAV_BLOCK_END)
     });
     expect(res.status).toBe(400);
+  });
+
+  // Exercises bookRoomForMumukshus when status is WAITING on a manual block
+  it('room booking on a manual block creates a WAITING room_booking with hold_reason = RC_BLOCKED and roomno = NA', async () => {
+    const res = await request(app)
+      .post('/api/v1/mumukshu/booking')
+      .send({
+        cardno: OUTSIDER,
+        primary_booking: roomBookingJson(OUTSIDER, CLOSURE_DAY, CLOSURE_DAY)
+      });
+    expect(res.status).toBe(200);
+
+    const booking = await RoomBooking.findOne({
+      where: { cardno: OUTSIDER, checkin: CLOSURE_DAY, checkout: CLOSURE_DAY }
+    });
+    expect(booking).not.toBeNull();
+    expect(booking.status).toBe(STATUS_WAITING);
+    expect(booking.roomno).toBe('NA');
+    expect(booking.hold_reason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // Flat path: stay inside a manual block -> WAITING / RC_BLOCKED with charge: 0
+  it('flat validate inside a manual block is waitlisted with RC_BLOCKED and charge 0', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, CLOSURE_START, CLOSURE_END)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.flatDetails[0].status).toBe(STATUS_WAITING);
+    expect(res.body.data.flatDetails[0].holdReason).toBe(HOLD_REASON.RC_BLOCKED);
+    expect(res.body.data.flatDetails[0].charge).toBe(0);
+  });
+
+  it('flat booking inside a manual block creates a WAITING flat booking with hold_reason = RC_BLOCKED', async () => {
+    const res = await request(app)
+      .post('/api/v1/mumukshu/booking')
+      .send({
+        cardno: OUTSIDER,
+        primary_booking: flatBookingJson(OUTSIDER, CLOSURE_START, CLOSURE_END)
+      });
+    expect(res.status).toBe(200);
+
+    const booking = await FlatBooking.findOne({
+      where: { cardno: OUTSIDER, checkin: CLOSURE_START, checkout: CLOSURE_END }
+    });
+    expect(booking).not.toBeNull();
+    expect(booking.status).toBe(STATUS_WAITING);
+    expect(booking.hold_reason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // Flat stay during an utsav's own block -> normal booking (not waitlisted)
+  it('flat validate during an utsav own block is confirmed as normal (not waitlisted)', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, INSIDE_CHECKIN, INSIDE_CHECKOUT)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.flatDetails[0].status).toBe(ROOM_STATUS_PENDING_CHECKIN);
+    expect(res.body.data.flatDetails[0].holdReason).toBeFalsy();
+  });
+
+  // Flat stay that only touches the edge of a manual block -> normal booking
+  it('flat validate that only touches the edge of a manual block is confirmed as normal', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, CLOSURE_PRE_EDGE, CLOSURE_START)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.flatDetails[0].status).toBe(ROOM_STATUS_PENDING_CHECKIN);
+    expect(res.body.data.flatDetails[0].holdReason).toBeFalsy();
   });
 
   // Regression guard: a stay that WRAPS the festival must still split into a
