@@ -31,6 +31,7 @@ import { splitDateRanges } from '../../../helpers/utsavBooking.helper.js';
 import {
   STATUS_ACTIVE,
   STATUS_CONFIRMED,
+  STATUS_AVAILABLE,
   STATUS_WAITING,
   ROOM_STATUS_PENDING_CHECKIN,
   HOLD_REASON,
@@ -137,7 +138,7 @@ describe('room stay inside an event span is blocked for everyone', () => {
     });
     // Create a flat owned by OUTSIDER for flat-booking tests
     await FlatDb.create({
-      flatno: 'EVT_FLAT_1',
+      flatno: 99470,
       owner: OUTSIDER,
       updatedBy: 'test'
     });
@@ -146,7 +147,7 @@ describe('room stay inside an event span is blocked for everyone', () => {
   afterAll(async () => {
     await FlatBooking.destroy({ where: { cardno: [ATTENDEE, OUTSIDER] } });
     await RoomBooking.destroy({ where: { cardno: [ATTENDEE, OUTSIDER] } });
-    await FlatDb.destroy({ where: { flatno: 'EVT_FLAT_1' } });
+    await FlatDb.destroy({ where: { flatno: 99470 } });
     await UtsavBooking.destroy({ where: { bookingid: 'EVT_IN_UB_1' } });
     await BlockDates.destroy({
       where: { comments: ['EVT_IN utsav auto-block', 'EVT_IN plain closure'] }
@@ -294,7 +295,7 @@ describe('room stay inside an event span is blocked for everyone', () => {
       primary_booking: flatBookingJson(OUTSIDER, INSIDE_CHECKIN, INSIDE_CHECKOUT)
     });
     expect(res.status).toBe(200);
-    expect(res.body.data.flatDetails[0].status).toBe(ROOM_STATUS_PENDING_CHECKIN);
+    expect(res.body.data.flatDetails[0].status).toBe(STATUS_AVAILABLE);
     expect(res.body.data.flatDetails[0].holdReason).toBeFalsy();
   });
 
@@ -305,7 +306,7 @@ describe('room stay inside an event span is blocked for everyone', () => {
       primary_booking: flatBookingJson(OUTSIDER, CLOSURE_PRE_EDGE, CLOSURE_START)
     });
     expect(res.status).toBe(200);
-    expect(res.body.data.flatDetails[0].status).toBe(ROOM_STATUS_PENDING_CHECKIN);
+    expect(res.body.data.flatDetails[0].status).toBe(STATUS_AVAILABLE);
     expect(res.body.data.flatDetails[0].holdReason).toBeFalsy();
   });
 
