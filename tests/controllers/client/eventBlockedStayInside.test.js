@@ -27,6 +27,8 @@ import { splitDateRanges } from '../../../helpers/utsavBooking.helper.js';
 import {
   STATUS_ACTIVE,
   STATUS_CONFIRMED,
+  STATUS_WAITING,
+  HOLD_REASON,
   RESEARCH_CENTRE,
   TYPE_ROOM
 } from '../../../config/constants.js';
@@ -57,6 +59,9 @@ const INSIDE_CHECKOUT = fmt(moment().add(145, 'day'));
 // A stay that wraps the whole festival (the legitimate split case).
 const WRAP_CHECKIN = fmt(moment().add(138, 'day'));
 const WRAP_CHECKOUT = fmt(moment().add(152, 'day'));
+// Auto-block ends on U_END + 1 day
+const UTSAV_BLOCK_END = fmt(moment(U_END).add(1, 'day'));
+const UTSAV_BLOCK_POST = fmt(moment(U_END).add(3, 'day'));
 // A standalone closure with no utsav attached, for the day-visit case.
 const CLOSURE_START = fmt(moment().add(160, 'day'));
 const CLOSURE_END = fmt(moment().add(165, 'day'));
@@ -162,11 +167,50 @@ describe('room stay inside an event span is blocked for everyone', () => {
     ).rejects.toThrow(new RegExp(utsav.name));
   });
 
-  // Second hole: a day visit skipped blocked-date validation entirely.
-  it('day visit onto a blocked date is rejected', async () => {
+  // Manual blocks allow waitlist: day visit onto a manual blocked date returns waiting status with RC_BLOCKED.
+  it('day visit onto a manual blocked date is waitlisted with RC_BLOCKED', async () => {
     const res = await postRoomValidate({
       cardno: OUTSIDER,
       primary_booking: roomBookingJson(OUTSIDER, CLOSURE_DAY, CLOSURE_DAY)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.roomDetails[0].status).toBe(STATUS_WAITING);
+    expect(res.body.data.roomDetails[0].holdReason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // A stay over several nights during a manual block -> RC_BLOCKED waitlist
+  it('a stay over several nights during a manual block is waitlisted with RC_BLOCKED', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, CLOSURE_START, CLOSURE_END)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.roomDetails[0].status).toBe(STATUS_WAITING);
+    expect(res.body.data.roomDetails[0].holdReason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // A stay during an utsav's own block -> still 400
+  it('a stay during an utsav own block is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, U_START, U_END)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // A stay starting on utsav.end_date + 1 -> still 400 because utsav block extends to end_date + 1
+  it('a stay starting on utsav.end_date + 1 is still rejected with 400 due to utsav auto-block', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, UTSAV_BLOCK_END, UTSAV_BLOCK_POST)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('a day visit on utsav.end_date + 1 is still rejected with 400 due to utsav auto-block', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, UTSAV_BLOCK_END, UTSAV_BLOCK_END)
     });
     expect(res.status).toBe(400);
   });

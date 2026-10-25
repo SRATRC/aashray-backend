@@ -32,12 +32,14 @@ import {
   updateRazorpayTransactions,
   usableCredits
 } from './transactions.helper.js';
+import moment from 'moment';
 import {
   calculateNights,
   checkFlatAlreadyBooked,
   validateDate,
   getBlockedDates,
-  isBlockFromUtsav
+  isBlockFromUtsav,
+  isDateBlocked
 } from '../controllers/helper.js';
 import {
   findUtsavOnBoundaryDates,
@@ -519,6 +521,31 @@ export function roomCharge(roomtype) {
   return roomtype == 'nac' ? NAC_ROOM_PRICE : AC_ROOM_PRICE;
 }
 
+async function getManualRCBlockForFlat(checkin, checkout) {
+  // Find active utsavs at RC (widened by 1 day so utsav auto-block checkout is covered)
+  const activeUtsavsAtRC = await UtsavDb.findAll({
+    where: {
+      location: RESEARCH_CENTRE,
+      [Sequelize.Op.and]: [
+        { start_date: { [Sequelize.Op.lte]: checkout } },
+        {
+          end_date: {
+            [Sequelize.Op.gte]: moment(checkin).subtract(1, 'day').format('YYYY-MM-DD')
+          }
+        }
+      ]
+    }
+  });
+
+  const blockedDates = await getBlockedDates(checkin, checkout);
+  // Exclude utsav blocks — flat owners may stay in their flats during utsavs.
+  // Only genuine manual RC blocks trigger waitlisting for flats.
+  const manualBlockedDates = blockedDates.filter((b) => !isBlockFromUtsav(b, activeUtsavsAtRC));
+
+  // Use isDateBlocked with boundaryAllowed = true so edge-touching dates do not match
+  return manualBlockedDates.find((b) => isDateBlocked(b, checkin, checkout, true)) || null;
+}
+
 export async function bookFlatForMumukshus(
   startDay,
   endDay,
@@ -553,27 +580,7 @@ export async function bookFlatForMumukshus(
   }
 
   const nights = await calculateNights(startDay, endDay);
-
-  const activeUtsavsAtRC = await UtsavDb.findAll({
-    where: {
-      location: RESEARCH_CENTRE,
-      [Sequelize.Op.and]: [
-        { start_date: { [Sequelize.Op.lte]: endDay } },
-        { end_date: { [Sequelize.Op.gte]: startDay } }
-      ]
-    }
-  });
-
-  if (activeUtsavsAtRC.length > 0) {
-    throw new ApiError(
-      400,
-      'Requested stay falls inside an event. Flat bookings cannot be made for event dates.'
-    );
-  }
-
-  const blockedDates = await getBlockedDates(startDay, endDay);
-  const manualBlockedDates = blockedDates.filter((b) => !isBlockFromUtsav(b, activeUtsavsAtRC));
-  const manualRCBlock = manualBlockedDates.length > 0 ? manualBlockedDates[0] : null;
+  const manualRCBlock = await getManualRCBlockForFlat(startDay, endDay);
 
   // Batched rolling-window cap for the whole group (fixed queries + sorted,
   // deadlock-safe per-person locks), instead of a per-occupant check.
@@ -887,28 +894,8 @@ export async function checkFlatAvailabilityForMumukshus(
     throw new ApiError(400, ERR_FLAT_ALREADY_BOOKED);
   }
 
-  const activeUtsavsAtRC = await UtsavDb.findAll({
-    where: {
-      location: RESEARCH_CENTRE,
-      [Sequelize.Op.and]: [
-        { start_date: { [Sequelize.Op.lte]: checkout_date } },
-        { end_date: { [Sequelize.Op.gte]: checkin_date } }
-      ]
-    }
-  });
-
-  if (activeUtsavsAtRC.length > 0) {
-    throw new ApiError(
-      400,
-      'Requested stay falls inside an event. Flat bookings cannot be made for event dates.'
-    );
-  }
-
-  const blockedDates = await getBlockedDates(checkin_date, checkout_date);
-  const manualBlockedDates = blockedDates.filter((b) => !isBlockFromUtsav(b, activeUtsavsAtRC));
-  const manualRCBlock = manualBlockedDates.length > 0 ? manualBlockedDates[0] : null;
-
   const nights = await calculateNights(checkin_date, checkout_date);
+  const manualRCBlock = await getManualRCBlockForFlat(checkin_date, checkout_date);
   const flatDetails = [];
 
   const flatOwnerData = await FlatDb.findAll({

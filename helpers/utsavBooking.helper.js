@@ -611,7 +611,11 @@ export async function getDateRangesDuringUtsav(
       location: RESEARCH_CENTRE,
       [Sequelize.Op.and]: [
         { start_date: { [Sequelize.Op.lte]: endDate } },
-        { end_date: { [Sequelize.Op.gte]: startDate } }
+        {
+          end_date: {
+            [Sequelize.Op.gte]: moment(startDate).subtract(1, 'day').format('YYYY-MM-DD')
+          }
+        }
       ]
     }
   });
