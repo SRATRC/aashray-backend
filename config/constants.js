@@ -189,6 +189,7 @@ export const HOLD_REASON = {
   ROLLING_WINDOW_LIMIT: 'ROLLING_WINDOW_LIMIT',
   ROOM_UNAVAILABLE: 'ROOM_UNAVAILABLE',
   UTSAV_BOUNDARY: 'UTSAV_BOUNDARY',
+  RC_BLOCKED: 'RC_BLOCKED',
   MANUAL: 'MANUAL',
   UNKNOWN: 'UNKNOWN'
 };
@@ -209,6 +210,11 @@ export const HOLD_REASON_COPY = {
     adminLabel: 'Event boundary date',
     userMessage:
       'This single-night stay falls on an event boundary date and is on the waitlist for review.'
+  },
+  RC_BLOCKED: {
+    adminLabel: 'Research Centre Blocked',
+    userMessage:
+      'The Research Centre is closed for general bookings on these dates. Your booking is on the waitlist for admin review.'
   },
   MANUAL: {
     adminLabel: 'Manually waitlisted',

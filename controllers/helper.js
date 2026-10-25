@@ -924,3 +924,15 @@ export function validateBlockedDates(blockedDates, dateRanges) {
     );
   }
 }
+
+export function isBlockFromUtsav(blockedDate, utsavs = []) {
+  return utsavs.some((u) => {
+    const utsavBlockCheckout = moment(u.end_date).add(1, 'day').format('YYYY-MM-DD');
+    return (
+      (blockedDate.checkin === u.start_date && blockedDate.checkout === utsavBlockCheckout) ||
+      blockedDate.comments === u.name ||
+      isDateRangeOverlapping(u.start_date, u.end_date, blockedDate.checkin, blockedDate.checkout)
+    );
+  });
+}
+

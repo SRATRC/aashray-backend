@@ -1488,7 +1488,9 @@ export const flatReservationReport = async (req, res) => {
       'checkin',
       'checkout',
       'status',
-      'nights'
+      'nights',
+      'hold_reason',
+      'hold_reason_meta'
     ],
     where: whereClause,
     order: [['checkin', 'ASC']]
@@ -1574,7 +1576,9 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
       'checkout',
       'bookedBy',
       'status',
-      'nights'
+      'nights',
+      'hold_reason',
+      'hold_reason_meta'
     ],
     where: {
       status: statuses,
