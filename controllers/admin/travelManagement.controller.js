@@ -441,9 +441,11 @@ LEFT JOIN travel_bus_group tbg
         model: ShibirDb,
         as: 'ShibirDb',
         attributes: ['name', 'start_date', 'end_date'],
-        where: travelDates.length
-          ? { end_date: { [Op.gte]: windowStart }, start_date: { [Op.lte]: windowEnd } }
-          : undefined
+        // A deleted shibir is not an adhyayan the member attends (same rule as has_confirmed_adhyayan).
+        where: {
+          status: { [Op.ne]: STATUS_DELETED },
+          ...(travelDates.length ? { end_date: { [Op.gte]: windowStart }, start_date: { [Op.lte]: windowEnd } } : {})
+        }
       }],
       // Deterministic order so same-delta ties in matchAdhyayanForLeg resolve stably.
       order: [[{ model: ShibirDb, as: 'ShibirDb' }, 'start_date', 'ASC']]
