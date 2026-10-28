@@ -9,8 +9,15 @@ import { formatWhatsAppPhone } from '../../utils/phoneFormatter.js';
 
 export const fetchAllAdmins = async (req, res) => {
   const admins = await AdminUsers.findAll({
+    include: [
+      {
+        model: AdminRoles,
+        where: { status: STATUS_ACTIVE },
+        required: false
+      }
+    ],
     order: [
-      [Sequelize.literal("status = 'active'"), 'DESC'], // Put active first
+      [Sequelize.literal("`AdminUsers`.`status` = 'active'"), 'DESC'], // Put active first
       ['username', 'ASC']                              // Then sort alphabetically
     ]
   });
@@ -19,42 +26,58 @@ export const fetchAllAdmins = async (req, res) => {
 };
 
 export const updateAdminRoles = async (req, res) => {
+  const { userid, roles } = req.body;
+  if (!userid) {
+    throw new ApiError(400, 'Invalid userid');
+  }
+  if (!roles || !Array.isArray(roles) || roles.length === 0) {
+    throw new ApiError(400, 'Invalid roles array');
+  }
+
+  // An unknown role name would fail on the roles foreign key as a 500.
+  const knownRoles = await Roles.findAll({
+    where: { name: roles, status: STATUS_ACTIVE },
+    attributes: ['name']
+  });
+  const unknownRoles = roles.filter(
+    (role) => !knownRoles.some((known) => known.name === role)
+  );
+  if (unknownRoles.length > 0) {
+    throw new ApiError(400, `Unknown roles: ${unknownRoles.join(', ')}`);
+  }
+
+  const admin = await AdminUsers.findOne({ where: { id: userid }, attributes: ['id'] });
+  if (!admin) {
+    throw new ApiError(400, `Unknown admin ids: ${userid}`);
+  }
+
   const t = await database.transaction();
   req.transaction = t;
 
-  const { userid, roles } = req.body;
-
-  // await AdminRoles.destroy({
-  //   where: {
-  //     user_id: userid
-  //   },
-  //   transaction: t
-  // });
-
+  // admin_roles is keyed on (user_id, role_name): keep one row per role.
+  // Mark every row inactive, then insert-or-reactivate the requested ones.
   await AdminRoles.update(
     {
       status: STATUS_INACTIVE,
       updatedBy: req.user.username
     },
-    { where: { user_id: userid }, transaction: t }
+    { where: { user_id: admin.id }, transaction: t }
   );
 
-  const admin_roles_data = [];
-  for (let i of roles) {
-    admin_roles_data.push({
-      user_id: userid,
-      role_name: i,
-      updatedBy: req.user.username
-    });
-  }
+  const admin_roles_data = [...new Set(roles)].map((role) => ({
+    user_id: admin.id,
+    role_name: role,
+    status: STATUS_ACTIVE,
+    updatedBy: req.user.username
+  }));
 
-  const admin_roles = await AdminRoles.bulkCreate(admin_roles_data, {
+  await AdminRoles.bulkCreate(admin_roles_data, {
+    updateOnDuplicate: ['status', 'updatedBy', 'updatedAt'],
     transaction: t
   });
-  if (admin_roles.length == 0)
-    throw new ApiError(500, 'Unexpected error occured while creating admin');
 
   await t.commit();
+  req.transaction = null;
   return res.status(200).send({ message: 'updated admin roles' });
 };
 
@@ -207,3 +230,159 @@ export const deleteRole = async (req, res) => {
 
   return res.status(200).send({ message: 'role deleted' });
 };
+
+export const bulkDeactivateAdmins = async (req, res) => {
+  const { usernames } = req.body;
+  if (!usernames || !Array.isArray(usernames) || usernames.length === 0) {
+    throw new ApiError(400, 'Invalid usernames array');
+  }
+
+  // Usernames match regardless of case, as MySQL's collation does, so a
+  // different-case spelling can't slip past the self-check.
+  const lower = (name) => String(name).toLowerCase();
+
+  // Check if superadmin is trying to deactivate themselves
+  if (usernames.some((name) => lower(name) === lower(req.user.username))) {
+    throw new ApiError(400, 'You cannot deactivate yourself.');
+  }
+
+  const knownAdmins = await AdminUsers.findAll({
+    where: { username: usernames },
+    attributes: ['username', 'status']
+  });
+  const knownNames = new Set(knownAdmins.map((known) => lower(known.username)));
+  const unknownUsernames = [...new Set(usernames)].filter((name) => !knownNames.has(lower(name)));
+  if (unknownUsernames.length > 0) {
+    throw new ApiError(400, `Unknown usernames: ${unknownUsernames.join(', ')}`);
+  }
+  // Only admins who were active get the "deactivated" message; one who was
+  // already inactive isn't told again.
+  const newlyDeactivated = knownAdmins.filter((known) => known.status !== STATUS_INACTIVE);
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  // Update users status
+  await AdminUsers.update(
+    {
+      status: STATUS_INACTIVE,
+      updatedBy: req.user.username
+    },
+    {
+      where: { username: usernames },
+      transaction: t
+    }
+  );
+
+  await t.commit();
+  req.transaction = null;
+
+  // Trigger WhatsApp notification for each newly deactivated admin
+  // asynchronously: once per real admin, using the stored username
+  for (const { username } of newlyDeactivated) {
+    AdminUsers.findOne({
+      where: { username },
+      include: [{ model: CardDb, as: 'card', attributes: ['issuedto', 'mobno', 'country'] }]
+    }).then(admin => {
+      if (admin && admin.card && admin.card.mobno) {
+        const phone = admin.card.mobno;
+        const formattedPhone = formatWhatsAppPhone(phone, admin.card.country);
+        const components = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: admin.card.issuedto || 'Mumukshu' },
+              { type: 'text', text: username },
+              { type: 'text', text: 'deactivated' }
+            ]
+          }
+        ];
+        sendWhatsAppMessage(formattedPhone, 'admin_status_updated', components).catch(err => {
+          console.error(`Error sending WA notification for bulk deactivate of ${username}:`, err.message || err);
+        });
+      }
+    }).catch(err => {
+      console.error(`Error fetching user details for WA notification of ${username}:`, err.message || err);
+    });
+  }
+
+  return res.status(200).send({ message: 'Successfully deactivated selected administrators' });
+};
+
+export const bulkAssignRoles = async (req, res) => {
+  const { userids, roles } = req.body;
+  if (!userids || !Array.isArray(userids) || userids.length === 0) {
+    throw new ApiError(400, 'Invalid userids array');
+  }
+  if (!roles || !Array.isArray(roles) || roles.length === 0) {
+    throw new ApiError(400, 'Invalid roles array');
+  }
+
+  // An unknown role name would fail on the roles foreign key as a 500.
+  const knownRoles = await Roles.findAll({
+    where: { name: roles, status: STATUS_ACTIVE },
+    attributes: ['name']
+  });
+  const unknownRoles = roles.filter(
+    (role) => !knownRoles.some((known) => known.name === role)
+  );
+  if (unknownRoles.length > 0) {
+    throw new ApiError(400, `Unknown roles: ${unknownRoles.join(', ')}`);
+  }
+
+  const knownAdmins = await AdminUsers.findAll({
+    where: { id: userids },
+    attributes: ['id']
+  });
+  const unknownIds = [...new Set(userids)].filter(
+    (id) => !knownAdmins.some((known) => String(known.id) === String(id))
+  );
+  if (unknownIds.length > 0) {
+    throw new ApiError(400, `Unknown admin ids: ${unknownIds.join(', ')}`);
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  for (const userid of userids) {
+    // Fetch active roles
+    const currentRoles = await AdminRoles.findAll({
+      where: { user_id: userid, status: STATUS_ACTIVE },
+      transaction: t
+    });
+    const currentRoleNames = currentRoles.map(r => r.role_name);
+
+    // Append new roles and remove duplicates
+    const updatedRoles = [...new Set([...currentRoleNames, ...roles])];
+
+    // Mark all current roles as inactive
+    await AdminRoles.update(
+      {
+        status: STATUS_INACTIVE,
+        updatedBy: req.user.username
+      },
+      {
+        where: { user_id: userid },
+        transaction: t
+      }
+    );
+
+    // Insert new rows or reactivate existing ones (primary key is user_id + role_name)
+    const admin_roles_data = updatedRoles.map(role => ({
+      user_id: userid,
+      role_name: role,
+      status: STATUS_ACTIVE,
+      updatedBy: req.user.username
+    }));
+
+    await AdminRoles.bulkCreate(admin_roles_data, {
+      updateOnDuplicate: ['status', 'updatedBy', 'updatedAt'],
+      transaction: t
+    });
+  }
+
+  await t.commit();
+  req.transaction = null;
+  return res.status(200).send({ message: 'Successfully updated roles for selected administrators' });
+};
+

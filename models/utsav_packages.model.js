@@ -33,6 +33,14 @@ const UtsavPackagesDb = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false
     },
+    starting_meal: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
+    ending_meal: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
     updatedBy: {
       type: DataTypes.STRING,
       allowNull: false

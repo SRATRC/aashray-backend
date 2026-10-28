@@ -41,6 +41,15 @@ export const TYPE_ROLE_MAP = {
     wifi: [ROLE_SUPER_ADMIN, ROLE_WIFI_ADMIN]
 };
 
+const isSystemGroupSlug = (slug) => /^[ua]\d+$/i.test(slug);
+const isTemporaryAccessLink = (link) => {
+    try {
+        return new URL(link.target_url).searchParams.has('token');
+    } catch (err) {
+        return false;
+    }
+};
+
 const isValidUrl = (url) => {
     try {
         const parsed = new URL(url);
@@ -88,7 +97,7 @@ export const createShortLink = async (req, res, next) => {
         });
 
         if (existing) {
-            throw new ApiError(400, 'Slug already exists');
+            throw new ApiError(409, 'Slug already exists');
         }
 
         const link = await ShortLink.create({
@@ -107,7 +116,7 @@ export const createShortLink = async (req, res, next) => {
         });
     } catch (error) {
         if (error.name === 'SequelizeUniqueConstraintError') {
-            throw new ApiError(400, 'Slug already exists');
+            throw new ApiError(409, 'Slug already exists');
         }
         throw error;
     }
@@ -150,7 +159,7 @@ export const redirectShortLink = async (req, res, next) => {
 
 export const updateShortLink = async (req, res, next) => {
     const { id } = req.params;
-    const { target_url, type, active } = req.body;
+    const { slug, target_url, type, active } = req.body;
 
     if (type && !VALID_TYPES.includes(type)) {
         throw new ApiError(400, `Invalid link type. Must be one of: ${VALID_TYPES.join(', ')}`);
@@ -186,11 +195,47 @@ export const updateShortLink = async (req, res, next) => {
         }
 
         const updateData = {};
+        if (slug !== undefined) {
+            if (typeof slug !== 'string') {
+                throw new ApiError(400, 'Slug must be a string');
+            }
+        }
+        const formattedSlug =
+            slug === undefined ? undefined : slug.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '');
+        if (slug !== undefined && formattedSlug !== link.slug.toLowerCase()) {
+            // A temporary-access link carries a signed token and the access
+            // check looks the link up by its slug, so renaming it would lock
+            // its holders out. The Utsav and Adhyayan group links (u12, a7)
+            // are looked up by slug too.
+            if (isTemporaryAccessLink(link) || isSystemGroupSlug(link.slug)) {
+                throw new ApiError(400, 'This link cannot be renamed');
+            }
+            if (!formattedSlug) {
+                throw new ApiError(400, 'Slug cannot be empty');
+            }
+            if (isSystemGroupSlug(formattedSlug)) {
+                throw new ApiError(400, 'This slug is reserved for group links');
+            }
+            const existingSlug = await ShortLink.findOne({ where: { slug: formattedSlug }, transaction: t });
+            if (existingSlug && existingSlug.id !== link.id) {
+                throw new ApiError(409, 'Slug already exists');
+            }
+            updateData.slug = formattedSlug;
+        }
+
         if (target_url !== undefined) updateData.target_url = target_url;
         if (type !== undefined) updateData.type = type;
         if (active !== undefined) updateData.active = active;
 
-        await link.update(updateData, { transaction: t });
+        try {
+            await link.update(updateData, { transaction: t });
+        } catch (error) {
+            // A concurrent rename to the same slug got there first.
+            if (error.name === 'SequelizeUniqueConstraintError') {
+                throw new ApiError(409, 'Slug already exists');
+            }
+            throw error;
+        }
 
         await t.commit();
         req.transaction = null;

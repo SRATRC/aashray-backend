@@ -10,12 +10,16 @@
 // was checked and nothing was rejected.
 //
 // Second hole in the same function: a day visit returned before the blocked-date
-// validation entirely, so a day visit onto a blocked date was never checked.
+// validation entirely, so a day visit onto an utsav blocked date was never checked
+// (while manual closures waitlist it).
 import request from 'supertest';
 import moment from 'moment';
 import { app } from '../../../app.js';
 import {
   CardDb,
+  FlatDb,
+  FlatBooking,
+  RoomBooking,
   UtsavDb,
   UtsavBooking,
   UtsavPackagesDb
@@ -27,8 +31,13 @@ import { splitDateRanges } from '../../../helpers/utsavBooking.helper.js';
 import {
   STATUS_ACTIVE,
   STATUS_CONFIRMED,
+  STATUS_AVAILABLE,
+  STATUS_WAITING,
+  ROOM_STATUS_PENDING_CHECKIN,
+  HOLD_REASON,
   RESEARCH_CENTRE,
-  TYPE_ROOM
+  TYPE_ROOM,
+  TYPE_FLAT
 } from '../../../config/constants.js';
 
 jest.mock('../../../utils/sendMail.js');
@@ -44,6 +53,14 @@ const roomBookingJson = (cardno, checkin, checkout) => ({
     mumukshuGroup: [{ roomType: 'ac', floorType: '', mumukshus: [cardno] }]
   }
 });
+const flatBookingJson = (cardno, checkin, checkout) => ({
+  booking_type: TYPE_FLAT,
+  details: {
+    checkin_date: checkin,
+    checkout_date: checkout,
+    mumukshus: [cardno]
+  }
+});
 
 const ATTENDEE = 'EVT_IN_ATT';
 const OUTSIDER = 'EVT_IN_OUT';
@@ -57,10 +74,18 @@ const INSIDE_CHECKOUT = fmt(moment().add(145, 'day'));
 // A stay that wraps the whole festival (the legitimate split case).
 const WRAP_CHECKIN = fmt(moment().add(138, 'day'));
 const WRAP_CHECKOUT = fmt(moment().add(152, 'day'));
+// Auto-block ends on U_END + 1 day
+const UTSAV_BLOCK_END = fmt(moment(U_END).add(1, 'day'));
+const UTSAV_BLOCK_POST = fmt(moment(U_END).add(3, 'day'));
 // A standalone closure with no utsav attached, for the day-visit case.
 const CLOSURE_START = fmt(moment().add(160, 'day'));
 const CLOSURE_END = fmt(moment().add(165, 'day'));
 const CLOSURE_DAY = fmt(moment().add(162, 'day'));
+const CLOSURE_PRE_EDGE = fmt(moment(CLOSURE_START).subtract(2, 'day'));
+// A manual closure with allow_waitlist = false (hard block)
+const HARD_CLOSURE_START = fmt(moment().add(170, 'day'));
+const HARD_CLOSURE_END = fmt(moment().add(175, 'day'));
+const HARD_CLOSURE_DAY = fmt(moment().add(172, 'day'));
 
 let utsav;
 let pkg;
@@ -105,6 +130,14 @@ describe('room stay inside an event span is blocked for everyone', () => {
       status: STATUS_ACTIVE,
       updatedBy: 'test'
     });
+    await BlockDates.create({
+      checkin: HARD_CLOSURE_START,
+      checkout: HARD_CLOSURE_END,
+      comments: 'EVT_IN hard closure',
+      status: STATUS_ACTIVE,
+      allow_waitlist: false,
+      updatedBy: 'test'
+    });
     // Only ATTENDEE holds a confirmed booking for the utsav.
     await UtsavBooking.create({
       bookingid: 'EVT_IN_UB_1',
@@ -115,12 +148,27 @@ describe('room stay inside an event span is blocked for everyone', () => {
       status: STATUS_CONFIRMED,
       updatedBy: 'test'
     });
+    // Create a flat owned by OUTSIDER for flat-booking tests
+    await FlatDb.create({
+      flatno: 99470,
+      owner: OUTSIDER,
+      updatedBy: 'test'
+    });
   });
 
   afterAll(async () => {
+    await FlatBooking.destroy({ where: { cardno: [ATTENDEE, OUTSIDER] } });
+    await RoomBooking.destroy({ where: { cardno: [ATTENDEE, OUTSIDER] } });
+    await FlatDb.destroy({ where: { flatno: 99470 } });
     await UtsavBooking.destroy({ where: { bookingid: 'EVT_IN_UB_1' } });
     await BlockDates.destroy({
-      where: { comments: ['EVT_IN utsav auto-block', 'EVT_IN plain closure'] }
+      where: {
+        comments: [
+          'EVT_IN utsav auto-block',
+          'EVT_IN plain closure',
+          'EVT_IN hard closure'
+        ]
+      }
     });
     await UtsavPackagesDb.destroy({ where: { id: pkg.id } });
     await UtsavDb.destroy({ where: { id: utsav.id } });
@@ -162,11 +210,154 @@ describe('room stay inside an event span is blocked for everyone', () => {
     ).rejects.toThrow(new RegExp(utsav.name));
   });
 
-  // Second hole: a day visit skipped blocked-date validation entirely.
-  it('day visit onto a blocked date is rejected', async () => {
+  // Manual blocks allow waitlist: day visit onto a manual blocked date returns waiting status with RC_BLOCKED.
+  it('day visit onto a manual blocked date is waitlisted with RC_BLOCKED', async () => {
     const res = await postRoomValidate({
       cardno: OUTSIDER,
       primary_booking: roomBookingJson(OUTSIDER, CLOSURE_DAY, CLOSURE_DAY)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.roomDetails[0].status).toBe(STATUS_WAITING);
+    expect(res.body.data.roomDetails[0].holdReason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // A stay over several nights during a manual block -> RC_BLOCKED waitlist
+  it('a stay over several nights during a manual block is waitlisted with RC_BLOCKED', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, CLOSURE_START, CLOSURE_END)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.roomDetails[0].status).toBe(STATUS_WAITING);
+    expect(res.body.data.roomDetails[0].holdReason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // A stay during an utsav's own block -> still 400
+  it('a stay during an utsav own block is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, U_START, U_END)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // A stay starting on utsav.end_date + 1 -> still 400 because utsav block extends to end_date + 1
+  it('a stay starting on utsav.end_date + 1 is still rejected with 400 due to utsav auto-block', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, UTSAV_BLOCK_END, UTSAV_BLOCK_POST)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('a day visit on utsav.end_date + 1 is still rejected with 400 due to utsav auto-block', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, UTSAV_BLOCK_END, UTSAV_BLOCK_END)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // Exercises bookRoomForMumukshus when status is WAITING on a manual block
+  it('room booking on a manual block creates a WAITING room_booking with hold_reason = RC_BLOCKED and roomno = NA', async () => {
+    const res = await request(app)
+      .post('/api/v1/mumukshu/booking')
+      .send({
+        cardno: OUTSIDER,
+        primary_booking: roomBookingJson(OUTSIDER, CLOSURE_DAY, CLOSURE_DAY)
+      });
+    expect(res.status).toBe(200);
+
+    const booking = await RoomBooking.findOne({
+      where: { cardno: OUTSIDER, checkin: CLOSURE_DAY, checkout: CLOSURE_DAY }
+    });
+    expect(booking).not.toBeNull();
+    expect(booking.status).toBe(STATUS_WAITING);
+    expect(booking.roomno).toBe('NA');
+    expect(booking.hold_reason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // Flat path: stay inside a manual block -> WAITING / RC_BLOCKED with charge: 0
+  it('flat validate inside a manual block is waitlisted with RC_BLOCKED and charge 0', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, CLOSURE_START, CLOSURE_END)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.flatDetails[0].status).toBe(STATUS_WAITING);
+    expect(res.body.data.flatDetails[0].holdReason).toBe(HOLD_REASON.RC_BLOCKED);
+    expect(res.body.data.flatDetails[0].charge).toBe(0);
+  });
+
+  it('flat booking inside a manual block creates a WAITING flat booking with hold_reason = RC_BLOCKED', async () => {
+    const res = await request(app)
+      .post('/api/v1/mumukshu/booking')
+      .send({
+        cardno: OUTSIDER,
+        primary_booking: flatBookingJson(OUTSIDER, CLOSURE_START, CLOSURE_END)
+      });
+    expect(res.status).toBe(200);
+
+    const booking = await FlatBooking.findOne({
+      where: { cardno: OUTSIDER, checkin: CLOSURE_START, checkout: CLOSURE_END }
+    });
+    expect(booking).not.toBeNull();
+    expect(booking.status).toBe(STATUS_WAITING);
+    expect(booking.hold_reason).toBe(HOLD_REASON.RC_BLOCKED);
+  });
+
+  // Flat stay during an utsav's own block -> normal booking (not waitlisted)
+  it('flat validate during an utsav own block is confirmed as normal (not waitlisted)', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, INSIDE_CHECKIN, INSIDE_CHECKOUT)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.flatDetails[0].status).toBe(STATUS_AVAILABLE);
+    expect(res.body.data.flatDetails[0].holdReason).toBeFalsy();
+  });
+
+  // Flat stay that only touches the edge of a manual block -> normal booking
+  it('flat validate that only touches the edge of a manual block is confirmed as normal', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, CLOSURE_PRE_EDGE, CLOSURE_START)
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.flatDetails[0].status).toBe(STATUS_AVAILABLE);
+    expect(res.body.data.flatDetails[0].holdReason).toBeFalsy();
+  });
+
+  // Hard manual closure (allow_waitlist = false) strictly rejects room, day visit, and flat stays with 400
+  it('room stay during a hard manual block (allow_waitlist = false) is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, HARD_CLOSURE_START, HARD_CLOSURE_END)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('day visit onto a hard manual block (allow_waitlist = false) is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, HARD_CLOSURE_DAY, HARD_CLOSURE_DAY)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('flat stay during a hard manual block (allow_waitlist = false) is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, HARD_CLOSURE_START, HARD_CLOSURE_END)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // Multi-block overlap: a stay overlapping both a waitlist block and a hard block must be hard-rejected
+  it('flat stay spanning across both a waitlist block and a hard block is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, CLOSURE_DAY, HARD_CLOSURE_DAY)
     });
     expect(res.status).toBe(400);
   });

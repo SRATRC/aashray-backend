@@ -42,6 +42,7 @@ export const STATUS_TAKEN = 'taken';
 export const STATUS_OPEN = 'open';
 export const STATUS_CLOSED = 'closed';
 export const STATUS_DELETED = 'deleted';
+export const STATUS_DEACTIVATED = 'deactivated';
 export const STATUS_INPROGRESS = 'in progress';
 export const STATUS_ADMIN_CANCELLED = 'admin cancelled';
 export const STATUS_PAYMENT_PENDING = 'pending';
@@ -64,6 +65,13 @@ export const STATUS_MUMUKSHU = 'MUMUKSHU';
 export const STATUS_SEVA_KUTIR = 'SEVA KUTIR';
 export const STATUS_GUEST = 'GUEST';
 export const AMT_TYPE_LATE_CHECKOUT_ROOM = 'late_checkout_room';
+export const AMT_TYPE_NO_SHOW_FOOD = 'no_show_food';
+export const AMT_TYPE_CREDITS_ADDED = 'credits_added';
+export const AMT_TYPE_CREDITS_USED = 'credits_used';
+export const AMT_TYPE_CASH_TXN = 'cash_txn';
+export const AMT_TYPE_UPI_TXN = 'upi_txn';
+export const AMT_TYPE_DEPARTMENT_TXN = 'department_txn';
+export const AMT_TYPE_NO_CREDITS = 'no_credits';
 
 // ROOM
 export const ROOM_DETAIL = 'Room Booking';
@@ -113,6 +121,9 @@ export const ERR_CARD_NOT_PROVIDED = 'Cardno not provided';
 export const ERR_CARD_NOT_FOUND = 'User not found';
 
 export const ERR_INVALID_BOOKING_TYPE = 'Invalid booking type';
+export const ERR_INVALID_BOOKING_CATEGORY = 'Invalid category';
+export const ERR_BOOKING_HISTORY_PARAMS_REQUIRED =
+  'cardno and category are required';
 export const ERR_INVALID_DATE = 'Invalid date';
 export const ERR_INVALID_MEAL_TIME = 'Invalid meal time';
 export const ERR_BLOCKED_DATES = 'Dates are blocked';
@@ -169,6 +180,10 @@ export const MSG_UPDATE_SUCCESSFUL = 'Update successful';
 export const MSG_BOOKING_WAITING = 'Some of the bookings are in waiting list';
 export const MSG_CANCEL_SUCCESSFUL = 'Booking cancelled successfully';
 export const MSG_FETCH_SUCCESSFUL = 'Fetched results successfully';
+export const MSG_BOOKING_DETAILS_FETCHED =
+  'Fetched booking details successfully';
+export const MSG_BOOKING_HISTORY_FETCHED =
+  'Fetched booking history successfully';
 
 export const ROLLING_WINDOW_DAYS = 30;
 export const ROLLING_WINDOW_NIGHT_LIMIT = 9;
@@ -180,6 +195,7 @@ export const HOLD_REASON = {
   ROLLING_WINDOW_LIMIT: 'ROLLING_WINDOW_LIMIT',
   ROOM_UNAVAILABLE: 'ROOM_UNAVAILABLE',
   UTSAV_BOUNDARY: 'UTSAV_BOUNDARY',
+  RC_BLOCKED: 'RC_BLOCKED',
   MANUAL: 'MANUAL',
   UNKNOWN: 'UNKNOWN'
 };
@@ -200,6 +216,11 @@ export const HOLD_REASON_COPY = {
     adminLabel: 'Event boundary date',
     userMessage:
       'This single-night stay falls on an event boundary date and is on the waitlist for review.'
+  },
+  RC_BLOCKED: {
+    adminLabel: 'Research Centre Blocked',
+    userMessage:
+      'The Research Centre is closed for general bookings on these dates. Your booking is on the waitlist for admin review.'
   },
   MANUAL: {
     adminLabel: 'Manually waitlisted',

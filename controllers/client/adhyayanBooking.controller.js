@@ -17,6 +17,7 @@ import {
   STATUS_ADMIN_CANCELLED,
   ERR_BOOKING_ALREADY_CANCELLED,
   STATUS_DELETED,
+  STATUS_WAITING,
   FEEDBACK_ELIGIBILITY_HOUR
 } from '../../config/constants.js';
 import { validateFeedbackEligibility } from '../../helpers/adhyayanBooking.helper.js';
@@ -29,13 +30,13 @@ import {
 import { attachUserContext } from '../../middleware/Logger.js';
 import database from '../../config/database.js';
 import Sequelize from 'sequelize';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import sendMail from '../../utils/sendMail.js';
 import ApiError from '../../utils/ApiError.js';
 
 export const FetchAllShibir = async (req, res) => {
   req.log.info('fetch_all_shibir_start');
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
@@ -58,12 +59,39 @@ export const FetchAllShibir = async (req, res) => {
     ]
   });
 
+  // How many people are already queued on each shibir. A full shibir is still
+  // bookable — it goes to the waitlist — so the app shows the queue length in
+  // place of "N seats left", and could not until this was sent.
+  const waitlistCounts = shibirs.length
+    ? await ShibirBookingDb.findAll({
+        attributes: [
+          'shibir_id',
+          [Sequelize.fn('COUNT', Sequelize.col('bookingid')), 'waitlist_count']
+        ],
+        where: {
+          shibir_id: { [Sequelize.Op.in]: shibirs.map((shibir) => shibir.id) },
+          status: STATUS_WAITING
+        },
+        group: ['shibir_id'],
+        raw: true
+      })
+    : [];
+
+  const waitlistByShibir = new Map(
+    waitlistCounts.map((row) => [row.shibir_id, Number(row.waitlist_count)])
+  );
+
   const groupedByMonth = shibirs.reduce((acc, event) => {
     const month = event.month;
     if (!acc[month]) {
       acc[month] = [];
     }
-    acc[month].push(event);
+    // Plain object so the added field survives serialization — a model instance
+    // only serializes its own attributes.
+    acc[month].push({
+      ...event.toJSON(),
+      waitlist_count: waitlistByShibir.get(event.id) ?? 0
+    });
     return acc;
   }, {});
 
@@ -84,6 +112,10 @@ export const FetchBookedShibir = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const upcomingOnly = req.query.upcoming === 'true';
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const upcomingWhere = upcomingOnly ? 'AND t2.end_date >= :today' : '';
+  const orderDirection = upcomingOnly ? 'ASC' : 'DESC';
   req.log.info('fetch_booked_shibir_start', { cardno: req.user.cardno, page, pageSize });
 
   const shibirs = await database.query(
@@ -107,7 +139,8 @@ export const FetchBookedShibir = async (req, res) => {
       AND t3.category IN (:category)
     LEFT JOIN card_db t4 ON t4.cardno = t1.cardno
     WHERE (t1.cardno = :cardno OR t1.bookedBy = :cardno)
-    ORDER BY t2.start_date DESC
+      ${upcomingWhere}
+    ORDER BY t2.start_date ${orderDirection}
     LIMIT :limit
     OFFSET :offset;
     `,
@@ -116,7 +149,8 @@ export const FetchBookedShibir = async (req, res) => {
         cardno: req.user.cardno,
         category: [TYPE_ADHYAYAN, TYPE_GUEST_ADHYAYAN],
         limit: pageSize,
-        offset: offset
+        offset: offset,
+        ...(upcomingOnly ? { today } : {})
       },
       type: Sequelize.QueryTypes.SELECT
     }

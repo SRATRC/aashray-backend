@@ -4,7 +4,8 @@ import {
   RoomBooking,
   FlatBooking,
   Transactions,
-  FlatDb
+  FlatDb,
+  UtsavDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -12,6 +13,7 @@ import {
   ROOM_STATUS_CHECKEDOUT,
   ROOM_BLOCKED,
   ROOM_STATUS_AVAILABLE,
+  STATUS_ACTIVE,
   STATUS_INACTIVE,
   STATUS_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
@@ -37,13 +39,15 @@ import {
   STATUS_CONFIRMED,
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_ROOM_FAILED_TO_BOOK,
-  ERR_INVALID_DATE
+  ERR_INVALID_DATE,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
   calculateNights,
   validateDate,
   getBlockedDates,
+  isBlockFromUtsav,
   sendUnifiedEmail
 } from '../helper.js';
 import {
@@ -1280,7 +1284,7 @@ export const rcBlockList = async (req, res) => {
 
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const blocked = await BlockDates.findAll({
-    attributes: ['id', 'checkin', 'checkout', 'comments', 'status'],
+    attributes: ['id', 'checkin', 'checkout', 'comments', 'status', 'allow_waitlist'],
     where: {
       checkout: { [Sequelize.Op.gte]: today }
     },
@@ -1294,8 +1298,12 @@ export const rcBlockList = async (req, res) => {
 };
 
 export const blockRC = async (req, res) => {
-  const { checkin_date, checkout_date, comments } = req.body;
-  req.log.info('block_rc_start', { checkin_date, checkout_date, comments });
+  const { checkin_date, checkout_date, comments, allow_waitlist = true } = req.body;
+  req.log.info('block_rc_start', { checkin_date, checkout_date, comments, allow_waitlist });
+
+  if (typeof allow_waitlist !== 'boolean') {
+    throw new ApiError(400, 'allow_waitlist must be a boolean');
+  }
 
   const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
@@ -1312,6 +1320,7 @@ export const blockRC = async (req, res) => {
     checkin: checkin_date,
     checkout: checkout_date,
     comments,
+    allow_waitlist,
     updatedBy: req.user.username
   });
 
@@ -1342,13 +1351,57 @@ export const unblockRC = async (req, res) => {
   return res.status(200).send({ message: 'Unblocked RC successfully' });
 };
 
+export const toggleRCBlockMode = async (req, res) => {
+  const { id } = req.params;
+  const { allow_waitlist } = req.body;
+  req.log.info('toggle_rc_block_mode_start', { id, allow_waitlist });
+
+  if (allow_waitlist !== undefined && typeof allow_waitlist !== 'boolean') {
+    throw new ApiError(400, 'allow_waitlist must be a boolean');
+  }
+
+  const blocked = await BlockDates.findByPk(id);
+
+  if (!blocked) {
+    req.log.warn('toggle_rc_block_mode_not_found', { id });
+    throw new ApiError(404, 'Block record not found');
+  }
+
+  if (blocked.status !== STATUS_ACTIVE) {
+    throw new ApiError(400, 'Cannot change mode of an inactive block');
+  }
+
+  const activeUtsavsAtRC = await UtsavDb.findAll({
+    where: { location: RESEARCH_CENTRE }
+  });
+  if (isBlockFromUtsav(blocked, activeUtsavsAtRC)) {
+    throw new ApiError(400, 'Cannot change mode for Utsav auto-blocks');
+  }
+
+  const newMode = allow_waitlist !== undefined ? allow_waitlist : blocked.allow_waitlist === false;
+  await blocked.update({
+    allow_waitlist: newMode,
+    updatedBy: req.user.username
+  });
+
+  req.log.info('toggle_rc_block_mode_success', { id, allow_waitlist: newMode });
+  return res.status(200).send({
+    message: `Switched block mode to ${newMode ? 'Waitlist Allowed' : 'Hard Block'}`,
+    data: blocked
+  });
+};
+
 export const occupancyReport = async (req, res) => {
-  req.log.info('occupancy_report_start');
+  const { date } = req.query;
+  if (date && !moment(date, 'YYYY-MM-DD', true).isValid()) {
+    throw new ApiError(400, 'Invalid date format, must be YYYY-MM-DD');
+  }
+  const todayIST = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const targetDate = date || todayIST;
 
-  const today = moment().tz('Asia/Kolkata').startOf('day').toDate(); // today's 00:00 IST
-  const tomorrow = moment().tz('Asia/Kolkata').add(1, 'day').startOf('day').toDate(); // tomorrow 00:00 IST
+  req.log.info('occupancy_report_start', { targetDate });
 
-  const result = await RoomBooking.findAll({
+  const rooms = await RoomBooking.findAll({
     attributes: [
       'bookingid',
       'roomtype',
@@ -1366,14 +1419,58 @@ export const occupancyReport = async (req, res) => {
       }
     ],
     where: {
-      status: ROOM_STATUS_CHECKEDIN,
-      checkin: { [Op.lte]: today },
-      checkout: { [Op.gt]: today }
+      [Op.or]: [
+        {
+          status: ROOM_STATUS_CHECKEDIN,
+          checkin: { [Op.lte]: targetDate },
+          // Stays covering the date (checkin <= date <= checkout). Only for
+          // today, guests still checked in past their checkout are also in
+          // the building, so today does not cap on checkout.
+          ...(targetDate === todayIST ? {} : { checkout: { [Op.gte]: targetDate } })
+        },
+        // Departures on the date, and (for a past date) stays that ended
+        // later: their status is "checkedout" today but they were in then.
+        // A future date has no checked-out guests.
+        ...(targetDate > todayIST
+          ? []
+          : [
+              {
+                status: ROOM_STATUS_CHECKEDOUT,
+                ...(targetDate === todayIST
+                  ? { checkout: targetDate }
+                  : { checkin: { [Op.lte]: targetDate }, checkout: { [Op.gte]: targetDate } })
+              }
+            ]),
+        {
+          status: ROOM_STATUS_PENDING_CHECKIN,
+          ...(targetDate > todayIST
+            ? // Future date: expected stays (arriving today or later, covering the date)
+              { checkin: { [Op.between]: [todayIST, targetDate] }, checkout: { [Op.gte]: targetDate } }
+            : { checkin: targetDate })
+        }
+      ]
     }
   });
 
-  req.log.info('occupancy_report_success', { count: result.length });
-  return res.status(200).send({ message: 'Success', data: result });
+  const combined = rooms
+    .filter(r => r.nights > 0 && r.checkin !== r.checkout && r.roomno && String(r.roomno).trim().toUpperCase() !== 'NA')
+    .map(r => {
+      const j = r.toJSON();
+      // The admin UI compares checkin/checkout with string equality, so emit
+      // plain YYYY-MM-DD (Asia/Kolkata) strings regardless of the raw DATEONLY
+      // serialization.
+      return {
+        ...j,
+        checkin: j.checkin ? moment(j.checkin).format('YYYY-MM-DD') : j.checkin,
+        checkout: j.checkout ? moment(j.checkout).format('YYYY-MM-DD') : j.checkout,
+        type: 'Room'
+      };
+    });
+
+  combined.sort((a, b) => String(a.roomno).localeCompare(String(b.roomno), undefined, { numeric: true }));
+
+  req.log.info('occupancy_report_success', { count: combined.length });
+  return res.status(200).send({ message: 'Success', data: combined });
 };
 
 export const ReservationReport = async (req, res) => {
@@ -1440,7 +1537,9 @@ export const flatReservationReport = async (req, res) => {
       'checkin',
       'checkout',
       'status',
-      'nights'
+      'nights',
+      'hold_reason',
+      'hold_reason_meta'
     ],
     where: whereClause,
     order: [['checkin', 'ASC']]
@@ -1526,7 +1625,9 @@ async function roomBookingReport(startDate, endDate, page, pageSize, statuses) {
       'checkout',
       'bookedBy',
       'status',
-      'nights'
+      'nights',
+      'hold_reason',
+      'hold_reason_meta'
     ],
     where: {
       status: statuses,
@@ -2306,13 +2407,13 @@ export const fetchLateCheckoutFees = async (req, res) => {
           rb_from_txn.cardno
         )
 
-      WHERE t.amt_type = 'late_checkout_room'
+      WHERE (t.amt_type = :lateCheckoutType OR t.description LIKE 'Late checkout fee for booking %')
         AND t.status IN (:statuses)
 
       ORDER BY t.createdAt DESC
       `,
       {
-        replacements: { statuses },
+        replacements: { statuses, lateCheckoutType: AMT_TYPE_LATE_CHECKOUT_ROOM },
         type: QueryTypes.SELECT
       }
     );

@@ -12,7 +12,8 @@ import {
   addPermanentCodeManually,
   insertPerWiFiCodesFromExcel,
   generateUsername,
-  exportPortalWifiCodes
+  exportPortalWifiCodes,
+  bulkActionTempWiFiCodes
 } from '../../controllers/admin/wifiManagement.controller.js';
 import CatchAsync from '../../utils/CatchAsync.js';
 import multer from 'multer';
@@ -23,6 +24,7 @@ router.use(auth);
 router.use(authorizeRoles(ROLE_SUPER_ADMIN, ROLE_WIFI_ADMIN));
 
 router.post('/uploadcode', upload.single('file'), CatchAsync(uploadWiFiCodes));
+router.post('/temp/bulk-action', CatchAsync(bulkActionTempWiFiCodes));
 router.get('/wifirecords', CatchAsync(wifiRecord));
 router.get('/permanent/portal-export', CatchAsync(exportPortalWifiCodes));
 router.get('/permanent', CatchAsync(getPermanentCodeRequests));

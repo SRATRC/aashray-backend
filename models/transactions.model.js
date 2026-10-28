@@ -10,7 +10,15 @@ import {
   STATUS_CREDITED,
   STATUS_PAYMENT_CAPTURED,
   STATUS_PAYMENT_AUTHORIZED,
-  STATUS_PAYMENT_FAILED
+  STATUS_PAYMENT_FAILED,
+  AMT_TYPE_LATE_CHECKOUT_ROOM,
+  AMT_TYPE_NO_SHOW_FOOD,
+  AMT_TYPE_CREDITS_ADDED,
+  AMT_TYPE_CREDITS_USED,
+  AMT_TYPE_CASH_TXN,
+  AMT_TYPE_UPI_TXN,
+  AMT_TYPE_DEPARTMENT_TXN,
+  AMT_TYPE_NO_CREDITS
 } from '../config/constants.js';
 
 const Transactions = sequelize.define(
@@ -52,6 +60,19 @@ const Transactions = sequelize.define(
     },
     description: {
       type: DataTypes.STRING,
+      allowNull: true
+    },
+    amt_type: {
+      type: DataTypes.ENUM(
+        AMT_TYPE_LATE_CHECKOUT_ROOM,
+        AMT_TYPE_NO_SHOW_FOOD,
+        AMT_TYPE_CREDITS_ADDED,
+        AMT_TYPE_CREDITS_USED,
+        AMT_TYPE_CASH_TXN,
+        AMT_TYPE_UPI_TXN,
+        AMT_TYPE_DEPARTMENT_TXN,
+        AMT_TYPE_NO_CREDITS
+      ),
       allowNull: true
     },
     status: {

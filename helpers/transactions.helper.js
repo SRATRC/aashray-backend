@@ -69,11 +69,19 @@ export async function createPendingTransaction(
 
 export async function userCancelBooking(user, booking, t) {
   var transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
+    where: { bookingid: booking.bookingid },
+    order: [['id', 'ASC']]
   });
 
   if (transaction) {
     await userCancelTransaction(user, null, transaction, t);
+    // A pending fare top-up (see adjustTravelAmount) must not outlive the booking.
+    // Only travel fares get top-ups, so other booking types skip the sweep.
+    if (transaction.category === TYPE_TRAVEL) {
+      await cancelPendingTopUps(booking.bookingid, transaction.category, user.username, t, {
+        status: STATUS_CANCELLED
+      });
+    }
   }
 
   await booking.update(
@@ -263,38 +271,269 @@ export async function cancelTransaction(
   return { credits };
 }
 
-export async function adjustAmount(
-  card,
-  booking,
-  transaction,
-  amount,
-  updatedBy,
-  t
-) {
-  const originalAmount = transaction.amount + transaction.discount;
-  const bookingType = getBookingType(transaction);
+const SETTLED_AT_ZERO = 'Balance updated to 0 (settled, nothing to pay)';
 
-  if (originalAmount > amount) {
-    const credits = originalAmount - amount;
-    // adjustAmount only receives updatedBy (string) — construct a minimal user object for addCredit
-    const user = { username: updatedBy };
-    await addCredit(user, card, bookingType, credits, t);
-    await useCredit(card, booking, transaction, amount, updatedBy, t);
-  } else if (originalAmount < amount) {
-    const balance = amount - originalAmount;
-    await transaction.update(
+/**
+ * Staff edit of the amount on a travel charge.
+ *
+ * `amount` is the NET the member owes: the value the travel report shows
+ * (`transactions.amount`, already after credit) and the staff form sends back.
+ * Credit already applied (`transaction.discount`) stays as it is. This never
+ * adds or refunds wallet credit, so the credit is not counted twice. Sending
+ * the same value again changes nothing. Staff may edit the amount whatever the
+ * payment state; status is left alone, with one exception: a net of 0 on a
+ * charge that is still pending is settled (cash pending -> cash completed,
+ * online pending and payment failed -> completed). Raising a charge that
+ * such an edit settled reopens it to cash pending (no payment was ever received;
+ * cash pending is skipped by the 24 h cancel job).
+ * No payment can ever arrive for 0, so a pending row would stay unpaid until
+ * the 24 h job cancelled the booking. Returns { settled, reopened } so the
+ * caller can move the booking too.
+ */
+export async function adjustAmount(transaction, amount, updatedBy, t) {
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new ApiError(400, 'Amount must be a non-negative number');
+  }
+
+  const current = Number(transaction.amount);
+
+  const settleStatus =
+    amount === 0
+      ? {
+          [STATUS_PAYMENT_PENDING]: STATUS_PAYMENT_COMPLETED,
+          [STATUS_CASH_PENDING]: STATUS_CASH_COMPLETED,
+          [STATUS_PAYMENT_FAILED]: STATUS_PAYMENT_COMPLETED
+        }[transaction.status]
+      : undefined;
+
+  // A charge that a 0 edit settled (marked in its description) was never paid.
+  // Raising it again must ask the member to pay and must not leave a refundable
+  // "completed" row. A charge that really was paid has no marker and keeps its
+  // status (N11). Reopening relies on the SETTLED_AT_ZERO description mark.
+  // Both kinds reopen to cash pending: the 30-min job only cancels payment
+  // pending / payment failed rows older than 24 h, so reopening an old online
+  // charge as payment pending would cancel the booking at once. The member can
+  // still pay cash pending (it is in PAYABLE_TRANSACTION_STATUSES).
+  const reopenStatus =
+    amount > 0 &&
+    current === 0 &&
+    String(transaction.description || '').startsWith(SETTLED_AT_ZERO)
+      ? {
+          [STATUS_PAYMENT_COMPLETED]: STATUS_CASH_PENDING,
+          [STATUS_CASH_COMPLETED]: STATUS_CASH_PENDING
+        }[transaction.status]
+      : undefined;
+
+  if (current === amount && !settleStatus) {
+    return { settled: false, reopened: false };
+  }
+
+  const discount = Number(transaction.discount) || 0;
+  const credits = discount > 0 ? ` (credits used: ${discount})` : '';
+  const newStatus = settleStatus || reopenStatus;
+
+  await transaction.update(
+    {
+      amount,
+      ...(newStatus && { status: newStatus }),
+      description: settleStatus
+        ? `${SETTLED_AT_ZERO}${credits}`
+        : `Balance updated to ${amount}${credits}`,
+      updatedBy
+    },
+    { transaction: t }
+  );
+
+  return { settled: !!settleStatus, reopened: !!reopenStatus };
+}
+
+// Description mark on the extra charge raised when staff increase the fare of a
+// booking that was already paid. Rows carrying it are never the booking's main
+// charge (that is the lowest id for the booking and category).
+export const TOP_UP_MARK = 'Fare top-up';
+
+const isReallyPaid = (txn) =>
+  [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(txn.status) &&
+  !String(txn.description || '').startsWith(SETTLED_AT_ZERO);
+
+const UNPAID_TOP_UP_STATUSES = [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED];
+
+// A top-up that has not received money yet. Never the main charge (rows[0]).
+const isPendingTopUp = (r) =>
+  UNPAID_TOP_UP_STATUSES.includes(r.status) && String(r.description || '').startsWith(TOP_UP_MARK);
+
+// transactions has no index on bookingid, so a locking read by booking would
+// lock every row in the table (and deadlock parallel cancels). The booking's
+// charges are found with a plain read and then locked or updated by id only.
+async function findTravelChargeRows(bookingid, category, t) {
+  return Transactions.findAll({
+    where: { bookingid, category },
+    order: [['id', 'ASC']],
+    transaction: t
+  });
+}
+
+// Cancels by id, and only while the row is still unpaid: a top-up the webhook
+// completed a moment ago keeps its payment.
+async function cancelTopUpRows(rows, status, updatedBy, t, log) {
+  let cancelled = 0;
+  for (const row of rows) {
+    const [affected] = await Transactions.update(
+      { status, description: `${TOP_UP_MARK} cancelled`, updatedBy },
+      { where: { id: row.id, status: UNPAID_TOP_UP_STATUSES }, transaction: t }
+    );
+    if (affected) {
+      cancelled += 1;
+      log.info('travel_top_up_cancelled', { bookingid: row.bookingid, transactionId: row.id, amount: row.amount, status });
+    }
+  }
+  return cancelled;
+}
+
+/**
+ * Cancels the pending extra charges of a booking (see adjustTravelAmount).
+ * They never received money and carry no credit, so nothing is refunded. A top-up
+ * that was already paid is left alone: the caller decides what to do with money.
+ * `status` follows who cancelled: a member cancel passes STATUS_CANCELLED.
+ */
+export async function cancelPendingTopUps(
+  bookingid,
+  category,
+  updatedBy,
+  t,
+  { status = STATUS_ADMIN_CANCELLED, log = logger } = {}
+) {
+  const rows = await findTravelChargeRows(bookingid, category, t);
+  const pending = rows.slice(1).filter(isPendingTopUp);
+  return cancelTopUpRows(pending, status, updatedBy, t, log);
+}
+
+/**
+ * Staff edit of the amount on a travel booking (all amounts are net of applied
+ * credit, i.e. the `amount` field). Locks the booking's transactions by id.
+ * The caller must hold the travel booking's row lock (updateBooking does).
+ *
+ * Nothing really paid yet: same as adjustAmount (edit, 0 settles, reopen).
+ * Really paid (a completed row without the settled-at-zero mark), with
+ * paid = sum of completed amounts and N the new amount:
+ *  - N > paid: exactly one pending top-up row for N - paid (cash pending, so the
+ *    30 min job leaves the confirmed booking alone and the app can still pay it).
+ *  - N == paid: any pending top-up is cancelled.
+ *  - N < paid: any pending top-up is cancelled, paid - N goes back to the payer
+ *    as travel credit, and the completed rows are lowered so they sum to N.
+ * A paid top-up is a completed row, so it counts toward `paid` next time.
+ * Returns { settled, reopened, topUp } like adjustAmount, topUp is the case name.
+ */
+export async function adjustTravelAmount(bookingid, amount, user, t, log = logger) {
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new ApiError(400, 'Amount must be a non-negative number');
+  }
+  // transactions.amount is DECIMAL(10,0): a fraction would be rounded silently
+  // by MySQL, so the stored charge would not match what staff typed.
+  if (!Number.isInteger(amount)) {
+    throw new ApiError(400, 'Amount must be a whole number of rupees');
+  }
+
+  // The caller holds the travel booking's row lock, so no other fare change on
+  // this booking can add a charge between the plain read and the lock by id.
+  const found = await findTravelChargeRows(bookingid, TYPE_TRAVEL, t);
+  const rows = found.length
+    ? await Transactions.findAll({
+        where: { id: found.map((r) => r.id) },
+        order: [['id', 'ASC']],
+        lock: t.LOCK.UPDATE,
+        transaction: t
+      })
+    : [];
+  if (rows.length === 0) {
+    throw new ApiError(404, 'Transaction not found');
+  }
+  // An authorized payment is neither pending nor paid yet: editing now could
+  // raise a second top-up for money that is about to be captured.
+  if (rows.some((r) => r.status === STATUS_PAYMENT_AUTHORIZED)) {
+    throw new ApiError(409, 'A payment for this booking is in progress. Try again in a few minutes.');
+  }
+
+  const main = rows[0];
+  const completed = rows.filter((r) =>
+    [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(r.status)
+  );
+
+  if (!completed.some(isReallyPaid)) {
+    log.info('travel_amount_edit_unpaid', { bookingid, transactionId: main.id, amount });
+    return { ...(await adjustAmount(main, amount, user.username, t)), topUp: null };
+  }
+
+  // All sums and compares are in paise: DECIMAL amounts summed as floats drift
+  // (100.1 + 50.2 !== 150.3), which would raise a tiny top-up on a same-fare edit.
+  const amountP = toPaise(amount);
+  const paidP = completed.reduce((sum, r) => sum + toPaise(Number(r.amount)), 0);
+  const paid = paidP / 100;
+  const pendingTopUps = rows.slice(1).filter(isPendingTopUp);
+  const base = { settled: false, reopened: false };
+
+  if (amountP > paidP) {
+    const diff = (amountP - paidP) / 100;
+    const [keep, ...extra] = pendingTopUps;
+    await cancelTopUpRows(extra, STATUS_ADMIN_CANCELLED, user.username, t, log);
+    if (keep) {
+      if (toPaise(Number(keep.amount)) !== toPaise(diff)) {
+        // The Razorpay order stays on the row, as on any edited charge: /pay
+        // always makes a fresh order, and a payment already in progress must
+        // still find this row in the webhook, which then checks paid vs owed.
+        await keep.update(
+          { amount: diff, description: `${TOP_UP_MARK}: ${diff} (fare ${amount}, paid ${paid})`, status: STATUS_CASH_PENDING, updatedBy: user.username },
+          { transaction: t }
+        );
+      }
+      log.info('travel_top_up_updated', { bookingid, transactionId: keep.id, paid, amount, topUp: diff });
+      return { ...base, topUp: 'updated' };
+    }
+    const created = await Transactions.create(
       {
-        // set status to cash pending as only admin
-        // can call this function
+        cardno: main.cardno,
+        bookingid,
+        category: main.category,
+        amount: diff,
         status: STATUS_CASH_PENDING,
-        discount: originalAmount,
-        amount: balance,
-        description: `Transaction updated. New Balance ${balance}.`,
-        updatedBy: updatedBy
+        description: `${TOP_UP_MARK}: ${diff} (fare ${amount}, paid ${paid})`,
+        updatedBy: user.username
+      },
+      { transaction: t }
+    );
+    log.info('travel_top_up_created', { bookingid, transactionId: created.id, paid, amount, topUp: diff });
+    return { ...base, topUp: 'created' };
+  }
+
+  await cancelTopUpRows(pendingTopUps, STATUS_ADMIN_CANCELLED, user.username, t, log);
+
+  if (amountP === paidP) {
+    log.info('travel_amount_edit_same_as_paid', { bookingid, paid, cancelledTopUps: pendingTopUps.length });
+    return { ...base, topUp: pendingTopUps.length ? 'cancelled' : null };
+  }
+
+  // amount < paid: refund the difference, newest paid row first.
+  const refundTotal = (paidP - amountP) / 100;
+  let refundP = paidP - amountP;
+  const card = await validateCard(main.cardno);
+  await addCredit(user, card, TYPE_TRAVEL, refundTotal, t);
+  for (const row of [...completed].reverse()) {
+    if (refundP <= 0) break;
+    const rowP = toPaise(Number(row.amount));
+    const cutP = Math.min(rowP, refundP);
+    if (cutP <= 0) continue;
+    refundP -= cutP;
+    await row.update(
+      {
+        amount: (rowP - cutP) / 100,
+        description: `Fare lowered from ${paid} to ${amount}: ${cutP / 100} refunded as travel credit`,
+        updatedBy: user.username
       },
       { transaction: t }
     );
   }
+  log.info('travel_amount_edit_refunded', { bookingid, paid, amount, refunded: refundTotal, cardno: main.cardno });
+  return { ...base, topUp: 'refunded' };
 }
 
 function getCreditType(bookingType) {
@@ -323,7 +562,7 @@ export function parseCredits(rawCredits) {
   return {};
 }
 
-async function addCredit(user, card, bookingType, credits, t) {
+export async function addCredit(user, card, bookingType, credits, t) {
   const creditType = getCreditType(bookingType);
 
   // Re-fetch card record with row lock if transaction is active to prevent race conditions

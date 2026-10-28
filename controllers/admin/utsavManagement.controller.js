@@ -237,13 +237,8 @@ export const createUtsav = async (req, res) => {
     total_seats,
     location,
     registration_deadline,
-    starting_meal,
-    ending_meal,
     whatsapp_link
   } = req.body;
-
-  validateMealField(starting_meal, 'starting_meal');
-  validateMealField(ending_meal, 'ending_meal');
 
   req.log.info('create_utsav_start', { name, start_date, end_date, total_seats, location });
 
@@ -287,8 +282,6 @@ export const createUtsav = async (req, res) => {
       available_seats: total_seats,
       status: STATUS_OPEN,
       registration_deadline,
-      starting_meal,
-      ending_meal,
       whatsapp_link,
       updatedBy: req.user.username
     },
@@ -383,8 +376,13 @@ export const addUtsavPackagesBulk = async (req, res) => {
         name,
         start_date,
         end_date,
-        amount
+        amount,
+        starting_meal,
+        ending_meal
       } = pkg;
+
+      validateMealField(starting_meal, 'starting_meal');
+      validateMealField(ending_meal, 'ending_meal');
 
       // ✅ Required field validation (NEW)
       if (!utsavid || !name || !start_date || !end_date || !amount) {
@@ -421,6 +419,13 @@ export const addUtsavPackagesBulk = async (req, res) => {
         );
       }
 
+      if (utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
+        throw new ApiError(
+          400,
+          `Starting and ending meals can only be configured for Research Centre utsavs (package "${name}")`
+        );
+      }
+
       // ✅ End >= Start
       if (packageEnd.isBefore(packageStart, 'day')) {
         throw new ApiError(
@@ -453,6 +458,8 @@ export const addUtsavPackagesBulk = async (req, res) => {
           start_date,
           end_date,
           amount,
+          starting_meal,
+          ending_meal,
           updatedBy: req.user.username
         },
         { transaction: t }
@@ -473,7 +480,10 @@ export const addUtsavPackagesBulk = async (req, res) => {
 };
 
 export const addUtsavPackage = async (req, res) => {
-  const { utsavid, name, start_date, end_date, amount } = req.body;
+  const { utsavid, name, start_date, end_date, amount, starting_meal, ending_meal } = req.body;
+
+  validateMealField(starting_meal, 'starting_meal');
+  validateMealField(ending_meal, 'ending_meal');
 
   req.log.info('add_utsav_package_start', { utsavid, name, start_date, end_date, amount });
 
@@ -506,6 +516,12 @@ export const addUtsavPackage = async (req, res) => {
       message: 'Package end date cannot be before start date'
     });
   }
+
+  if (utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
+    return res.status(400).send({
+      message: 'Starting and ending meals can only be configured for Research Centre utsavs'
+    });
+  }
   // 4. Check for duplicate package name in the same Utsav
   const alreadyExists = await UtsavPackagesDb.findOne({
     where: {
@@ -528,6 +544,8 @@ export const addUtsavPackage = async (req, res) => {
     start_date,
     end_date,
     amount,
+    starting_meal,
+    ending_meal,
     updatedBy: req.user.username
   });
 
@@ -554,34 +572,49 @@ export const updateUtsav = async (req, res) => {
     comments,
     location,
     registration_deadline,
-    starting_meal,
-    ending_meal,
     whatsapp_link
   } = req.body;
-
-  validateMealField(starting_meal, 'starting_meal');
-  validateMealField(ending_meal, 'ending_meal');
 
   const utsavId = req.params.id;
   req.log.info('update_utsav_start', { utsavId, name, start_date, end_date, status, total_seats });
 
-  const utsav = await validateUtsav(utsavId);
-  const month = moment(start_date).format('MMMM');
+  const startMoment = moment(start_date, moment.ISO_8601, true);
+  const endMoment = moment(end_date, moment.ISO_8601, true);
+  if (!start_date || !startMoment.isValid()) {
+    throw new ApiError(400, 'start_date is required (YYYY-MM-DD)');
+  }
+  if (!end_date || !endMoment.isValid()) {
+    throw new ApiError(400, 'end_date is required (YYYY-MM-DD)');
+  }
+  if (endMoment.isBefore(startMoment, 'day')) {
+    throw new ApiError(400, 'end_date cannot be before start_date');
+  }
+  const month = startMoment.format('MMMM');
 
-  // 🧩 Hybrid available_seats logic
+  // One transaction for the whole edit: a failure part-way leaves the utsav
+  // unchanged. CatchAsync rolls req.transaction back.
+  const t = await database.transaction();
+  req.transaction = t;
+
+  // Read the utsav under a row lock inside the transaction. A seat reserve or
+  // release running at the same time would otherwise be overwritten by seat
+  // maths done on a stale, pre-transaction read.
+  const utsav = await UtsavDb.findByPk(utsavId, {
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  if (!utsav) throw new ApiError(404, 'Utsav not found');
+
+  // Hybrid available_seats logic
   let newAvailableSeats;
-
-  // If total_seats changed → auto adjust
   if (total_seats != utsav.total_seats) {
+    // total_seats changed: move available_seats by the same amount
     const diff = total_seats - utsav.total_seats;
     newAvailableSeats = Math.max(0, utsav.available_seats + diff);
-  }
-  // If same total_seats but frontend sent available_seats → allow manual override
-  else if (available_seats !== undefined && available_seats !== null) {
+  } else if (available_seats !== undefined && available_seats !== null) {
+    // same total_seats but a manual available_seats override was sent
     newAvailableSeats = available_seats;
-  }
-  // Otherwise → keep existing
-  else {
+  } else {
     newAvailableSeats = utsav.available_seats;
   }
 
@@ -597,11 +630,9 @@ export const updateUtsav = async (req, res) => {
     comments,
     location,
     registration_deadline,
-    starting_meal,
-    ending_meal,
     whatsapp_link,
     updatedBy: req.user.username
-  });
+  }, { transaction: t });
 
   if (whatsapp_link) {
     const slug = `u${utsavId}`;
@@ -611,7 +642,7 @@ export const updateUtsav = async (req, res) => {
       type: 'utsav',
       active: true,
       createdBy: req.user.username
-    });
+    }, { transaction: t });
 
     const inviteMatch = whatsapp_link.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
     if (inviteMatch && inviteMatch[1] && whatsapp_link !== previousWhatsappLink) {
@@ -624,9 +655,11 @@ export const updateUtsav = async (req, res) => {
           type: 'utsav',
           eventId: utsavId
         }
-      });
+      }, { transaction: t });
     }
   }
+
+  await t.commit();
 
   req.log.info('update_utsav_success', { utsavId, newAvailableSeats });
   return res.status(200).send({ message: 'Updated Utsav' });
@@ -1132,6 +1165,31 @@ export const utsavStatusUpdate = async (req, res) => {
           'Admin Cancelled can only be set from waiting, payment pending, confirmed or cancelled'
         );
       }
+      // Lock order: utsav, then the member's card, then meals. The credit
+      // restore below locks the card, and a member room booking with meals
+      // locks the card before the meal rows. Clearing the meals first and the
+      // card after (the old order) deadlocked with that booking. The member's
+      // own cancel takes the same order (utsav, then card).
+      await UtsavDb.findOne({
+        where: { id: booking.utsavid },
+        attributes: ['id'],
+        transaction: t,
+        lock: t.LOCK.UPDATE
+      });
+      // Lock every card this cancel may touch: the attendee's, and the payer's
+      // (credits go back to transaction.cardno). Sorted so two cancels for the
+      // same pair take the locks in the same order.
+      const cardsToLock = [
+        ...new Set([booking.cardno, transaction?.cardno].filter(Boolean))
+      ].sort();
+      for (const cardno of cardsToLock) {
+        await CardDb.findOne({
+          where: { cardno },
+          attributes: ['id'],
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        });
+      }
       // Only a booking that held a seat was given utsav meals; waiting-list
       // bookings never are. The cleanup clears every meal in the package dates,
       // so running it for a booking that never had them wipes meals the member
@@ -1245,8 +1303,11 @@ export const fetchUtsav = async (req, res) => {
 };
 
 export const updateUtsavPackage = async (req, res) => {
-  const { name, start_date, end_date, amount } = req.body;
+  const { name, start_date, end_date, amount, starting_meal, ending_meal } = req.body;
   const { id: packageId } = req.params;
+
+  validateMealField(starting_meal, 'starting_meal');
+  validateMealField(ending_meal, 'ending_meal');
 
   req.log.info('update_utsav_package_start', { packageId, name, amount });
 
@@ -1257,11 +1318,25 @@ export const updateUtsavPackage = async (req, res) => {
     return res.status(404).send({ message: 'Package not found' });
   }
 
+  const utsav = await UtsavDb.findOne({ where: { id: utsavPackage.utsavid } });
+  if (!utsav) {
+    req.log.warn('update_utsav_package_utsav_not_found', { packageId, utsavid: utsavPackage.utsavid });
+    return res.status(404).send({ message: 'Associated utsav not found' });
+  }
+
+  if (utsav.location !== RESEARCH_CENTRE && (starting_meal || ending_meal)) {
+    return res.status(400).send({
+      message: 'Starting and ending meals can only be configured for Research Centre utsavs'
+    });
+  }
+
   await utsavPackage.update({
     name,
     start_date,
     end_date,
     amount,
+    starting_meal,
+    ending_meal,
     updatedBy: req.user.username
   });
 
@@ -1280,6 +1355,8 @@ export const fetchAllPackages = async (req, res) => {
         up.start_date,
         up.end_date,
         up.amount,
+        up.starting_meal,
+        up.ending_meal,
         u.name AS utsav_name,
         COUNT(
           CASE WHEN ub.status = '${STATUS_WAITING}' THEN 1 END
@@ -1297,6 +1374,8 @@ export const fetchAllPackages = async (req, res) => {
         up.start_date,
         up.end_date,
         up.amount,
+        up.starting_meal,
+        up.ending_meal,
         u.name
      ORDER BY up.start_date ASC`,
     {
@@ -1344,10 +1423,20 @@ export const fetchPackage = async (req, res) => {
     return res.status(404).send({ message: 'Package not found' });
   }
 
+  const utsav = await UtsavDb.findOne({
+    where: { id: packageData.utsavid },
+    attributes: ['id', 'name', 'location']
+  });
+
+  const responseData = {
+    ...packageData.toJSON(),
+    location: utsav?.location || null
+  };
+
   req.log.info('fetch_utsav_package_success', { id });
   return res
     .status(200)
-    .send({ message: 'Fetched Package', data: packageData });
+    .send({ message: 'Fetched Package', data: responseData });
 };
 
 export const fetchAllUtsavList = async (req, res) => {

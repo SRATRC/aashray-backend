@@ -16,13 +16,15 @@ import {
   ERR_FLAT_FAILED_TO_BOOK,
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
-  ROLLING_WINDOW_NIGHT_LIMIT
+  ROLLING_WINDOW_NIGHT_LIMIT,
+  RESEARCH_CENTRE
 } from '../config/constants.js';
 import {
   RoomBooking,
   RoomDb,
   FlatBooking,
-  FlatDb
+  FlatDb,
+  UtsavDb
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -30,10 +32,14 @@ import {
   updateRazorpayTransactions,
   usableCredits
 } from './transactions.helper.js';
+import moment from 'moment';
 import {
   calculateNights,
   checkFlatAlreadyBooked,
-  validateDate
+  validateDate,
+  getBlockedDates,
+  isBlockFromUtsav,
+  isDateBlocked
 } from '../controllers/helper.js';
 import {
   findUtsavOnBoundaryDates,
@@ -376,17 +382,7 @@ export async function bookRoomForMumukshus(
 
     userBookingIds[card.cardno] = userBookingIds[card.cardno] || [];
 
-    if (nights == 0) {
-      const result = await bookDayVisit(
-        card.cardno,
-        range.start,
-        range.end,
-        bookedBy,
-        updatedBy,
-        t
-      );
-      userBookingIds[card.cardno].push(result.bookingid);
-    } else if (status == STATUS_WAITING) {
+    if (status == STATUS_WAITING) {
       const result = await bookWaitingRoom(
         card.cardno,
         range.start,
@@ -401,6 +397,16 @@ export async function bookRoomForMumukshus(
         holdReasonMeta
       );
       userBookingIds[card.cardno].push(result.bookingId);
+    } else if (nights == 0) {
+      const result = await bookDayVisit(
+        card.cardno,
+        range.start,
+        range.end,
+        bookedBy,
+        updatedBy,
+        t
+      );
+      userBookingIds[card.cardno].push(result.bookingid);
     } else if (status == STATUS_AVAILABLE) {
       const result = await bookAvailableRoom(
         card.cardno,
@@ -515,6 +521,48 @@ export function roomCharge(roomtype) {
   return roomtype == 'nac' ? NAC_ROOM_PRICE : AC_ROOM_PRICE;
 }
 
+async function getManualRCBlockForFlat(checkin, checkout) {
+  // Find active utsavs at RC (widened by 1 day so utsav auto-block checkout is covered)
+  const activeUtsavsAtRC = await UtsavDb.findAll({
+    where: {
+      location: RESEARCH_CENTRE,
+      [Sequelize.Op.and]: [
+        { start_date: { [Sequelize.Op.lte]: checkout } },
+        {
+          end_date: {
+            [Sequelize.Op.gte]: moment(checkin).subtract(1, 'day').format('YYYY-MM-DD')
+          }
+        }
+      ]
+    }
+  });
+
+  const blockedDates = await getBlockedDates(checkin, checkout);
+  // Exclude utsav blocks — flat owners may stay in their flats during utsavs.
+  // Only genuine manual RC blocks trigger waitlisting for flats.
+  const manualBlockedDates = blockedDates.filter((b) => !isBlockFromUtsav(b, activeUtsavsAtRC));
+
+  // Overnight stays: edge-touching blocks don't count. Same-day visits use the strict check,
+  // matching the room flow, so a visit on the block's first day is still caught.
+  const boundaryAllowed = checkin !== checkout;
+  const matchingBlocks = manualBlockedDates.filter((b) =>
+    isDateBlocked(b, checkin, checkout, boundaryAllowed)
+  );
+
+  // If any overlapping block is a hard block, reject immediately with 400
+  const hardBlock = matchingBlocks.find((b) => b.allow_waitlist === false);
+  if (hardBlock) {
+    throw new ApiError(
+      400,
+      `Dates are blocked during following periods: ${moment(hardBlock.checkin).format(
+        'Do MMMM, YYYY'
+      )} to ${moment(hardBlock.checkout).format('Do MMMM, YYYY')}`
+    );
+  }
+
+  return matchingBlocks[0] || null;
+}
+
 export async function bookFlatForMumukshus(
   startDay,
   endDay,
@@ -549,6 +597,7 @@ export async function bookFlatForMumukshus(
   }
 
   const nights = await calculateNights(startDay, endDay);
+  const manualRCBlock = await getManualRCBlockForFlat(startDay, endDay);
 
   // Batched rolling-window cap for the whole group (fixed queries + sorted,
   // deadlock-safe per-person locks), instead of a per-occupant check.
@@ -573,7 +622,8 @@ export async function bookFlatForMumukshus(
       user.cardno,
       t,
       false,
-      capByCard.get(mumukshu)
+      capByCard.get(mumukshu),
+      manualRCBlock
     );
     amount += booking.discountedAmount;
     userBookingIds[mumukshu] = [booking.bookingId];
@@ -581,7 +631,7 @@ export async function bookFlatForMumukshus(
   }
 
   var order = null;
-  if (createOrder && user.country == 'India' && amount > 0) {
+  if (createOrder && amount > 0) {
     order = await generateOrderId(amount);
     await updateRazorpayTransactions(bookingIds, [], order.id, t);
   } else {
@@ -605,7 +655,8 @@ export async function createFlatBooking(
   updatedBy,
   t,
   cashAllowed = false,
-  capResult = null
+  capResult = null,
+  manualRCBlock = null
 ) {
   let bookingId = uuidv4();
 
@@ -616,12 +667,21 @@ export async function createFlatBooking(
     status = ROOM_STATUS_PENDING_CHECKIN;
   }
 
+  // If dates fall in manual RC block, force WAITING with no charge.
   // 9-night / 30-day rolling cap → force waiting. `capResult` is precomputed by
   // the caller's batched check (already a no-op for residents); the admin path
   // omits it (it warns via its own gate).
   let holdReason = null;
   let holdReasonMeta = null;
-  if (nights > 0 && capResult && capResult.exceeds) {
+  if (manualRCBlock) {
+    status = STATUS_WAITING;
+    holdReason = HOLD_REASON.RC_BLOCKED;
+    holdReasonMeta = {
+      checkin: manualRCBlock.checkin,
+      checkout: manualRCBlock.checkout,
+      comments: manualRCBlock.comments
+    };
+  } else if (nights > 0 && capResult && capResult.exceeds) {
     status = STATUS_WAITING;
     holdReason = HOLD_REASON.ROLLING_WINDOW_LIMIT;
     holdReasonMeta = {
@@ -762,7 +822,15 @@ export async function checkRoomAvailabilityForMumukshus(
         const nights = await calculateNights(range.start, range.end);
         const minNights = range.overlappingWithUtsav && nights > 0 ? 1 : 0;
 
-        if (nights == 0) {
+        if (range.manualRCBlocked) {
+          status = STATUS_WAITING;
+          holdReason = HOLD_REASON.RC_BLOCKED;
+          holdReasonMeta = {
+            checkin: range.blockedDate?.checkin,
+            checkout: range.blockedDate?.checkout,
+            comments: range.blockedDate?.comments
+          };
+        } else if (nights == 0) {
           // 1 day visit
           status = STATUS_AVAILABLE;
         } else if (overCapUsage.has(mumukshu)) {
@@ -844,6 +912,7 @@ export async function checkFlatAvailabilityForMumukshus(
   }
 
   const nights = await calculateNights(checkin_date, checkout_date);
+  const manualRCBlock = await getManualRCBlockForFlat(checkin_date, checkout_date);
   const flatDetails = [];
 
   const flatOwnerData = await FlatDb.findAll({
@@ -865,6 +934,24 @@ export async function checkFlatAvailabilityForMumukshus(
   const tempUser = { ...user, credits: { ...user.credits } };
 
   for (const mumukshu of mumukshus) {
+    if (manualRCBlock) {
+      flatDetails.push({
+        mumukshu,
+        flatno: flat.flatno,
+        nights,
+        charge: 0,
+        availableCredits: 0,
+        status: STATUS_WAITING,
+        holdReason: HOLD_REASON.RC_BLOCKED,
+        holdReasonMeta: {
+          checkin: manualRCBlock.checkin,
+          checkout: manualRCBlock.checkout,
+          comments: manualRCBlock.comments
+        }
+      });
+      continue;
+    }
+
     const cap = capByCard.get(mumukshu);
     if (cap.exceeds) {
       // Over the cap → waitlisted with no charge, mirroring createFlatBooking.

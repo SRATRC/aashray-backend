@@ -7,6 +7,13 @@ import {
 import {
   STATUS_CONFIRMED,
   STATUS_WAITING,
+  STATUS_CANCELLED,
+  STATUS_ADMIN_CANCELLED,
+  STATUS_CREDITED,
+  STATUS_CASH_PENDING,
+  STATUS_PAYMENT_PENDING,
+  STATUS_PAYMENT_FAILED,
+  TYPE_TRAVEL,
   MSG_CANCEL_SUCCESSFUL,
   RAJ_PRAVAS_EMAIL,
   STATUS_PROCEED_FOR_PAYMENT,
@@ -14,7 +21,7 @@ import {
   ERR_BOOKING_NOT_FOUND,
   RESEARCH_CENTRE
 } from '../../config/constants.js';
-import { userCancelBooking } from '../../helpers/transactions.helper.js';
+import { userCancelBooking, TOP_UP_MARK } from '../../helpers/transactions.helper.js';
 import {
   updateWaitingTravelBooking,
   sendTravelBookingStatusUpdateMail
@@ -29,13 +36,17 @@ import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import sendMail from '../../utils/sendMail.js';
 import Sequelize from 'sequelize';
-import moment from 'moment';
+import moment from 'moment-timezone';
 
 export const FetchUpcoming = async (req, res) => {
   attachUserContext(req);
   const page = parseInt(req.query.page) || 1;
   const pageSize = parseInt(req.query.page_size) || 10;
   const offset = (page - 1) * pageSize;
+  const upcomingOnly = req.query.upcoming === 'true';
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const upcomingWhere = upcomingOnly ? 'AND t1.date >= :today' : '';
+  const orderDirection = upcomingOnly ? 'ASC' : 'DESC';
   req.log.info('fetch_travel_bookings_start', { cardno: req.user.cardno, page, pageSize });
 
   const data = await database.query(
@@ -53,30 +64,46 @@ export const FetchUpcoming = async (req, res) => {
        t1.comments,
        t1.admin_comments,
        t1.status,
-       t2.amount,
+       COALESCE(tx.open_total, t2.amount) AS amount,
+       tx.top_up_due AS topUpDue,
        t2.status AS transaction_status,
        t5.bus_name,
        t6.timing AS departure_time,
        t8.issuedto AS coordinator_name,
        t8.mobno AS coordinator_contact
     FROM travel_db t1
-    LEFT JOIN transactions t2 ON t1.bookingid = t2.bookingid
+    LEFT JOIN (
+      SELECT bookingid,
+             MIN(id) AS main_id,
+             SUM(CASE WHEN status NOT IN (:closedTxnStatuses) THEN amount END) AS open_total,
+             SUM(CASE WHEN status IN (:unpaidTxnStatuses) AND description LIKE :topUpLike THEN amount END) AS top_up_due
+        FROM transactions
+       WHERE category = :category
+       GROUP BY bookingid
+    ) tx ON tx.bookingid = t1.bookingid
+    LEFT JOIN transactions t2 ON t2.id = tx.main_id
     LEFT JOIN card_db t3 ON t1.cardno = t3.cardno
     LEFT JOIN travel_bus_passengers t4 ON t1.bookingid = t4.bookingid
     LEFT JOIN travel_bus_group t5 ON t4.bus_group_id = t5.id
     LEFT JOIN travel_bus_stops t6 ON t5.id = t6.bus_group_id AND TRIM(LOWER(t6.stop_name)) = TRIM(LOWER(t1.pickup_point))
     LEFT JOIN travel_db t7 ON t5.coordinator_bookingid = t7.bookingid
     LEFT JOIN card_db t8 ON t7.cardno = t8.cardno
-    WHERE t1.cardno = :cardno
-      OR t1.bookedBy = :cardno
-    ORDER BY t1.date DESC
+    WHERE (t1.cardno = :cardno OR t1.bookedBy = :cardno)
+      ${upcomingWhere}
+    ORDER BY t1.date ${orderDirection}
     LIMIT :limit
     OFFSET :offset;`,
     {
       replacements: {
         cardno: req.user.cardno,
+        category: TYPE_TRAVEL,
+        closedTxnStatuses: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED, STATUS_CREDITED],
+        unpaidTxnStatuses: [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED],
+        // Read once, grouped by booking (see the staff travel report).
+        topUpLike: `${TOP_UP_MARK}%`,
         limit: pageSize,
-        offset: offset
+        offset: offset,
+        ...(upcomingOnly ? { today } : {})
       },
       type: Sequelize.QueryTypes.SELECT
     }
@@ -95,6 +122,8 @@ export const CancelTravel = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
+  // Locked first, inside t: a staff fare edit takes the same one-row lock, so it
+  // cannot add a top-up that the cancel's top-up sweep would miss.
   const booking = await TravelDb.findOne({
     where: {
       bookingid: bookingid,
@@ -104,7 +133,9 @@ export const CancelTravel = async (req, res) => {
         STATUS_PROCEED_FOR_PAYMENT,
         STATUS_WAITING
       ]
-    }
+    },
+    lock: t.LOCK.UPDATE,
+    transaction: t
   });
 
   if (!booking) {
@@ -193,7 +224,7 @@ export const CancelTravel = async (req, res) => {
 
 export const checkUpcomingEvents = async (req, res) => {
   attachUserContext(req);
-  const today = moment().format('YYYY-MM-DD');
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   req.log.info('check_upcoming_events_start', { cardno: req.user.cardno, date: today });
 
   const utsavs = await UtsavDb.findAll({

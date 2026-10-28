@@ -946,8 +946,8 @@ export async function sendUtsavWhatsApp(user, utsavBookingDetails = [], bookedFo
         return String(m).charAt(0).toUpperCase() + String(m).slice(1);
       };
 
-      const startMeals = getFirstMeal(utsavObj.starting_meal, "Breakfast");
-      const endMeals = getLastMeal(utsavObj.ending_meal, "Dinner");
+      const startMeals = getFirstMeal(packageObj.starting_meal, "Breakfast");
+      const endMeals = getLastMeal(packageObj.ending_meal, "Dinner");
 
       const startingMealText = isRC && pkgStart ? `${pkgStart} (${startMeals})` : "N/A";
       const endingMealText = isRC && pkgEnd ? `${pkgEnd} (${endMeals})` : "N/A";
@@ -2240,8 +2240,8 @@ export async function sendUtsavStatusChangeWhatsApp(booking, previousStatus, opt
       return String(m).charAt(0).toUpperCase() + String(m).slice(1);
     };
 
-    const startMeals = getFirstMeal(utsav?.starting_meal, "Breakfast");
-    const endMeals = getLastMeal(utsav?.ending_meal, "Dinner");
+    const startMeals = getFirstMeal(pkg?.starting_meal, "Breakfast");
+    const endMeals = getLastMeal(pkg?.ending_meal, "Dinner");
 
     const startingMealText = isRC && pkgStart ? `${pkgStart} (${startMeals})` : "N/A";
     const endingMealText = isRC && pkgEnd ? `${pkgEnd} (${endMeals})` : "N/A";
