@@ -30,7 +30,6 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   STATUS_CASH_PENDING,
   STATUS_PAYMENT_PENDING,
-  STATUS_PENDING,
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
   STATUS_CREDITED,
@@ -985,9 +984,12 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   const activeStayWhere = {
     cardno,
     [Sequelize.Op.or]: [
-      { status: ROOM_STATUS_CHECKEDIN },
       {
-        status: [ROOM_STATUS_PENDING_CHECKIN, STATUS_PENDING],
+        status: ROOM_STATUS_CHECKEDIN,
+        checkout: { [Sequelize.Op.gte]: moment().tz('Asia/Kolkata').subtract(14, 'days').format('YYYY-MM-DD') }
+      },
+      {
+        status: ROOM_STATUS_PENDING_CHECKIN,
         checkout: { [Sequelize.Op.gte]: today }
       }
     ]
@@ -1032,10 +1034,6 @@ export const fetchKioskBookingsByCard = async (req, res) => {
 };
 
 export const fetchRoomBookingsByCard = async (req, res) => {
-  if (req.query.kiosk === 'true') {
-    return fetchKioskBookingsByCard(req, res);
-  }
-
   const cardno = req.params.cardno;
   req.log.info('fetch_room_bookings_by_card_start', { cardno });
 
@@ -2400,6 +2398,105 @@ export const updateFlatBookingStatus = async (req, res) => {
 export const fetchLateCheckoutFees = async (req, res) => {
   const { payment_type } = req.query;
   req.log.info('fetch_late_checkout_fees_start', { payment_type });
+
+  if (payment_type === 'overdue_checkouts') {
+    const nowIST = moment().tz('Asia/Kolkata');
+    const today = nowIST.format('YYYY-MM-DD');
+    const nowTime = nowIST.format('HH:mm:ss');
+    const isPastDeadline = nowTime > CHECKOUT_DEADLINE;
+
+    // Overdue condition:
+    // Past checkout date is always overdue.
+    // If today is checkout date and past 11:00:00 AM, it's overdue today.
+    const overdueCondition = isPastDeadline
+      ? { checkout: { [Sequelize.Op.lte]: today } }
+      : { checkout: { [Sequelize.Op.lt]: today } };
+
+    const [overdueRooms, overdueFlats] = await Promise.all([
+      RoomBooking.findAll({
+        where: {
+          status: ROOM_STATUS_CHECKEDIN,
+          ...overdueCondition
+        },
+        include: [
+          {
+            model: CardDb,
+            attributes: ['cardno', 'issuedto', 'mobno']
+          }
+        ],
+        order: [['checkout', 'ASC']]
+      }),
+      FlatBooking.findAll({
+        where: {
+          status: ROOM_STATUS_CHECKEDIN,
+          ...overdueCondition
+        },
+        include: [
+          {
+            model: CardDb,
+            attributes: ['cardno', 'issuedto', 'mobno']
+          }
+        ],
+        order: [['checkout', 'ASC']]
+      })
+    ]);
+
+    const formattedRooms = overdueRooms.map((rb) => {
+      const isToday = rb.checkout === today;
+      const isHalfDay = nowTime <= LATE_CHECKOUT_HALF;
+      const estLateFee = isToday ? calcLateCheckoutFee(rb.roomtype, isHalfDay) : null;
+      const daysOverdue = moment(today).diff(moment(rb.checkout), 'days');
+
+      return {
+        id: null,
+        amount: isToday ? `₹${estLateFee} (Est.)` : (daysOverdue > 0 ? `${daysOverdue}d overdue` : 'Overdue'),
+        bookingid: rb.bookingid,
+        roomno: rb.roomno || '—',
+        roomtype: rb.roomtype || '—',
+        checkin: rb.checkin,
+        checkout: rb.checkout,
+        nights: rb.nights,
+        guest_name: rb.CardDb?.issuedto || '—',
+        mobile: rb.CardDb?.mobno || '—',
+        is_flat: false,
+        is_overdue: true
+      };
+    });
+
+    const formattedFlats = overdueFlats.map((fb) => {
+      const isToday = fb.checkout === today;
+      const daysOverdue = moment(today).diff(moment(fb.checkout), 'days');
+
+      return {
+        id: null,
+        amount: isToday ? 'Overdue' : (daysOverdue > 0 ? `${daysOverdue}d overdue` : 'Overdue'),
+        bookingid: fb.bookingid,
+        roomno: fb.flatno ? `Flat ${fb.flatno}` : 'Flat',
+        roomtype: 'Flat',
+        checkin: fb.checkin,
+        checkout: fb.checkout,
+        nights: fb.nights,
+        guest_name: fb.CardDb?.issuedto || '—',
+        mobile: fb.CardDb?.mobno || '—',
+        is_flat: true,
+        is_overdue: true
+      };
+    });
+
+    const combined = [...formattedRooms, ...formattedFlats].sort((a, b) =>
+      String(a.checkout).localeCompare(String(b.checkout))
+    );
+
+    req.log.info('fetch_overdue_checkouts_success', { count: combined.length });
+    return res.status(200).json({
+      success: true,
+      data: combined,
+      meta: {
+        count: combined.length,
+        payment_type
+      }
+    });
+  }
 
   const statusMap = {
     payment_pending: ['cash pending'],

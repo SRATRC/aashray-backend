@@ -167,12 +167,10 @@ export const generateTempCodeForAdmin = async (req, res) => {
   const password = await generateTempCodeForCard(cleanCardNo, t);
   await t.commit();
 
-  if (req.log) {
-    req.log.info('kiosk_wifi_temp_code_generated', {
-      cardno: cleanCardNo,
-      by: req.user?.username
-    });
-  }
+  req.log.info('kiosk_wifi_temp_code_generated', {
+    cardno: cleanCardNo,
+    by: req.user?.username
+  });
 
   return res.status(200).send({
     data: password,
@@ -189,13 +187,11 @@ export const fetchTempCodesForAdmin = async (req, res) => {
 
   const rows = await fetchTempCodesForCard(cleanCardNo);
 
-  if (req.log) {
-    req.log.info('fetch_temp_codes_for_admin_success', {
-      cardno: cleanCardNo,
-      by: req.user?.username,
-      count: rows.length
-    });
-  }
+  req.log.info('fetch_temp_codes_for_admin_success', {
+    cardno: cleanCardNo,
+    by: req.user?.username,
+    count: rows.length
+  });
 
   return res.status(200).send({
     message: rows.length ? 'Wifi Passwords' : 'No active WiFi passwords found',
