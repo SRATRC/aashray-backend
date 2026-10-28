@@ -29,6 +29,11 @@ const BlockDates = sequelize.define(
       values: [STATUS_ACTIVE, STATUS_INACTIVE],
       defaultValue: STATUS_ACTIVE
     },
+    allow_waitlist: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true
+    },
     updatedBy: {
       type: DataTypes.STRING,
       allowNull: false

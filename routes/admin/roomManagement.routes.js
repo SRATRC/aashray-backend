@@ -15,6 +15,7 @@ import {
   rcBlockList,
   blockRC,
   unblockRC,
+  toggleRCBlockMode,
   ReservationReport,
   dayWiseGuestCountReport,
   availableRooms,
@@ -71,6 +72,7 @@ router.put('/update_room/:roomno', CatchAsync(updateRoom));
 // RC management routes
 router.post('/block_rc', CatchAsync(blockRC));
 router.put('/unblock_rc/:id', CatchAsync(unblockRC));
+router.put('/toggle_rc_block_mode/:id', CatchAsync(toggleRCBlockMode));
 router.get('/rc_block_list', CatchAsync(rcBlockList));
 
 // reports

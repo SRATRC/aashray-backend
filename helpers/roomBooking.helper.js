@@ -545,9 +545,22 @@ async function getManualRCBlockForFlat(checkin, checkout) {
   // Overnight stays: edge-touching blocks don't count. Same-day visits use the strict check,
   // matching the room flow, so a visit on the block's first day is still caught.
   const boundaryAllowed = checkin !== checkout;
-  return (
-    manualBlockedDates.find((b) => isDateBlocked(b, checkin, checkout, boundaryAllowed)) || null
+  const matchingBlocks = manualBlockedDates.filter((b) =>
+    isDateBlocked(b, checkin, checkout, boundaryAllowed)
   );
+
+  // If any overlapping block is a hard block, reject immediately with 400
+  const hardBlock = matchingBlocks.find((b) => b.allow_waitlist === false);
+  if (hardBlock) {
+    throw new ApiError(
+      400,
+      `Dates are blocked during following periods: ${moment(hardBlock.checkin).format(
+        'Do MMMM, YYYY'
+      )} to ${moment(hardBlock.checkout).format('Do MMMM, YYYY')}`
+    );
+  }
+
+  return matchingBlocks[0] || null;
 }
 
 export async function bookFlatForMumukshus(
