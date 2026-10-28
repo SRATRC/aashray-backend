@@ -1,6 +1,7 @@
 import {
   ERR_INVALID_DATE,
   ERR_TRAVEL_ALREADY_BOOKED,
+  ERR_TRAVEL_INVALID_DIRECTION,
   RESEARCH_CENTRE,
   STATUS_ADMIN_CANCELLED,
   STATUS_AWAITING_CONFIRMATION,
@@ -198,4 +199,25 @@ export async function bookTravelForMumukshus(
   await TravelDb.bulkCreate(bookingsToCreate, { transaction: t });
   log.info('travel_booking_result', { count: bookingsToCreate.length, date });
   return { userBookingIds, waitingBookingCount: 0 };
+}
+
+// Shared by the mumukshu and guest booking controllers: is this one-way trip allowed?
+export async function checkTravelAvailability(details) {
+  const { date, mumukshuGroup } = details;
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  if (date < today) throw new ApiError(400, ERR_INVALID_DATE);
+
+  await validateCards(mumukshuGroup.flatMap((g) => g.mumukshus));
+
+  for (const g of mumukshuGroup) {
+    if (g.pickup_point !== RESEARCH_CENTRE && g.drop_point !== RESEARCH_CENTRE) {
+      throw new ApiError(400, ERR_TRAVEL_INVALID_DIRECTION);
+    }
+    await checkTravelAlreadyBooked(date, {
+      mumukshus: g.mumukshus,
+      drop_point: g.drop_point
+    });
+  }
+
+  return { status: STATUS_AWAITING_CONFIRMATION, charge: 0 };
 }
