@@ -1,4 +1,5 @@
 import {
+  CardDb,
   FlatBooking,
   RoomBooking,
   WifiDb,
@@ -20,25 +21,31 @@ import {
 import APIError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
 import database from '../../config/database.js';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import { sendWifiRequestWhatsApp } from '../../helpers/whatsapp.helper.js';
 
 const MAX_WIFI_PASS_LIMIT = 1;
 
-export const generateTempCode = async (req, res) => {
-  const t = await database.transaction();
-  req.transaction = t;
+export const generateTempCodeForCard = async (cardno, t) => {
+  const card = await CardDb.findOne({
+    where: { cardno },
+    attributes: ['cardno', 'res_status'],
+    transaction: t,
+    lock: t?.LOCK?.UPDATE
+  });
 
-  if (
-    !validateResStatus(req.user.res_status, [STATUS_MUMUKSHU, STATUS_GUEST])
-  ) {
+  if (!card) {
+    throw new APIError(404, 'Card not found');
+  }
+
+  if (!validateResStatus(card.res_status, [STATUS_MUMUKSHU, STATUS_GUEST])) {
     throw new APIError(
       403,
-      'You are not eligible to generate a temporary WiFi code'
+      'This guest is not eligible to generate a temporary WiFi code'
     );
   }
 
-  const booking = await fetchBookings(req.user.cardno);
+  const booking = await fetchBookings(cardno, t);
   if (!booking) {
     throw new APIError(404, 'user not checked in yet.');
   }
@@ -46,10 +53,11 @@ export const generateTempCode = async (req, res) => {
 
   const count = await WifiDb.count({
     where: {
-      cardno: req.user.cardno,
+      cardno,
       status: STATUS_INACTIVE,
       roombookingid
-    }
+    },
+    transaction: t
   });
   if (count >= MAX_WIFI_PASS_LIMIT) {
     throw new APIError(
@@ -60,7 +68,7 @@ export const generateTempCode = async (req, res) => {
 
   const [updatedCount] = await WifiDb.update(
     {
-      cardno: req.user.cardno,
+      cardno,
       status: STATUS_INACTIVE,
       roombookingid
     },
@@ -80,7 +88,7 @@ export const generateTempCode = async (req, res) => {
   const updatedRow = await WifiDb.findOne({
     attributes: ['password'],
     where: {
-      cardno: req.user.cardno,
+      cardno,
       status: STATUS_INACTIVE,
       roombookingid
     },
@@ -88,10 +96,18 @@ export const generateTempCode = async (req, res) => {
     transaction: t
   });
 
+  return updatedRow?.password;
+};
+
+export const generateTempCode = async (req, res) => {
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const password = await generateTempCodeForCard(req.user.cardno, t);
   await t.commit();
 
   return res.status(200).send({
-    data: updatedRow?.password,
+    data: password,
     message: 'Your wifi password has been generated'
   });
 };
@@ -123,6 +139,48 @@ export const fetchTempCodes = async (req, res) => {
     order: [['createdAt', 'ASC']]
   });
   return res.status(200).send({ message: 'Wifi Passwords', data: passwords });
+};
+
+export const fetchTempCodesForCard = async (cardno) => {
+  const booking = await fetchBookings(cardno);
+  if (!booking) return [];
+
+  return WifiDb.findAll({
+    attributes: ['password', 'createdAt'],
+    where: {
+      cardno,
+      roombookingid: booking.bookingid
+    },
+    order: [['createdAt', 'ASC']]
+  });
+};
+
+export const generateTempCodeForAdmin = async (req, res) => {
+  const { cardno } = req.body;
+  if (!cardno || typeof cardno !== 'string') {
+    throw new APIError(400, 'cardno is required');
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+  const password = await generateTempCodeForCard(cardno.trim(), t);
+  await t.commit();
+
+  return res.status(200).send({
+    data: password,
+    message: 'Temporary WiFi password generated'
+  });
+};
+
+export const fetchTempCodesForAdmin = async (req, res) => {
+  const { cardno } = req.params;
+  if (!cardno) throw new APIError(400, 'cardno is required');
+
+  const rows = await fetchTempCodesForCard(cardno);
+  return res.status(200).send({
+    message: rows.length ? 'Wifi Passwords' : 'No active WiFi passwords found',
+    data: rows
+  });
 };
 
 export const requestPermanentCode = async (req, res) => {
@@ -326,18 +384,28 @@ export const resetPermanentCode = async (req, res) => {
   });
 };
 
-const fetchBookings = async (cardno) => {
-  const today = moment().format('YYYY-MM-DD');
+const fetchBookings = async (cardno, transaction = null) => {
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const commonWhereClause = {
     cardno,
     checkout: { [Sequelize.Op.gte]: today },
     status: ROOM_STATUS_CHECKEDIN
   };
+  // Day visits (nights 0) store checkout = checkin + 1; judge them by checkin
+  // so a visit today is not eligible tomorrow.
+  const roomWhereClause = {
+    cardno,
+    status: ROOM_STATUS_CHECKEDIN,
+    [Sequelize.Op.or]: [
+      { nights: { [Sequelize.Op.gt]: 0 }, checkout: { [Sequelize.Op.gte]: today } },
+      { nights: 0, checkin: { [Sequelize.Op.gte]: today } }
+    ]
+  };
 
   const [isRoomCheckedin, isFlatCheckedin, isUtsavCheckedin] =
     await Promise.all([
-      RoomBooking.findOne({ where: commonWhereClause }),
-      FlatBooking.findOne({ where: commonWhereClause }),
+      RoomBooking.findOne({ where: roomWhereClause, transaction }),
+      FlatBooking.findOne({ where: commonWhereClause, transaction }),
       UtsavBooking.findOne({
         include: [
           {
@@ -352,7 +420,8 @@ const fetchBookings = async (cardno) => {
         where: {
           cardno: cardno,
           status: ROOM_STATUS_CHECKEDIN
-        }
+        },
+        transaction
       })
     ]);
 

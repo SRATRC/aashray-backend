@@ -35,6 +35,11 @@ import {
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
 import CatchAsync from '../../utils/CatchAsync.js';
+import {
+  generateTempCodeForAdmin,
+  fetchTempCodesForAdmin
+} from '../../controllers/wifi/wifi.controller.js';
+
 
 router.use(auth);
 
@@ -53,6 +58,10 @@ router.get('/room_list', CatchAsync(roomList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));
 router.get('/available_rooms_for_day', CatchAsync(availableRoomsForDay))
 router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
+// Kiosk WiFi actions use the scanned guest card number, not the admin's card.
+router.post('/kiosk/wifi/generate-temp-code', CatchAsync(generateTempCodeForAdmin));
+router.get('/kiosk/wifi/fetch-temp-codes/:cardno', CatchAsync(fetchTempCodesForAdmin));
+
 
 // flat routes
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));

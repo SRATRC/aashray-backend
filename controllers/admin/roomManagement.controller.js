@@ -966,6 +966,27 @@ export const fetchAllFlatBookings = async (req, res) => {
 export const fetchRoomBookingsByCard = async (req, res) => {
   const cardno = req.params.cardno;
   req.log.info('fetch_room_bookings_by_card_start', { cardno });
+  if (req.query.kiosk === 'true') {
+    const [roomBookings, flatBookings, cardDetails] = await Promise.all([
+      RoomBooking.findAll({ where: { cardno }, order: [['checkin', 'ASC']] }),
+      FlatBooking.findAll({ where: { cardno }, order: [['checkin', 'ASC']] }),
+      CardDb.findOne({
+        where: { cardno },
+        attributes: ['cardno', 'issuedto']
+      })
+    ]);
+
+    return res.status(200).send({
+      message: 'Fetched bookings',
+      data: {
+        room_booking: roomBookings,
+        flat_booking: flatBookings,
+        card_details: cardDetails
+      }
+    });
+  }
+
+
 
   const bookings = await RoomBooking.findAll({
     where: { cardno },
