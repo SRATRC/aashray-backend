@@ -66,6 +66,11 @@ const TravelDb = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true
     },
+    trip_group_id: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: null
+    },
     comments: {
       type: DataTypes.STRING,
       allowNull: true
