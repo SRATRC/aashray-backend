@@ -70,7 +70,7 @@ import {
   checkAdhyayanAvailabilityForMumukshus
 } from '../../helpers/adhyayanBooking.helper.js';
 import {
-  bookTravelForMumukshus,
+  bookTravelDispatch,
   checkTravelAvailability
 } from '../../helpers/travelBooking.helper.js';
 import { validateCards } from '../../helpers/card.helper.js';
@@ -529,21 +529,34 @@ async function bookUtsav(data, t, user) {
   return result;
 }
 
-// Guest travel details use `guestGroup`; the shared travel helper expects `mumukshuGroup`
-// whose groups carry a `mumukshus` array of cardnos. Normalize.
+// Guest travel details use `guestGroup`; the shared travel helper expects
+// `mumukshuGroup` whose groups carry a `mumukshus` array of cardnos. Normalize.
 function normalizeGuestTravelDetails(details) {
-  return {
-    date: details.date,
-    mumukshuGroup: (details.guestGroup || []).map((g) => ({
+  const toLeg = (group) =>
+    (group || []).map((g) => ({
       ...g,
       mumukshus: g.mumukshus || g.guests
-    }))
+    }));
+  return {
+    date: details.date,
+    mumukshuGroup: toLeg(details.guestGroup),
+    return_date: details.return_date,
+    returnMumukshuGroup: details.returnGuestGroup
+      ? toLeg(details.returnGuestGroup)
+      : undefined
   };
 }
 
 async function bookTravelGuest(data, t, user) {
-  const { date, mumukshuGroup } = normalizeGuestTravelDetails(data.details);
-  return bookTravelForMumukshus(date, mumukshuGroup, t, user);
+  const norm = normalizeGuestTravelDetails(data.details);
+  return bookTravelDispatch(
+    norm.date,
+    norm.mumukshuGroup,
+    norm.return_date,
+    norm.returnMumukshuGroup,
+    t,
+    user
+  );
 }
 
 async function bookRoom(data, t, user, utsav) {

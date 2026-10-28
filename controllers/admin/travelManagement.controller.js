@@ -315,7 +315,7 @@ export const fetchUpcomingBookings = async (req, res) => {
   END AS drop_point`;
 
   const data = await database.query(
-    `SELECT t1.bookingid, t1.bookedBy, t1.date, t1.createdAt,
+    `SELECT t1.bookingid, t1.trip_group_id, t1.bookedBy, t1.date, t1.createdAt,
        ${pickupSelect}, ${dropSelect}, t1.arrival_time,
        CASE 
          WHEN t1.leaving_post_adhyayan = 1 THEN 1
