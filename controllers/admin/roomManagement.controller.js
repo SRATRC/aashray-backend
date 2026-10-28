@@ -84,6 +84,9 @@ import sequelize from '../../config/database.js';
 
 const CHECKOUT_DEADLINE = '11:00:00';
 const LATE_CHECKOUT_HALF = '15:00:00';
+// Stays more than 14 days overdue are excluded from kiosk self-checkout
+// to prevent stale zombie bookings; staff handles them via the overdue report.
+const KIOSK_CHECKEDIN_LOOKBACK_DAYS = 14;
 
 const calcLateCheckoutFee = (roomType, isHalfDay) => {
   if (roomType === 'nac') {
@@ -981,12 +984,13 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   }
 
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const kioskLookbackCutoff = moment(today).subtract(KIOSK_CHECKEDIN_LOOKBACK_DAYS, 'days').format('YYYY-MM-DD');
   const activeStayWhere = {
     cardno,
     [Sequelize.Op.or]: [
       {
         status: ROOM_STATUS_CHECKEDIN,
-        checkout: { [Sequelize.Op.gte]: moment().tz('Asia/Kolkata').subtract(14, 'days').format('YYYY-MM-DD') }
+        checkout: { [Sequelize.Op.gte]: kioskLookbackCutoff }
       },
       {
         status: ROOM_STATUS_PENDING_CHECKIN,
@@ -2444,12 +2448,15 @@ export const fetchLateCheckoutFees = async (req, res) => {
     const formattedRooms = overdueRooms.map((rb) => {
       const isToday = rb.checkout === today;
       const isHalfDay = nowTime <= LATE_CHECKOUT_HALF;
-      const estLateFee = isToday ? calcLateCheckoutFee(rb.roomtype, isHalfDay) : null;
+      // Day visits (nights < 1) are never charged a late fee per handleSameDayCheckout
+      const estLateFee = (isToday && rb.nights >= 1) ? calcLateCheckoutFee(rb.roomtype, isHalfDay) : null;
       const daysOverdue = moment(today).diff(moment(rb.checkout), 'days');
 
       return {
         id: null,
-        amount: isToday ? `₹${estLateFee} (Est.)` : (daysOverdue > 0 ? `${daysOverdue}d overdue` : 'Overdue'),
+        amount: estLateFee,
+        est_late_fee: estLateFee,
+        days_overdue: Math.max(0, daysOverdue),
         bookingid: rb.bookingid,
         roomno: rb.roomno || '—',
         roomtype: rb.roomtype || '—',
@@ -2464,12 +2471,13 @@ export const fetchLateCheckoutFees = async (req, res) => {
     });
 
     const formattedFlats = overdueFlats.map((fb) => {
-      const isToday = fb.checkout === today;
       const daysOverdue = moment(today).diff(moment(fb.checkout), 'days');
 
       return {
         id: null,
-        amount: isToday ? 'Overdue' : (daysOverdue > 0 ? `${daysOverdue}d overdue` : 'Overdue'),
+        amount: null,
+        est_late_fee: null,
+        days_overdue: Math.max(0, daysOverdue),
         bookingid: fb.bookingid,
         roomno: fb.flatno ? `Flat ${fb.flatno}` : 'Flat',
         roomtype: 'Flat',
