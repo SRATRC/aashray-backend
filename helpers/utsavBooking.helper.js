@@ -627,11 +627,11 @@ export async function getDateRangesDuringUtsav(
     }
   }
 
-  const utsavBlockedDates = [];
+  const hardBlockedDates = [];
   const manualBlockedDates = [];
   for (const b of blockedDates) {
-    if (isBlockFromUtsav(b, allRCUtsavs)) {
-      utsavBlockedDates.push(b);
+    if (isBlockFromUtsav(b, allRCUtsavs) || b.allow_waitlist === false) {
+      hardBlockedDates.push(b);
     } else {
       manualBlockedDates.push(b);
     }
@@ -644,15 +644,15 @@ export async function getDateRangesDuringUtsav(
     const dateRanges = [];
 
     // A day visit is one whole range and is never split around an utsav.
-    // If it falls on an utsav blocked date, validateBlockedDates rejects it with 400.
-    // If it falls on a manual RC block, it is tagged as manualRCBlocked so it can be waitlisted.
+    // If it falls on an utsav blocked date or a hard manual block, validateBlockedDates rejects it with 400.
+    // If it falls on a waitlist-allowed manual RC block, it is tagged as manualRCBlocked so it can be waitlisted.
     if (isDayVisit) {
       dateRanges.push({
         start: startDate,
         end: endDate,
         overlappingWithUtsav: false
       });
-      validateBlockedDates(utsavBlockedDates, dateRanges);
+      validateBlockedDates(hardBlockedDates, dateRanges);
 
       for (const range of dateRanges) {
         const matchingManualBlock = manualBlockedDates.find((b) =>
@@ -711,8 +711,8 @@ export async function getDateRangesDuringUtsav(
       });
     }
 
-    // Utsav blocked dates strictly reject room bookings with 400
-    validateBlockedDates(utsavBlockedDates, dateRanges);
+    // Utsav blocked dates and hard manual blocks strictly reject room bookings with 400
+    validateBlockedDates(hardBlockedDates, dateRanges);
 
     // Manual RC blocks tag ranges so they can be placed on the waiting list
     for (const range of dateRanges) {

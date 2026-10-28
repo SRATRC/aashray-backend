@@ -935,7 +935,9 @@ export function isBlockFromUtsav(blockedDate, utsavs = []) {
     const utsavBlockCheckout = moment(u.end_date).add(1, 'day').format('YYYY-MM-DD');
     return (
       (blockedDate.checkin === u.start_date && blockedDate.checkout === utsavBlockCheckout) ||
-      blockedDate.comments === u.name
+      (blockedDate.comments === u.name &&
+        blockedDate.checkin < utsavBlockCheckout &&
+        blockedDate.checkout > u.start_date)
     );
   });
 }

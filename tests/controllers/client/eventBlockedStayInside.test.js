@@ -82,6 +82,10 @@ const CLOSURE_START = fmt(moment().add(160, 'day'));
 const CLOSURE_END = fmt(moment().add(165, 'day'));
 const CLOSURE_DAY = fmt(moment().add(162, 'day'));
 const CLOSURE_PRE_EDGE = fmt(moment(CLOSURE_START).subtract(2, 'day'));
+// A manual closure with allow_waitlist = false (hard block)
+const HARD_CLOSURE_START = fmt(moment().add(170, 'day'));
+const HARD_CLOSURE_END = fmt(moment().add(175, 'day'));
+const HARD_CLOSURE_DAY = fmt(moment().add(172, 'day'));
 
 let utsav;
 let pkg;
@@ -126,6 +130,14 @@ describe('room stay inside an event span is blocked for everyone', () => {
       status: STATUS_ACTIVE,
       updatedBy: 'test'
     });
+    await BlockDates.create({
+      checkin: HARD_CLOSURE_START,
+      checkout: HARD_CLOSURE_END,
+      comments: 'EVT_IN hard closure',
+      status: STATUS_ACTIVE,
+      allow_waitlist: false,
+      updatedBy: 'test'
+    });
     // Only ATTENDEE holds a confirmed booking for the utsav.
     await UtsavBooking.create({
       bookingid: 'EVT_IN_UB_1',
@@ -150,7 +162,13 @@ describe('room stay inside an event span is blocked for everyone', () => {
     await FlatDb.destroy({ where: { flatno: 99470 } });
     await UtsavBooking.destroy({ where: { bookingid: 'EVT_IN_UB_1' } });
     await BlockDates.destroy({
-      where: { comments: ['EVT_IN utsav auto-block', 'EVT_IN plain closure'] }
+      where: {
+        comments: [
+          'EVT_IN utsav auto-block',
+          'EVT_IN plain closure',
+          'EVT_IN hard closure'
+        ]
+      }
     });
     await UtsavPackagesDb.destroy({ where: { id: pkg.id } });
     await UtsavDb.destroy({ where: { id: utsav.id } });
@@ -308,6 +326,31 @@ describe('room stay inside an event span is blocked for everyone', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.flatDetails[0].status).toBe(STATUS_AVAILABLE);
     expect(res.body.data.flatDetails[0].holdReason).toBeFalsy();
+  });
+
+  // Hard manual closure (allow_waitlist = false) strictly rejects room, day visit, and flat stays with 400
+  it('room stay during a hard manual block (allow_waitlist = false) is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, HARD_CLOSURE_START, HARD_CLOSURE_END)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('day visit onto a hard manual block (allow_waitlist = false) is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: roomBookingJson(OUTSIDER, HARD_CLOSURE_DAY, HARD_CLOSURE_DAY)
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('flat stay during a hard manual block (allow_waitlist = false) is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, HARD_CLOSURE_START, HARD_CLOSURE_END)
+    });
+    expect(res.status).toBe(400);
   });
 
   // Regression guard: a stay that WRAPS the festival must still split into a

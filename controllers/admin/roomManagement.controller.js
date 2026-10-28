@@ -1294,8 +1294,8 @@ export const rcBlockList = async (req, res) => {
 };
 
 export const blockRC = async (req, res) => {
-  const { checkin_date, checkout_date, comments } = req.body;
-  req.log.info('block_rc_start', { checkin_date, checkout_date, comments });
+  const { checkin_date, checkout_date, comments, allow_waitlist = true } = req.body;
+  req.log.info('block_rc_start', { checkin_date, checkout_date, comments, allow_waitlist });
 
   const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
@@ -1312,6 +1312,7 @@ export const blockRC = async (req, res) => {
     checkin: checkin_date,
     checkout: checkout_date,
     comments,
+    allow_waitlist: allow_waitlist !== false,
     updatedBy: req.user.username
   });
 
@@ -1340,6 +1341,29 @@ export const unblockRC = async (req, res) => {
 
   req.log.info('unblock_rc_success', { id: req.params.id });
   return res.status(200).send({ message: 'Unblocked RC successfully' });
+};
+
+export const toggleRCBlockMode = async (req, res) => {
+  req.log.info('toggle_rc_block_mode_start', { id: req.params.id });
+
+  const blocked = await BlockDates.findByPk(req.params.id);
+
+  if (!blocked) {
+    req.log.warn('toggle_rc_block_mode_not_found', { id: req.params.id });
+    throw new ApiError(404, 'Block record not found');
+  }
+
+  const newMode = blocked.allow_waitlist === false;
+  await blocked.update({
+    allow_waitlist: newMode,
+    updatedBy: req.user.username
+  });
+
+  req.log.info('toggle_rc_block_mode_success', { id: req.params.id, allow_waitlist: newMode });
+  return res.status(200).send({
+    message: `Switched block mode to ${newMode ? 'Waitlist Allowed' : 'Hard Block'}`,
+    data: blocked
+  });
 };
 
 export const occupancyReport = async (req, res) => {
