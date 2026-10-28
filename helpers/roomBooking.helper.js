@@ -19,6 +19,7 @@ import {
   ROLLING_WINDOW_NIGHT_LIMIT,
   RESEARCH_CENTRE
 } from '../config/constants.js';
+import RoomBlock from '../models/room_block.model.js';
 import {
   RoomBooking,
   RoomDb,
@@ -249,7 +250,18 @@ export async function findRoom(
     ]
   };
 
-  if (excludeRooms.length > 0) {
+  const queryCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  const blockedRoomnos = await fetchBlockedRoomnos(checkin, queryCheckout);
+  const combinedExclude = [...new Set([...excludeRooms, ...blockedRoomnos])];
+
+  if (combinedExclude.length > 0) {
+    whereConditions[Sequelize.Op.and].push({
+      roomno: { [Sequelize.Op.notIn]: combinedExclude }
+    });
+  }
+  if (false && excludeRooms.length > 0) {
     whereConditions[Sequelize.Op.and].push({
       roomno: { [Sequelize.Op.notIn]: excludeRooms }
     });
@@ -984,4 +996,54 @@ export async function checkFlatAvailabilityForMumukshus(
   }
 
   return flatDetails;
+}
+
+
+// Rooms with an active block on any night of [checkin, queryCheckout). A block's
+// end_date is its LAST blocked day (inclusive); NULL = permanent.
+export async function fetchBlockedRoomnos(checkin, queryCheckout) {
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: queryCheckout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gte]: checkin } }
+      ]
+    }
+  });
+  return blocks.map((b) => b.roomno);
+}
+
+// All active blocks that touch [checkin, windowCheckout), with their dates.
+export async function fetchActiveRoomBlocks(checkin, checkout) {
+  const windowCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  return RoomBlock.findAll({
+    attributes: ['roomno', 'start_date', 'end_date'],
+    where: {
+      status: 'active',
+      start_date: { [Sequelize.Op.lt]: windowCheckout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gte]: checkin } }
+      ]
+    }
+  });
+}
+
+// Rooms blocked on any night of [start, end) out of a fetchActiveRoomBlocks() list.
+export function blockedRoomsInRange(activeRoomBlocks, start, end) {
+  const rangeEnd = start === end
+    ? moment(start, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : end;
+  return activeRoomBlocks
+    .filter(
+      (b) =>
+        b.start_date < rangeEnd &&
+        (b.end_date === null || b.end_date >= start)
+    )
+    .map((b) => b.roomno);
 }
