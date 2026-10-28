@@ -4,7 +4,8 @@ import {
   RoomBooking,
   FlatBooking,
   Transactions,
-  FlatDb
+  FlatDb,
+  UtsavDb
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -12,6 +13,7 @@ import {
   ROOM_STATUS_CHECKEDOUT,
   ROOM_BLOCKED,
   ROOM_STATUS_AVAILABLE,
+  STATUS_ACTIVE,
   STATUS_INACTIVE,
   STATUS_CANCELLED,
   ERR_BOOKING_NOT_FOUND,
@@ -37,13 +39,15 @@ import {
   STATUS_CONFIRMED,
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_ROOM_FAILED_TO_BOOK,
-  ERR_INVALID_DATE
+  ERR_INVALID_DATE,
+  RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
   calculateNights,
   validateDate,
   getBlockedDates,
+  isBlockFromUtsav,
   sendUnifiedEmail
 } from '../helper.js';
 import {
@@ -1280,7 +1284,7 @@ export const rcBlockList = async (req, res) => {
 
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const blocked = await BlockDates.findAll({
-    attributes: ['id', 'checkin', 'checkout', 'comments', 'status'],
+    attributes: ['id', 'checkin', 'checkout', 'comments', 'status', 'allow_waitlist'],
     where: {
       checkout: { [Sequelize.Op.gte]: today }
     },
@@ -1297,6 +1301,10 @@ export const blockRC = async (req, res) => {
   const { checkin_date, checkout_date, comments, allow_waitlist = true } = req.body;
   req.log.info('block_rc_start', { checkin_date, checkout_date, comments, allow_waitlist });
 
+  if (typeof allow_waitlist !== 'boolean') {
+    throw new ApiError(400, 'allow_waitlist must be a boolean');
+  }
+
   const blockedDates = await getBlockedDates(checkin_date, checkout_date);
 
   if (blockedDates.length > 0) {
@@ -1312,7 +1320,7 @@ export const blockRC = async (req, res) => {
     checkin: checkin_date,
     checkout: checkout_date,
     comments,
-    allow_waitlist: allow_waitlist !== false,
+    allow_waitlist,
     updatedBy: req.user.username
   });
 
@@ -1344,22 +1352,39 @@ export const unblockRC = async (req, res) => {
 };
 
 export const toggleRCBlockMode = async (req, res) => {
-  req.log.info('toggle_rc_block_mode_start', { id: req.params.id });
+  const { id } = req.params;
+  const { allow_waitlist } = req.body;
+  req.log.info('toggle_rc_block_mode_start', { id, allow_waitlist });
 
-  const blocked = await BlockDates.findByPk(req.params.id);
+  if (allow_waitlist !== undefined && typeof allow_waitlist !== 'boolean') {
+    throw new ApiError(400, 'allow_waitlist must be a boolean');
+  }
+
+  const blocked = await BlockDates.findByPk(id);
 
   if (!blocked) {
-    req.log.warn('toggle_rc_block_mode_not_found', { id: req.params.id });
+    req.log.warn('toggle_rc_block_mode_not_found', { id });
     throw new ApiError(404, 'Block record not found');
   }
 
-  const newMode = blocked.allow_waitlist === false;
+  if (blocked.status !== STATUS_ACTIVE) {
+    throw new ApiError(400, 'Cannot change mode of an inactive block');
+  }
+
+  const activeUtsavsAtRC = await UtsavDb.findAll({
+    where: { location: RESEARCH_CENTRE }
+  });
+  if (isBlockFromUtsav(blocked, activeUtsavsAtRC)) {
+    throw new ApiError(400, 'Cannot change mode for Utsav auto-blocks');
+  }
+
+  const newMode = allow_waitlist !== undefined ? allow_waitlist : blocked.allow_waitlist === false;
   await blocked.update({
     allow_waitlist: newMode,
     updatedBy: req.user.username
   });
 
-  req.log.info('toggle_rc_block_mode_success', { id: req.params.id, allow_waitlist: newMode });
+  req.log.info('toggle_rc_block_mode_success', { id, allow_waitlist: newMode });
   return res.status(200).send({
     message: `Switched block mode to ${newMode ? 'Waitlist Allowed' : 'Hard Block'}`,
     data: blocked

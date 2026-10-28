@@ -353,6 +353,15 @@ describe('room stay inside an event span is blocked for everyone', () => {
     expect(res.status).toBe(400);
   });
 
+  // Multi-block overlap: a stay overlapping both a waitlist block and a hard block must be hard-rejected
+  it('flat stay spanning across both a waitlist block and a hard block is rejected with 400', async () => {
+    const res = await postRoomValidate({
+      cardno: OUTSIDER,
+      primary_booking: flatBookingJson(OUTSIDER, CLOSURE_DAY, HARD_CLOSURE_DAY)
+    });
+    expect(res.status).toBe(400);
+  });
+
   // Regression guard: a stay that WRAPS the festival must still split into a
   // pre- and a post-festival segment (this change must not swallow the split).
   //

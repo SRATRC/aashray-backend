@@ -926,7 +926,7 @@ export function validateBlockedDates(blockedDates, dateRanges) {
 }
 
 // Matches an utsav auto-block by exact dates (checkin = start_date, checkout = end_date + 1)
-// or comments matching the utsav name.
+// or comments matching the utsav name that overlap the utsav dates.
 // NOTE: If an utsav's dates/name are edited via updateUtsav without updating the auto-block,
 // the stale block won't match here and will be treated as manual. Future enhancement: link
 // block_dates directly via a nullable utsavid column to avoid date/name heuristics.
