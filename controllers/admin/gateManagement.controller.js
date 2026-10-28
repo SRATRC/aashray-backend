@@ -1,8 +1,6 @@
 import {
   GateRecord,
-  CardDb,
-  FlatBooking,
-  RoomBooking
+  CardDb
 } from '../../models/associations.js';
 import {
   STATUS_MUMUKSHU,
@@ -10,12 +8,8 @@ import {
   STATUS_ONPREM,
   STATUS_RESIDENT,
   STATUS_SEVA_KUTIR,
-  STATUS_OFFPREM,
-  ROOM_STATUS_CHECKEDIN,
-  ROOM_STATUS_CHECKEDOUT,
-  ROOM_STATUS_PENDING_CHECKIN
+  STATUS_OFFPREM
 } from '../../config/constants.js';
-import logger from '../../config/logger.js';
 import database from '../../config/database.js';
 import ApiError from '../../utils/ApiError.js';
 import Sequelize from 'sequelize';
@@ -313,21 +307,6 @@ export const gateExit = async (req, res) => {
     },
     { transaction: t }
   );
-
-  const today = moment().format('YYYY-MM-DD');
-
-  const booking = await FlatBooking.findOne({
-    where: {
-      cardno: req.body.cardno,
-      status: ROOM_STATUS_CHECKEDIN,
-      checkout: { [Sequelize.Op.lte]: today }
-    }
-  });
-
-  if (booking) {
-    booking.status = ROOM_STATUS_CHECKEDOUT;
-    await booking.save({ transaction: t });
-  }
 
   await t.commit();
 

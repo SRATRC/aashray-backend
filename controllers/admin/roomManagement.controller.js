@@ -30,6 +30,7 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   STATUS_CASH_PENDING,
   STATUS_PAYMENT_PENDING,
+  STATUS_PENDING,
   NAC_ROOM_PRICE,
   AC_ROOM_PRICE,
   STATUS_CREDITED,
@@ -963,30 +964,80 @@ export const fetchAllFlatBookings = async (req, res) => {
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
-export const fetchRoomBookingsByCard = async (req, res) => {
-  const cardno = req.params.cardno;
-  req.log.info('fetch_room_bookings_by_card_start', { cardno });
-  if (req.query.kiosk === 'true') {
-    const [roomBookings, flatBookings, cardDetails] = await Promise.all([
-      RoomBooking.findAll({ where: { cardno }, order: [['checkin', 'ASC']] }),
-      FlatBooking.findAll({ where: { cardno }, order: [['checkin', 'ASC']] }),
-      CardDb.findOne({
-        where: { cardno },
-        attributes: ['cardno', 'issuedto']
-      })
-    ]);
-
-    return res.status(200).send({
-      message: 'Fetched bookings',
-      data: {
-        room_booking: roomBookings,
-        flat_booking: flatBookings,
-        card_details: cardDetails
-      }
-    });
+export const fetchKioskBookingsByCard = async (req, res) => {
+  const cardno = req.params.cardno?.trim();
+  if (!cardno) {
+    throw new ApiError(400, 'Card number is required');
   }
 
+  req.log.info('fetch_kiosk_bookings_by_card_start', { cardno });
 
+  const cardDetails = await CardDb.findOne({
+    where: { cardno },
+    attributes: ['cardno', 'issuedto']
+  });
+
+  if (!cardDetails) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const activeStayWhere = {
+    cardno,
+    [Sequelize.Op.or]: [
+      { status: ROOM_STATUS_CHECKEDIN },
+      {
+        status: [ROOM_STATUS_PENDING_CHECKIN, STATUS_PENDING],
+        checkout: { [Sequelize.Op.gte]: today }
+      }
+    ]
+  };
+
+  const bookingAttributes = [
+    'bookingid',
+    'cardno',
+    'checkin',
+    'checkout',
+    'nights',
+    'status'
+  ];
+
+  const [roomBookings, flatBookings] = await Promise.all([
+    RoomBooking.findAll({
+      where: activeStayWhere,
+      attributes: [...bookingAttributes, 'roomno'],
+      order: [['checkin', 'ASC']]
+    }),
+    FlatBooking.findAll({
+      where: activeStayWhere,
+      attributes: [...bookingAttributes, 'flatno'],
+      order: [['checkin', 'ASC']]
+    })
+  ]);
+
+  req.log.info('fetch_kiosk_bookings_by_card_success', {
+    cardno,
+    roomBookingsCount: roomBookings.length,
+    flatBookingsCount: flatBookings.length
+  });
+
+  return res.status(200).send({
+    message: 'Fetched bookings',
+    data: {
+      room_booking: roomBookings,
+      flat_booking: flatBookings,
+      card_details: cardDetails
+    }
+  });
+};
+
+export const fetchRoomBookingsByCard = async (req, res) => {
+  if (req.query.kiosk === 'true') {
+    return fetchKioskBookingsByCard(req, res);
+  }
+
+  const cardno = req.params.cardno;
+  req.log.info('fetch_room_bookings_by_card_start', { cardno });
 
   const bookings = await RoomBooking.findAll({
     where: { cardno },

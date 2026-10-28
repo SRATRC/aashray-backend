@@ -160,11 +160,19 @@ export const generateTempCodeForAdmin = async (req, res) => {
   if (!cardno || typeof cardno !== 'string') {
     throw new APIError(400, 'cardno is required');
   }
+  const cleanCardNo = cardno.trim();
 
   const t = await database.transaction();
   req.transaction = t;
-  const password = await generateTempCodeForCard(cardno.trim(), t);
+  const password = await generateTempCodeForCard(cleanCardNo, t);
   await t.commit();
+
+  if (req.log) {
+    req.log.info('kiosk_wifi_temp_code_generated', {
+      cardno: cleanCardNo,
+      by: req.user?.username
+    });
+  }
 
   return res.status(200).send({
     data: password,
@@ -174,9 +182,21 @@ export const generateTempCodeForAdmin = async (req, res) => {
 
 export const fetchTempCodesForAdmin = async (req, res) => {
   const { cardno } = req.params;
-  if (!cardno) throw new APIError(400, 'cardno is required');
+  if (!cardno || typeof cardno !== 'string') {
+    throw new APIError(400, 'cardno is required');
+  }
+  const cleanCardNo = cardno.trim();
 
-  const rows = await fetchTempCodesForCard(cardno);
+  const rows = await fetchTempCodesForCard(cleanCardNo);
+
+  if (req.log) {
+    req.log.info('fetch_temp_codes_for_admin_success', {
+      cardno: cleanCardNo,
+      by: req.user?.username,
+      count: rows.length
+    });
+  }
+
   return res.status(200).send({
     message: rows.length ? 'Wifi Passwords' : 'No active WiFi passwords found',
     data: rows
@@ -398,7 +418,7 @@ const fetchBookings = async (cardno, transaction = null) => {
     status: ROOM_STATUS_CHECKEDIN,
     [Sequelize.Op.or]: [
       { nights: { [Sequelize.Op.gt]: 0 }, checkout: { [Sequelize.Op.gte]: today } },
-      { nights: 0, checkin: { [Sequelize.Op.gte]: today } }
+      { nights: 0, checkin: today }
     ]
   };
 
