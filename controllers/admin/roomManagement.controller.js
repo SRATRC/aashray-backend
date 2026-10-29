@@ -41,6 +41,7 @@ import {
   STATUS_CONFIRMED,
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_ROOM_FAILED_TO_BOOK,
+  ERR_ROOM_NO_BED_AVAILABLE,
   ERR_INVALID_DATE,
   RESEARCH_CENTRE,
   MSG_ROLLING_WINDOW_ADMIN_WARNING,
@@ -2578,9 +2579,13 @@ export const bulkRoomBooking = async (req, res) => {
     cardsByNo.set(cardno, card);
   }
 
-  const capByCard = nights > 0
-    ? await checkRollingWindowLimitForCards([...cardsByNo.values()], checkin_date, checkout_date, t, true)
-    : new Map();
+  const capByCard = await checkRollingWindowLimitForCards(
+    [...cardsByNo.values()],
+    checkin_date,
+    checkout_date,
+    t,
+    true
+  );
 
   const overlapByCard = await getOverlappingRoomBookings(checkin_date, checkout_date, [...cardsByNo.keys()], t);
   const activeRoomBlocks = await fetchActiveRoomBlocks(checkin_date, checkout_date);
@@ -2588,30 +2593,25 @@ export const bulkRoomBooking = async (req, res) => {
   const notify = [];
   for (const b of bookings) {
     const cardno = String(b.cardno || '').trim();
-    const { room_type } = b;
     const card = cardsByNo.get(cardno);
+
+    const roomType = String(b.room_type || 'nac').trim().toLowerCase();
+    if (!['nac', 'ac'].includes(roomType)) {
+      throw new ApiError(400, `Invalid room_type '${b.room_type}' for card ${cardno}`);
+    }
 
     if (overlapByCard[String(card.cardno)]?.length > 0) {
       throw new ApiError(400, `Guest ${card.issuedto} (${card.cardno}) already has an active booking for these dates.`);
     }
 
     let bookingResult;
-    if (nights === 0 && room_type === 'NA') {
-      bookingResult = await bookDayVisit(
-        card.cardno,
-        checkin_date,
-        checkout_date,
-        null,
-        card.cardno,
-        t
-      );
-    } else {
+    try {
       bookingResult = await createRoomBooking(
         card.cardno,
         checkin_date,
         checkout_date,
         nights,
-        room_type || 'nac',
+        roomType,
         card.gender,
         floor_pref || null,
         card,
@@ -2624,10 +2624,15 @@ export const bulkRoomBooking = async (req, res) => {
         boundaryUtsav,
         activeRoomBlocks
       );
+    } catch (err) {
+      if (err?.message === ERR_ROOM_NO_BED_AVAILABLE) {
+        throw new ApiError(400, `No room available for guest ${card.issuedto} (${card.cardno})`);
+      }
+      throw err;
     }
 
     const roomno = bookingResult.bookedRoomNo || bookingResult.roomno || 'NA';
-    const isWaiting = roomno === 'NA' && room_type !== 'NA';
+    const isWaiting = roomno === 'NA';
     const cap = capByCard.get(card.cardno);
     const row = {
       cardno: card.cardno,
