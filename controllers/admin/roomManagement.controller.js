@@ -56,6 +56,7 @@ import {
   checkRoomAlreadyBooked,
   createFlatBooking,
   createRoomBooking,
+  fetchBlockedRoomnos,
   roomCharge
 } from '../../helpers/roomBooking.helper.js';
 import {
@@ -1279,7 +1280,7 @@ export const unblockRoom = async (req, res) => {
     );
     await RoomBlock.update(
       { status: 'cancelled', updatedBy: req.user.username },
-      { where: { roomno: room.roomno, status: 'active' }, transaction: t }
+      { where: { roomno: room.roomno, status: 'active', end_date: null }, transaction: t }
     );
   }
 
@@ -2626,7 +2627,7 @@ export const createRoomBlock = async (req, res) => {
     where: {
       roomno: { [Op.in]: roomsToBlock.map(r => r.roomno) },
       status: { [Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] },
-      checkin: { [Op.lt]: windowEnd },
+      checkin: { [Op.lte]: windowEnd },
       checkout: { [Op.gt]: start_date }
     },
     transaction: t
