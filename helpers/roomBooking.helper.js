@@ -17,8 +17,10 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  ROOM_BLOCK_ACTIVE
 } from '../config/constants.js';
+import RoomBlock from '../models/room_block.model.js';
 import {
   RoomBooking,
   RoomDb,
@@ -249,12 +251,18 @@ export async function findRoom(
     ]
   };
 
-  if (excludeRooms.length > 0) {
+  const queryCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  const blockedRoomnos = await fetchBlockedRoomnos(checkin, queryCheckout);
+  const combinedExclude = [...new Set([...excludeRooms, ...blockedRoomnos])];
+
+  if (combinedExclude.length > 0) {
     whereConditions[Sequelize.Op.and].push({
-      roomno: { [Sequelize.Op.notIn]: excludeRooms }
+      roomno: { [Sequelize.Op.notIn]: combinedExclude }
     });
   }
- 
+
   return RoomDb.findOne({
     attributes: ['roomno'],
     where: whereConditions,
@@ -304,7 +312,8 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
       }
     }
   });
-  const bookedRooms = bookings.map((x) => x.roomno);
+  const blockedRooms = await fetchBlockedRoomnos(checkin, checkout);
+  const bookedRooms = [...new Set([...bookings.map((x) => x.roomno), ...blockedRooms])];
 
   return RoomDb.findAll({
     where: {
@@ -985,3 +994,23 @@ export async function checkFlatAvailabilityForMumukshus(
 
   return flatDetails;
 }
+
+
+// Rooms with an active block on any night of [checkin, queryCheckout). A block's
+// end_date is its LAST blocked day (inclusive); NULL = permanent.
+export async function fetchBlockedRoomnos(checkin, queryCheckout) {
+  const blocks = await RoomBlock.findAll({
+    attributes: ['roomno'],
+    where: {
+      status: ROOM_BLOCK_ACTIVE,
+      start_date: { [Sequelize.Op.lt]: queryCheckout },
+      [Sequelize.Op.or]: [
+        { end_date: null },
+        { end_date: { [Sequelize.Op.gte]: checkin } }
+      ]
+    }
+  });
+  return blocks.map((b) => b.roomno);
+}
+
+

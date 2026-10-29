@@ -4,6 +4,7 @@ import FoodDb from './food_db.model.js';
 import FoodPhysicalPlate from './food_physical_plate.model.js';
 import FlatDb from './flatdb.model.js';
 import FlatBooking from './flat_booking.model.js';
+import RoomBlock from './room_block.model.js';
 import RoomBooking from './room_booking.model.js';
 import RoomDb from './roomdb.model.js';
 import ShibirDb from './shibir_db.model.js';
@@ -253,6 +254,14 @@ RoomBooking.belongsTo(RoomDb, {
   foreignKey: 'roomno',
   targetKey: 'roomno'
 });
+RoomDb.hasMany(RoomBlock, {
+  foreignKey: 'roomno',
+  sourceKey: 'roomno',
+  as: 'blocks',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+RoomBlock.belongsTo(RoomDb, { foreignKey: 'roomno', targetKey: 'roomno' });
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'
@@ -761,6 +770,7 @@ export {
   FoodPhysicalPlate,
   RoomBooking,
   RoomDb,
+  RoomBlock,
   FlatDb,
   FlatBooking,
   TravelDb,

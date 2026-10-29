@@ -11,6 +11,9 @@ import {
   updateRoomBooking,
   roomList,
   blockRoom,
+  createRoomBlock,
+  cancelRoomBlock,
+  bulkCancelRoomBlocks,
   unblockRoom,
   rcBlockList,
   blockRC,
@@ -67,6 +70,12 @@ router.put('/update_flat_booking_status', CatchAsync(updateFlatBookingStatus));
 // room management routes
 router.put('/block_room/:roomno', CatchAsync(blockRoom));
 router.put('/unblock_room/:roomno', CatchAsync(unblockRoom));
+
+router.post('/room_block', CatchAsync(createRoomBlock));
+router.post('/room_block/bulk', CatchAsync(createRoomBlock));
+router.put('/room_block/:id/cancel', CatchAsync(cancelRoomBlock));
+router.post('/room_block/bulk_cancel', CatchAsync(bulkCancelRoomBlocks));
+
 router.put('/update_room/:roomno', CatchAsync(updateRoom));
 
 // RC management routes

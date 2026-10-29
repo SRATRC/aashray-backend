@@ -81,6 +81,8 @@ export const ROOM_STATUS_CHECKEDIN = 'checkedin';
 export const ROOM_STATUS_CHECKEDOUT = 'checkedout';
 export const ROOM_STATUS_AVAILABLE = 'available';
 export const ROOM_BLOCKED = 'blocked';
+export const ROOM_BLOCK_ACTIVE = 'active';
+export const ROOM_BLOCK_CANCELLED = 'cancelled';
 
 // TRAVEL
 export const TRAVEL_DETAIL = 'Travel Booking';
