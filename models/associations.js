@@ -4,6 +4,8 @@ import FoodDb from './food_db.model.js';
 import FoodPhysicalPlate from './food_physical_plate.model.js';
 import FlatDb from './flatdb.model.js';
 import FlatBooking from './flat_booking.model.js';
+import RoomAllocationPriority from './room_allocation_priority.model.js';
+import RoomBlock from './room_block.model.js';
 import RoomBooking from './room_booking.model.js';
 import RoomDb from './roomdb.model.js';
 import ShibirDb from './shibir_db.model.js';
@@ -794,6 +796,8 @@ export {
   ShibirAttendanceRecord,
   UtsavFeedback,
   UtsavFeedbackAnswer,
+  RoomAllocationPriority,
+  RoomBlock,
   CustomForm,
   CustomFormResponse,
   CustomFormDraft,

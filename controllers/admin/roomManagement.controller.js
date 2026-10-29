@@ -1,11 +1,13 @@
 import {
   CardDb,
   RoomDb,
+  RoomAllocationPriority,
   RoomBooking,
   FlatBooking,
   Transactions,
   FlatDb,
-  UtsavDb
+  UtsavDb,
+  RoomBlock
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -39,8 +41,11 @@ import {
   STATUS_CONFIRMED,
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_ROOM_FAILED_TO_BOOK,
+  ERR_ROOM_NO_BED_AVAILABLE,
   ERR_INVALID_DATE,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  MSG_ROLLING_WINDOW_ADMIN_WARNING,
+  BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -55,9 +60,14 @@ import {
   checkRoomAlreadyBooked,
   createFlatBooking,
   createRoomBooking,
-  roomCharge
+  roomCharge,
+  fetchActiveRoomBlocks,
+  getOverlappingRoomBookings,
+  getPriorityOrderForMonth
 } from '../../helpers/roomBooking.helper.js';
+import { findUtsavOnBoundaryDates } from '../../helpers/utsavBooking.helper.js';
 import {
+  checkRollingWindowLimitForCards,
   getRollingWindowWarning,
   getPromotionCapWarning,
   withWarning
@@ -1197,10 +1207,23 @@ export const blockRoom = async (req, res) => {
     throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   for (const room of rooms) {
     await room.update(
       {
         roomstatus: ROOM_BLOCKED,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+    await RoomBlock.create(
+      {
+        roomno: room.roomno,
+        start_date: today,
+        end_date: null,
+        reason: 'Admin blocked',
+        status: 'active',
+        createdBy: req.user.username,
         updatedBy: req.user.username
       },
       { transaction: t }
@@ -1239,6 +1262,10 @@ export const unblockRoom = async (req, res) => {
         updatedBy: req.user.username
       },
       { transaction: t }
+    );
+    await RoomBlock.update(
+      { status: 'cancelled', updatedBy: req.user.username },
+      { where: { roomno: room.roomno, status: 'active' }, transaction: t }
     );
   }
 
@@ -2498,3 +2525,245 @@ export const revokeLateCheckoutFee = async (req, res) => {
   }
 };
 
+
+
+export const bulkRoomBooking = async (req, res) => {
+  const { checkin_date, checkout_date, floor_pref, bookings } = req.body;
+  req.log.info('bulk_room_booking_start', { checkin_date, checkout_date, floor_pref, count: bookings ? bookings.length : 0 });
+
+  if (!checkin_date || !checkout_date) {
+    throw new ApiError(400, 'Check-in and Check-out dates are required');
+  }
+  if (checkin_date >= checkout_date) {
+    throw new ApiError(400, ERR_INVALID_DATE);
+  }
+  if (!bookings || !Array.isArray(bookings) || bookings.length === 0) {
+    throw new ApiError(400, 'Bookings array is required and cannot be empty');
+  }
+
+  const submittedCardnos = bookings.map((booking) => String(booking?.cardno || '').trim());
+  const duplicateCardnos = submittedCardnos.filter(
+    (cardno, index) => cardno && submittedCardnos.indexOf(cardno) !== index
+  );
+  if (duplicateCardnos.length > 0) {
+    throw new ApiError(400, `Duplicate card number in bulk booking: ${duplicateCardnos[0]}`);
+  }
+
+  const nights = await calculateNights(checkin_date, checkout_date);
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const excludeRooms = [];
+  const results = [];
+
+  const priorityList = await getPriorityOrderForMonth(checkin_date);
+
+  const boundaryUtsav =
+    nights === 1
+      ? (await findUtsavOnBoundaryDates(checkin_date, checkout_date)) || null
+      : null;
+
+  if (submittedCardnos.some((cardno) => !cardno)) {
+    throw new ApiError(400, 'Card number is required for each booking row');
+  }
+  const cardsByNo = new Map();
+  for (const cardno of [...submittedCardnos].sort()) {
+    const card = await CardDb.findOne({
+      where: { cardno },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    if (!card) {
+      throw new ApiError(400, `Card not found for card number: ${cardno}`);
+    }
+    cardsByNo.set(cardno, card);
+  }
+
+  const capByCard = await checkRollingWindowLimitForCards(
+    [...cardsByNo.values()],
+    checkin_date,
+    checkout_date,
+    t,
+    true
+  );
+
+  const overlapByCard = await getOverlappingRoomBookings(checkin_date, checkout_date, [...cardsByNo.keys()], t);
+  const activeRoomBlocks = await fetchActiveRoomBlocks(checkin_date, checkout_date);
+
+  const notify = [];
+  for (const b of bookings) {
+    const cardno = String(b.cardno || '').trim();
+    const card = cardsByNo.get(cardno);
+
+    const roomType = String(b.room_type || 'nac').trim().toLowerCase();
+    if (!['nac', 'ac'].includes(roomType)) {
+      throw new ApiError(400, `Invalid room_type '${b.room_type}' for card ${cardno}`);
+    }
+
+    if (overlapByCard[String(card.cardno)]?.length > 0) {
+      throw new ApiError(400, `Guest ${card.issuedto} (${card.cardno}) already has an active booking for these dates.`);
+    }
+
+    let bookingResult;
+    try {
+      bookingResult = await createRoomBooking(
+        card.cardno,
+        checkin_date,
+        checkout_date,
+        nights,
+        roomType,
+        card.gender,
+        floor_pref || null,
+        card,
+        t,
+        true, // pay at centre (cash pending), like a single admin booking
+        excludeRooms,
+        null,
+        priorityList,
+        true, // skipCap: confirmed + billed, warning below
+        boundaryUtsav,
+        activeRoomBlocks
+      );
+    } catch (err) {
+      if (err?.message === ERR_ROOM_NO_BED_AVAILABLE) {
+        throw new ApiError(400, `No room available for guest ${card.issuedto} (${card.cardno})`);
+      }
+      throw err;
+    }
+
+    const roomno = bookingResult.bookedRoomNo || bookingResult.roomno || 'NA';
+    const isWaiting = roomno === 'NA';
+    const cap = capByCard.get(card.cardno);
+    const row = {
+      cardno: card.cardno,
+      name: card.issuedto,
+      roomno,
+      status: isWaiting ? STATUS_WAITING : 'booked',
+      payment: isWaiting ? null : 'pay at centre'
+    };
+    if (cap && cap.exceeds) {
+      row.warning = { message: MSG_ROLLING_WINDOW_ADMIN_WARNING, windowNights: cap.windowNights };
+    }
+    results.push(row);
+    notify.push({
+      card,
+      isWaiting,
+      bookingId: bookingResult.bookingid || bookingResult.bookingId
+    });
+  }
+
+  await t.commit();
+
+  for (const { card, isWaiting, bookingId } of notify) {
+    if (bookingId != null) {
+      sendUnifiedEmail(
+        card.cardno,
+        { [TYPE_ROOM]: [bookingId] },
+        card,
+        isWaiting ? BOOKING_STATUS_PENDING : STATUS_CONFIRMED,
+        'unifiedBookingEmail',
+        false
+      );
+    }
+    sendDualUserNotifications({
+      primary: {
+        token: card.token,
+        title: isWaiting ? 'Raj Sharan Booking Waitlisted' : 'Raj Sharan Booking by Admin',
+        body: isWaiting
+          ? 'Your stay from ' + moment(checkin_date).format('Do MMM, YYYY') + ' to ' +
+            moment(checkout_date).format('Do MMM, YYYY') +
+            ' is on the waiting list. You will be notified once it is confirmed.'
+          : 'Your stay has been booked from ' + moment(checkin_date).format('Do MMM, YYYY') +
+            ' to ' + moment(checkout_date).format('Do MMM, YYYY') + ' by admin.'
+      },
+      screen: '/bookings'
+    });
+  }
+  req.log.info('bulk_room_booking_success', { count: results.length });
+  return res.status(201).send({
+    message: `Successfully booked rooms for ${results.length} guests`,
+    data: results,
+    warning: results.some((r) => r.warning)
+      ? { message: MSG_ROLLING_WINDOW_ADMIN_WARNING, count: results.filter((r) => r.warning).length }
+      : undefined
+  });
+};
+
+export const getAllocationPriorities = async (req, res) => {
+  const priorities = await RoomAllocationPriority.findAll({
+    order: [
+      Sequelize.literal(`CASE WHEN month IS NULL THEN 0 ELSE month END ASC`)
+    ]
+  });
+  return res.status(200).send({ data: priorities });
+};
+
+const parseAllocationMonth = (month) => {
+  if (month === null || month === undefined || month === '' || month === 'default' || month === 'null') {
+    return null;
+  }
+  const value = typeof month === 'string' && /^\d+$/.test(month.trim()) ? Number(month) : month;
+  if (!Number.isInteger(value) || value < 1 || value > 12) {
+    throw new ApiError(400, 'month must be a whole number from 1 to 12, or empty for the global default');
+  }
+  return value;
+};
+
+export const updateAllocationPriority = async (req, res) => {
+  const { month, priority_order } = req.body;
+  const monthVal = parseAllocationMonth(month);
+
+  if (!priority_order || typeof priority_order !== 'string') {
+    throw new ApiError(400, 'priority_order string is required');
+  }
+
+  const ALLOWED = ['OAG_1st', 'OAG_2nd', 'NAG_1st', 'NAG_2nd'];
+  const tokens = priority_order.split(',').map((s) => s.trim()).filter(Boolean);
+  if (
+    tokens.length !== 4 ||
+    new Set(tokens).size !== tokens.length ||
+    tokens.some((x) => !ALLOWED.includes(x))
+  ) {
+    throw new ApiError(
+      400,
+      `priority_order must be a comma-separated list of distinct values from: ${ALLOWED.join(', ')}`
+    );
+  }
+  const cleanPriorityOrder = tokens.join(',');
+
+  const updatedBy = req.user?.username || 'ADMIN';
+
+  let record = await RoomAllocationPriority.findOne({ where: { month: monthVal } });
+  if (!record) {
+    try {
+      record = await RoomAllocationPriority.create({ month: monthVal, priority_order: cleanPriorityOrder, updatedBy });
+    } catch (err) {
+      if (err?.name !== 'SequelizeUniqueConstraintError') throw err;
+      record = await RoomAllocationPriority.findOne({ where: { month: monthVal } });
+      await record.update({ priority_order: cleanPriorityOrder, updatedBy });
+    }
+  } else {
+    await record.update({ priority_order: cleanPriorityOrder, updatedBy });
+  }
+
+  return res.status(200).send({
+    message: `Allocation priority for ${monthVal === null ? 'Global Default' : 'Month ' + monthVal} updated successfully`,
+    data: record
+  });
+};
+
+export const deleteAllocationPriority = async (req, res) => {
+  const { month } = req.params;
+  const monthVal = parseAllocationMonth(month);
+
+  const record = await RoomAllocationPriority.findOne({
+    where: { month: monthVal }
+  });
+
+  if (!record) {
+    throw new ApiError(404, 'Allocation priority rule not found');
+  }
+
+  await record.destroy();
+  return res.status(200).send({ message: 'Allocation priority rule removed successfully' });
+};
