@@ -1221,10 +1221,23 @@ export const blockRoom = async (req, res) => {
     throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   for (const room of rooms) {
     await room.update(
       {
         roomstatus: ROOM_BLOCKED,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+    await RoomBlock.create(
+      {
+        roomno: room.roomno,
+        start_date: today,
+        end_date: null,
+        reason: 'Admin blocked',
+        status: 'active',
+        createdBy: req.user.username,
         updatedBy: req.user.username
       },
       { transaction: t }
@@ -1263,6 +1276,10 @@ export const unblockRoom = async (req, res) => {
         updatedBy: req.user.username
       },
       { transaction: t }
+    );
+    await RoomBlock.update(
+      { status: 'cancelled', updatedBy: req.user.username },
+      { where: { roomno: room.roomno, status: 'active' }, transaction: t }
     );
   }
 
@@ -1458,18 +1475,18 @@ export const occupancyReport = async (req, res) => {
         ...(targetDate > todayIST
           ? []
           : [
-              {
-                status: ROOM_STATUS_CHECKEDOUT,
-                ...(targetDate === todayIST
-                  ? { checkout: targetDate }
-                  : { checkin: { [Op.lte]: targetDate }, checkout: { [Op.gte]: targetDate } })
-              }
-            ]),
+            {
+              status: ROOM_STATUS_CHECKEDOUT,
+              ...(targetDate === todayIST
+                ? { checkout: targetDate }
+                : { checkin: { [Op.lte]: targetDate }, checkout: { [Op.gte]: targetDate } })
+            }
+          ]),
         {
           status: ROOM_STATUS_PENDING_CHECKIN,
           ...(targetDate > todayIST
             ? // Future date: expected stays (arriving today or later, covering the date)
-              { checkin: { [Op.between]: [todayIST, targetDate] }, checkout: { [Op.gte]: targetDate } }
+            { checkin: { [Op.between]: [todayIST, targetDate] }, checkout: { [Op.gte]: targetDate } }
             : { checkin: targetDate })
         }
       ]
@@ -2003,6 +2020,9 @@ export async function findAllRoomsForDay(date, room_type, gender) {
   });
 
   const bookedRoomNos = bookings.map((b) => b.roomno);
+  const nextDay = moment(date, 'YYYY-MM-DD').add(1, 'day').format('YYYY-MM-DD');
+  const blockedRoomNos = await fetchBlockedRoomnos(date, nextDay);
+  const excludeRoomNos = [...new Set([...bookedRoomNos, ...blockedRoomNos])];
 
   // Step 2: Get available rooms from roomdb excluding booked ones
   return RoomDb.findAll({
@@ -2010,7 +2030,7 @@ export async function findAllRoomsForDay(date, room_type, gender) {
       roomtype: room_type,
       roomstatus: ROOM_STATUS_AVAILABLE,
       roomno: {
-        [Sequelize.Op.notIn]: bookedRoomNos
+        [Sequelize.Op.notIn]: excludeRoomNos
       },
       ...(gender && { gender })
     },
@@ -2595,54 +2615,73 @@ export const createRoomBlock = async (req, res) => {
   }
 
   const t = await database.transaction();
-  try {
-    const createdBlocks = [];
-    for (const r of roomsToBlock) {
-      const isPermanent = effectiveEndDate === null;
-      if (isPermanent) {
-        const existingPermanent = await RoomBlock.findOne({
-          where: {
-            roomno: r.roomno,
-            status: 'active',
-            end_date: null
-          },
-          transaction: t
-        });
-        if (existingPermanent) continue;
-      }
+  req.transaction = t;
 
-      const blockRecord = await RoomBlock.create(
-        {
-          roomno: r.roomno,
-          start_date,
-          end_date: effectiveEndDate,
-          reason: reason || null,
-          status: 'active',
-          createdBy: req.user.username,
-          updatedBy: req.user.username
-        },
-        { transaction: t }
-      );
-      createdBlocks.push(blockRecord);
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const windowEnd = effectiveEndDate || '9999-12-31';
 
-      if (isPermanent) {
-        await RoomDb.update(
-          { roomstatus: ROOM_BLOCKED, updatedBy: req.user.username },
-          { where: { roomno: r.roomno }, transaction: t }
-        );
-      }
-    }
-
-    await t.commit();
-    req.log.info('create_room_block_success', { count: createdBlocks.length });
-    return res.status(200).send({
-      message: `Successfully blocked ${createdBlocks.length} beds`,
-      data: createdBlocks
-    });
-  } catch (err) {
-    await t.rollback();
-    throw err;
+  // Check for active room bookings overlapping this block range for warning
+  const overlappingBookings = await RoomBooking.findAll({
+    attributes: ['roomno', 'cardno', 'checkin', 'checkout'],
+    where: {
+      roomno: { [Op.in]: roomsToBlock.map(r => r.roomno) },
+      status: { [Op.notIn]: [STATUS_CANCELLED, STATUS_ADMIN_CANCELLED] },
+      checkin: { [Op.lt]: windowEnd },
+      checkout: { [Op.gt]: start_date }
+    },
+    transaction: t
+  });
+  let warning = null;
+  if (overlappingBookings.length > 0) {
+    const sample = overlappingBookings.slice(0, 3).map(b => `${b.roomno} (${b.checkin} to ${b.checkout})`).join(', ');
+    warning = `Existing booking(s) found in date range for: ${sample}${overlappingBookings.length > 3 ? ` (+${overlappingBookings.length - 3} more)` : ''}`;
   }
+
+  const createdBlocks = [];
+  for (const r of roomsToBlock) {
+    const isPermanent = effectiveEndDate === null;
+    // Deduplicate: check if an identical active block already exists
+    const existingBlock = await RoomBlock.findOne({
+      where: {
+        roomno: r.roomno,
+        status: 'active',
+        start_date,
+        end_date: effectiveEndDate
+      },
+      transaction: t
+    });
+    if (existingBlock) continue;
+
+    const blockRecord = await RoomBlock.create(
+      {
+        roomno: r.roomno,
+        start_date,
+        end_date: effectiveEndDate,
+        reason: reason || null,
+        status: 'active',
+        createdBy: req.user.username,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+    createdBlocks.push(blockRecord);
+
+    // Only set roomstatus = ROOM_BLOCKED if the permanent block has already started today
+    if (isPermanent && start_date <= today) {
+      await RoomDb.update(
+        { roomstatus: ROOM_BLOCKED, updatedBy: req.user.username },
+        { where: { roomno: r.roomno }, transaction: t }
+      );
+    }
+  }
+
+  await t.commit();
+  req.log.info('create_room_block_success', { count: createdBlocks.length });
+  return res.status(200).send({
+    message: `Successfully blocked ${createdBlocks.length} beds`,
+    data: createdBlocks,
+    warning: warning || undefined
+  });
 };
 
 export const cancelRoomBlock = async (req, res) => {
@@ -2668,42 +2707,34 @@ export const cancelRoomBlock = async (req, res) => {
 
     const filteredBlocks = blocks.filter(b => {
       const suffix = b.roomno.slice(baseRoomNo.length);
-      return /^[a-zA-Z]$/.test(suffix);
+      return /^[a-zA-Z]?$/.test(suffix);
     });
 
     const t = await database.transaction();
-    try {
-      await Promise.all(
-        filteredBlocks.map(b =>
-          b.update({ status: 'cancelled', updatedBy: req.user.username }, { transaction: t })
-        )
-      );
-      await syncRoomBlockedFlag(
-        filteredBlocks.map((b) => b.roomno),
-        req.user.username,
-        t
-      );
-      await t.commit();
-    } catch (err) {
-      await t.rollback();
-      throw err;
-    }
+    req.transaction = t;
+    await Promise.all(
+      filteredBlocks.map(b =>
+        b.update({ status: 'cancelled', updatedBy: req.user.username }, { transaction: t })
+      )
+    );
+    await syncRoomBlockedFlag(
+      filteredBlocks.map((b) => b.roomno),
+      req.user.username,
+      t
+    );
+    await t.commit();
 
     req.log.info('cancel_room_block_success_all_beds', { baseRoomNo, count: filteredBlocks.length });
     return res.status(200).send({ message: 'Room blocks cancelled successfully for all beds' });
   } else {
     const t = await database.transaction();
-    try {
-      await block.update(
-        { status: 'cancelled', updatedBy: req.user.username },
-        { transaction: t }
-      );
-      await syncRoomBlockedFlag([block.roomno], req.user.username, t);
-      await t.commit();
-    } catch (err) {
-      await t.rollback();
-      throw err;
-    }
+    req.transaction = t;
+    await block.update(
+      { status: 'cancelled', updatedBy: req.user.username },
+      { transaction: t }
+    );
+    await syncRoomBlockedFlag([block.roomno], req.user.username, t);
+    await t.commit();
     req.log.info('cancel_room_block_success', { id });
     return res.status(200).send({ message: 'Room block cancelled successfully' });
   }
@@ -2718,31 +2749,26 @@ export const bulkCancelRoomBlocks = async (req, res) => {
   }
 
   const t = await database.transaction();
-  let affectedCount = 0;
-  try {
-    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
-    const scopes = [
-      { start_date: { [Op.lte]: today }, end_date: { [Op.gte]: today } }
-    ];
-    if (includeFuture) scopes.push({ start_date: { [Op.gt]: today } });
-    if (includePermanent) scopes.push({ end_date: null });
-    [affectedCount] = await RoomBlock.update(
-      { status: 'cancelled', updatedBy: req.user.username },
-      {
-        where: {
-          status: 'active',
-          roomno: { [Op.in]: roomnos },
-          [Op.or]: scopes
-        },
-        transaction: t
-      }
-    );
-    await syncRoomBlockedFlag(roomnos, req.user.username, t);
-    await t.commit();
-  } catch (err) {
-    await t.rollback();
-    throw err;
-  }
+  req.transaction = t;
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const scopes = [
+    { start_date: { [Op.lte]: today }, end_date: { [Op.gte]: today } }
+  ];
+  if (includeFuture) scopes.push({ start_date: { [Op.gt]: today } });
+  if (includePermanent) scopes.push({ end_date: null });
+  const [affectedCount] = await RoomBlock.update(
+    { status: 'cancelled', updatedBy: req.user.username },
+    {
+      where: {
+        status: 'active',
+        roomno: { [Op.in]: roomnos },
+        [Op.or]: scopes
+      },
+      transaction: t
+    }
+  );
+  await syncRoomBlockedFlag(roomnos, req.user.username, t);
+  await t.commit();
 
   req.log.info('bulk_cancel_room_blocks_success', { affected: affectedCount });
   return res.status(200).send({ message: `Successfully cancelled current blocks for ${affectedCount} beds`, cancelled: affectedCount });

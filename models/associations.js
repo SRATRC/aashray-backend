@@ -254,6 +254,14 @@ RoomBooking.belongsTo(RoomDb, {
   foreignKey: 'roomno',
   targetKey: 'roomno'
 });
+RoomDb.hasMany(RoomBlock, {
+  foreignKey: 'roomno',
+  sourceKey: 'roomno',
+  as: 'blocks',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+RoomBlock.belongsTo(RoomDb, { foreignKey: 'roomno', targetKey: 'roomno' });
 RoomBooking.belongsTo(CardDb, {
   foreignKey: 'cardno',
   targetKey: 'cardno'

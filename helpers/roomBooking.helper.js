@@ -261,11 +261,7 @@ export async function findRoom(
       roomno: { [Sequelize.Op.notIn]: combinedExclude }
     });
   }
-  if (false && excludeRooms.length > 0) {
-    whereConditions[Sequelize.Op.and].push({
-      roomno: { [Sequelize.Op.notIn]: excludeRooms }
-    });
-  }
+
  
   return RoomDb.findOne({
     attributes: ['roomno'],
@@ -316,7 +312,8 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
       }
     }
   });
-  const bookedRooms = bookings.map((x) => x.roomno);
+  const blockedRooms = await fetchBlockedRoomnos(checkin, checkout);
+  const bookedRooms = [...new Set([...bookings.map((x) => x.roomno), ...blockedRooms])];
 
   return RoomDb.findAll({
     where: {
