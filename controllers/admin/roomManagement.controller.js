@@ -41,7 +41,9 @@ import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_INVALID_DATE,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  ROOM_BLOCK_ACTIVE,
+  ROOM_BLOCK_CANCELLED
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -1134,7 +1136,7 @@ export const roomList = async (req, res) => {
       {
         model: RoomBlock,
         as: 'blocks',
-        where: { status: 'active' },
+        where: { status: ROOM_BLOCK_ACTIVE },
         required: false,
         attributes: ['id', 'start_date', 'end_date', 'reason']
       }
@@ -1237,7 +1239,7 @@ export const blockRoom = async (req, res) => {
         start_date: today,
         end_date: null,
         reason: 'Admin blocked',
-        status: 'active',
+        status: ROOM_BLOCK_ACTIVE,
         createdBy: req.user.username,
         updatedBy: req.user.username
       },
@@ -1279,8 +1281,8 @@ export const unblockRoom = async (req, res) => {
       { transaction: t }
     );
     await RoomBlock.update(
-      { status: 'cancelled', updatedBy: req.user.username },
-      { where: { roomno: room.roomno, status: 'active', end_date: null }, transaction: t }
+      { status: ROOM_BLOCK_CANCELLED, updatedBy: req.user.username },
+      { where: { roomno: room.roomno, status: ROOM_BLOCK_ACTIVE, end_date: null }, transaction: t }
     );
   }
 
@@ -2550,7 +2552,7 @@ const syncRoomBlockedFlag = async (roomnos, username, transaction) => {
   if (uniqueRoomnos.length === 0) return;
 
   const stillBlocked = await RoomBlock.findAll({
-    where: { roomno: { [Op.in]: uniqueRoomnos }, status: 'active', end_date: null },
+    where: { roomno: { [Op.in]: uniqueRoomnos }, status: ROOM_BLOCK_ACTIVE, end_date: null },
     attributes: ['roomno'],
     transaction
   });
@@ -2645,7 +2647,7 @@ export const createRoomBlock = async (req, res) => {
     const existingBlock = await RoomBlock.findOne({
       where: {
         roomno: r.roomno,
-        status: 'active',
+        status: ROOM_BLOCK_ACTIVE,
         start_date,
         end_date: effectiveEndDate
       },
@@ -2659,7 +2661,7 @@ export const createRoomBlock = async (req, res) => {
         start_date,
         end_date: effectiveEndDate,
         reason: reason || null,
-        status: 'active',
+        status: ROOM_BLOCK_ACTIVE,
         createdBy: req.user.username,
         updatedBy: req.user.username
       },
@@ -2691,7 +2693,7 @@ export const cancelRoomBlock = async (req, res) => {
   req.log.info('cancel_room_block_start', { id, cancelAllBeds });
 
   const block = await RoomBlock.findByPk(id);
-  if (!block || block.status !== 'active') {
+  if (!block || block.status !== ROOM_BLOCK_ACTIVE) {
     throw new ApiError(404, 'Active room block not found');
   }
 
@@ -2715,7 +2717,7 @@ export const cancelRoomBlock = async (req, res) => {
     req.transaction = t;
     await Promise.all(
       filteredBlocks.map(b =>
-        b.update({ status: 'cancelled', updatedBy: req.user.username }, { transaction: t })
+        b.update({ status: ROOM_BLOCK_CANCELLED, updatedBy: req.user.username }, { transaction: t })
       )
     );
     await syncRoomBlockedFlag(
@@ -2731,7 +2733,7 @@ export const cancelRoomBlock = async (req, res) => {
     const t = await database.transaction();
     req.transaction = t;
     await block.update(
-      { status: 'cancelled', updatedBy: req.user.username },
+      { status: ROOM_BLOCK_CANCELLED, updatedBy: req.user.username },
       { transaction: t }
     );
     await syncRoomBlockedFlag([block.roomno], req.user.username, t);
@@ -2755,13 +2757,13 @@ export const bulkCancelRoomBlocks = async (req, res) => {
   const scopes = [
     { start_date: { [Op.lte]: today }, end_date: { [Op.gte]: today } }
   ];
-  if (includeFuture) scopes.push({ start_date: { [Op.gt]: today } });
+  if (includeFuture) scopes.push({ start_date: { [Op.gt]: today }, end_date: { [Op.ne]: null } });
   if (includePermanent) scopes.push({ end_date: null });
   const [affectedCount] = await RoomBlock.update(
-    { status: 'cancelled', updatedBy: req.user.username },
+    { status: ROOM_BLOCK_CANCELLED, updatedBy: req.user.username },
     {
       where: {
-        status: 'active',
+        status: ROOM_BLOCK_ACTIVE,
         roomno: { [Op.in]: roomnos },
         [Op.or]: scopes
       },

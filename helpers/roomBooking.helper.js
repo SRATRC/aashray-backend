@@ -17,7 +17,8 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  ROOM_BLOCK_ACTIVE
 } from '../config/constants.js';
 import RoomBlock from '../models/room_block.model.js';
 import {
@@ -262,7 +263,6 @@ export async function findRoom(
     });
   }
 
- 
   return RoomDb.findOne({
     attributes: ['roomno'],
     where: whereConditions,
@@ -1002,7 +1002,7 @@ export async function fetchBlockedRoomnos(checkin, queryCheckout) {
   const blocks = await RoomBlock.findAll({
     attributes: ['roomno'],
     where: {
-      status: 'active',
+      status: ROOM_BLOCK_ACTIVE,
       start_date: { [Sequelize.Op.lt]: queryCheckout },
       [Sequelize.Op.or]: [
         { end_date: null },
@@ -1013,34 +1013,4 @@ export async function fetchBlockedRoomnos(checkin, queryCheckout) {
   return blocks.map((b) => b.roomno);
 }
 
-// All active blocks that touch [checkin, windowCheckout), with their dates.
-export async function fetchActiveRoomBlocks(checkin, checkout) {
-  const windowCheckout = checkin === checkout
-    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
-    : checkout;
-  return RoomBlock.findAll({
-    attributes: ['roomno', 'start_date', 'end_date'],
-    where: {
-      status: 'active',
-      start_date: { [Sequelize.Op.lt]: windowCheckout },
-      [Sequelize.Op.or]: [
-        { end_date: null },
-        { end_date: { [Sequelize.Op.gte]: checkin } }
-      ]
-    }
-  });
-}
 
-// Rooms blocked on any night of [start, end) out of a fetchActiveRoomBlocks() list.
-export function blockedRoomsInRange(activeRoomBlocks, start, end) {
-  const rangeEnd = start === end
-    ? moment(start, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
-    : end;
-  return activeRoomBlocks
-    .filter(
-      (b) =>
-        b.start_date < rangeEnd &&
-        (b.end_date === null || b.end_date >= start)
-    )
-    .map((b) => b.roomno);
-}
