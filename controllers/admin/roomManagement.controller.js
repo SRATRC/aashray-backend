@@ -6,7 +6,8 @@ import {
   FlatBooking,
   Transactions,
   FlatDb,
-  UtsavDb
+  UtsavDb,
+  RoomBlock
 } from '../../models/associations.js';
 import {
   ROOM_STATUS_PENDING_CHECKIN,
@@ -41,7 +42,9 @@ import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_INVALID_DATE,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  MSG_ROLLING_WINDOW_ADMIN_WARNING,
+  BOOKING_STATUS_PENDING
 } from '../../config/constants.js';
 import {
   checkFlatAlreadyBooked,
@@ -56,8 +59,12 @@ import {
   checkRoomAlreadyBooked,
   createFlatBooking,
   createRoomBooking,
-  roomCharge
+  roomCharge,
+  fetchActiveRoomBlocks,
+  getOverlappingRoomBookings,
+  getPriorityOrderForMonth
 } from '../../helpers/roomBooking.helper.js';
+import { findUtsavOnBoundaryDates } from '../../helpers/utsavBooking.helper.js';
 import {
   checkRollingWindowLimitForCards,
   getRollingWindowWarning,
@@ -1199,10 +1206,23 @@ export const blockRoom = async (req, res) => {
     throw new ApiError(400, ERR_ROOM_NOT_FOUND);
   }
 
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   for (const room of rooms) {
     await room.update(
       {
         roomstatus: ROOM_BLOCKED,
+        updatedBy: req.user.username
+      },
+      { transaction: t }
+    );
+    await RoomBlock.create(
+      {
+        roomno: room.roomno,
+        start_date: today,
+        end_date: null,
+        reason: 'Admin blocked',
+        status: 'active',
+        createdBy: req.user.username,
         updatedBy: req.user.username
       },
       { transaction: t }
@@ -1241,6 +1261,10 @@ export const unblockRoom = async (req, res) => {
         updatedBy: req.user.username
       },
       { transaction: t }
+    );
+    await RoomBlock.update(
+      { status: 'cancelled', updatedBy: req.user.username },
+      { where: { roomno: room.roomno, status: 'active' }, transaction: t }
     );
   }
 
@@ -2509,7 +2533,7 @@ export const bulkRoomBooking = async (req, res) => {
   if (!checkin_date || !checkout_date) {
     throw new ApiError(400, 'Check-in and Check-out dates are required');
   }
-  if (checkin_date > checkout_date) {
+  if (checkin_date >= checkout_date) {
     throw new ApiError(400, ERR_INVALID_DATE);
   }
   if (!bookings || !Array.isArray(bookings) || bookings.length === 0) {
@@ -2684,23 +2708,37 @@ export const updateAllocationPriority = async (req, res) => {
   const { month, priority_order } = req.body;
   const monthVal = parseAllocationMonth(month);
 
-  if (!priority_order) {
+  if (!priority_order || typeof priority_order !== 'string') {
     throw new ApiError(400, 'priority_order string is required');
   }
+
+  const ALLOWED = ['OAG_1st', 'OAG_2nd', 'NAG_1st', 'NAG_2nd'];
+  const tokens = priority_order.split(',').map((s) => s.trim()).filter(Boolean);
+  if (
+    tokens.length !== 4 ||
+    new Set(tokens).size !== tokens.length ||
+    tokens.some((x) => !ALLOWED.includes(x))
+  ) {
+    throw new ApiError(
+      400,
+      `priority_order must be a comma-separated list of distinct values from: ${ALLOWED.join(', ')}`
+    );
+  }
+  const cleanPriorityOrder = tokens.join(',');
 
   const updatedBy = req.user?.username || 'ADMIN';
 
   let record = await RoomAllocationPriority.findOne({ where: { month: monthVal } });
   if (!record) {
     try {
-      record = await RoomAllocationPriority.create({ month: monthVal, priority_order, updatedBy });
+      record = await RoomAllocationPriority.create({ month: monthVal, priority_order: cleanPriorityOrder, updatedBy });
     } catch (err) {
       if (err?.name !== 'SequelizeUniqueConstraintError') throw err;
       record = await RoomAllocationPriority.findOne({ where: { month: monthVal } });
-      await record.update({ priority_order, updatedBy });
+      await record.update({ priority_order: cleanPriorityOrder, updatedBy });
     }
   } else {
-    await record.update({ priority_order, updatedBy });
+    await record.update({ priority_order: cleanPriorityOrder, updatedBy });
   }
 
   return res.status(200).send({
