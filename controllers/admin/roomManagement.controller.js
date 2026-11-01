@@ -966,6 +966,35 @@ export const fetchAllFlatBookings = async (req, res) => {
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
+const kioskCheckoutPreview = async (booking, isFlat, today, nowTime) => {
+  if (booking.status !== ROOM_STATUS_CHECKEDIN) return null;
+
+  if (today === booking.checkout) {
+    if (!isFlat && nowTime > CHECKOUT_DEADLINE && booking.nights >= 1) {
+      return {
+        late_fee: calcLateCheckoutFee(booking.roomtype, nowTime <= LATE_CHECKOUT_HALF)
+      };
+    }
+    return null;
+  }
+
+  if (today < booking.checkout) {
+    const transaction = await Transactions.findOne({
+      where: {
+        bookingid: booking.bookingid,
+        ...(isFlat && { category: TYPE_FLAT })
+      }
+    });
+    if (!transaction) return null;
+    const nights = await calculateNights(booking.checkin, today);
+    const newAmount = roomCharge(isFlat ? 'nac' : booking.roomtype) * nights;
+    const credit = Number(transaction.amount) + Number(transaction.discount) - newAmount;
+    return credit > 0 ? { credit } : null;
+  }
+
+  return null;
+};
+
 export const fetchKioskBookingsByCard = async (req, res) => {
   const cardno = req.params.cardno?.trim();
   if (!cardno) {
@@ -983,7 +1012,9 @@ export const fetchKioskBookingsByCard = async (req, res) => {
     throw new ApiError(404, 'Card not found');
   }
 
-  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const nowIST = moment().tz('Asia/Kolkata');
+  const today = nowIST.format('YYYY-MM-DD');
+  const nowTime = nowIST.format('HH:mm:ss');
   const kioskLookbackCutoff = moment(today).subtract(KIOSK_CHECKEDIN_LOOKBACK_DAYS, 'days').format('YYYY-MM-DD');
   const activeStayWhere = {
     cardno,
@@ -994,6 +1025,10 @@ export const fetchKioskBookingsByCard = async (req, res) => {
       },
       {
         status: ROOM_STATUS_PENDING_CHECKIN,
+        checkout: { [Sequelize.Op.gte]: today }
+      },
+      {
+        status: STATUS_PAYMENT_PENDING,
         checkout: { [Sequelize.Op.gte]: today }
       }
     ]
@@ -1011,7 +1046,7 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   const [roomBookings, flatBookings] = await Promise.all([
     RoomBooking.findAll({
       where: activeStayWhere,
-      attributes: [...bookingAttributes, 'roomno'],
+      attributes: [...bookingAttributes, 'roomno', 'roomtype'],
       order: [['checkin', 'ASC']]
     }),
     FlatBooking.findAll({
@@ -1019,6 +1054,15 @@ export const fetchKioskBookingsByCard = async (req, res) => {
       attributes: [...bookingAttributes, 'flatno'],
       order: [['checkin', 'ASC']]
     })
+  ]);
+
+  const withPreview = (isFlat) => async (booking) => ({
+    ...booking.get({ plain: true }),
+    checkout_preview: await kioskCheckoutPreview(booking, isFlat, today, nowTime)
+  });
+  const [roomBookingsOut, flatBookingsOut] = await Promise.all([
+    Promise.all(roomBookings.map(withPreview(false))),
+    Promise.all(flatBookings.map(withPreview(true)))
   ]);
 
   req.log.info('fetch_kiosk_bookings_by_card_success', {
@@ -1030,8 +1074,8 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   return res.status(200).send({
     message: 'Fetched bookings',
     data: {
-      room_booking: roomBookings,
-      flat_booking: flatBookings,
+      room_booking: roomBookingsOut,
+      flat_booking: flatBookingsOut,
       card_details: cardDetails
     }
   });
