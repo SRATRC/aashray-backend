@@ -30,10 +30,10 @@ import { HEADER_APP_VERSION, HEADER_PLATFORM } from '../config/constants.js';
 
 export const HOLD_MS = 700;
 // The planned fixed release. Override with the FIXED_APP_VERSION env var (no code change).
-export const DEFAULT_FIXED_APP_VERSION = '1.1.60';
+export const DEFAULT_FIXED_APP_VERSION = '1.1.61';
 const HEADER_VALIDATE_MODE = 'x-aashray-validate-mode';
 
-// "1.1.60" -> [1, 1, 60]. Reads the leading dotted numbers, so "v1.2.0", "1.2.0-beta"
+// "1.1.61" -> [1, 1, 61]. Reads the leading dotted numbers, so "v1.2.0", "1.2.0-beta"
 // and "1.2.0 (45)" all read as 1.2.0. Returns null if there are none.
 const parseVersion = (text) => {
   if (typeof text !== 'string') return null;
@@ -41,7 +41,7 @@ const parseVersion = (text) => {
   return match ? match[1].split('.').map(Number) : null;
 };
 
-// Numeric compare (1.1.9 < 1.1.60). Missing parts count as 0. Returns -1, 0 or 1.
+// Numeric compare (1.1.9 < 1.1.61). Missing parts count as 0. Returns -1, 0 or 1.
 const compareVersions = (a, b) => {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = a[i] ?? 0;
