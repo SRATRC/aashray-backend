@@ -8,8 +8,8 @@ import ShortLink from '../models/short_link.model.js';
 
 const KIOSK_ROUTES = [
   ['GET', /^\/stay\/kiosk\/bookings\/[^/]+$/],
-  ['POST', /^\/stay\/kiosk\/wifi\/generate[-_]temp[-_]code$/],
-  ['GET', /^\/stay\/kiosk\/wifi\/fetch[-_]temp[-_]codes\/[^/]+$/],
+  ['POST', /^\/stay\/kiosk\/wifi\/generate_temp_code$/],
+  ['GET', /^\/stay\/kiosk\/wifi\/fetch_temp_codes\/[^/]+$/],
   ['PUT', /^\/stay\/(flat_)?check(in|out)\/[^/]+$/]
 ];
 

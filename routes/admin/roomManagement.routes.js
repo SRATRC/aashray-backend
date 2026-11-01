@@ -60,8 +60,8 @@ router.get('/available_rooms_for_day', CatchAsync(availableRoomsForDay))
 router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
 router.get('/kiosk/bookings/:cardno', CatchAsync(fetchKioskBookingsByCard));
 // Kiosk WiFi actions use the scanned guest card number, not the admin's card.
-router.post(['/kiosk/wifi/generate-temp-code', '/kiosk/wifi/generate_temp_code'], CatchAsync(generateTempCodeForAdmin));
-router.get(['/kiosk/wifi/fetch-temp-codes/:cardno', '/kiosk/wifi/fetch_temp_codes/:cardno'], CatchAsync(fetchTempCodesForAdmin));
+router.post('/kiosk/wifi/generate_temp_code', CatchAsync(generateTempCodeForAdmin));
+router.get('/kiosk/wifi/fetch_temp_codes/:cardno', CatchAsync(fetchTempCodesForAdmin));
 
 // flat routes
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));
