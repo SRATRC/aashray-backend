@@ -34,6 +34,7 @@ import {
   AC_ROOM_PRICE,
   STATUS_CREDITED,
   STATUS_PAYMENT_COMPLETED,
+  STATUS_CASH_COMPLETED,
   ERR_TRANSACTION_NOT_FOUND,
   AMT_TYPE_LATE_CHECKOUT_ROOM,
   STATUS_CONFIRMED,
@@ -988,7 +989,13 @@ const kioskCheckoutPreview = async (booking, isFlat, today, nowTime) => {
     if (!transaction) return null;
     const nights = await calculateNights(booking.checkin, today);
     const newAmount = roomCharge(isFlat ? 'nac' : booking.roomtype) * nights;
-    const credit = Number(transaction.amount) + Number(transaction.discount) - newAmount;
+    const paid =
+      transaction.status === STATUS_PAYMENT_COMPLETED ||
+      transaction.status === STATUS_CASH_COMPLETED;
+    const refund = paid
+      ? Number(transaction.amount) + Number(transaction.discount)
+      : Number(transaction.discount);
+    const credit = refund - newAmount;
     return credit > 0 ? { credit } : null;
   }
 
