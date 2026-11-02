@@ -90,6 +90,7 @@ export const TRAVEL_TYPE_FULL = 'full';
 // ADMIN ROLES
 export const ROLE_SUPER_ADMIN = 'superAdmin';
 export const ROLE_ROOM_ADMIN = 'roomAdmin';
+export const ROLE_KIOSK_ADMIN = 'kioskAdmin';
 export const ROLE_CARD_ADMIN = 'cardAdmin';
 export const ROLE_OFFICE_ADMIN = 'officeAdmin';
 export const ROLE_ADHYAYAN_ADMIN = 'adhyayanAdmin';
