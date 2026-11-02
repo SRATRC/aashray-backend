@@ -967,7 +967,7 @@ export const fetchAllFlatBookings = async (req, res) => {
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
 };
 
-const kioskCheckoutPreview = async (booking, isFlat, today, nowTime) => {
+const kioskCheckoutPreview = async (booking, isFlat, today, nowTime, transaction, bookerNameMap) => {
   if (booking.status !== ROOM_STATUS_CHECKEDIN) return null;
 
   if (today === booking.checkout) {
@@ -980,12 +980,6 @@ const kioskCheckoutPreview = async (booking, isFlat, today, nowTime) => {
   }
 
   if (today < booking.checkout) {
-    const transaction = await Transactions.findOne({
-      where: {
-        bookingid: booking.bookingid,
-        ...(isFlat && { category: TYPE_FLAT })
-      }
-    });
     if (!transaction) return null;
     const nights = await calculateNights(booking.checkin, today);
     const newAmount = roomCharge(isFlat ? 'nac' : booking.roomtype) * nights;
@@ -996,7 +990,20 @@ const kioskCheckoutPreview = async (booking, isFlat, today, nowTime) => {
       ? Number(transaction.amount) + Number(transaction.discount)
       : Number(transaction.discount);
     const credit = refund - newAmount;
-    return credit > 0 ? { credit } : null;
+    if (credit <= 0) return null;
+
+    const payerCardno = transaction.cardno || booking.bookedBy || booking.cardno;
+    const isSelfBooked = !payerCardno || payerCardno === booking.cardno;
+    const payerName = !isSelfBooked
+      ? (bookerNameMap?.get(payerCardno) || payerCardno)
+      : null;
+
+    return {
+      credit,
+      is_self_booked: isSelfBooked,
+      payer_cardno: payerCardno,
+      payer_name: payerName
+    };
   }
 
   return null;
@@ -1009,15 +1016,6 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   }
 
   req.log.info('fetch_kiosk_bookings_by_card_start', { cardno });
-
-  const cardDetails = await CardDb.findOne({
-    where: { cardno },
-    attributes: ['cardno', 'issuedto']
-  });
-
-  if (!cardDetails) {
-    throw new ApiError(404, 'Card not found');
-  }
 
   const nowIST = moment().tz('Asia/Kolkata');
   const today = nowIST.format('YYYY-MM-DD');
@@ -1044,13 +1042,19 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   const bookingAttributes = [
     'bookingid',
     'cardno',
+    'bookedBy',
     'checkin',
     'checkout',
     'nights',
     'status'
   ];
 
-  const [roomBookings, flatBookings] = await Promise.all([
+  // Batch 1: Query CardDb, RoomBooking, and FlatBooking in parallel
+  const [cardDetails, roomBookings, flatBookings] = await Promise.all([
+    CardDb.findOne({
+      where: { cardno },
+      attributes: ['cardno', 'issuedto']
+    }),
     RoomBooking.findAll({
       where: activeStayWhere,
       attributes: [...bookingAttributes, 'roomno', 'roomtype'],
@@ -1063,10 +1067,77 @@ export const fetchKioskBookingsByCard = async (req, res) => {
     })
   ]);
 
-  const withPreview = (isFlat) => async (booking) => ({
-    ...booking.get({ plain: true }),
-    checkout_preview: await kioskCheckoutPreview(booking, isFlat, today, nowTime)
-  });
+  if (!cardDetails) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  const allBookings = [...roomBookings, ...flatBookings];
+
+  // Batch 2: Collect booker cards and early checkout booking IDs, then fetch both in parallel
+  const allBookedByCardnos = [
+    ...new Set(
+      allBookings
+        .map((b) => b.bookedBy)
+        .filter((b) => b && b !== cardno)
+    )
+  ];
+
+  const earlyCheckoutBookingIds = allBookings
+    .filter((b) => b.status === ROOM_STATUS_CHECKEDIN && today < b.checkout)
+    .map((b) => b.bookingid);
+
+  const [bookerCards, transactions] = await Promise.all([
+    allBookedByCardnos.length
+      ? CardDb.findAll({
+          where: { cardno: allBookedByCardnos },
+          attributes: ['cardno', 'issuedto']
+        })
+      : [],
+    earlyCheckoutBookingIds.length
+      ? Transactions.findAll({
+          where: {
+            bookingid: earlyCheckoutBookingIds,
+            [Sequelize.Op.or]: [
+              { category: TYPE_ROOM },
+              { category: TYPE_FLAT }
+            ]
+          }
+        })
+      : []
+  ]);
+
+  const bookerNameMap = new Map(bookerCards.map((c) => [c.cardno, c.issuedto]));
+  const txMap = new Map(transactions.map((t) => [t.bookingid, t]));
+
+  // Also if any transaction was paid by another card not in bookerNameMap, resolve it
+  const missingPayerCardnos = transactions
+    .map((t) => t.cardno)
+    .filter((c) => c && c !== cardno && !bookerNameMap.has(c));
+
+  if (missingPayerCardnos.length > 0) {
+    const extraPayerCards = await CardDb.findAll({
+      where: { cardno: missingPayerCardnos },
+      attributes: ['cardno', 'issuedto']
+    });
+    for (const c of extraPayerCards) {
+      bookerNameMap.set(c.cardno, c.issuedto);
+    }
+  }
+
+  const withPreview = (isFlat) => async (booking) => {
+    const plain = booking.get({ plain: true });
+    const bookerName =
+      plain.bookedBy && plain.bookedBy !== cardno
+        ? bookerNameMap.get(plain.bookedBy) || plain.bookedBy
+        : null;
+    const tx = txMap.get(plain.bookingid) || null;
+    return {
+      ...plain,
+      booker_name: bookerName,
+      checkout_preview: await kioskCheckoutPreview(booking, isFlat, today, nowTime, tx, bookerNameMap)
+    };
+  };
+
   const [roomBookingsOut, flatBookingsOut] = await Promise.all([
     Promise.all(roomBookings.map(withPreview(false))),
     Promise.all(flatBookings.map(withPreview(true)))
