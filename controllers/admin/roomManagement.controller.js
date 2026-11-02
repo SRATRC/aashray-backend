@@ -1105,14 +1105,14 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   const bookerNameMap = new Map(bookerCards.map((c) => [c.cardno, c.issuedto]));
 
   const withPreview = (isFlat) => async (booking) => {
-    const plain = booking.get({ plain: true });
+    const { bookedBy, ...publicFields } = booking.get({ plain: true });
     const bookerName =
-      plain.bookedBy && plain.bookedBy !== cardno
-        ? bookerNameMap.get(plain.bookedBy) || null
+      bookedBy && bookedBy !== cardno
+        ? bookerNameMap.get(bookedBy) || null
         : null;
-    const tx = txMap.get(plain.bookingid) || null;
+    const tx = txMap.get(publicFields.bookingid) || null;
     return {
-      ...plain,
+      ...publicFields,
       booker_name: bookerName,
       checkout_preview: await kioskCheckoutPreview(booking, isFlat, today, nowTime, tx, bookerNameMap)
     };
