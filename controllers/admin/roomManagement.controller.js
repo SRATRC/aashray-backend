@@ -995,13 +995,12 @@ const kioskCheckoutPreview = async (booking, isFlat, today, nowTime, transaction
     const payerCardno = transaction.cardno || booking.bookedBy || booking.cardno;
     const isSelfBooked = !payerCardno || payerCardno === booking.cardno;
     const payerName = !isSelfBooked
-      ? (bookerNameMap?.get(payerCardno) || payerCardno)
+      ? (bookerNameMap?.get(payerCardno) || null)
       : null;
 
     return {
       credit,
       is_self_booked: isSelfBooked,
-      payer_cardno: payerCardno,
       payer_name: payerName
     };
   }
@@ -1073,62 +1072,43 @@ export const fetchKioskBookingsByCard = async (req, res) => {
 
   const allBookings = [...roomBookings, ...flatBookings];
 
-  // Batch 2: Collect booker cards and early checkout booking IDs, then fetch both in parallel
-  const allBookedByCardnos = [
-    ...new Set(
-      allBookings
-        .map((b) => b.bookedBy)
-        .filter((b) => b && b !== cardno)
-    )
-  ];
-
   const earlyCheckoutBookingIds = allBookings
     .filter((b) => b.status === ROOM_STATUS_CHECKEDIN && today < b.checkout)
     .map((b) => b.bookingid);
 
-  const [bookerCards, transactions] = await Promise.all([
-    allBookedByCardnos.length
-      ? CardDb.findAll({
-          where: { cardno: allBookedByCardnos },
-          attributes: ['cardno', 'issuedto']
-        })
-      : [],
-    earlyCheckoutBookingIds.length
-      ? Transactions.findAll({
-          where: {
-            bookingid: earlyCheckoutBookingIds,
-            [Sequelize.Op.or]: [
-              { category: TYPE_ROOM },
-              { category: TYPE_FLAT }
-            ]
-          }
-        })
-      : []
-  ]);
+  // Batch 2: Fetch transactions for early checkout stays first (if any)
+  const transactions = earlyCheckoutBookingIds.length
+    ? await Transactions.findAll({
+        where: {
+          bookingid: earlyCheckoutBookingIds
+        }
+      })
+    : [];
 
-  const bookerNameMap = new Map(bookerCards.map((c) => [c.cardno, c.issuedto]));
   const txMap = new Map(transactions.map((t) => [t.bookingid, t]));
 
-  // Also if any transaction was paid by another card not in bookerNameMap, resolve it
-  const missingPayerCardnos = transactions
-    .map((t) => t.cardno)
-    .filter((c) => c && c !== cardno && !bookerNameMap.has(c));
+  // Collect all distinct booker and payer cards to resolve names in one single query
+  const relevantCardnos = [
+    ...allBookings.map((b) => b.bookedBy),
+    ...transactions.map((t) => t.cardno)
+  ].filter((c) => c && c !== cardno);
 
-  if (missingPayerCardnos.length > 0) {
-    const extraPayerCards = await CardDb.findAll({
-      where: { cardno: missingPayerCardnos },
-      attributes: ['cardno', 'issuedto']
-    });
-    for (const c of extraPayerCards) {
-      bookerNameMap.set(c.cardno, c.issuedto);
-    }
-  }
+  const uniqueCardnos = [...new Set(relevantCardnos)];
+
+  const bookerCards = uniqueCardnos.length
+    ? await CardDb.findAll({
+        where: { cardno: uniqueCardnos },
+        attributes: ['cardno', 'issuedto']
+      })
+    : [];
+
+  const bookerNameMap = new Map(bookerCards.map((c) => [c.cardno, c.issuedto]));
 
   const withPreview = (isFlat) => async (booking) => {
     const plain = booking.get({ plain: true });
     const bookerName =
       plain.bookedBy && plain.bookedBy !== cardno
-        ? bookerNameMap.get(plain.bookedBy) || plain.bookedBy
+        ? bookerNameMap.get(plain.bookedBy) || null
         : null;
     const tx = txMap.get(plain.bookingid) || null;
     return {
