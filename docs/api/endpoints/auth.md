@@ -188,7 +188,7 @@ Create a new admin account.
 
 Reset an admin's password.
 
-**Auth:** None
+**Auth:** superAdmin JWT
 
 **Request body:**
 ```json

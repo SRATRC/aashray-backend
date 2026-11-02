@@ -161,7 +161,7 @@ Some roles are location-specific (e.g., `adhyayanAdminKol` for Kolkata, `travelA
 ### Admin Account Management
 
 - **Create admin:** `POST /api/v1/admin/auth/create` -- superAdmin only, sets initial roles
-- **Reset password:** `POST /api/v1/admin/auth/reset-password` -- no auth required (self-service)
+- **Reset password:** `POST /api/v1/admin/auth/reset-password` -- superAdmin only
 - **Deactivate admin:** `PUT /api/v1/admin/sudo/deactivate/:username` -- superAdmin only
 - **Activate admin:** `PUT /api/v1/admin/sudo/activate/:username` -- superAdmin only
 - **Update roles:** `PUT /api/v1/admin/sudo/update_roles` -- superAdmin only
@@ -193,7 +193,6 @@ These routes require no authentication:
 - `POST /api/v1/client/verifyAndLogin` -- Login
 - `POST /api/v1/client/forgotPassword` -- Password reset
 - `POST /api/v1/admin/auth/login` -- Admin login
-- `POST /api/v1/admin/auth/reset-password` -- Admin password reset
 - `POST /api/v1/admin/utsav/utsavCheckin` -- Utsav check-in (public kiosk)
 - `POST /api/v1/admin/utsav/issue/:cardno` -- Utsav plate issuance (public kiosk)
 - `POST /api/v1/razorpay/verifyPayment` -- Razorpay webhook (verified by webhook secret)
