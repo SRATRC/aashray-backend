@@ -824,12 +824,14 @@ export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
 }
 
 export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, location = RESEARCH_CENTRE }) {
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
   // 1. First fetch qualifying past Research Centre shibirs in date range
   const qualifyingShibirs = await database.query(
     `SELECT s.id
      FROM shibir_db s
      WHERE s.location = :location
-       AND s.end_date <= CURRENT_DATE
+       AND s.end_date <= :today
        AND s.start_date >= :startDate
        AND s.start_date <= :endDate
        AND s.status != :statusDeleted
@@ -840,6 +842,7 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
         location,
         startDate,
         endDate,
+        today,
         statusDeleted: STATUS_DELETED,
         excludedSpeakerPattern: EXCLUDED_ATTENDANCE_SPEAKER_PATTERN
       },
@@ -868,15 +871,15 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
       END AS total_regular_sessions,
       COALESCE(part.total_registered, 0) AS total_registered,
       CASE 
-        WHEN COALESCE(cond.total_conducted, 0) = 0 AND COALESCE(sess.total_configured, 0) = 0 THEN 0
+        WHEN COALESCE(cond.total_conducted, 0) = 0 THEN 0
         ELSE COALESCE(part.total_attended, 0)
       END AS total_attended,
       CASE 
-        WHEN COALESCE(cond.total_conducted, 0) = 0 AND COALESCE(sess.total_configured, 0) = 0 THEN 0
+        WHEN COALESCE(cond.total_conducted, 0) = 0 THEN 0
         ELSE COALESCE(part.total_partial, 0)
       END AS total_partial,
       CASE 
-        WHEN COALESCE(cond.total_conducted, 0) = 0 AND COALESCE(sess.total_configured, 0) = 0 THEN 0
+        WHEN COALESCE(cond.total_conducted, 0) = 0 THEN 0
         ELSE COALESCE(part.total_absent, 0)
       END AS total_absent,
       CASE 
@@ -1018,18 +1021,18 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
 
   let whereTypeClause = '';
   if (type === 'attended') {
-    if (effectiveRegularSessions === 0) {
-      return { shibir: shibirSummary, totalRegularSessions: 0, regularSessions: [], participants: [] };
+    if (conductedCount === 0) {
+      return { shibir: shibirSummary, totalRegularSessions: effectiveRegularSessions, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions = :effectiveRegularSessions AND :effectiveRegularSessions > 0';
   } else if (type === 'partial') {
-    if (effectiveRegularSessions === 0) {
-      return { shibir: shibirSummary, totalRegularSessions: 0, regularSessions: [], participants: [] };
+    if (conductedCount === 0) {
+      return { shibir: shibirSummary, totalRegularSessions: effectiveRegularSessions, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions > 0 AND p.attended_regular_sessions < :effectiveRegularSessions';
   } else if (type === 'absent') {
-    if (effectiveRegularSessions === 0) {
-      return { shibir: shibirSummary, totalRegularSessions: 0, regularSessions: [], participants: [] };
+    if (conductedCount === 0) {
+      return { shibir: shibirSummary, totalRegularSessions: effectiveRegularSessions, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions = 0';
   } else if (type === 'registered' || type === 'complete') {
@@ -1050,6 +1053,7 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
       p.attended_session_numbers,
       :effectiveRegularSessions AS total_regular_sessions,
       CASE 
+        WHEN :conductedCount = 0 THEN 'N/A'
         WHEN :effectiveRegularSessions = 0 THEN 'N/A'
         ELSE CONCAT(p.attended_regular_sessions, ' of ', :effectiveRegularSessions, ' sessions')
       END AS attendance_summary
@@ -1077,7 +1081,8 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
     replacements: {
       shibirId,
       statusConfirmed: STATUS_CONFIRMED,
-      effectiveRegularSessions
+      effectiveRegularSessions,
+      conductedCount
     },
     type: Sequelize.QueryTypes.SELECT
   });
@@ -1117,7 +1122,9 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
       const attended = Number(p.attended_regular_sessions);
       const total = effectiveRegularSessions;
       let category = 'Absent';
-      if (total > 0) {
+      if (conductedCount === 0) {
+        category = 'Registered';
+      } else if (total > 0) {
         if (attended === total) {
           category = 'Full Attended';
         } else if (attended > 0) {
@@ -1150,8 +1157,18 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
 
 export async function getShibirRegularSessionsManagement({ shibirId }) {
   const shibir = await ShibirDb.findByPk(shibirId);
-  if (!shibir) {
+  if (!shibir || shibir.status === STATUS_DELETED) {
     throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  if (shibir.location !== RESEARCH_CENTRE) {
+    throw new ApiError(400, 'Session management is only available for Research Centre Adhyayans');
+  }
+
+  const todayStr = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const endDateStr = moment(shibir.end_date).format('YYYY-MM-DD');
+  if (endDateStr > todayStr) {
+    throw new ApiError(400, 'Session management is only available for completed Adhyayans');
   }
 
   const sessions = await ShibirSession.findAll({
@@ -1201,6 +1218,24 @@ export async function getShibirRegularSessionsManagement({ shibirId }) {
 }
 
 export async function removeUnusedShibirSession({ shibirId, sessionNumber, adminUsername, log = logger, transaction }) {
+  const shibir = await ShibirDb.findByPk(shibirId, {
+    transaction,
+    lock: transaction?.LOCK?.UPDATE
+  });
+  if (!shibir || shibir.status === STATUS_DELETED) {
+    throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  if (shibir.location !== RESEARCH_CENTRE) {
+    throw new ApiError(400, 'Session management is only available for Research Centre Adhyayans');
+  }
+
+  const todayStr = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const endDateStr = moment(shibir.end_date).format('YYYY-MM-DD');
+  if (endDateStr > todayStr) {
+    throw new ApiError(400, 'Sessions can only be removed for completed Adhyayans');
+  }
+
   const session = await ShibirSession.findOne({
     where: {
       shibir_id: shibirId,
@@ -1261,12 +1296,70 @@ export async function removeUnusedShibirSession({ shibirId, sessionNumber, admin
 }
 
 export async function restoreDefaultShibirSessions({ shibirId, adminUsername, log = logger, transaction }) {
-  const shibir = await ShibirDb.findByPk(shibirId, { transaction });
-  if (!shibir) {
+  const shibir = await ShibirDb.findByPk(shibirId, {
+    transaction,
+    lock: transaction?.LOCK?.UPDATE
+  });
+  if (!shibir || shibir.status === STATUS_DELETED) {
     throw new ApiError(404, 'Adhyayan not found');
   }
 
-  await initializeShibirSessions(shibir, transaction);
+  if (shibir.location !== RESEARCH_CENTRE) {
+    throw new ApiError(400, 'Session restoration is only available for Research Centre Adhyayans');
+  }
+
+  const todayStr = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const endDateStr = moment(shibir.end_date).format('YYYY-MM-DD');
+  if (endDateStr > todayStr) {
+    throw new ApiError(400, 'Session restoration is only available for completed Adhyayans');
+  }
+
+  const startDate = moment.tz(shibir.start_date, 'Asia/Kolkata').startOf('day');
+  const endDate = moment.tz(shibir.end_date, 'Asia/Kolkata').startOf('day');
+  const days = endDate.diff(startDate, 'days') + 1;
+
+  // Find all existing regular sessions for this shibir
+  const existingSessions = await ShibirSession.findAll({
+    where: { shibir_id: shibirId, type: 'regular' },
+    transaction,
+    lock: transaction?.LOCK?.UPDATE
+  });
+  const existingNumbers = new Set(existingSessions.map((s) => Number(s.session_number)));
+
+  // Insert only missing regular sessions
+  for (let d = 1; d <= days; d++) {
+    const dateStr = moment.tz(shibir.start_date, 'Asia/Kolkata').add(d - 1, 'days').format('YYYY-MM-DD');
+    const s1 = (d - 1) * 2 + 1;
+    const s2 = (d - 1) * 2 + 2;
+
+    if (!existingNumbers.has(s1)) {
+      await ShibirSession.create(
+        {
+          shibir_id: shibir.id,
+          session_number: s1,
+          type: 'regular',
+          date: dateStr,
+          start_time: '10:00:00',
+          updatedBy: adminUsername || 'system'
+        },
+        { transaction }
+      );
+    }
+
+    if (!existingNumbers.has(s2)) {
+      await ShibirSession.create(
+        {
+          shibir_id: shibir.id,
+          session_number: s2,
+          type: 'regular',
+          date: dateStr,
+          start_time: '15:45:00',
+          updatedBy: adminUsername || 'system'
+        },
+        { transaction }
+      );
+    }
+  }
 
   log.info('shibir_default_sessions_restored', {
     shibirId,
@@ -1277,6 +1370,8 @@ export async function restoreDefaultShibirSessions({ shibirId, adminUsername, lo
 }
 
 export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location = RESEARCH_CENTRE }) {
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
   const query = `
     SELECT 
       s.id AS shibir_id,
@@ -1303,7 +1398,7 @@ export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location
       GROUP BY r.bookingid
     ) att ON att.bookingid = b.bookingid
     WHERE s.location = :location
-      AND s.end_date <= CURRENT_DATE
+      AND s.end_date <= :today
       AND s.start_date >= :startDate
       AND s.start_date <= :endDate
       AND s.status != :statusDeleted
@@ -1323,6 +1418,7 @@ export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location
       location,
       startDate,
       endDate,
+      today,
       statusConfirmed: STATUS_CONFIRMED,
       statusDeleted: STATUS_DELETED,
       excludedSpeakerPattern: EXCLUDED_ATTENDANCE_SPEAKER_PATTERN
