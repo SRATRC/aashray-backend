@@ -517,8 +517,13 @@ export const updateAdhyayan = async (req, res) => {
     }, { transaction: t });
 
     // Sync sessions immediately on date/duration changes
+    const datesChanged = !oldStartDate.isSame(newStartDate, 'day') || !oldEndDate.isSame(newEndDate, 'day');
+    const locationChanged = adhyayan.location !== location;
+
     if (location === RESEARCH_CENTRE) {
-      await initializeShibirSessions({ id: adhyayan.id, start_date, end_date }, t);
+      if (datesChanged || locationChanged) {
+        await initializeShibirSessions({ id: adhyayan.id, start_date, end_date }, t);
+      }
     } else {
       // If changed away from Research Centre, clear sessions and attendance records
       await ShibirSession.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
