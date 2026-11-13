@@ -967,8 +967,18 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
 
 export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
   const shibir = await ShibirDb.findByPk(shibirId);
-  if (!shibir) {
+  if (!shibir || shibir.status === STATUS_DELETED) {
     throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  if (shibir.location !== RESEARCH_CENTRE) {
+    throw new ApiError(400, 'Past attendance report is only available for Research Centre Adhyayans');
+  }
+
+  const todayStr = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+  const endDateStr = moment(shibir.end_date).format('YYYY-MM-DD');
+  if (endDateStr > todayStr) {
+    throw new ApiError(400, 'Past attendance report is not available for ongoing or upcoming Adhyayans');
   }
 
   if (shibir.speaker && shibir.speaker.toLowerCase().includes(EXCLUDED_ATTENDANCE_SPEAKER_SUBSTRING)) {
@@ -1197,21 +1207,23 @@ export async function removeUnusedShibirSession({ shibirId, sessionNumber, admin
       session_number: sessionNumber,
       type: 'regular'
     },
-    transaction
+    transaction,
+    lock: transaction?.LOCK?.UPDATE
   });
 
   if (!session) {
     throw new ApiError(404, `Regular session ${sessionNumber} not found for this Adhyayan`);
   }
 
-  // Safety check: ensure no marked attendance exists
+  // Safety check: ensure no marked attendance exists with exclusive row lock
   const attendanceCount = await ShibirAttendanceRecord.count({
     where: {
       shibir_id: shibirId,
       session_number: sessionNumber,
       attended: 1
     },
-    transaction
+    transaction,
+    lock: transaction?.LOCK?.UPDATE
   });
 
   if (attendanceCount > 0) {
