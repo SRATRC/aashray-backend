@@ -17,6 +17,7 @@ import {
   FEEDBACK_ELIGIBILITY_HOUR,
   RESEARCH_CENTRE
 } from '../config/constants.js';
+import database from '../config/database.js';
 import {
   AdhyayanFeedback,
   ShibirBookingDb,
@@ -299,32 +300,41 @@ export async function openAdhyayanSeat(adhyayan, updatedBy, t, log = logger) {
   });
 
   if (booking) {
+    const isFree = Number(adhyayan.amount) === 0;
+    const newStatus = isFree ? STATUS_CONFIRMED : STATUS_PAYMENT_PENDING;
+
     // Preserve booker attribution on promotion: keep the original bookedBy
     // (already set at creation) and record who triggered the promotion.
     await booking.update(
       {
-        status: STATUS_PAYMENT_PENDING,
+        status: newStatus,
         bookedBy: booking.bookedBy,
         updatedBy
       },
       { transaction: t }
     );
 
-    // for a booking in waiting status, there should be no existing transaction
-    const bookedBy = booking.bookedBy || booking.cardno;
-    const card = await validateCard(bookedBy);
-    await createPendingTransaction(
-      card,
-      booking,
-      TYPE_ADHYAYAN,
-      adhyayan.amount,
-      updatedBy,
-      t
-    );
+    // Only create a pending transaction if the shibir has charges
+    if (!isFree) {
+      // for a booking in waiting status, there should be no existing transaction
+      const bookedBy = booking.bookedBy || booking.cardno;
+      const card = await validateCard(bookedBy);
+      await createPendingTransaction(
+        card,
+        booking,
+        TYPE_ADHYAYAN,
+        adhyayan.amount,
+        updatedBy,
+        t
+      );
+    }
+
     log.info('adhyayan_waitlist_promoted', {
       bookingid: booking.bookingid,
       cardno: booking.cardno,
-      shibir_id: adhyayan.id
+      shibir_id: adhyayan.id,
+      status: newStatus,
+      isFree
     });
     await createShibirAttendanceEntry(booking, { username: updatedBy }, t);
     return booking;
@@ -808,4 +818,479 @@ export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
     where: { bookingid: bookingId },
     transaction
   });
+}
+
+export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, location = RESEARCH_CENTRE }) {
+  const query = `
+    SELECT 
+      s.id AS shibir_id,
+      s.name,
+      s.speaker,
+      s.location,
+      DATE_FORMAT(s.start_date, '%Y-%m-%d') AS start_date,
+      DATE_FORMAT(s.end_date, '%Y-%m-%d') AS end_date,
+      DATEDIFF(s.end_date, s.start_date) + 1 AS no_of_days,
+      CASE 
+        WHEN COALESCE(cond.total_conducted, 0) > 0 THEN cond.total_conducted
+        ELSE COALESCE(sess.total_configured, 0)
+      END AS total_regular_sessions,
+      COALESCE(part.total_registered, 0) AS total_registered,
+      CASE 
+        WHEN COALESCE(cond.total_conducted, 0) = 0 AND COALESCE(sess.total_configured, 0) = 0 THEN 0
+        ELSE COALESCE(part.total_attended, 0)
+      END AS total_attended,
+      CASE 
+        WHEN COALESCE(cond.total_conducted, 0) = 0 AND COALESCE(sess.total_configured, 0) = 0 THEN 0
+        ELSE COALESCE(part.total_partial, 0)
+      END AS total_partial,
+      CASE 
+        WHEN COALESCE(cond.total_conducted, 0) = 0 AND COALESCE(sess.total_configured, 0) = 0 THEN 0
+        ELSE COALESCE(part.total_absent, 0)
+      END AS total_absent,
+      CASE 
+        WHEN COALESCE(cond.total_conducted, 0) > 0 THEN 1 
+        ELSE 0 
+      END AS has_attendance_data
+    FROM shibir_db s
+    LEFT JOIN (
+      SELECT shibir_id, COUNT(*) AS total_configured
+      FROM shibir_sessions 
+      WHERE type = 'regular' 
+      GROUP BY shibir_id
+    ) sess ON sess.shibir_id = s.id
+    LEFT JOIN (
+      SELECT ses.shibir_id, COUNT(DISTINCT r.session_number) AS total_conducted
+      FROM shibir_attendance_records r
+      JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
+      WHERE r.attended = 1
+      GROUP BY ses.shibir_id
+    ) cond ON cond.shibir_id = s.id
+    LEFT JOIN (
+      SELECT 
+        p.shibir_id,
+        COUNT(*) AS total_registered,
+        SUM(CASE WHEN p.attended_count = p.effective_sessions AND p.effective_sessions > 0 THEN 1 ELSE 0 END) AS total_attended,
+        SUM(CASE WHEN p.attended_count > 0 AND p.attended_count < p.effective_sessions THEN 1 ELSE 0 END) AS total_partial,
+        SUM(CASE WHEN p.attended_count = 0 THEN 1 ELSE 0 END) AS total_absent
+      FROM (
+        SELECT 
+          b.shibir_id,
+          b.bookingid,
+          CASE 
+            WHEN COALESCE(c_sub.total_conducted, 0) > 0 THEN c_sub.total_conducted
+            ELSE COALESCE(ses_sub.total_configured, 0)
+          END AS effective_sessions,
+          COUNT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END) AS attended_count
+        FROM shibir_booking_db b
+        LEFT JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id AND ses.type = 'regular'
+        LEFT JOIN (
+          SELECT shibir_id, COUNT(*) AS total_configured
+          FROM shibir_sessions 
+          WHERE type = 'regular' 
+          GROUP BY shibir_id
+        ) ses_sub ON ses_sub.shibir_id = b.shibir_id
+        LEFT JOIN (
+          SELECT ses2.shibir_id, COUNT(DISTINCT r2.session_number) AS total_conducted
+          FROM shibir_attendance_records r2
+          JOIN shibir_sessions ses2 ON ses2.shibir_id = r2.shibir_id AND ses2.session_number = r2.session_number AND ses2.type = 'regular'
+          WHERE r2.attended = 1
+          GROUP BY ses2.shibir_id
+        ) c_sub ON c_sub.shibir_id = b.shibir_id
+        LEFT JOIN shibir_attendance_records r 
+          ON r.bookingid = b.bookingid 
+          AND r.session_number = ses.session_number
+        WHERE b.status = :statusConfirmed
+        GROUP BY b.shibir_id, b.bookingid, c_sub.total_conducted, ses_sub.total_configured
+      ) p
+      GROUP BY p.shibir_id
+    ) part ON part.shibir_id = s.id
+    WHERE s.location = :location
+      AND s.end_date <= CURRENT_DATE
+      AND s.start_date >= :startDate
+      AND s.start_date <= :endDate
+      AND s.status != 'deleted'
+      AND (s.speaker IS NULL OR LOWER(TRIM(s.speaker)) NOT LIKE '%nilesh%')
+    ORDER BY s.start_date DESC;
+  `;
+
+  const results = await database.query(query, {
+    replacements: {
+      location,
+      startDate,
+      endDate,
+      statusConfirmed: STATUS_CONFIRMED
+    },
+    type: Sequelize.QueryTypes.SELECT
+  });
+
+  return results.map((row) => ({
+    shibir_id: Number(row.shibir_id),
+    name: row.name,
+    speaker: row.speaker,
+    location: row.location,
+    start_date: row.start_date,
+    end_date: row.end_date,
+    no_of_days: Number(row.no_of_days),
+    total_regular_sessions: Number(row.total_regular_sessions),
+    has_attendance_data: Boolean(Number(row.has_attendance_data)),
+    total_registered: Number(row.total_registered),
+    total_attended: Number(row.total_attended),
+    total_partial: Number(row.total_partial),
+    total_absent: Number(row.total_absent)
+  }));
+}
+
+export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
+  const shibir = await ShibirDb.findByPk(shibirId);
+  if (!shibir) {
+    throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  if (shibir.speaker && shibir.speaker.toLowerCase().includes('nilesh')) {
+    throw new ApiError(400, 'Attendance report is not available for this speaker');
+  }
+
+  // Smart detection of effective regular sessions:
+  // Count regular sessions that actually had attendance marked (r.attended = 1).
+  // If no attendance records exist for any session, fall back to configured regular sessions count.
+  const conductedSessionsResult = await database.query(
+    `SELECT COUNT(DISTINCT r.session_number) AS total_conducted
+     FROM shibir_attendance_records r
+     JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
+     WHERE r.shibir_id = :shibirId AND r.attended = 1`,
+    {
+      replacements: { shibirId },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
+
+  const conductedCount = Number(conductedSessionsResult[0]?.total_conducted || 0);
+  const totalConfiguredSessions = await ShibirSession.count({
+    where: { shibir_id: shibirId, type: 'regular' }
+  });
+
+  const effectiveRegularSessions = conductedCount > 0 ? conductedCount : totalConfiguredSessions;
+
+  let whereTypeClause = '';
+  if (type === 'attended') {
+    if (effectiveRegularSessions === 0) {
+      return { shibir, totalRegularSessions: 0, participants: [] };
+    }
+    whereTypeClause = 'AND p.attended_regular_sessions = :effectiveRegularSessions AND :effectiveRegularSessions > 0';
+  } else if (type === 'partial') {
+    if (effectiveRegularSessions === 0) {
+      return { shibir, totalRegularSessions: 0, participants: [] };
+    }
+    whereTypeClause = 'AND p.attended_regular_sessions > 0 AND p.attended_regular_sessions < :effectiveRegularSessions';
+  } else if (type === 'absent') {
+    whereTypeClause = 'AND p.attended_regular_sessions = 0';
+  } else if (type === 'registered' || type === 'complete') {
+    whereTypeClause = '';
+  } else {
+    throw new ApiError(400, "Invalid type. Must be one of: 'registered', 'attended', 'partial', 'absent', 'complete'");
+  }
+
+  const query = `
+    SELECT 
+      b.cardno,
+      c.issuedto AS name,
+      c.mobno,
+      c.center,
+      c.gender,
+      c.res_status,
+      p.attended_regular_sessions,
+      p.attended_session_numbers,
+      :effectiveRegularSessions AS total_regular_sessions,
+      CASE 
+        WHEN :effectiveRegularSessions = 0 THEN 'N/A'
+        ELSE CONCAT(p.attended_regular_sessions, ' of ', :effectiveRegularSessions, ' sessions')
+      END AS attendance_summary
+    FROM (
+      SELECT 
+        b.bookingid,
+        b.cardno,
+        COUNT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END) AS attended_regular_sessions,
+        GROUP_CONCAT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END ORDER BY ses.session_number) AS attended_session_numbers
+      FROM shibir_booking_db b
+      JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id AND ses.type = 'regular'
+      LEFT JOIN shibir_attendance_records r 
+        ON r.bookingid = b.bookingid 
+        AND r.session_number = ses.session_number
+      WHERE b.shibir_id = :shibirId AND b.status = :statusConfirmed
+      GROUP BY b.bookingid, b.cardno
+    ) p
+    JOIN shibir_booking_db b ON b.bookingid = p.bookingid
+    LEFT JOIN card_db c ON c.cardno = b.cardno
+    WHERE 1=1 ${whereTypeClause}
+    ORDER BY c.issuedto ASC, b.cardno ASC;
+  `;
+
+  const participants = await database.query(query, {
+    replacements: {
+      shibirId,
+      statusConfirmed: STATUS_CONFIRMED,
+      effectiveRegularSessions
+    },
+    type: Sequelize.QueryTypes.SELECT
+  });
+
+  let regularSessions;
+  if (conductedCount > 0) {
+    regularSessions = await database.query(
+      `SELECT DISTINCT ses.session_number, ses.date, ses.start_time
+       FROM shibir_sessions ses
+       JOIN shibir_attendance_records r 
+         ON r.shibir_id = ses.shibir_id 
+        AND r.session_number = ses.session_number 
+        AND ses.type = 'regular'
+       WHERE ses.shibir_id = :shibirId AND r.attended = 1
+       ORDER BY ses.session_number ASC`,
+      {
+        replacements: { shibirId },
+        type: Sequelize.QueryTypes.SELECT
+      }
+    );
+  } else {
+    regularSessions = await ShibirSession.findAll({
+      where: { shibir_id: shibirId, type: 'regular' },
+      order: [['session_number', 'ASC']]
+    });
+  }
+
+  return {
+    shibir: {
+      id: shibir.id,
+      name: shibir.name,
+      speaker: shibir.speaker,
+      location: shibir.location,
+      start_date: shibir.start_date,
+      end_date: shibir.end_date,
+      total_regular_sessions: effectiveRegularSessions
+    },
+    totalRegularSessions: effectiveRegularSessions,
+    regularSessions: regularSessions.map((s) => ({
+      session_number: Number(s.session_number),
+      date: s.date,
+      start_time: s.start_time
+    })),
+    participants: participants.map((p) => {
+      const attended = Number(p.attended_regular_sessions);
+      const total = effectiveRegularSessions;
+      let category = 'Absent';
+      if (total > 0) {
+        if (attended === total) {
+          category = 'Full Attended';
+        } else if (attended > 0) {
+          category = 'Partially Attended';
+        } else {
+          category = 'Absent';
+        }
+      } else {
+        category = 'Registered';
+      }
+
+      return {
+        cardno: p.cardno,
+        name: p.name || '',
+        mobno: p.mobno || '',
+        center: p.center || '',
+        gender: p.gender || '',
+        res_status: p.res_status || '',
+        attended_regular_sessions: attended,
+        total_regular_sessions: total,
+        attended_session_numbers: p.attended_session_numbers
+          ? p.attended_session_numbers.split(',').map(Number)
+          : [],
+        category,
+        attendance_summary: p.attendance_summary
+      };
+    })
+  };
+}
+
+export async function getShibirRegularSessionsManagement({ shibirId }) {
+  const shibir = await ShibirDb.findByPk(shibirId);
+  if (!shibir) {
+    throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  const sessions = await ShibirSession.findAll({
+    where: { shibir_id: shibirId, type: 'regular' },
+    order: [['session_number', 'ASC']]
+  });
+
+  const attendanceCounts = await database.query(
+    `SELECT session_number, COUNT(*) AS count
+     FROM shibir_attendance_records
+     WHERE shibir_id = :shibirId AND attended = 1
+     GROUP BY session_number`,
+    {
+      replacements: { shibirId },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
+
+  const countMap = {};
+  attendanceCounts.forEach((r) => {
+    countMap[r.session_number] = Number(r.count);
+  });
+
+  const sessionDetails = sessions.map((s) => {
+    const attendees = countMap[s.session_number] || 0;
+    return {
+      id: s.id,
+      session_number: s.session_number,
+      date: s.date,
+      start_time: s.start_time,
+      attendance_count: attendees,
+      can_remove: attendees === 0
+    };
+  });
+
+  return {
+    shibir: {
+      id: shibir.id,
+      name: shibir.name,
+      speaker: shibir.speaker,
+      start_date: shibir.start_date,
+      end_date: shibir.end_date
+    },
+    total_sessions: sessions.length,
+    sessions: sessionDetails
+  };
+}
+
+export async function removeUnusedShibirSession({ shibirId, sessionNumber, adminUsername, log = logger, transaction }) {
+  const session = await ShibirSession.findOne({
+    where: {
+      shibir_id: shibirId,
+      session_number: sessionNumber,
+      type: 'regular'
+    },
+    transaction
+  });
+
+  if (!session) {
+    throw new ApiError(404, `Regular session ${sessionNumber} not found for this Adhyayan`);
+  }
+
+  // Safety check: ensure no marked attendance exists
+  const attendanceCount = await ShibirAttendanceRecord.count({
+    where: {
+      shibir_id: shibirId,
+      session_number: sessionNumber,
+      attended: 1
+    },
+    transaction
+  });
+
+  if (attendanceCount > 0) {
+    log.warn('attempted_remove_session_with_attendance', {
+      shibirId,
+      sessionNumber,
+      attendanceCount,
+      adminUsername
+    });
+    throw new ApiError(
+      400,
+      `Cannot remove Session ${sessionNumber}: ${attendanceCount} participant(s) already have attendance marked for this session.`
+    );
+  }
+
+  // Remove any empty attendance record entries for this session
+  await ShibirAttendanceRecord.destroy({
+    where: {
+      shibir_id: shibirId,
+      session_number: sessionNumber
+    },
+    transaction
+  });
+
+  // Delete the regular session
+  await session.destroy({ transaction });
+
+  log.info('shibir_regular_session_removed', {
+    shibirId,
+    sessionNumber,
+    adminUsername
+  });
+
+  return { success: true, message: `Session ${sessionNumber} removed successfully.` };
+}
+
+export async function restoreDefaultShibirSessions({ shibirId, adminUsername, log = logger, transaction }) {
+  const shibir = await ShibirDb.findByPk(shibirId, { transaction });
+  if (!shibir) {
+    throw new ApiError(404, 'Adhyayan not found');
+  }
+
+  await initializeShibirSessions(shibir, transaction);
+
+  log.info('shibir_default_sessions_restored', {
+    shibirId,
+    adminUsername
+  });
+
+  return { success: true, message: 'Default sessions restored successfully.' };
+}
+
+export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location = RESEARCH_CENTRE }) {
+  const query = `
+    SELECT 
+      s.id AS shibir_id,
+      s.name AS shibir_name,
+      s.speaker,
+      DATE_FORMAT(s.start_date, '%Y-%m-%d') AS start_date,
+      DATE_FORMAT(s.end_date, '%Y-%m-%d') AS end_date,
+      DATEDIFF(s.end_date, s.start_date) + 1 AS no_of_days,
+      b.cardno,
+      COALESCE(c.issuedto, '') AS name,
+      COALESCE(c.mobno, '') AS mobno,
+      COALESCE(c.center, '') AS center,
+      COALESCE(c.gender, '') AS gender,
+      COALESCE(c.res_status, '') AS res_status
+    FROM shibir_db s
+    JOIN shibir_booking_db b ON b.shibir_id = s.id AND b.status = :statusConfirmed
+    LEFT JOIN card_db c ON c.cardno = b.cardno
+    LEFT JOIN (
+      SELECT r.bookingid, COUNT(DISTINCT r.session_number) AS attended_count
+      FROM shibir_attendance_records r
+      JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
+      WHERE r.attended = 1
+      GROUP BY r.bookingid
+    ) att ON att.bookingid = b.bookingid
+    WHERE s.location = :location
+      AND s.end_date <= CURRENT_DATE
+      AND s.start_date >= :startDate
+      AND s.start_date <= :endDate
+      AND s.status != 'deleted'
+      AND (s.speaker IS NULL OR LOWER(TRIM(s.speaker)) NOT LIKE '%nilesh%')
+      AND COALESCE(att.attended_count, 0) = 0
+    ORDER BY s.start_date DESC, c.issuedto ASC, b.cardno ASC;
+  `;
+
+  const absentees = await database.query(query, {
+    replacements: {
+      location,
+      startDate,
+      endDate,
+      statusConfirmed: STATUS_CONFIRMED
+    },
+    type: Sequelize.QueryTypes.SELECT
+  });
+
+  return absentees.map((r) => ({
+    shibir_id: Number(r.shibir_id),
+    shibir_name: r.shibir_name,
+    speaker: r.speaker,
+    start_date: r.start_date,
+    end_date: r.end_date,
+    no_of_days: Number(r.no_of_days),
+    cardno: r.cardno,
+    name: r.name,
+    mobno: r.mobno ? String(r.mobno) : '',
+    center: r.center,
+    gender: r.gender,
+    res_status: r.res_status
+  }));
 }
