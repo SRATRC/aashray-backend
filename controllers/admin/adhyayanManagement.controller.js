@@ -977,7 +977,8 @@ export const markAdhyayanAttendance = async (req, res) => {
 
   const session = await ShibirSession.findOne({
     where: { shibir_id, session_number: sessionNo },
-    transaction: t
+    transaction: t,
+    lock: t.LOCK.SHARE
   });
 
   if (!session) {
@@ -1338,7 +1339,8 @@ export const toggleAttendance = async (req, res) => {
 
   const session = await ShibirSession.findOne({
     where: { shibir_id, session_number: sessionNo },
-    transaction: t
+    transaction: t,
+    lock: t.LOCK.SHARE
   });
 
   if (!session) {
@@ -1420,7 +1422,8 @@ export const bulkToggleAttendance = async (req, res) => {
 
   const session = await ShibirSession.findOne({
     where: { shibir_id, session_number: sessionNo },
-    transaction: t
+    transaction: t,
+    lock: t.LOCK.SHARE
   });
 
   if (!session) {
@@ -1674,21 +1677,26 @@ function resolveReportDateRange(query) {
     if (moment(start_date).isAfter(moment(end_date))) {
       throw new ApiError(400, 'start_date cannot be greater than end_date');
     }
+    if (moment(end_date).diff(moment(start_date), 'days') > 366) {
+      throw new ApiError(400, 'Custom date range cannot exceed 12 months');
+    }
     return { startDate: start_date, endDate: end_date, range: 'custom' };
   }
 
+  const todayIST = moment().tz('Asia/Kolkata');
+
   if (range === '6m') {
     return {
-      startDate: moment().subtract(6, 'months').format('YYYY-MM-DD'),
-      endDate: moment().format('YYYY-MM-DD'),
+      startDate: todayIST.clone().subtract(6, 'months').format('YYYY-MM-DD'),
+      endDate: todayIST.format('YYYY-MM-DD'),
       range: '6m'
     };
   }
 
   if (range === '3m') {
     return {
-      startDate: moment().subtract(3, 'months').format('YYYY-MM-DD'),
-      endDate: moment().format('YYYY-MM-DD'),
+      startDate: todayIST.clone().subtract(3, 'months').format('YYYY-MM-DD'),
+      endDate: todayIST.format('YYYY-MM-DD'),
       range: '3m'
     };
   }
