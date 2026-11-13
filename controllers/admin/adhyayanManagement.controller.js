@@ -38,11 +38,18 @@ import {
   bookAdhyayanForMumukshusAdmin,
   createShibirAttendanceEntry,
   resetShibirAttendance,
-  initializeShibirSessions
+  initializeShibirSessions,
+  getFeedbackStats,
+  getPastAdhyayanAttendanceSummary,
+  getPastAdhyayanParticipantsByType,
+  getShibirRegularSessionsManagement,
+  removeUnusedShibirSession,
+  restoreDefaultShibirSessions,
+  getAllPastAdhyayanAbsentees
 } from '../../helpers/adhyayanBooking.helper.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import { sendUnifiedWhatsApp } from '../../helpers/whatsapp.helper.js';
-import { getFeedbackStats } from '../../helpers/adhyayanBooking.helper.js';
+import XLSX from 'xlsx';
 import {
   sendDualUserNotifications,
   sendPushNotifications
@@ -491,6 +498,7 @@ export const updateAdhyayan = async (req, res) => {
   }
 
   const previousWhatsappLink = adhyayan.whatsapp_link;
+  const previousLocation = adhyayan.location;
   const t = await database.transaction();
   try {
     await adhyayan.update({
@@ -510,8 +518,13 @@ export const updateAdhyayan = async (req, res) => {
     }, { transaction: t });
 
     // Sync sessions immediately on date/duration changes
+    const datesChanged = !oldStartDate.isSame(newStartDate, 'day') || !oldEndDate.isSame(newEndDate, 'day');
+    const locationChanged = previousLocation !== location;
+
     if (location === RESEARCH_CENTRE) {
-      await initializeShibirSessions({ id: adhyayan.id, start_date, end_date }, t);
+      if (datesChanged || locationChanged) {
+        await initializeShibirSessions({ id: adhyayan.id, start_date, end_date }, t);
+      }
     } else {
       // If changed away from Research Centre, clear sessions and attendance records
       await ShibirSession.destroy({ where: { shibir_id: adhyayan.id }, transaction: t });
@@ -661,7 +674,7 @@ export const adhyayanStatusUpdate = async (req, res) => {
         }
       }
 
-      if (!transaction) {
+      if (!transaction && Number(adhyayan.amount) > 0) {
         transaction = await createPendingTransaction(
           bookedByCard,
           booking,
@@ -674,8 +687,9 @@ export const adhyayanStatusUpdate = async (req, res) => {
       }
 
       if (
-        transaction.status === STATUS_PAYMENT_PENDING ||
-        transaction.status === STATUS_CASH_PENDING
+        transaction &&
+        (transaction.status === STATUS_PAYMENT_PENDING ||
+        transaction.status === STATUS_CASH_PENDING)
       ) {
         await transaction.update(
           {
@@ -705,38 +719,44 @@ export const adhyayanStatusUpdate = async (req, res) => {
           throw new ApiError(400, ERR_ADHYAYAN_NO_SEATS_AVAILABLE);
         }
 
-        if (!transaction) {
-          transaction = await createPendingTransaction(
-            bookedByCard,
-            booking,
-            TYPE_ADHYAYAN,
-            adhyayan.amount,
-            req.user.username,
-            t,
-            true
-          );
-        }
-
-        // After applying credits, if the transaction is complete
-        // then confirm the booking.
-        if (transaction.status == STATUS_PAYMENT_COMPLETED) {
+        if (Number(adhyayan.amount) === 0) {
+          // Free shibir bookings are confirmed directly
           newBookingStatus = STATUS_CONFIRMED;
           await ensureAttendanceEntry(booking, req.user, t);
+        } else {
+          if (!transaction) {
+            transaction = await createPendingTransaction(
+              bookedByCard,
+              booking,
+              TYPE_ADHYAYAN,
+              adhyayan.amount,
+              req.user.username,
+              t,
+              true
+            );
+          }
 
-          sendDualUserNotifications({
-            primary: {
-              cardno: booking.cardno,
-              title: 'Adhyayan Booking Confirmed',
-              body: 'Your adhyayan booking has been confirmed.'
-            },
-            bookedBy: booking.bookedBy && {
-              token: bookedByCard.token,
-              title: 'Adhyayan Booking Confirmed',
-              body: `Adhyayan booking for ${booking.CardDb.issuedto.split(' ')[0]
-                } has been confirmed.`
-            },
-            screen: '/bookings'
-          });
+          // After applying credits, if the transaction is complete
+          // then confirm the booking.
+          if (transaction.status == STATUS_PAYMENT_COMPLETED) {
+            newBookingStatus = STATUS_CONFIRMED;
+            await ensureAttendanceEntry(booking, req.user, t);
+
+            sendDualUserNotifications({
+              primary: {
+                cardno: booking.cardno,
+                title: 'Adhyayan Booking Confirmed',
+                body: 'Your adhyayan booking has been confirmed.'
+              },
+              bookedBy: booking.bookedBy && {
+                token: bookedByCard.token,
+                title: 'Adhyayan Booking Confirmed',
+                body: `Adhyayan booking for ${booking.CardDb.issuedto.split(' ')[0]
+                  } has been confirmed.`
+              },
+              screen: '/bookings'
+            });
+          }
         }
       }
 
@@ -963,7 +983,8 @@ export const markAdhyayanAttendance = async (req, res) => {
 
   const session = await ShibirSession.findOne({
     where: { shibir_id, session_number: sessionNo },
-    transaction: t
+    transaction: t,
+    lock: t.LOCK.SHARE
   });
 
   if (!session) {
@@ -1324,7 +1345,8 @@ export const toggleAttendance = async (req, res) => {
 
   const session = await ShibirSession.findOne({
     where: { shibir_id, session_number: sessionNo },
-    transaction: t
+    transaction: t,
+    lock: t.LOCK.SHARE
   });
 
   if (!session) {
@@ -1406,7 +1428,8 @@ export const bulkToggleAttendance = async (req, res) => {
 
   const session = await ShibirSession.findOne({
     where: { shibir_id, session_number: sessionNo },
-    transaction: t
+    transaction: t,
+    lock: t.LOCK.SHARE
   });
 
   if (!session) {
@@ -1627,7 +1650,7 @@ export const sendAdhyayanGroupReminder = async (req, res) => {
         missingBookings = bookings.filter(b => b.CardDb && missingCardNos.has(String(b.CardDb.cardno)));
       }
     } catch (auditErr) {
-      console.error('[Batch Reminder] Group reconciliation failed, sending to all bookings:', auditErr.message);
+      req.log.error('batch_reminder_group_reconciliation_failed', { error: auditErr.message });
     }
   }
 
@@ -1641,5 +1664,447 @@ export const sendAdhyayanGroupReminder = async (req, res) => {
 
   return res.status(200).send({
     message: `Reminder batch dispatched to ${sentCount} un-joined participants`
+  });
+};
+
+function resolveReportDateRange(query) {
+  const { range = '3m', start_date, end_date } = query;
+
+  if (start_date || end_date) {
+    if (!start_date || !end_date) {
+      throw new ApiError(400, 'Both start_date and end_date are required for a custom date range');
+    }
+    if (!moment(start_date, 'YYYY-MM-DD', true).isValid()) {
+      throw new ApiError(400, 'Invalid start_date format. Expected YYYY-MM-DD');
+    }
+    if (!moment(end_date, 'YYYY-MM-DD', true).isValid()) {
+      throw new ApiError(400, 'Invalid end_date format. Expected YYYY-MM-DD');
+    }
+    if (moment(start_date).isAfter(moment(end_date))) {
+      throw new ApiError(400, 'start_date cannot be greater than end_date');
+    }
+    if (moment(end_date).diff(moment(start_date), 'days') > 366) {
+      throw new ApiError(400, 'Custom date range cannot exceed 12 months');
+    }
+    return { startDate: start_date, endDate: end_date, range: 'custom' };
+  }
+
+  const todayIST = moment().tz('Asia/Kolkata');
+
+  if (range === '6m') {
+    return {
+      startDate: todayIST.clone().subtract(6, 'months').format('YYYY-MM-DD'),
+      endDate: todayIST.format('YYYY-MM-DD'),
+      range: '6m'
+    };
+  }
+
+  if (range === '3m') {
+    return {
+      startDate: todayIST.clone().subtract(3, 'months').format('YYYY-MM-DD'),
+      endDate: todayIST.format('YYYY-MM-DD'),
+      range: '3m'
+    };
+  }
+
+  throw new ApiError(400, `Invalid range '${range}'. Allowed ranges: '3m', '6m', or specify 'start_date' and 'end_date'`);
+}
+
+export const fetchPastAdhyayanAttendanceReport = async (req, res) => {
+  const { export: exportType } = req.query;
+  const { startDate, endDate, range } = resolveReportDateRange(req.query);
+  req.log.info('fetch_past_adhyayan_attendance_report_start', { range, startDate, endDate, exportType });
+
+  const adhyayans = await getPastAdhyayanAttendanceSummary({
+    startDate,
+    endDate,
+    location: RESEARCH_CENTRE
+  });
+
+  if (exportType === 'excel') {
+    req.log.info('export_past_adhyayan_attendance_report_excel', { count: adhyayans.length });
+    const rows = adhyayans.map((item) => ({
+      'Shibir ID': item.shibir_id,
+      Topic: item.name,
+      Speaker: item.speaker,
+      'Start Date': item.start_date,
+      'End Date': item.end_date,
+      Days: item.no_of_days,
+      'Regular Sessions': item.has_attendance_data ? item.total_regular_sessions : 'N/A',
+      'Total Registered': item.total_registered,
+      'Full Attended': item.has_attendance_data ? item.total_attended : 'N/A',
+      'Partially Attended': item.has_attendance_data ? item.total_partial : 'N/A',
+      Absent: item.has_attendance_data ? item.total_absent : 'N/A'
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Past Adhyayans');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="past_adhyayan_attendance_${startDate}_to_${endDate}.xlsx"`
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    return res.send(buffer);
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      filter: {
+        range,
+        start_date: startDate,
+        end_date: endDate,
+        location: RESEARCH_CENTRE
+      },
+      adhyayans
+    }
+  });
+};
+
+export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
+  const { shibir_id } = req.params;
+  const { type = 'registered', export: exportType } = req.query;
+  const shibirId = Number(shibir_id);
+
+  if (!shibirId || isNaN(shibirId)) {
+    throw new ApiError(400, 'Valid shibir_id is required');
+  }
+
+  const validTypes = ['registered', 'attended', 'partial', 'absent', 'complete'];
+  if (!validTypes.includes(type)) {
+    throw new ApiError(400, `Invalid type. Allowed types: ${validTypes.join(', ')}`);
+  }
+
+  req.log.info('fetch_past_adhyayan_participants_report_start', { shibirId, type, exportType });
+
+  const result = await getPastAdhyayanParticipantsByType({
+    shibirId,
+    type
+  });
+
+  if (exportType === 'excel') {
+    req.log.info('export_past_adhyayan_participants_report_excel', {
+      shibirId,
+      type,
+      count: result.participants.length
+    });
+
+    const wb = XLSX.utils.book_new();
+
+    if (type === 'complete') {
+      const allParticipants = result.participants;
+      const fullAttended = allParticipants.filter((p) => p.category === 'Full Attended');
+      const partialAttended = allParticipants.filter((p) => p.category === 'Partially Attended');
+      const absent = allParticipants.filter((p) => p.category === 'Absent');
+
+      // Single Sheet: Top Summary followed by Participant List with Session Matrix
+      const sessionHeaders = (result.regularSessions || []).map(
+        (s) => `Session ${s.session_number}`
+      );
+
+      const tableHeaders = [
+        '#',
+        'Card No',
+        'Name',
+        'Mobile',
+        'Center',
+        'Gender',
+        'Resident Status',
+        'Category',
+        ...sessionHeaders,
+        'Attendance Summary'
+      ];
+
+      const sheetData = [
+        ['Adhyayan Attendance Report'],
+        [],
+        ['Topic', result.shibir.name || '', '', 'Total Registered', allParticipants.length],
+        ['Speaker', result.shibir.speaker || '', '', 'Full Attended', fullAttended.length],
+        ['Dates', `${result.shibir.start_date} to ${result.shibir.end_date}`, '', 'Partially Attended', partialAttended.length],
+        ['Regular Sessions', result.totalRegularSessions, '', 'Absent', absent.length],
+        [],
+        tableHeaders
+      ];
+
+      allParticipants.forEach((p, idx) => {
+        const sessionValues = (result.regularSessions || []).map((s) => {
+          const attended = (p.attended_session_numbers || []).includes(s.session_number);
+          return attended ? 'P' : 'A';
+        });
+
+        sheetData.push([
+          idx + 1,
+          { t: 's', v: p.cardno ? String(p.cardno) : '' },
+          p.name || '',
+          { t: 's', v: p.mobno ? String(p.mobno) : '' },
+          p.center || '',
+          p.gender || '',
+          p.res_status || '',
+          p.category || '',
+          ...sessionValues,
+          p.attendance_summary || ''
+        ]);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+      // Merge cells in top summary so Topic, Speaker, Dates don't get truncated
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, // Title: A1 to E1
+        { s: { r: 2, c: 1 }, e: { r: 2, c: 2 } }, // Topic: B3 to C3
+        { s: { r: 3, c: 1 }, e: { r: 3, c: 2 } }, // Speaker: B4 to C4
+        { s: { r: 4, c: 1 }, e: { r: 4, c: 2 } }, // Dates: B5 to C5
+        { s: { r: 5, c: 1 }, e: { r: 5, c: 2 } }  // Regular Sessions: B6 to C6
+      ];
+
+      const sessionCols = (result.regularSessions || []).map(() => ({ wch: 11 }));
+      ws['!cols'] = [
+        { wch: 5 },  // #
+        { wch: 14 }, // Card No
+        { wch: 26 }, // Name
+        { wch: 16 }, // Mobile
+        { wch: 18 }, // Center
+        { wch: 8 },  // Gender
+        { wch: 16 }, // Resident Status
+        { wch: 20 }, // Category
+        ...sessionCols,
+        { wch: 22 }  // Attendance Summary
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Attendance Report');
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="shibir_${shibirId}_attendance_report.xlsx"`
+      );
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      return res.send(buffer);
+    }
+
+    const rows = [
+      ['#', 'Card No', 'Name', 'Mobile', 'Center', 'Gender', 'Resident Status', 'Attendance Summary']
+    ];
+
+    result.participants.forEach((p, idx) => {
+      rows.push([
+        idx + 1,
+        { t: 's', v: p.cardno ? String(p.cardno) : '' },
+        p.name || '',
+        { t: 's', v: p.mobno ? String(p.mobno) : '' },
+        p.center || '',
+        p.gender || '',
+        p.res_status || '',
+        p.attendance_summary || ''
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 5 },  // #
+      { wch: 14 }, // Card No
+      { wch: 26 }, // Name
+      { wch: 16 }, // Mobile
+      { wch: 18 }, // Center
+      { wch: 8 },  // Gender
+      { wch: 16 }, // Resident Status
+      { wch: 22 }  // Attendance Summary
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Participants');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="shibir_${shibirId}_${type}_participants.xlsx"`
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    return res.send(buffer);
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      shibir: result.shibir,
+      filter_type: type,
+      total_count: result.participants.length,
+      regular_sessions: result.regularSessions || [],
+      participants: result.participants
+    }
+  });
+};
+
+export const fetchShibirSessionsManagement = async (req, res) => {
+  const { shibir_id } = req.params;
+  const shibirId = Number(shibir_id);
+
+  if (!shibirId || isNaN(shibirId)) {
+    throw new ApiError(400, 'Valid shibir_id is required');
+  }
+
+  req.log.info('fetch_shibir_sessions_management_start', { shibirId });
+  const data = await getShibirRegularSessionsManagement({ shibirId });
+
+  return res.status(200).json({
+    success: true,
+    data
+  });
+};
+
+export const deleteShibirSession = async (req, res) => {
+  const { shibir_id, session_number } = req.params;
+  const shibirId = Number(shibir_id);
+  const sessionNumber = Number(session_number);
+
+  if (!shibirId || isNaN(shibirId)) {
+    throw new ApiError(400, 'Valid shibir_id is required');
+  }
+  if (!sessionNumber || isNaN(sessionNumber)) {
+    throw new ApiError(400, 'Valid session_number is required');
+  }
+
+  req.log.info('delete_shibir_session_start', {
+    shibirId,
+    sessionNumber,
+    admin: req.user?.username
+  });
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const result = await removeUnusedShibirSession({
+    shibirId,
+    sessionNumber,
+    adminUsername: req.user?.username,
+    log: req.log,
+    transaction: t
+  });
+
+  await t.commit();
+  req.transaction = null;
+
+  return res.status(200).json({
+    success: true,
+    message: result.message
+  });
+};
+
+export const fetchAllPastAdhyayanAbsentees = async (req, res) => {
+  const { export: exportType } = req.query;
+  const { startDate, endDate, range } = resolveReportDateRange(req.query);
+  req.log.info('fetch_all_past_adhyayan_absentees_start', { range, startDate, endDate, exportType });
+
+  const absentees = await getAllPastAdhyayanAbsentees({
+    startDate,
+    endDate,
+    location: RESEARCH_CENTRE
+  });
+
+  if (exportType === 'excel') {
+    req.log.info('export_all_past_adhyayan_absentees_excel', { count: absentees.length });
+
+    const rows = [
+      ['#', 'Adhyayan Topic', 'Dates', 'Days', 'Speaker', 'Card No', 'Name', 'Mobile', 'Center', 'Gender', 'Resident Status']
+    ];
+
+    absentees.forEach((a, idx) => {
+      rows.push([
+        idx + 1,
+        a.shibir_name || '',
+        `${a.start_date} to ${a.end_date}`,
+        a.no_of_days,
+        a.speaker || '',
+        { t: 's', v: a.cardno ? String(a.cardno) : '' },
+        a.name || '',
+        { t: 's', v: a.mobno ? String(a.mobno) : '' },
+        a.center || '',
+        a.gender || '',
+        a.res_status || ''
+      ]);
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 5 },  // #
+      { wch: 32 }, // Topic
+      { wch: 24 }, // Dates
+      { wch: 6 },  // Days
+      { wch: 20 }, // Speaker
+      { wch: 14 }, // Card No
+      { wch: 26 }, // Name
+      { wch: 16 }, // Mobile
+      { wch: 18 }, // Center
+      { wch: 8 },  // Gender
+      { wch: 16 }  // Resident Status
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'All Absentees');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="all_absentees_${startDate}_to_${endDate}.xlsx"`
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    return res.send(buffer);
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      filter: {
+        range,
+        start_date: startDate,
+        end_date: endDate,
+        location: RESEARCH_CENTRE
+      },
+      total_absentees: absentees.length,
+      absentees
+    }
+  });
+};
+
+export const restoreShibirSessions = async (req, res) => {
+  const { shibir_id } = req.params;
+  const shibirId = Number(shibir_id);
+
+  if (!shibirId || isNaN(shibirId)) {
+    throw new ApiError(400, 'Valid shibir_id is required');
+  }
+
+  req.log.info('restore_shibir_sessions_start', { shibirId, admin: req.user?.username });
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const result = await restoreDefaultShibirSessions({
+    shibirId,
+    adminUsername: req.user?.username,
+    log: req.log,
+    transaction: t
+  });
+
+  await t.commit();
+  req.transaction = null;
+
+  return res.status(200).json({
+    success: true,
+    message: result.message
   });
 };
