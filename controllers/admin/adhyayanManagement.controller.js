@@ -498,6 +498,7 @@ export const updateAdhyayan = async (req, res) => {
   }
 
   const previousWhatsappLink = adhyayan.whatsapp_link;
+  const previousLocation = adhyayan.location;
   const t = await database.transaction();
   try {
     await adhyayan.update({
@@ -518,7 +519,7 @@ export const updateAdhyayan = async (req, res) => {
 
     // Sync sessions immediately on date/duration changes
     const datesChanged = !oldStartDate.isSame(newStartDate, 'day') || !oldEndDate.isSame(newEndDate, 'day');
-    const locationChanged = adhyayan.location !== location;
+    const locationChanged = previousLocation !== location;
 
     if (location === RESEARCH_CENTRE) {
       if (datesChanged || locationChanged) {
