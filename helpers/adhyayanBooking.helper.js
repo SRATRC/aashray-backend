@@ -996,20 +996,30 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
 
   const effectiveRegularSessions = conductedCount > 0 ? conductedCount : totalConfiguredSessions;
 
+  const shibirSummary = {
+    id: shibir.id,
+    name: shibir.name,
+    speaker: shibir.speaker,
+    location: shibir.location,
+    start_date: shibir.start_date,
+    end_date: shibir.end_date,
+    total_regular_sessions: effectiveRegularSessions
+  };
+
   let whereTypeClause = '';
   if (type === 'attended') {
     if (effectiveRegularSessions === 0) {
-      return { shibir, totalRegularSessions: 0, regularSessions: [], participants: [] };
+      return { shibir: shibirSummary, totalRegularSessions: 0, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions = :effectiveRegularSessions AND :effectiveRegularSessions > 0';
   } else if (type === 'partial') {
     if (effectiveRegularSessions === 0) {
-      return { shibir, totalRegularSessions: 0, regularSessions: [], participants: [] };
+      return { shibir: shibirSummary, totalRegularSessions: 0, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions > 0 AND p.attended_regular_sessions < :effectiveRegularSessions';
   } else if (type === 'absent') {
     if (effectiveRegularSessions === 0) {
-      return { shibir, totalRegularSessions: 0, regularSessions: [], participants: [] };
+      return { shibir: shibirSummary, totalRegularSessions: 0, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions = 0';
   } else if (type === 'registered' || type === 'complete') {
@@ -1086,15 +1096,7 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
   }
 
   return {
-    shibir: {
-      id: shibir.id,
-      name: shibir.name,
-      speaker: shibir.speaker,
-      location: shibir.location,
-      start_date: shibir.start_date,
-      end_date: shibir.end_date,
-      total_regular_sessions: effectiveRegularSessions
-    },
+    shibir: shibirSummary,
     totalRegularSessions: effectiveRegularSessions,
     regularSessions: regularSessions.map((s) => ({
       session_number: Number(s.session_number),
@@ -1284,6 +1286,7 @@ export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location
       SELECT r.bookingid, COUNT(DISTINCT r.session_number) AS attended_count
       FROM shibir_attendance_records r
       JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
+      JOIN shibir_db s4 ON s4.id = ses.shibir_id AND s4.location = :location AND s4.start_date BETWEEN :startDate AND :endDate
       WHERE r.attended = 1
       GROUP BY r.bookingid
     ) att ON att.bookingid = b.bookingid
