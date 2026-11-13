@@ -1658,24 +1658,48 @@ export const sendAdhyayanGroupReminder = async (req, res) => {
   });
 };
 
-export const fetchPastAdhyayanAttendanceReport = async (req, res) => {
-  const { range = '3m', start_date, end_date, export: exportType } = req.query;
-  req.log.info('fetch_past_adhyayan_attendance_report_start', { range, start_date, end_date, exportType });
+function resolveReportDateRange(query) {
+  const { range = '3m', start_date, end_date } = query;
 
-  let startDate;
-  let endDate;
-
-  if (start_date && end_date) {
-    startDate = start_date;
-    endDate = end_date;
-  } else if (range === '6m') {
-    startDate = moment().subtract(6, 'months').format('YYYY-MM-DD');
-    endDate = moment().format('YYYY-MM-DD');
-  } else {
-    // Default 3 months
-    startDate = moment().subtract(3, 'months').format('YYYY-MM-DD');
-    endDate = moment().format('YYYY-MM-DD');
+  if (start_date || end_date) {
+    if (!start_date || !end_date) {
+      throw new ApiError(400, 'Both start_date and end_date are required for a custom date range');
+    }
+    if (!moment(start_date, 'YYYY-MM-DD', true).isValid()) {
+      throw new ApiError(400, 'Invalid start_date format. Expected YYYY-MM-DD');
+    }
+    if (!moment(end_date, 'YYYY-MM-DD', true).isValid()) {
+      throw new ApiError(400, 'Invalid end_date format. Expected YYYY-MM-DD');
+    }
+    if (moment(start_date).isAfter(moment(end_date))) {
+      throw new ApiError(400, 'start_date cannot be greater than end_date');
+    }
+    return { startDate: start_date, endDate: end_date, range: 'custom' };
   }
+
+  if (range === '6m') {
+    return {
+      startDate: moment().subtract(6, 'months').format('YYYY-MM-DD'),
+      endDate: moment().format('YYYY-MM-DD'),
+      range: '6m'
+    };
+  }
+
+  if (range === '3m') {
+    return {
+      startDate: moment().subtract(3, 'months').format('YYYY-MM-DD'),
+      endDate: moment().format('YYYY-MM-DD'),
+      range: '3m'
+    };
+  }
+
+  throw new ApiError(400, `Invalid range '${range}'. Allowed ranges: '3m', '6m', or specify 'start_date' and 'end_date'`);
+}
+
+export const fetchPastAdhyayanAttendanceReport = async (req, res) => {
+  const { export: exportType } = req.query;
+  const { startDate, endDate, range } = resolveReportDateRange(req.query);
+  req.log.info('fetch_past_adhyayan_attendance_report_start', { range, startDate, endDate, exportType });
 
   const adhyayans = await getPastAdhyayanAttendanceSummary({
     startDate,
@@ -1964,22 +1988,9 @@ export const deleteShibirSession = async (req, res) => {
 };
 
 export const fetchAllPastAdhyayanAbsentees = async (req, res) => {
-  const { range = '3m', start_date, end_date, export: exportType } = req.query;
-  req.log.info('fetch_all_past_adhyayan_absentees_start', { range, start_date, end_date, exportType });
-
-  let startDate;
-  let endDate;
-
-  if (start_date && end_date) {
-    startDate = start_date;
-    endDate = end_date;
-  } else if (range === '6m') {
-    startDate = moment().subtract(6, 'months').format('YYYY-MM-DD');
-    endDate = moment().format('YYYY-MM-DD');
-  } else {
-    startDate = moment().subtract(3, 'months').format('YYYY-MM-DD');
-    endDate = moment().format('YYYY-MM-DD');
-  }
+  const { export: exportType } = req.query;
+  const { startDate, endDate, range } = resolveReportDateRange(req.query);
+  req.log.info('fetch_all_past_adhyayan_absentees_start', { range, startDate, endDate, exportType });
 
   const absentees = await getAllPastAdhyayanAbsentees({
     startDate,

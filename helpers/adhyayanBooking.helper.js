@@ -15,7 +15,10 @@ import {
   STATUS_CASH_COMPLETED,
   ERR_FEEDBACK_ALREADY_SUBMITTED,
   FEEDBACK_ELIGIBILITY_HOUR,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  STATUS_DELETED,
+  EXCLUDED_ATTENDANCE_SPEAKER_PATTERN,
+  EXCLUDED_ATTENDANCE_SPEAKER_SUBSTRING
 } from '../config/constants.js';
 import database from '../config/database.js';
 import {
@@ -821,6 +824,35 @@ export async function resetShibirAttendance(bookingId, updatedBy, transaction) {
 }
 
 export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, location = RESEARCH_CENTRE }) {
+  // 1. First fetch qualifying past Research Centre shibirs in date range
+  const qualifyingShibirs = await database.query(
+    `SELECT s.id
+     FROM shibir_db s
+     WHERE s.location = :location
+       AND s.end_date <= CURRENT_DATE
+       AND s.start_date >= :startDate
+       AND s.start_date <= :endDate
+       AND s.status != :statusDeleted
+       AND (s.speaker IS NULL OR LOWER(TRIM(s.speaker)) NOT LIKE :excludedSpeakerPattern)
+     ORDER BY s.start_date DESC`,
+    {
+      replacements: {
+        location,
+        startDate,
+        endDate,
+        statusDeleted: STATUS_DELETED,
+        excludedSpeakerPattern: EXCLUDED_ATTENDANCE_SPEAKER_PATTERN
+      },
+      type: Sequelize.QueryTypes.SELECT
+    }
+  );
+
+  if (qualifyingShibirs.length === 0) {
+    return [];
+  }
+
+  const shibirIds = qualifyingShibirs.map((s) => s.id);
+
   const query = `
     SELECT 
       s.id AS shibir_id,
@@ -855,14 +887,14 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
     LEFT JOIN (
       SELECT shibir_id, COUNT(*) AS total_configured
       FROM shibir_sessions 
-      WHERE type = 'regular' 
+      WHERE type = 'regular' AND shibir_id IN (:shibirIds)
       GROUP BY shibir_id
     ) sess ON sess.shibir_id = s.id
     LEFT JOIN (
       SELECT ses.shibir_id, COUNT(DISTINCT r.session_number) AS total_conducted
       FROM shibir_attendance_records r
       JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
-      WHERE r.attended = 1
+      WHERE r.attended = 1 AND ses.shibir_id IN (:shibirIds)
       GROUP BY ses.shibir_id
     ) cond ON cond.shibir_id = s.id
     LEFT JOIN (
@@ -886,38 +918,31 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
         LEFT JOIN (
           SELECT shibir_id, COUNT(*) AS total_configured
           FROM shibir_sessions 
-          WHERE type = 'regular' 
+          WHERE type = 'regular' AND shibir_id IN (:shibirIds)
           GROUP BY shibir_id
         ) ses_sub ON ses_sub.shibir_id = b.shibir_id
         LEFT JOIN (
           SELECT ses2.shibir_id, COUNT(DISTINCT r2.session_number) AS total_conducted
           FROM shibir_attendance_records r2
           JOIN shibir_sessions ses2 ON ses2.shibir_id = r2.shibir_id AND ses2.session_number = r2.session_number AND ses2.type = 'regular'
-          WHERE r2.attended = 1
+          WHERE r2.attended = 1 AND ses2.shibir_id IN (:shibirIds)
           GROUP BY ses2.shibir_id
         ) c_sub ON c_sub.shibir_id = b.shibir_id
         LEFT JOIN shibir_attendance_records r 
           ON r.bookingid = b.bookingid 
           AND r.session_number = ses.session_number
-        WHERE b.status = :statusConfirmed
+        WHERE b.shibir_id IN (:shibirIds) AND b.status = :statusConfirmed
         GROUP BY b.shibir_id, b.bookingid, c_sub.total_conducted, ses_sub.total_configured
       ) p
       GROUP BY p.shibir_id
     ) part ON part.shibir_id = s.id
-    WHERE s.location = :location
-      AND s.end_date <= CURRENT_DATE
-      AND s.start_date >= :startDate
-      AND s.start_date <= :endDate
-      AND s.status != 'deleted'
-      AND (s.speaker IS NULL OR LOWER(TRIM(s.speaker)) NOT LIKE '%nilesh%')
+    WHERE s.id IN (:shibirIds)
     ORDER BY s.start_date DESC;
   `;
 
   const results = await database.query(query, {
     replacements: {
-      location,
-      startDate,
-      endDate,
+      shibirIds,
       statusConfirmed: STATUS_CONFIRMED
     },
     type: Sequelize.QueryTypes.SELECT
@@ -946,7 +971,7 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
     throw new ApiError(404, 'Adhyayan not found');
   }
 
-  if (shibir.speaker && shibir.speaker.toLowerCase().includes('nilesh')) {
+  if (shibir.speaker && shibir.speaker.toLowerCase().includes(EXCLUDED_ATTENDANCE_SPEAKER_SUBSTRING)) {
     throw new ApiError(400, 'Attendance report is not available for this speaker');
   }
 
@@ -974,15 +999,18 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
   let whereTypeClause = '';
   if (type === 'attended') {
     if (effectiveRegularSessions === 0) {
-      return { shibir, totalRegularSessions: 0, participants: [] };
+      return { shibir, totalRegularSessions: 0, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions = :effectiveRegularSessions AND :effectiveRegularSessions > 0';
   } else if (type === 'partial') {
     if (effectiveRegularSessions === 0) {
-      return { shibir, totalRegularSessions: 0, participants: [] };
+      return { shibir, totalRegularSessions: 0, regularSessions: [], participants: [] };
     }
     whereTypeClause = 'AND p.attended_regular_sessions > 0 AND p.attended_regular_sessions < :effectiveRegularSessions';
   } else if (type === 'absent') {
+    if (effectiveRegularSessions === 0) {
+      return { shibir, totalRegularSessions: 0, regularSessions: [], participants: [] };
+    }
     whereTypeClause = 'AND p.attended_regular_sessions = 0';
   } else if (type === 'registered' || type === 'complete') {
     whereTypeClause = '';
@@ -1012,7 +1040,7 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
         COUNT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END) AS attended_regular_sessions,
         GROUP_CONCAT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END ORDER BY ses.session_number) AS attended_session_numbers
       FROM shibir_booking_db b
-      JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id AND ses.type = 'regular'
+      LEFT JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id AND ses.type = 'regular'
       LEFT JOIN shibir_attendance_records r 
         ON r.bookingid = b.bookingid 
         AND r.session_number = ses.session_number
@@ -1263,9 +1291,15 @@ export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location
       AND s.end_date <= CURRENT_DATE
       AND s.start_date >= :startDate
       AND s.start_date <= :endDate
-      AND s.status != 'deleted'
-      AND (s.speaker IS NULL OR LOWER(TRIM(s.speaker)) NOT LIKE '%nilesh%')
+      AND s.status != :statusDeleted
+      AND (s.speaker IS NULL OR LOWER(TRIM(s.speaker)) NOT LIKE :excludedSpeakerPattern)
       AND COALESCE(att.attended_count, 0) = 0
+      AND EXISTS (
+        SELECT 1
+        FROM shibir_attendance_records r3
+        JOIN shibir_sessions ses3 ON ses3.shibir_id = r3.shibir_id AND ses3.session_number = r3.session_number AND ses3.type = 'regular'
+        WHERE r3.shibir_id = s.id AND r3.attended = 1
+      )
     ORDER BY s.start_date DESC, c.issuedto ASC, b.cardno ASC;
   `;
 
@@ -1274,7 +1308,9 @@ export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location
       location,
       startDate,
       endDate,
-      statusConfirmed: STATUS_CONFIRMED
+      statusConfirmed: STATUS_CONFIRMED,
+      statusDeleted: STATUS_DELETED,
+      excludedSpeakerPattern: EXCLUDED_ATTENDANCE_SPEAKER_PATTERN
     },
     type: Sequelize.QueryTypes.SELECT
   });
