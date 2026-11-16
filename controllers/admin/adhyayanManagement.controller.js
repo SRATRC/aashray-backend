@@ -1730,11 +1730,15 @@ export const fetchPastAdhyayanAttendanceReport = async (req, res) => {
       'Start Date': item.start_date,
       'End Date': item.end_date,
       Days: item.no_of_days,
-      'Regular Sessions': item.has_attendance_data ? item.total_regular_sessions : 'N/A',
       'Total Registered': item.total_registered,
-      'Full Attended': item.has_attendance_data ? item.total_attended : 'N/A',
-      'Partially Attended': item.has_attendance_data ? item.total_partial : 'N/A',
-      Absent: item.has_attendance_data ? item.total_absent : 'N/A'
+      'Regular Sessions': item.regular?.has_attendance_data ? item.regular.total_sessions : 'N/A',
+      'Reg Full Attended': item.regular?.has_attendance_data ? item.regular.total_attended : 'N/A',
+      'Reg Partially Attended': item.regular?.has_attendance_data ? item.regular.total_partial : 'N/A',
+      'Reg Absent': item.regular?.has_attendance_data ? item.regular.total_absent : 'N/A',
+      'MV Sessions': item.mv?.has_attendance_data ? item.mv.total_sessions : 'N/A',
+      'MV Full Attended': item.mv?.has_attendance_data ? item.mv.total_attended : 'N/A',
+      'MV Partially Attended': item.mv?.has_attendance_data ? item.mv.total_partial : 'N/A',
+      'MV Absent': item.mv?.has_attendance_data ? item.mv.total_absent : 'N/A'
     }));
 
     const wb = XLSX.utils.book_new();
@@ -1769,7 +1773,7 @@ export const fetchPastAdhyayanAttendanceReport = async (req, res) => {
 
 export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
   const { shibir_id } = req.params;
-  const { type = 'registered', export: exportType } = req.query;
+  const { type = 'registered', export: exportType, session_type = 'regular' } = req.query;
   const shibirId = Number(shibir_id);
 
   if (!shibirId || isNaN(shibirId)) {
@@ -1781,11 +1785,12 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
     throw new ApiError(400, `Invalid type. Allowed types: ${validTypes.join(', ')}`);
   }
 
-  req.log.info('fetch_past_adhyayan_participants_report_start', { shibirId, type, exportType });
+  req.log.info('fetch_past_adhyayan_participants_report_start', { shibirId, type, exportType, session_type });
 
   const result = await getPastAdhyayanParticipantsByType({
     shibirId,
-    type
+    type,
+    sessionType: session_type
   });
 
   if (exportType === 'excel') {
@@ -1807,6 +1812,9 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
       const sessionHeaders = (result.regularSessions || []).map(
         (s) => `Session ${s.session_number}`
       );
+      const mvHeaders = (result.mvSessions || []).map(
+        (s) => `MV ${s.display_number}`
+      );
 
       const tableHeaders = [
         '#',
@@ -1818,6 +1826,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         'Resident Status',
         'Category',
         ...sessionHeaders,
+        ...mvHeaders,
         'Attendance Summary'
       ];
 
@@ -1827,7 +1836,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         ['Topic', result.shibir.name || '', '', 'Total Registered', allParticipants.length],
         ['Speaker', result.shibir.speaker || '', '', 'Full Attended', fullAttended.length],
         ['Dates', `${result.shibir.start_date} to ${result.shibir.end_date}`, '', 'Partially Attended', partialAttended.length],
-        ['Regular Sessions', result.totalRegularSessions, '', 'Absent', absent.length],
+        ['Sessions', `Regular: ${result.totalRegularSessions} | MV: ${result.totalMvSessions}`, '', 'Absent', absent.length],
         [],
         tableHeaders
       ];
@@ -1835,6 +1844,10 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
       allParticipants.forEach((p, idx) => {
         const sessionValues = (result.regularSessions || []).map((s) => {
           const attended = (p.attended_session_numbers || []).includes(s.session_number);
+          return attended ? 'P' : 'A';
+        });
+        const mvValues = (result.mvSessions || []).map((s) => {
+          const attended = (p.attended_mv_session_numbers || []).includes(s.session_number);
           return attended ? 'P' : 'A';
         });
 
@@ -1848,6 +1861,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
           p.res_status || '',
           p.category || '',
           ...sessionValues,
+          ...mvValues,
           p.attendance_summary || ''
         ]);
       });
@@ -1860,10 +1874,10 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         { s: { r: 2, c: 1 }, e: { r: 2, c: 2 } }, // Topic: B3 to C3
         { s: { r: 3, c: 1 }, e: { r: 3, c: 2 } }, // Speaker: B4 to C4
         { s: { r: 4, c: 1 }, e: { r: 4, c: 2 } }, // Dates: B5 to C5
-        { s: { r: 5, c: 1 }, e: { r: 5, c: 2 } }  // Regular Sessions: B6 to C6
+        { s: { r: 5, c: 1 }, e: { r: 5, c: 2 } }  // Sessions: B6 to C6
       ];
 
-      const sessionCols = (result.regularSessions || []).map(() => ({ wch: 11 }));
+      const allSessionCols = [...(result.regularSessions || []), ...(result.mvSessions || [])].map(() => ({ wch: 11 }));
       ws['!cols'] = [
         { wch: 5 },  // #
         { wch: 14 }, // Card No
@@ -1873,7 +1887,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         { wch: 8 },  // Gender
         { wch: 16 }, // Resident Status
         { wch: 20 }, // Category
-        ...sessionCols,
+        ...allSessionCols,
         { wch: 22 }  // Attendance Summary
       ];
 
@@ -1939,8 +1953,12 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
     data: {
       shibir: result.shibir,
       filter_type: type,
+      session_type: session_type,
       total_count: result.participants.length,
       regular_sessions: result.regularSessions || [],
+      regularSessions: result.regularSessions || [],
+      mv_sessions: result.mvSessions || [],
+      mvSessions: result.mvSessions || [],
       participants: result.participants
     }
   });
@@ -2002,14 +2020,15 @@ export const deleteShibirSession = async (req, res) => {
 };
 
 export const fetchAllPastAdhyayanAbsentees = async (req, res) => {
-  const { export: exportType } = req.query;
+  const { export: exportType, session_type = 'regular' } = req.query;
   const { startDate, endDate, range } = resolveReportDateRange(req.query);
-  req.log.info('fetch_all_past_adhyayan_absentees_start', { range, startDate, endDate, exportType });
+  req.log.info('fetch_all_past_adhyayan_absentees_start', { range, startDate, endDate, exportType, session_type });
 
   const absentees = await getAllPastAdhyayanAbsentees({
     startDate,
     endDate,
-    location: RESEARCH_CENTRE
+    location: RESEARCH_CENTRE,
+    sessionType: session_type
   });
 
   if (exportType === 'excel') {
