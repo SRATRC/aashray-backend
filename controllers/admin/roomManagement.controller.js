@@ -65,7 +65,9 @@ import {
 } from '../../helpers/rollingWindow.helper.js';
 import {
   adminCancelTransaction,
-  createPendingTransaction
+  createPendingTransaction,
+  findUnpaidBookingTransaction,
+  UNPAID_TRANSACTION_STATUSES
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp, sendLateCheckoutFeeWaivedWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -319,15 +321,13 @@ export const manualCheckin = async (req, res) => {
     );
   }
 
-  var transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
-  });
-
-  if (
-    transaction &&
-    [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
-  ) {
-    req.log.warn('manual_checkin_payment_pending', { bookingid: booking.bookingid, transactionStatus: transaction.status });
+  const unpaidTransaction = await findUnpaidBookingTransaction(booking.bookingid, t);
+  if (unpaidTransaction) {
+    req.log.warn('manual_checkin_payment_pending', {
+      bookingid: booking.bookingid,
+      transactionStatus: unpaidTransaction.status,
+      amount: unpaidTransaction.amount
+    });
     throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
@@ -558,6 +558,16 @@ export const flatCheckin = async (req, res) => {
   if (booking.checkin > today) {
     req.log.warn('flat_checkin_too_early', { bookingid: booking.bookingid, checkin: booking.checkin, today });
     throw new ApiError(404, `Cannot check-in until ${booking.checkin}.`);
+  }
+
+  const unpaidTransaction = await findUnpaidBookingTransaction(booking.bookingid, t);
+  if (unpaidTransaction) {
+    req.log.warn('flat_checkin_payment_pending', {
+      bookingid: booking.bookingid,
+      transactionStatus: unpaidTransaction.status,
+      amount: unpaidTransaction.amount
+    });
+    throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
   const originalStatus = booking.status;
@@ -1045,7 +1055,8 @@ export const fetchKioskBookingsByCard = async (req, res) => {
     'checkin',
     'checkout',
     'nights',
-    'status'
+    'status',
+    'updatedAt'
   ];
 
   // Batch 1: Query CardDb, RoomBooking, and FlatBooking in parallel
@@ -1057,11 +1068,35 @@ export const fetchKioskBookingsByCard = async (req, res) => {
     RoomBooking.findAll({
       where: activeStayWhere,
       attributes: [...bookingAttributes, 'roomno', 'roomtype'],
+      include: [
+        {
+          model: CardDb,
+          as: 'bookedByCard',
+          attributes: ['cardno', 'issuedto']
+        }
+      ],
       order: [['checkin', 'ASC']]
     }),
     FlatBooking.findAll({
       where: activeStayWhere,
       attributes: [...bookingAttributes, 'flatno'],
+      include: [
+        {
+          model: CardDb,
+          as: 'bookedByCard',
+          attributes: ['cardno', 'issuedto']
+        },
+        {
+          model: FlatDb,
+          attributes: ['flatno', 'owner'],
+          include: [
+            {
+              model: CardDb,
+              attributes: ['cardno', 'issuedto']
+            }
+          ]
+        }
+      ],
       order: [['checkin', 'ASC']]
     })
   ]);
@@ -1071,27 +1106,38 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   }
 
   const allBookings = [...roomBookings, ...flatBookings];
+  const allBookingIds = allBookings.map((b) => b.bookingid);
 
-  const earlyCheckoutBookingIds = allBookings
-    .filter((b) => b.status === ROOM_STATUS_CHECKEDIN && today < b.checkout)
-    .map((b) => b.bookingid);
-
-  // Batch 2: Fetch transactions for early checkout stays first (if any)
-  const transactions = earlyCheckoutBookingIds.length
+  // Batch 2: Fetch transactions for all active bookings
+  const transactions = allBookingIds.length
     ? await Transactions.findAll({
         where: {
-          bookingid: earlyCheckoutBookingIds
-        }
+          bookingid: allBookingIds
+        },
+        order: [['createdAt', 'DESC']]
       })
     : [];
 
-  const txMap = new Map(transactions.map((t) => [t.bookingid, t]));
+  const txMap = new Map();
+  const txListMap = new Map();
+  for (const t of transactions) {
+    if (!txListMap.has(t.bookingid)) txListMap.set(t.bookingid, []);
+    txListMap.get(t.bookingid).push(t);
 
-  // Collect all distinct booker and payer cards to resolve names in one single query
-  const relevantCardnos = [
-    ...allBookings.map((b) => b.bookedBy),
-    ...transactions.map((t) => t.cardno)
-  ].filter((c) => c && c !== cardno);
+    // Keep latest completed transaction for checkout refund preview, else latest transaction overall
+    const existing = txMap.get(t.bookingid);
+    const isCompleted = t.status === STATUS_PAYMENT_COMPLETED || t.status === STATUS_CASH_COMPLETED;
+    if (!existing) {
+      txMap.set(t.bookingid, t);
+    } else if (isCompleted && existing.status !== STATUS_PAYMENT_COMPLETED && existing.status !== STATUS_CASH_COMPLETED) {
+      txMap.set(t.bookingid, t);
+    }
+  }
+
+  // Collect distinct payer cards from transactions to resolve payer names for checkout preview
+  const relevantCardnos = transactions
+    .map((t) => t.cardno)
+    .filter((c) => c && c !== cardno);
 
   const uniqueCardnos = [...new Set(relevantCardnos)];
 
@@ -1105,15 +1151,42 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   const bookerNameMap = new Map(bookerCards.map((c) => [c.cardno, c.issuedto]));
 
   const withPreview = (isFlat) => async (booking) => {
-    const { bookedBy, ...publicFields } = booking.get({ plain: true });
-    const bookerName =
-      bookedBy && bookedBy !== cardno
-        ? bookerNameMap.get(bookedBy) || null
-        : null;
+    const plain = booking.get({ plain: true });
+    const { bookedBy, bookedByCard, FlatDb: flatInfo, ...publicFields } = plain;
+
+    const ownerCardno = flatInfo?.owner;
+    const ownerName = flatInfo?.CardDb?.issuedto || null;
+    const isOwner = Boolean(
+      isFlat &&
+      ownerCardno &&
+      String(ownerCardno).trim() === String(booking.cardno).trim()
+    );
+
+    const isThirdParty = Boolean(
+      bookedBy &&
+      String(bookedBy).trim() !== '' &&
+      String(bookedBy).trim() !== String(booking.cardno).trim()
+    );
+
+    const bookerName = isThirdParty ? (bookedByCard?.issuedto || null) : null;
+
     const tx = txMap.get(publicFields.bookingid) || null;
+    const bTxs = txListMap.get(publicFields.bookingid) || [];
+    const pendingTx = bTxs.find(
+      (t) => UNPAID_TRANSACTION_STATUSES.includes(t.status) && Number(t.amount) > 0
+    );
+    const hasUnpaidPayment = Boolean(pendingTx || publicFields.status === STATUS_PAYMENT_PENDING);
+    const unpaidAmount = pendingTx ? Number(pendingTx.amount) : 0;
+
     return {
       ...publicFields,
+      is_flat: isFlat,
+      is_owner: isOwner,
+      is_third_party: isThirdParty,
+      owner_name: isOwner ? null : ownerName,
       booker_name: bookerName,
+      has_unpaid_payment: hasUnpaidPayment,
+      unpaid_amount: unpaidAmount,
       checkout_preview: await kioskCheckoutPreview(booking, isFlat, today, nowTime, tx, bookerNameMap)
     };
   };

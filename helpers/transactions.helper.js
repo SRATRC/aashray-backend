@@ -356,7 +356,19 @@ const isReallyPaid = (txn) =>
   [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(txn.status) &&
   !String(txn.description || '').startsWith(SETTLED_AT_ZERO);
 
-const UNPAID_TOP_UP_STATUSES = [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED];
+export const UNPAID_TRANSACTION_STATUSES = [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED];
+export const UNPAID_TOP_UP_STATUSES = UNPAID_TRANSACTION_STATUSES;
+
+export async function findUnpaidBookingTransaction(bookingid, t) {
+  return await Transactions.findOne({
+    where: {
+      bookingid,
+      status: UNPAID_TRANSACTION_STATUSES,
+      amount: { [Sequelize.Op.gt]: 0 }
+    },
+    transaction: t
+  });
+}
 
 // A top-up that has not received money yet. Never the main charge (rows[0]).
 const isPendingTopUp = (r) =>
