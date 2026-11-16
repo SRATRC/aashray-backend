@@ -289,3 +289,8 @@ export const UPDATE_TYPE_UNSUPPORTED = 'unsupported';
 export const HEADER_PLATFORM = 'x-platform';
 export const HEADER_APP_VERSION = 'x-app-version';
 export const HEADER_OS_VERSION = 'x-os-version';
+
+// ADHYAYAN ATTENDANCE REPORTING
+// Substring exclusion pattern for speakers whose attendance is not tracked (e.g. Pujya Nilesh Bhai)
+export const EXCLUDED_ATTENDANCE_SPEAKER_PATTERN = '%nilesh%';
+export const EXCLUDED_ATTENDANCE_SPEAKER_SUBSTRING = 'nilesh';
