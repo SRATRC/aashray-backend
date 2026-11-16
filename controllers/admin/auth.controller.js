@@ -18,7 +18,7 @@ export const login = async (req, res) => {
 
   if (!admin) {
     req.log.warn('admin_login_user_not_found', { username });
-    throw new ApiError(401, 'Invalid Username');
+    throw new ApiError(401, 'Invalid credentials');
   }
 
   if (admin.dataValues.status === STATUS_INACTIVE) {
@@ -49,7 +49,7 @@ export const login = async (req, res) => {
     return res.status(200).send({ token: token, roles: admin_roles, username: admin.dataValues.username });
   } else {
     req.log.warn('admin_login_incorrect_password', { username });
-    throw new ApiError(401, 'Incorrect password');
+    throw new ApiError(401, 'Invalid credentials');
   }
 };
 

@@ -66,7 +66,9 @@ import {
 } from '../../helpers/rollingWindow.helper.js';
 import {
   adminCancelTransaction,
-  createPendingTransaction
+  createPendingTransaction,
+  findUnpaidBookingTransaction,
+  UNPAID_TRANSACTION_STATUSES
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp, sendLateCheckoutFeeWaivedWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -320,15 +322,13 @@ export const manualCheckin = async (req, res) => {
     );
   }
 
-  var transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
-  });
-
-  if (
-    transaction &&
-    [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
-  ) {
-    req.log.warn('manual_checkin_payment_pending', { bookingid: booking.bookingid, transactionStatus: transaction.status });
+  const unpaidTransaction = await findUnpaidBookingTransaction(booking.bookingid, t);
+  if (unpaidTransaction) {
+    req.log.warn('manual_checkin_payment_pending', {
+      bookingid: booking.bookingid,
+      transactionStatus: unpaidTransaction.status,
+      amount: unpaidTransaction.amount
+    });
     throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
@@ -561,15 +561,13 @@ export const flatCheckin = async (req, res) => {
     throw new ApiError(404, `Cannot check-in until ${booking.checkin}.`);
   }
 
-  var transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
-  });
-
-  if (
-    transaction &&
-    [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
-  ) {
-    req.log.warn('flat_checkin_payment_pending', { bookingid: booking.bookingid, transactionStatus: transaction.status });
+  const unpaidTransaction = await findUnpaidBookingTransaction(booking.bookingid, t);
+  if (unpaidTransaction) {
+    req.log.warn('flat_checkin_payment_pending', {
+      bookingid: booking.bookingid,
+      transactionStatus: unpaidTransaction.status,
+      amount: unpaidTransaction.amount
+    });
     throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
@@ -1116,7 +1114,8 @@ export const fetchKioskBookingsByCard = async (req, res) => {
     ? await Transactions.findAll({
         where: {
           bookingid: allBookingIds
-        }
+        },
+        order: [['createdAt', 'DESC']]
       })
     : [];
 
@@ -1126,18 +1125,20 @@ export const fetchKioskBookingsByCard = async (req, res) => {
     if (!txListMap.has(t.bookingid)) txListMap.set(t.bookingid, []);
     txListMap.get(t.bookingid).push(t);
 
-    // Prefer completed transaction for checkout refund preview, else latest transaction
+    // Keep latest completed transaction for checkout refund preview, else latest transaction overall
     const existing = txMap.get(t.bookingid);
-    if (!existing || t.status === STATUS_PAYMENT_COMPLETED || t.status === STATUS_CASH_COMPLETED) {
+    const isCompleted = t.status === STATUS_PAYMENT_COMPLETED || t.status === STATUS_CASH_COMPLETED;
+    if (!existing) {
+      txMap.set(t.bookingid, t);
+    } else if (isCompleted && existing.status !== STATUS_PAYMENT_COMPLETED && existing.status !== STATUS_CASH_COMPLETED) {
       txMap.set(t.bookingid, t);
     }
   }
 
-  // Collect all distinct booker and payer cards to resolve names in one single query
-  const relevantCardnos = [
-    ...allBookings.map((b) => b.bookedBy),
-    ...transactions.map((t) => t.cardno)
-  ].filter((c) => c && c !== cardno);
+  // Collect distinct payer cards from transactions to resolve payer names for checkout preview
+  const relevantCardnos = transactions
+    .map((t) => t.cardno)
+    .filter((c) => c && c !== cardno);
 
   const uniqueCardnos = [...new Set(relevantCardnos)];
 
@@ -1162,21 +1163,20 @@ export const fetchKioskBookingsByCard = async (req, res) => {
       String(ownerCardno).trim() === String(booking.cardno).trim()
     );
 
-    const isThirdParty =
+    const isThirdParty = Boolean(
       bookedBy &&
       String(bookedBy).trim() !== '' &&
-      String(bookedBy).trim() !== String(booking.cardno).trim();
+      String(bookedBy).trim() !== String(booking.cardno).trim()
+    );
 
     const bookerName = isThirdParty
-      ? (bookedByCard?.issuedto || bookerNameMap.get(bookedBy) || ownerName || null)
+      ? (bookedByCard?.issuedto || bookerNameMap.get(bookedBy) || null)
       : (!isFlat ? null : (isOwner ? null : ownerName));
 
     const tx = txMap.get(publicFields.bookingid) || null;
     const bTxs = txListMap.get(publicFields.bookingid) || [];
     const pendingTx = bTxs.find(
-      (t) =>
-        [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING, STATUS_PAYMENT_FAILED].includes(t.status) &&
-        Number(t.amount) > 0
+      (t) => UNPAID_TRANSACTION_STATUSES.includes(t.status) && Number(t.amount) > 0
     );
     const hasUnpaidPayment = Boolean(pendingTx || publicFields.status === STATUS_PAYMENT_PENDING);
     const unpaidAmount = pendingTx ? Number(pendingTx.amount) : 0;
@@ -1185,8 +1185,8 @@ export const fetchKioskBookingsByCard = async (req, res) => {
       ...publicFields,
       is_flat: isFlat,
       is_owner: isOwner,
-      owner_name: ownerName,
-      bookedBy: isThirdParty ? bookedBy : null,
+      is_third_party: isThirdParty,
+      owner_name: isOwner ? null : ownerName,
       booker_name: bookerName,
       has_unpaid_payment: hasUnpaidPayment,
       unpaid_amount: unpaidAmount,
