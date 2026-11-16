@@ -865,38 +865,92 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
       DATE_FORMAT(s.start_date, '%Y-%m-%d') AS start_date,
       DATE_FORMAT(s.end_date, '%Y-%m-%d') AS end_date,
       DATEDIFF(s.end_date, s.start_date) + 1 AS no_of_days,
-      CASE 
-        WHEN COALESCE(cond.total_conducted, 0) > 0 THEN cond.total_conducted
-        ELSE COALESCE(sess.total_configured, 0)
-      END AS total_regular_sessions,
       COALESCE(part.total_registered, 0) AS total_registered,
+
+      -- Regular Sessions Stats
       CASE 
-        WHEN COALESCE(cond.total_conducted, 0) = 0 THEN 0
-        ELSE COALESCE(part.total_attended, 0)
+        WHEN COALESCE(cond.total_conducted_reg, 0) > 0 THEN cond.total_conducted_reg
+        ELSE COALESCE(sess.total_configured_reg, 0)
+      END AS total_regular_sessions,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_reg, 0) = 0 THEN 0
+        ELSE COALESCE(part.reg_attended, 0)
       END AS total_attended,
       CASE 
-        WHEN COALESCE(cond.total_conducted, 0) = 0 THEN 0
-        ELSE COALESCE(part.total_partial, 0)
+        WHEN COALESCE(cond.total_conducted_reg, 0) = 0 THEN 0
+        ELSE COALESCE(part.reg_partial, 0)
       END AS total_partial,
       CASE 
-        WHEN COALESCE(cond.total_conducted, 0) = 0 THEN 0
-        ELSE COALESCE(part.total_absent, 0)
+        WHEN COALESCE(cond.total_conducted_reg, 0) = 0 THEN 0
+        ELSE COALESCE(part.reg_absent, 0)
       END AS total_absent,
       CASE 
-        WHEN COALESCE(cond.total_conducted, 0) > 0 THEN 1 
+        WHEN COALESCE(cond.total_conducted_reg, 0) > 0 THEN 1 
         ELSE 0 
-      END AS has_attendance_data
+      END AS has_attendance_data,
+
+      -- Morning Vanchan (MV) Stats
+      CASE 
+        WHEN COALESCE(cond.total_conducted_mv, 0) > 0 THEN cond.total_conducted_mv
+        ELSE COALESCE(sess.total_configured_mv, 0)
+      END AS total_mv_sessions,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_mv, 0) = 0 THEN 0
+        ELSE COALESCE(part.mv_attended, 0)
+      END AS total_attended_mv,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_mv, 0) = 0 THEN 0
+        ELSE COALESCE(part.mv_partial, 0)
+      END AS total_partial_mv,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_mv, 0) = 0 THEN 0
+        ELSE COALESCE(part.mv_absent, 0)
+      END AS total_absent_mv,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_mv, 0) > 0 THEN 1 
+        ELSE 0 
+      END AS has_attendance_data_mv,
+
+      -- Combined (Regular + MV) Stats
+      CASE 
+        WHEN COALESCE(cond.total_conducted_comb, 0) > 0 THEN cond.total_conducted_comb
+        ELSE COALESCE(sess.total_configured_comb, 0)
+      END AS total_combined_sessions,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_comb, 0) = 0 THEN 0
+        ELSE COALESCE(part.comb_attended, 0)
+      END AS total_attended_comb,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_comb, 0) = 0 THEN 0
+        ELSE COALESCE(part.comb_partial, 0)
+      END AS total_partial_comb,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_comb, 0) = 0 THEN 0
+        ELSE COALESCE(part.comb_absent, 0)
+      END AS total_absent_comb,
+      CASE 
+        WHEN COALESCE(cond.total_conducted_comb, 0) > 0 THEN 1 
+        ELSE 0 
+      END AS has_attendance_data_comb
     FROM shibir_db s
     LEFT JOIN (
-      SELECT shibir_id, COUNT(*) AS total_configured
+      SELECT 
+        shibir_id, 
+        COUNT(*) AS total_configured_comb,
+        SUM(CASE WHEN type = 'regular' THEN 1 ELSE 0 END) AS total_configured_reg,
+        SUM(CASE WHEN type = 'MV' THEN 1 ELSE 0 END) AS total_configured_mv
       FROM shibir_sessions 
-      WHERE type = 'regular' AND shibir_id IN (:shibirIds)
+      WHERE shibir_id IN (:shibirIds)
       GROUP BY shibir_id
     ) sess ON sess.shibir_id = s.id
     LEFT JOIN (
-      SELECT ses.shibir_id, COUNT(DISTINCT r.session_number) AS total_conducted
+      SELECT 
+        ses.shibir_id, 
+        COUNT(DISTINCT r.session_number) AS total_conducted_comb,
+        COUNT(DISTINCT CASE WHEN ses.type = 'regular' THEN r.session_number END) AS total_conducted_reg,
+        COUNT(DISTINCT CASE WHEN ses.type = 'MV' THEN r.session_number END) AS total_conducted_mv
       FROM shibir_attendance_records r
-      JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
+      JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number
       WHERE r.attended = 1 AND ses.shibir_id IN (:shibirIds)
       GROUP BY ses.shibir_id
     ) cond ON cond.shibir_id = s.id
@@ -904,30 +958,58 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
       SELECT 
         p.shibir_id,
         COUNT(*) AS total_registered,
-        SUM(CASE WHEN p.attended_count = p.effective_sessions AND p.effective_sessions > 0 THEN 1 ELSE 0 END) AS total_attended,
-        SUM(CASE WHEN p.attended_count > 0 AND p.attended_count < p.effective_sessions THEN 1 ELSE 0 END) AS total_partial,
-        SUM(CASE WHEN p.attended_count = 0 THEN 1 ELSE 0 END) AS total_absent
+        SUM(CASE WHEN p.reg_att = p.reg_eff AND p.reg_eff > 0 THEN 1 ELSE 0 END) AS reg_attended,
+        SUM(CASE WHEN p.reg_att > 0 AND p.reg_att < p.reg_eff THEN 1 ELSE 0 END) AS reg_partial,
+        SUM(CASE WHEN p.reg_att = 0 THEN 1 ELSE 0 END) AS reg_absent,
+
+        SUM(CASE WHEN p.mv_att = p.mv_eff AND p.mv_eff > 0 THEN 1 ELSE 0 END) AS mv_attended,
+        SUM(CASE WHEN p.mv_att > 0 AND p.mv_att < p.mv_eff THEN 1 ELSE 0 END) AS mv_partial,
+        SUM(CASE WHEN p.mv_att = 0 THEN 1 ELSE 0 END) AS mv_absent,
+
+        SUM(CASE WHEN p.comb_att = p.comb_eff AND p.comb_eff > 0 THEN 1 ELSE 0 END) AS comb_attended,
+        SUM(CASE WHEN p.comb_att > 0 AND p.comb_att < p.comb_eff THEN 1 ELSE 0 END) AS comb_partial,
+        SUM(CASE WHEN p.comb_att = 0 THEN 1 ELSE 0 END) AS comb_absent
       FROM (
         SELECT 
           b.shibir_id,
           b.bookingid,
           CASE 
-            WHEN COALESCE(c_sub.total_conducted, 0) > 0 THEN c_sub.total_conducted
-            ELSE COALESCE(ses_sub.total_configured, 0)
-          END AS effective_sessions,
-          COUNT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END) AS attended_count
+            WHEN COALESCE(c_sub.cond_reg, 0) > 0 THEN c_sub.cond_reg
+            ELSE COALESCE(ses_sub.conf_reg, 0)
+          END AS reg_eff,
+          COUNT(DISTINCT CASE WHEN r.attended = 1 AND ses.type = 'regular' THEN ses.session_number END) AS reg_att,
+
+          CASE 
+            WHEN COALESCE(c_sub.cond_mv, 0) > 0 THEN c_sub.cond_mv
+            ELSE COALESCE(ses_sub.conf_mv, 0)
+          END AS mv_eff,
+          COUNT(DISTINCT CASE WHEN r.attended = 1 AND ses.type = 'MV' THEN ses.session_number END) AS mv_att,
+
+          CASE 
+            WHEN COALESCE(c_sub.cond_comb, 0) > 0 THEN c_sub.cond_comb
+            ELSE COALESCE(ses_sub.conf_comb, 0)
+          END AS comb_eff,
+          COUNT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END) AS comb_att
         FROM shibir_booking_db b
-        LEFT JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id AND ses.type = 'regular'
+        LEFT JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id
         LEFT JOIN (
-          SELECT shibir_id, COUNT(*) AS total_configured
+          SELECT 
+            shibir_id, 
+            COUNT(*) AS conf_comb,
+            SUM(CASE WHEN type = 'regular' THEN 1 ELSE 0 END) AS conf_reg,
+            SUM(CASE WHEN type = 'MV' THEN 1 ELSE 0 END) AS conf_mv
           FROM shibir_sessions 
-          WHERE type = 'regular' AND shibir_id IN (:shibirIds)
+          WHERE shibir_id IN (:shibirIds)
           GROUP BY shibir_id
         ) ses_sub ON ses_sub.shibir_id = b.shibir_id
         LEFT JOIN (
-          SELECT ses2.shibir_id, COUNT(DISTINCT r2.session_number) AS total_conducted
+          SELECT 
+            ses2.shibir_id, 
+            COUNT(DISTINCT r2.session_number) AS cond_comb,
+            COUNT(DISTINCT CASE WHEN ses2.type = 'regular' THEN r2.session_number END) AS cond_reg,
+            COUNT(DISTINCT CASE WHEN ses2.type = 'MV' THEN r2.session_number END) AS cond_mv
           FROM shibir_attendance_records r2
-          JOIN shibir_sessions ses2 ON ses2.shibir_id = r2.shibir_id AND ses2.session_number = r2.session_number AND ses2.type = 'regular'
+          JOIN shibir_sessions ses2 ON ses2.shibir_id = r2.shibir_id AND ses2.session_number = r2.session_number
           WHERE r2.attended = 1 AND ses2.shibir_id IN (:shibirIds)
           GROUP BY ses2.shibir_id
         ) c_sub ON c_sub.shibir_id = b.shibir_id
@@ -935,7 +1017,7 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
           ON r.bookingid = b.bookingid 
           AND r.session_number = ses.session_number
         WHERE b.shibir_id IN (:shibirIds) AND b.status = :statusConfirmed
-        GROUP BY b.shibir_id, b.bookingid, c_sub.total_conducted, ses_sub.total_configured
+        GROUP BY b.shibir_id, b.bookingid, c_sub.cond_comb, c_sub.cond_reg, c_sub.cond_mv, ses_sub.conf_comb, ses_sub.conf_reg, ses_sub.conf_mv
       ) p
       GROUP BY p.shibir_id
     ) part ON part.shibir_id = s.id
@@ -951,24 +1033,69 @@ export async function getPastAdhyayanAttendanceSummary({ startDate, endDate, loc
     type: Sequelize.QueryTypes.SELECT
   });
 
-  return results.map((row) => ({
-    shibir_id: Number(row.shibir_id),
-    name: row.name,
-    speaker: row.speaker,
-    location: row.location,
-    start_date: row.start_date,
-    end_date: row.end_date,
-    no_of_days: Number(row.no_of_days),
-    total_regular_sessions: Number(row.total_regular_sessions),
-    has_attendance_data: Boolean(Number(row.has_attendance_data)),
-    total_registered: Number(row.total_registered),
-    total_attended: Number(row.total_attended),
-    total_partial: Number(row.total_partial),
-    total_absent: Number(row.total_absent)
-  }));
+  return results.map((row) => {
+    const regSessions = Number(row.total_regular_sessions);
+    const regHasData = Boolean(Number(row.has_attendance_data));
+    const regAttended = Number(row.total_attended);
+    const regPartial = Number(row.total_partial);
+    const regAbsent = Number(row.total_absent);
+
+    const mvSessions = Number(row.total_mv_sessions);
+    const mvHasData = Boolean(Number(row.has_attendance_data_mv));
+    const mvAttended = Number(row.total_attended_mv);
+    const mvPartial = Number(row.total_partial_mv);
+    const mvAbsent = Number(row.total_absent_mv);
+
+    const combSessions = Number(row.total_combined_sessions);
+    const combHasData = Boolean(Number(row.has_attendance_data_comb));
+    const combAttended = Number(row.total_attended_comb);
+    const combPartial = Number(row.total_partial_comb);
+    const combAbsent = Number(row.total_absent_comb);
+
+    return {
+      shibir_id: Number(row.shibir_id),
+      name: row.name,
+      speaker: row.speaker,
+      location: row.location,
+      start_date: row.start_date,
+      end_date: row.end_date,
+      no_of_days: Number(row.no_of_days),
+      total_registered: Number(row.total_registered),
+
+      // Legacy root properties (matches regular mode for full backward compatibility)
+      total_regular_sessions: regSessions,
+      has_attendance_data: regHasData,
+      total_attended: regAttended,
+      total_partial: regPartial,
+      total_absent: regAbsent,
+
+      // Mode-specific breakdowns for Option 2 view switcher
+      regular: {
+        total_sessions: regSessions,
+        has_attendance_data: regHasData,
+        total_attended: regAttended,
+        total_partial: regPartial,
+        total_absent: regAbsent
+      },
+      mv: {
+        total_sessions: mvSessions,
+        has_attendance_data: mvHasData,
+        total_attended: mvAttended,
+        total_partial: mvPartial,
+        total_absent: mvAbsent
+      },
+      combined: {
+        total_sessions: combSessions,
+        has_attendance_data: combHasData,
+        total_attended: combAttended,
+        total_partial: combPartial,
+        total_absent: combAbsent
+      }
+    };
+  });
 }
 
-export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
+export async function getPastAdhyayanParticipantsByType({ shibirId, type, sessionType = 'regular' }) {
   const shibir = await ShibirDb.findByPk(shibirId);
   if (!shibir || shibir.status === STATUS_DELETED) {
     throw new ApiError(404, 'Adhyayan not found');
@@ -988,13 +1115,14 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
     throw new ApiError(400, 'Attendance report is not available for this speaker');
   }
 
-  // Smart detection of effective regular sessions:
-  // Count regular sessions that actually had attendance marked (r.attended = 1).
-  // If no attendance records exist for any session, fall back to configured regular sessions count.
+  // Conducted session counts for regular, MV, and combined
   const conductedSessionsResult = await database.query(
-    `SELECT COUNT(DISTINCT r.session_number) AS total_conducted
+    `SELECT 
+       COUNT(DISTINCT CASE WHEN ses.type = 'regular' THEN r.session_number END) AS conducted_reg,
+       COUNT(DISTINCT CASE WHEN ses.type = 'MV' THEN r.session_number END) AS conducted_mv,
+       COUNT(DISTINCT r.session_number) AS conducted_comb
      FROM shibir_attendance_records r
-     JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
+     JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number
      WHERE r.shibir_id = :shibirId AND r.attended = 1`,
     {
       replacements: { shibirId },
@@ -1002,12 +1130,33 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
     }
   );
 
-  const conductedCount = Number(conductedSessionsResult[0]?.total_conducted || 0);
-  const totalConfiguredSessions = await ShibirSession.count({
-    where: { shibir_id: shibirId, type: 'regular' }
-  });
+  const conductedReg = Number(conductedSessionsResult[0]?.conducted_reg || 0);
+  const conductedMv = Number(conductedSessionsResult[0]?.conducted_mv || 0);
+  const conductedComb = Number(conductedSessionsResult[0]?.conducted_comb || 0);
 
-  const effectiveRegularSessions = conductedCount > 0 ? conductedCount : totalConfiguredSessions;
+  const [configuredReg, configuredMv] = await Promise.all([
+    ShibirSession.count({ where: { shibir_id: shibirId, type: 'regular' } }),
+    ShibirSession.count({ where: { shibir_id: shibirId, type: 'MV' } })
+  ]);
+  const configuredComb = configuredReg + configuredMv;
+
+  const effectiveReg = conductedReg > 0 ? conductedReg : configuredReg;
+  const effectiveMv = conductedMv > 0 ? conductedMv : configuredMv;
+  const effectiveComb = conductedComb > 0 ? conductedComb : configuredComb;
+
+  let activeConducted = conductedReg;
+  let activeEffective = effectiveReg;
+  let activeField = 'attended_regular_sessions';
+
+  if (sessionType === 'mv') {
+    activeConducted = conductedMv;
+    activeEffective = effectiveMv;
+    activeField = 'attended_mv_sessions';
+  } else if (sessionType === 'combined') {
+    activeConducted = conductedComb;
+    activeEffective = effectiveComb;
+    activeField = 'attended_comb_sessions';
+  }
 
   const shibirSummary = {
     id: shibir.id,
@@ -1016,25 +1165,54 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
     location: shibir.location,
     start_date: shibir.start_date,
     end_date: shibir.end_date,
-    total_regular_sessions: effectiveRegularSessions
+    total_regular_sessions: effectiveReg,
+    total_mv_sessions: effectiveMv,
+    total_combined_sessions: effectiveComb
   };
 
   let whereTypeClause = '';
   if (type === 'attended') {
-    if (conductedCount === 0) {
-      return { shibir: shibirSummary, totalRegularSessions: effectiveRegularSessions, regularSessions: [], participants: [] };
+    if (activeConducted === 0) {
+      return {
+        shibir: shibirSummary,
+        sessionType,
+        totalRegularSessions: effectiveReg,
+        totalMvSessions: effectiveMv,
+        totalCombinedSessions: effectiveComb,
+        regularSessions: [],
+        mvSessions: [],
+        participants: []
+      };
     }
-    whereTypeClause = 'AND p.attended_regular_sessions = :effectiveRegularSessions AND :effectiveRegularSessions > 0';
+    whereTypeClause = `AND p.${activeField} = :activeEffective AND :activeEffective > 0`;
   } else if (type === 'partial') {
-    if (conductedCount === 0) {
-      return { shibir: shibirSummary, totalRegularSessions: effectiveRegularSessions, regularSessions: [], participants: [] };
+    if (activeConducted === 0) {
+      return {
+        shibir: shibirSummary,
+        sessionType,
+        totalRegularSessions: effectiveReg,
+        totalMvSessions: effectiveMv,
+        totalCombinedSessions: effectiveComb,
+        regularSessions: [],
+        mvSessions: [],
+        participants: []
+      };
     }
-    whereTypeClause = 'AND p.attended_regular_sessions > 0 AND p.attended_regular_sessions < :effectiveRegularSessions';
+    whereTypeClause = `AND p.${activeField} > 0 AND p.${activeField} < :activeEffective`;
   } else if (type === 'absent') {
-    if (conductedCount === 0) {
-      return { shibir: shibirSummary, totalRegularSessions: effectiveRegularSessions, regularSessions: [], participants: [] };
+    if (activeConducted === 0) {
+      return {
+        shibir: shibirSummary,
+        sessionType,
+        totalRegularSessions: effectiveReg,
+        totalMvSessions: effectiveMv,
+        totalCombinedSessions: effectiveComb,
+        regularSessions: [],
+        mvSessions: [],
+        participants: []
+      };
     }
-    whereTypeClause = 'AND p.attended_regular_sessions = 0';
+    whereTypeClause = `AND p.${activeField} = 0`;
   } else if (type === 'registered' || type === 'complete') {
     whereTypeClause = '';
   } else {
@@ -1050,21 +1228,23 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
       c.gender,
       c.res_status,
       p.attended_regular_sessions,
-      p.attended_session_numbers,
-      :effectiveRegularSessions AS total_regular_sessions,
-      CASE 
-        WHEN :conductedCount = 0 THEN 'N/A'
-        WHEN :effectiveRegularSessions = 0 THEN 'N/A'
-        ELSE CONCAT(p.attended_regular_sessions, ' of ', :effectiveRegularSessions, ' sessions')
-      END AS attendance_summary
+      p.attended_regular_session_numbers,
+      p.attended_mv_sessions,
+      p.attended_mv_session_numbers,
+      p.attended_comb_sessions,
+      p.attended_comb_session_numbers
     FROM (
       SELECT 
         b.bookingid,
         b.cardno,
-        COUNT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END) AS attended_regular_sessions,
-        GROUP_CONCAT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END ORDER BY ses.session_number) AS attended_session_numbers
+        COUNT(DISTINCT CASE WHEN r.attended = 1 AND ses.type = 'regular' THEN ses.session_number END) AS attended_regular_sessions,
+        GROUP_CONCAT(DISTINCT CASE WHEN r.attended = 1 AND ses.type = 'regular' THEN ses.session_number END ORDER BY ses.session_number) AS attended_regular_session_numbers,
+        COUNT(DISTINCT CASE WHEN r.attended = 1 AND ses.type = 'MV' THEN ses.session_number END) AS attended_mv_sessions,
+        GROUP_CONCAT(DISTINCT CASE WHEN r.attended = 1 AND ses.type = 'MV' THEN ses.session_number END ORDER BY ses.session_number) AS attended_mv_session_numbers,
+        COUNT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END) AS attended_comb_sessions,
+        GROUP_CONCAT(DISTINCT CASE WHEN r.attended = 1 THEN ses.session_number END ORDER BY ses.session_number) AS attended_comb_session_numbers
       FROM shibir_booking_db b
-      LEFT JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id AND ses.type = 'regular'
+      LEFT JOIN shibir_sessions ses ON ses.shibir_id = b.shibir_id
       LEFT JOIN shibir_attendance_records r 
         ON r.bookingid = b.bookingid 
         AND r.session_number = ses.session_number
@@ -1081,14 +1261,13 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
     replacements: {
       shibirId,
       statusConfirmed: STATUS_CONFIRMED,
-      effectiveRegularSessions,
-      conductedCount
+      activeEffective
     },
     type: Sequelize.QueryTypes.SELECT
   });
 
   let regularSessions;
-  if (conductedCount > 0) {
+  if (conductedReg > 0) {
     regularSessions = await database.query(
       `SELECT DISTINCT ses.session_number, ses.date, ses.start_time
        FROM shibir_sessions ses
@@ -1110,30 +1289,89 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
     });
   }
 
+  let mvSessions;
+  if (conductedMv > 0) {
+    mvSessions = await database.query(
+      `SELECT DISTINCT ses.session_number, ses.date, ses.start_time
+       FROM shibir_sessions ses
+       JOIN shibir_attendance_records r 
+         ON r.shibir_id = ses.shibir_id 
+        AND r.session_number = ses.session_number 
+        AND ses.type = 'MV'
+       WHERE ses.shibir_id = :shibirId AND r.attended = 1
+       ORDER BY ses.session_number ASC`,
+      {
+        replacements: { shibirId },
+        type: Sequelize.QueryTypes.SELECT
+      }
+    );
+  } else {
+    mvSessions = await ShibirSession.findAll({
+      where: { shibir_id: shibirId, type: 'MV' },
+      order: [['session_number', 'ASC']]
+    });
+  }
+
+  const formattedRegularSessions = regularSessions.map((s) => ({
+    session_number: Number(s.session_number),
+    date: s.date,
+    start_time: s.start_time
+  }));
+
+  const formattedMvSessions = mvSessions.map((s, idx) => ({
+    session_number: Number(s.session_number),
+    display_number: idx + 1,
+    date: s.date,
+    start_time: s.start_time
+  }));
+
   return {
     shibir: shibirSummary,
-    totalRegularSessions: effectiveRegularSessions,
-    regularSessions: regularSessions.map((s) => ({
-      session_number: Number(s.session_number),
-      date: s.date,
-      start_time: s.start_time
-    })),
+    sessionType,
+    totalRegularSessions: effectiveReg,
+    totalMvSessions: effectiveMv,
+    totalCombinedSessions: effectiveComb,
+    regularSessions: formattedRegularSessions,
+    mvSessions: formattedMvSessions,
     participants: participants.map((p) => {
-      const attended = Number(p.attended_regular_sessions);
-      const total = effectiveRegularSessions;
+      const regAttended = Number(p.attended_regular_sessions);
+      const mvAttended = Number(p.attended_mv_sessions);
+      const combAttended = Number(p.attended_comb_sessions);
+
+      let activeAttended = regAttended;
+      let activeTotal = effectiveReg;
+      if (sessionType === 'mv') {
+        activeAttended = mvAttended;
+        activeTotal = effectiveMv;
+      } else if (sessionType === 'combined') {
+        activeAttended = combAttended;
+        activeTotal = effectiveComb;
+      }
+
       let category = 'Absent';
-      if (conductedCount === 0) {
+      if (activeConducted === 0) {
         category = 'Registered';
-      } else if (total > 0) {
-        if (attended === total) {
+      } else if (activeTotal > 0) {
+        if (activeAttended === activeTotal) {
           category = 'Full Attended';
-        } else if (attended > 0) {
+        } else if (activeAttended > 0) {
           category = 'Partially Attended';
         } else {
           category = 'Absent';
         }
       } else {
         category = 'Registered';
+      }
+
+      let summaryText = 'N/A';
+      if (activeConducted > 0 && activeTotal > 0) {
+        if (sessionType === 'mv') {
+          summaryText = `${mvAttended} of ${activeTotal} MV days`;
+        } else if (sessionType === 'combined') {
+          summaryText = `${combAttended} of ${activeTotal} total sessions`;
+        } else {
+          summaryText = `${regAttended} of ${activeTotal} sessions`;
+        }
       }
 
       return {
@@ -1143,13 +1381,34 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type }) {
         center: p.center || '',
         gender: p.gender || '',
         res_status: p.res_status || '',
-        attended_regular_sessions: attended,
-        total_regular_sessions: total,
-        attended_session_numbers: p.attended_session_numbers
-          ? p.attended_session_numbers.split(',').map(Number)
+
+        // Active mode stats
+        attended_sessions: activeAttended,
+        total_sessions: activeTotal,
+
+        // Regular
+        attended_regular_sessions: regAttended,
+        total_regular_sessions: effectiveReg,
+        attended_session_numbers: p.attended_regular_session_numbers
+          ? p.attended_regular_session_numbers.split(',').map(Number)
           : [],
+
+        // Morning Vanchan
+        attended_mv_sessions: mvAttended,
+        total_mv_sessions: effectiveMv,
+        attended_mv_session_numbers: p.attended_mv_session_numbers
+          ? p.attended_mv_session_numbers.split(',').map(Number)
+          : [],
+
+        // Combined
+        attended_comb_sessions: combAttended,
+        total_comb_sessions: effectiveComb,
+        attended_comb_session_numbers: p.attended_comb_session_numbers
+          ? p.attended_comb_session_numbers.split(',').map(Number)
+          : [],
+
         category,
-        attendance_summary: p.attendance_summary
+        attendance_summary: summaryText
       };
     })
   };
@@ -1369,8 +1628,18 @@ export async function restoreDefaultShibirSessions({ shibirId, adminUsername, lo
   return { success: true, message: 'Default sessions restored successfully.' };
 }
 
-export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location = RESEARCH_CENTRE }) {
+export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location = RESEARCH_CENTRE, sessionType = 'regular' }) {
   const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
+  let sessionTypeCondition = "ses.type = 'regular'";
+  let sessionTypeCondition3 = "ses3.type = 'regular'";
+  if (sessionType === 'mv') {
+    sessionTypeCondition = "ses.type = 'MV'";
+    sessionTypeCondition3 = "ses3.type = 'MV'";
+  } else if (sessionType === 'combined') {
+    sessionTypeCondition = "ses.type IN ('regular', 'MV')";
+    sessionTypeCondition3 = "ses3.type IN ('regular', 'MV')";
+  }
 
   const query = `
     SELECT 
@@ -1392,7 +1661,7 @@ export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location
     LEFT JOIN (
       SELECT r.bookingid, COUNT(DISTINCT r.session_number) AS attended_count
       FROM shibir_attendance_records r
-      JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ses.type = 'regular'
+      JOIN shibir_sessions ses ON ses.shibir_id = r.shibir_id AND ses.session_number = r.session_number AND ${sessionTypeCondition}
       JOIN shibir_db s4 ON s4.id = ses.shibir_id AND s4.location = :location AND s4.start_date BETWEEN :startDate AND :endDate
       WHERE r.attended = 1
       GROUP BY r.bookingid
@@ -1407,7 +1676,7 @@ export async function getAllPastAdhyayanAbsentees({ startDate, endDate, location
       AND EXISTS (
         SELECT 1
         FROM shibir_attendance_records r3
-        JOIN shibir_sessions ses3 ON ses3.shibir_id = r3.shibir_id AND ses3.session_number = r3.session_number AND ses3.type = 'regular'
+        JOIN shibir_sessions ses3 ON ses3.shibir_id = r3.shibir_id AND ses3.session_number = r3.session_number AND ${sessionTypeCondition3}
         WHERE r3.shibir_id = s.id AND r3.attended = 1
       )
     ORDER BY s.start_date DESC, c.issuedto ASC, b.cardno ASC;
