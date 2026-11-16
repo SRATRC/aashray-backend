@@ -18,7 +18,7 @@ export const login = async (req, res) => {
 
   if (!admin) {
     req.log.warn('admin_login_user_not_found', { username });
-    throw new ApiError(404, 'Invalid Username');
+    throw new ApiError(401, 'Invalid Username');
   }
 
   if (admin.dataValues.status === STATUS_INACTIVE) {
