@@ -41,7 +41,6 @@ import {
   ERR_BOOKING_ALREADY_CANCELLED,
   ERR_ROOM_FAILED_TO_BOOK,
   ERR_INVALID_DATE,
-  STATUS_PAYMENT_FAILED,
   RESEARCH_CENTRE
 } from '../../config/constants.js';
 import {
@@ -1169,9 +1168,7 @@ export const fetchKioskBookingsByCard = async (req, res) => {
       String(bookedBy).trim() !== String(booking.cardno).trim()
     );
 
-    const bookerName = isThirdParty
-      ? (bookedByCard?.issuedto || bookerNameMap.get(bookedBy) || null)
-      : (!isFlat ? null : (isOwner ? null : ownerName));
+    const bookerName = isThirdParty ? (bookedByCard?.issuedto || null) : null;
 
     const tx = txMap.get(publicFields.bookingid) || null;
     const bTxs = txListMap.get(publicFields.bookingid) || [];
