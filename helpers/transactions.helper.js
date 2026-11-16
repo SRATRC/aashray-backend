@@ -376,7 +376,7 @@ export async function findUnpaidBookingTransaction(bookingid, t) {
  */
 export function pickPrimaryCheckoutTransaction(transactionsList = [], isFlat = false) {
   if (isFlat) {
-    return transactionsList.find((t) => t.category === TYPE_FLAT) || transactionsList[0] || null;
+    return transactionsList.find((t) => t.category === TYPE_FLAT) || null;
   }
   return transactionsList[0] || null;
 }

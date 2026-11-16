@@ -1849,10 +1849,12 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
 
       allParticipants.forEach((p, idx) => {
         const sessionValues = (result.regularSessions || []).map((s) => {
+          if (!result.regularConducted) return '-';
           const attended = (p.attended_session_numbers || []).includes(s.session_number);
           return attended ? 'P' : 'A';
         });
         const mvValues = (result.mvSessions || []).map((s) => {
+          if (!result.mvConducted) return '-';
           const attended = (p.attended_mv_session_numbers || []).includes(s.session_number);
           return attended ? 'P' : 'A';
         });

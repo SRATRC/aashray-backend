@@ -1331,6 +1331,8 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type, sessio
     totalRegularSessions: effectiveReg,
     totalMvSessions: effectiveMv,
     totalCombinedSessions: effectiveComb,
+    regularConducted: conductedReg > 0,
+    mvConducted: conductedMv > 0,
     regularSessions: formattedRegularSessions,
     mvSessions: formattedMvSessions,
     participants: participants.map((p) => {
