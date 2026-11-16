@@ -1134,8 +1134,10 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type, sessio
   const conductedMv = Number(conductedSessionsResult[0]?.conducted_mv || 0);
   const conductedComb = Number(conductedSessionsResult[0]?.conducted_comb || 0);
 
-  const configuredReg = await ShibirSession.count({ where: { shibir_id: shibirId, type: 'regular' } });
-  const configuredMv = await ShibirSession.count({ where: { shibir_id: shibirId, type: 'MV' } });
+  const [configuredReg, configuredMv] = await Promise.all([
+    ShibirSession.count({ where: { shibir_id: shibirId, type: 'regular' } }),
+    ShibirSession.count({ where: { shibir_id: shibirId, type: 'MV' } })
+  ]);
   const configuredComb = configuredReg + configuredMv;
 
   const effectiveReg = conductedReg > 0 ? conductedReg : configuredReg;
@@ -1396,6 +1398,13 @@ export async function getPastAdhyayanParticipantsByType({ shibirId, type, sessio
         total_mv_sessions: effectiveMv,
         attended_mv_session_numbers: p.attended_mv_session_numbers
           ? p.attended_mv_session_numbers.split(',').map(Number)
+          : [],
+
+        // Combined
+        attended_comb_sessions: combAttended,
+        total_comb_sessions: effectiveComb,
+        attended_comb_session_numbers: p.attended_comb_session_numbers
+          ? p.attended_comb_session_numbers.split(',').map(Number)
           : [],
 
         category,

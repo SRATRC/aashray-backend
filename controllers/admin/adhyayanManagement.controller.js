@@ -1785,6 +1785,11 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
     throw new ApiError(400, `Invalid type. Allowed types: ${validTypes.join(', ')}`);
   }
 
+  const validSessionTypes = ['regular', 'mv', 'combined'];
+  if (!validSessionTypes.includes(session_type)) {
+    throw new ApiError(400, `Invalid session_type. Allowed: ${validSessionTypes.join(', ')}`);
+  }
+
   req.log.info('fetch_past_adhyayan_participants_report_start', { shibirId, type, exportType, session_type });
 
   const result = await getPastAdhyayanParticipantsByType({
@@ -1830,8 +1835,9 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         'Attendance Summary'
       ];
 
+      const modeLabel = session_type === 'mv' ? 'Morning Vanchan' : session_type === 'combined' ? 'Combined View' : 'Regular Lectures';
       const sheetData = [
-        ['Adhyayan Attendance Report'],
+        ['Adhyayan Attendance Report', '', '', `View: ${modeLabel}`],
         [],
         ['Topic', result.shibir.name || '', '', 'Total Registered', allParticipants.length],
         ['Speaker', result.shibir.speaker || '', '', 'Full Attended', fullAttended.length],
@@ -1896,7 +1902,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
 
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="shibir_${shibirId}_attendance_report.xlsx"`
+        `attachment; filename="shibir_${shibirId}_attendance_report_${session_type}.xlsx"`
       );
       res.setHeader(
         'Content-Type',
@@ -1939,7 +1945,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
 
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="shibir_${shibirId}_${type}_participants.xlsx"`
+      `attachment; filename="shibir_${shibirId}_${type}_${session_type}_participants.xlsx"`
     );
     res.setHeader(
       'Content-Type',
@@ -1956,9 +1962,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
       session_type: session_type,
       total_count: result.participants.length,
       regular_sessions: result.regularSessions || [],
-      regularSessions: result.regularSessions || [],
       mv_sessions: result.mvSessions || [],
-      mvSessions: result.mvSessions || [],
       participants: result.participants
     }
   });
@@ -2021,6 +2025,12 @@ export const deleteShibirSession = async (req, res) => {
 
 export const fetchAllPastAdhyayanAbsentees = async (req, res) => {
   const { export: exportType, session_type = 'regular' } = req.query;
+
+  const validSessionTypes = ['regular', 'mv', 'combined'];
+  if (!validSessionTypes.includes(session_type)) {
+    throw new ApiError(400, `Invalid session_type. Allowed: ${validSessionTypes.join(', ')}`);
+  }
+
   const { startDate, endDate, range } = resolveReportDateRange(req.query);
   req.log.info('fetch_all_past_adhyayan_absentees_start', { range, startDate, endDate, exportType, session_type });
 
@@ -2075,7 +2085,7 @@ export const fetchAllPastAdhyayanAbsentees = async (req, res) => {
 
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="all_absentees_${startDate}_to_${endDate}.xlsx"`
+      `attachment; filename="all_absentees_${startDate}_to_${endDate}_${session_type}.xlsx"`
     );
     res.setHeader(
       'Content-Type',
