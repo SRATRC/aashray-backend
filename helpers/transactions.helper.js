@@ -370,6 +370,33 @@ export async function findUnpaidBookingTransaction(bookingid, t) {
   });
 }
 
+/**
+ * Pick the primary booking transaction from an in-memory list of transactions
+ * (ordered by createdAt ASC). For flats, looks for category === TYPE_FLAT first.
+ */
+export function pickPrimaryCheckoutTransaction(transactionsList = [], isFlat = false) {
+  if (isFlat) {
+    return transactionsList.find((t) => t.category === TYPE_FLAT) || transactionsList[0] || null;
+  }
+  return transactionsList[0] || null;
+}
+
+/**
+ * Fetch the primary booking transaction from the database for checkout / refund calculations.
+ * Always orders by createdAt ASC to consistently target the main booking charge.
+ */
+export async function getPrimaryCheckoutTransaction(bookingid, isFlat = false, options = {}) {
+  const where = { bookingid };
+  if (isFlat) {
+    where.category = TYPE_FLAT;
+  }
+  return Transactions.findOne({
+    where,
+    order: [['createdAt', 'ASC']],
+    ...options
+  });
+}
+
 // A top-up that has not received money yet. Never the main charge (rows[0]).
 const isPendingTopUp = (r) =>
   UNPAID_TOP_UP_STATUSES.includes(r.status) && String(r.description || '').startsWith(TOP_UP_MARK);

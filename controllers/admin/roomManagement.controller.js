@@ -67,6 +67,8 @@ import {
   adminCancelTransaction,
   createPendingTransaction,
   findUnpaidBookingTransaction,
+  getPrimaryCheckoutTransaction,
+  pickPrimaryCheckoutTransaction,
   UNPAID_TRANSACTION_STATUSES
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
@@ -379,8 +381,8 @@ export const manualCheckout = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
+  const transaction = await getPrimaryCheckoutTransaction(booking.bookingid, false, {
+    transaction: dbTransaction
   });
 
   const previousStatus = booking.status;
@@ -621,8 +623,8 @@ export const flatCheckout = async (req, res) => {
     const nights = await calculateNights(booking.checkin, today);
 
     // Handle early checkout credit adjustment if a paid transaction exists
-    const transaction = await Transactions.findOne({
-      where: { bookingid: booking.bookingid, category: TYPE_FLAT }
+    const transaction = await getPrimaryCheckoutTransaction(booking.bookingid, true, {
+      transaction: t
     });
 
     if (transaction) {
@@ -1108,30 +1110,20 @@ export const fetchKioskBookingsByCard = async (req, res) => {
   const allBookings = [...roomBookings, ...flatBookings];
   const allBookingIds = allBookings.map((b) => b.bookingid);
 
-  // Batch 2: Fetch transactions for all active bookings
+  // Batch 2: Fetch transactions for all active bookings (ordered earliest first to match checkout resolution)
   const transactions = allBookingIds.length
     ? await Transactions.findAll({
         where: {
           bookingid: allBookingIds
         },
-        order: [['createdAt', 'DESC']]
+        order: [['createdAt', 'ASC']]
       })
     : [];
 
-  const txMap = new Map();
   const txListMap = new Map();
   for (const t of transactions) {
     if (!txListMap.has(t.bookingid)) txListMap.set(t.bookingid, []);
     txListMap.get(t.bookingid).push(t);
-
-    // Keep latest completed transaction for checkout refund preview, else latest transaction overall
-    const existing = txMap.get(t.bookingid);
-    const isCompleted = t.status === STATUS_PAYMENT_COMPLETED || t.status === STATUS_CASH_COMPLETED;
-    if (!existing) {
-      txMap.set(t.bookingid, t);
-    } else if (isCompleted && existing.status !== STATUS_PAYMENT_COMPLETED && existing.status !== STATUS_CASH_COMPLETED) {
-      txMap.set(t.bookingid, t);
-    }
   }
 
   // Collect distinct payer cards from transactions to resolve payer names for checkout preview
@@ -1170,8 +1162,8 @@ export const fetchKioskBookingsByCard = async (req, res) => {
 
     const bookerName = isThirdParty ? (bookedByCard?.issuedto || null) : null;
 
-    const tx = txMap.get(publicFields.bookingid) || null;
     const bTxs = txListMap.get(publicFields.bookingid) || [];
+    const tx = pickPrimaryCheckoutTransaction(bTxs, isFlat);
     const pendingTx = bTxs.find(
       (t) => UNPAID_TRANSACTION_STATUSES.includes(t.status) && Number(t.amount) > 0
     );
