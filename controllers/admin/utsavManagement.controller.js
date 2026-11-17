@@ -54,6 +54,8 @@ import {
   RESEARCH_CENTRE,
   STATUS_OPEN,
   STATUS_PAYMENT_COMPLETED,
+  STATUS_PAYMENT_FAILED,
+  STATUS_PAYMENT_AUTHORIZED,
   ERR_BOOKING_ALREADY_CANCELLED
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
@@ -732,6 +734,9 @@ export const fetchUtsavBookings = async (req, res) => {
       t1.status,
       t5.status AS transaction_status,
       t1.bookedby,
+      t6.issuedto AS booker_name,
+      t2.credits AS attendee_credits,
+      t6.credits AS booker_credits,
       t1.utsavid,
       t1.packageid,
       t2.dob,
@@ -741,7 +746,12 @@ export const fetchUtsavBookings = async (req, res) => {
     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
     LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
-    LEFT JOIN transactions AS t5 ON t1.bookingid = t5.bookingid
+    LEFT JOIN transactions AS t5 ON t5.id = (
+      SELECT id FROM transactions
+      WHERE bookingid = t1.bookingid AND category = 'utsav'
+      ORDER BY id DESC LIMIT 1
+    )
+    LEFT JOIN card_db AS t6 ON t1.bookedby = t6.cardno
     WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
     `,
     {
@@ -1424,15 +1434,28 @@ export const fetchPackagesByUtsav = async (req, res) => {
     return res.status(400).send({ message: 'utsavid is required' });
   }
 
-  const packages = await UtsavPackagesDb.findAll({
-    where: { utsavid },
-    order: [['start_date', 'ASC']]
-  });
+  const [packages, hasCustomFormsCount] = await Promise.all([
+    UtsavPackagesDb.findAll({
+      where: { utsavid },
+      order: [['start_date', 'ASC']]
+    }),
+    CustomForm.count({
+      where: {
+        status: 'active',
+        [Sequelize.Op.or]: [
+          { event_id: utsavid },
+          Sequelize.literal(`JSON_CONTAINS(event_ids, '"${utsavid}"') OR JSON_CONTAINS(event_ids, '${utsavid}')`)
+        ]
+      }
+    }).catch(() => 0)
+  ]);
 
-  req.log.info('fetch_packages_by_utsav_success', { utsavid, count: packages.length });
+  const hasCustomForms = Number(hasCustomFormsCount) > 0;
+
+  req.log.info('fetch_packages_by_utsav_success', { utsavid, count: packages.length, hasCustomForms });
   return res
     .status(200)
-    .send({ message: 'Fetched packages for utsav', data: packages });
+    .send({ message: 'Fetched packages for utsav', data: packages, has_custom_forms: hasCustomForms });
 };
 
 export const fetchPackage = async (req, res) => {
@@ -2052,7 +2075,11 @@ export const getSystemRoomAllocations = async (req, res) => {
     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
     LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
-    LEFT JOIN transactions AS t5 ON t1.bookingid = t5.bookingid
+    LEFT JOIN transactions AS t5 ON t5.id = (
+      SELECT id FROM transactions
+      WHERE bookingid = t1.bookingid AND category = 'utsav'
+      ORDER BY id DESC LIMIT 1
+    )
     WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
     ORDER BY t1.createdAt ASC`,
     {

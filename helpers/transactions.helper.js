@@ -70,7 +70,7 @@ export async function createPendingTransaction(
 export async function userCancelBooking(user, booking, t) {
   var transaction = await Transactions.findOne({
     where: { bookingid: booking.bookingid },
-    order: [['id', 'ASC']]
+    order: [['id', 'DESC']]
   });
 
   if (transaction) {

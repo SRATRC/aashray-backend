@@ -745,22 +745,26 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
     utsav || UtsavDb.findOne({ where: { id: booking.utsavid } })
   ]);
 
-  // Early return if no card or email
-  if (!card?.email) return;
+  const recipientEmail = card?.email || bookedByCard?.email;
+  if (!recipientEmail) return;
+
+  const ccEmail = (card?.email && bookedByCard?.email && card.email !== bookedByCard.email)
+    ? bookedByCard.email
+    : undefined;
 
   // Send email with optimized context
   sendMail({
-    email: card.email,
-    cc: bookedByCard?.email,
+    email: recipientEmail,
+    cc: ccEmail,
     subject: 'Utsav Booking Updated',
     template: 'utsavStatusUpdate',
     context: {
-      name: card.issuedto,
+      name: card?.issuedto || bookedByCard?.issuedto || '',
       bookingid: booking.bookingid,
       status: booking.status,
-      utsavName: utsavData.name,
-      utsavStartDate: utsavData.start_date,
-      utsavEndDate: utsavData.end_date
+      utsavName: utsavData?.name || '',
+      utsavStartDate: utsavData?.start_date,
+      utsavEndDate: utsavData?.end_date
     }
   });
 }

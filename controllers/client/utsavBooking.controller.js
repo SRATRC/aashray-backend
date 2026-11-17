@@ -145,7 +145,11 @@ export const ViewUtsavBookings = async (req, res) => {
     LEFT JOIN utsav_db t2 ON t1.utsavid = t2.id
     LEFT JOIN utsav_packages_db t3 ON t3.id = t1.packageid
     LEFT JOIN card_db t5 ON t5.cardno = t1.cardno
-    LEFT JOIN transactions t4 ON t4.bookingid = t1.bookingid
+    LEFT JOIN transactions t4 ON t4.id = (
+      SELECT id FROM transactions
+      WHERE bookingid = t1.bookingid AND category = 'utsav'
+      ORDER BY id DESC LIMIT 1
+    )
     WHERE (t1.cardno = :cardno OR t1.bookedBy = :cardno)
       ${upcomingWhere}
     ORDER BY ${orderBy}
@@ -262,7 +266,7 @@ export const CancelUtsavBooking = async (req, res) => {
   // transactions.bookingid has no index, so a locking read by bookingid scans
   // and locks the whole table, blocking every new booking until this commits.
   // Find the payment row's id with a plain read, then lock only that row.
-  const paymentRow = await Transactions.findOne({ where: { bookingid }, attributes: ['id'] });
+  const paymentRow = await Transactions.findOne({ where: { bookingid }, order: [['id', 'DESC']], attributes: ['id'] });
   if (paymentRow) {
     await Transactions.findOne({ where: { id: paymentRow.id }, transaction: t, lock: t.LOCK.UPDATE });
   }
