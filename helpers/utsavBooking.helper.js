@@ -955,13 +955,56 @@ export async function adjustUtsavFoodForPackageChange(oldPkg, newPkg, utsav, car
     }
   }
 
-  // 3. Re-apply boundary meal rules for new package start/end dates (even if overlapping)
-  if (newPkg.start_date) {
-    await bookFoodForAllMeals(newPkg.start_date, newPkg.start_date, effectiveStartingMeal, null, cardno, t, updatedBy);
+  // 3. Handle old boundary days that become interior middle days in the new package.
+  // If oldPkg.start_date falls strictly inside the new range, it was previously trimmed to oldPkg.starting_meal.
+  // Now it is a full middle day and needs all meals booked.
+  if (oldPkg.start_date && oldPkg.start_date > newPkg.start_date && oldPkg.start_date < newPkg.end_date) {
+    await bookFoodForAllMeals(oldPkg.start_date, oldPkg.start_date, null, null, cardno, t, updatedBy);
   }
-  if (newPkg.end_date) {
-    await bookFoodForAllMeals(newPkg.end_date, newPkg.end_date, null, effectiveEndingMeal, cardno, t, updatedBy);
+  // Similarly, if oldPkg.end_date falls strictly inside the new range, it was previously trimmed to oldPkg.ending_meal.
+  // Now it is a full middle day and needs all meals booked.
+  if (oldPkg.end_date && oldPkg.end_date > newPkg.start_date && oldPkg.end_date < newPkg.end_date) {
+    await bookFoodForAllMeals(oldPkg.end_date, oldPkg.end_date, null, null, cardno, t, updatedBy);
   }
+
+  // 4. Apply boundary meal rules for new package start & end dates (even if overlapping).
+  // If the new package is a single-day package (start_date === end_date), pass BOTH starting and ending meals
+  // in a single call so that one call does not overwrite the other.
+  if (newPkg.start_date && newPkg.start_date === newPkg.end_date) {
+    await bookFoodForAllMeals(newPkg.start_date, newPkg.end_date, effectiveStartingMeal, effectiveEndingMeal, cardno, t, updatedBy);
+  } else {
+    if (newPkg.start_date) {
+      await bookFoodForAllMeals(newPkg.start_date, newPkg.start_date, effectiveStartingMeal, null, cardno, t, updatedBy);
+    }
+    if (newPkg.end_date) {
+      await bookFoodForAllMeals(newPkg.end_date, newPkg.end_date, null, effectiveEndingMeal, cardno, t, updatedBy);
+    }
+  }
+}
+
+/**
+ * Unified WHERE condition to find custom forms attached to an Utsav.
+ * Used consistently across package fetch and response pruning.
+ */
+export function getUtsavCustomFormWhereCondition(utsavid) {
+  const parsedId = Number(utsavid);
+  if (!Number.isInteger(parsedId)) {
+    return { id: -1 };
+  }
+  return {
+    status: 'active',
+    [Sequelize.Op.or]: [
+      { event_id: parsedId },
+      Sequelize.literal(`JSON_CONTAINS(event_ids, '"${parsedId}"') OR JSON_CONTAINS(event_ids, '${parsedId}')`),
+      {
+        event_id: null,
+        title: { [Sequelize.Op.like]: '%Tapascharya%' },
+        [Sequelize.Op.and]: [
+          Sequelize.literal(`(event_ids IS NULL OR event_ids = '[]' OR JSON_LENGTH(event_ids) = 0)`)
+        ]
+      }
+    ]
+  };
 }
 
 /**
@@ -999,15 +1042,12 @@ function keyMatchesAnyDroppedDate(key, droppedDates) {
 export async function removeDroppedDatesFromCustomForms(utsavid, cardno, datesToCancel = [], t) {
   if (!utsavid || !cardno || !datesToCancel.length) return;
 
+  const parsedId = Number(utsavid);
+  if (!Number.isInteger(parsedId)) return;
+
   try {
     const forms = await CustomForm.findAll({
-      where: {
-        status: 'active',
-        [Sequelize.Op.or]: [
-          { event_id: utsavid },
-          { event_id: null, title: { [Sequelize.Op.like]: '%Tapascharya%' } }
-        ]
-      },
+      where: getUtsavCustomFormWhereCondition(parsedId),
       attributes: ['id'],
       raw: true,
       transaction: t

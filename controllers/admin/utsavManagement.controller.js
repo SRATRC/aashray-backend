@@ -27,7 +27,8 @@ import {
   sendUtsavBookingUpdateEmail,
   adjustUtsavFoodForPackageChange,
   removeDroppedDatesFromCustomForms,
-  sendUtsavPackageChangeWhatsApp
+  sendUtsavPackageChangeWhatsApp,
+  getUtsavCustomFormWhereCondition
 } from '../../helpers/utsavBooking.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import {
@@ -1434,25 +1435,25 @@ export const fetchPackagesByUtsav = async (req, res) => {
     return res.status(400).send({ message: 'utsavid is required' });
   }
 
+  const parsedUtsavId = Number(utsavid);
+  if (!Number.isInteger(parsedUtsavId)) {
+    req.log.warn('fetch_packages_by_utsav_invalid_id', { utsavid });
+    return res.status(400).send({ message: 'utsavid must be an integer' });
+  }
+
   const [packages, hasCustomFormsCount] = await Promise.all([
     UtsavPackagesDb.findAll({
-      where: { utsavid },
+      where: { utsavid: parsedUtsavId },
       order: [['start_date', 'ASC']]
     }),
     CustomForm.count({
-      where: {
-        status: 'active',
-        [Sequelize.Op.or]: [
-          { event_id: utsavid },
-          Sequelize.literal(`JSON_CONTAINS(event_ids, '"${utsavid}"') OR JSON_CONTAINS(event_ids, '${utsavid}')`)
-        ]
-      }
-    }).catch(() => 0)
+      where: getUtsavCustomFormWhereCondition(parsedUtsavId)
+    })
   ]);
 
   const hasCustomForms = Number(hasCustomFormsCount) > 0;
 
-  req.log.info('fetch_packages_by_utsav_success', { utsavid, count: packages.length, hasCustomForms });
+  req.log.info('fetch_packages_by_utsav_success', { utsavid: parsedUtsavId, count: packages.length, hasCustomForms });
   return res
     .status(200)
     .send({ message: 'Fetched packages for utsav', data: packages, has_custom_forms: hasCustomForms });
