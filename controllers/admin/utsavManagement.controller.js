@@ -23,15 +23,19 @@ import {
   bookUtsavForMumukshus,
   cancelUtsavFoodBookings,
   bookFoodForUtsav,
-  bookUtsavForMumukshusAdmin
+  bookUtsavForMumukshusAdmin,
+  sendUtsavBookingUpdateEmail,
+  adjustUtsavFoodForPackageChange,
+  removeDroppedDatesFromCustomForms,
+  sendUtsavPackageChangeWhatsApp
 } from '../../helpers/utsavBooking.helper.js';
-import { sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import {
   adminCancelTransaction,
   createPendingTransaction,
   cancelTransaction,
-  useCredit
+  useCredit,
+  parseCredits
 } from '../../helpers/transactions.helper.js';
 
 import {
@@ -56,6 +60,7 @@ import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
 import database from '../../config/database.js';
 import moment from 'moment';
+import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
 import {
@@ -1013,6 +1018,10 @@ export const utsavStatusUpdate = async (req, res) => {
         );
       }
 
+      if (booking.other?.includes('WAS_CHECKEDIN')) {
+        newBookingStatus = ROOM_STATUS_CHECKEDIN;
+      }
+
       if (booking.status === STATUS_WAITING) {
         await reserveUtsavSeat(utsav, t);
       }
@@ -1075,15 +1084,22 @@ export const utsavStatusUpdate = async (req, res) => {
         // Reserve seat
         await reserveUtsavSeat(utsav, t);
 
-        newBookingStatus = STATUS_CONFIRMED;
+        newBookingStatus = booking.other?.includes('WAS_CHECKEDIN')
+          ? ROOM_STATUS_CHECKEDIN
+          : STATUS_CONFIRMED;
+
+        const zeroUpdateData = {
+          status: newBookingStatus,
+          updatedBy: req.user.username,
+          description:
+            `Since package amount is 0, updating the status to ${newBookingStatus}.`
+        };
+        if (newBookingStatus === ROOM_STATUS_CHECKEDIN && booking.other?.includes('WAS_CHECKEDIN')) {
+          zeroUpdateData.other = booking.other.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+        }
 
         await booking.update(
-          {
-            status: newBookingStatus,
-            updatedBy: req.user.username,
-            description:
-              'Since package amount is 0, updating the status to confirmed.'
-          },
+          zeroUpdateData,
           { transaction: t }
         );
         await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
@@ -1147,7 +1163,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
       newBookingStatus =
         transaction.status === STATUS_PAYMENT_COMPLETED
-          ? STATUS_CONFIRMED
+          ? (booking.other?.includes('WAS_CHECKEDIN') ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED)
           : STATUS_PAYMENT_PENDING;
       break;
 
@@ -1267,8 +1283,13 @@ export const utsavStatusUpdate = async (req, res) => {
       throw new ApiError(400, 'Invalid status provided');
   }
 
+  const generalUpdateData = { status: newBookingStatus, updatedBy: req.user.username };
+  if (newBookingStatus === ROOM_STATUS_CHECKEDIN && booking.other?.includes('WAS_CHECKEDIN')) {
+    generalUpdateData.other = booking.other.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+  }
+
   await booking.update(
-    { status: newBookingStatus, updatedBy: req.user.username },
+    generalUpdateData,
     { transaction: t }
   );
 
@@ -4267,4 +4288,248 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       error: err.message
     });
   }
+};
+
+export const changeUtsavPackage = async (req, res) => {
+  const { bookingid, newPackageId, newRoomNo, description } = req.body;
+
+  req.log.info('change_utsav_package_start', {
+    bookingid,
+    newPackageId,
+    newRoomNo,
+    description,
+    adminUser: req.user?.username
+  });
+
+  if (!bookingid || !newPackageId) {
+    throw new ApiError(400, 'Booking ID and New Package ID are required');
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const booking = await UtsavBooking.findOne({
+    where: { bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  if (!booking) {
+    throw new ApiError(404, 'Booking not found');
+  }
+
+  if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(booking.status)) {
+    throw new ApiError(400, 'Cannot change package for a cancelled booking');
+  }
+
+  const allowedStatuses = [STATUS_WAITING, STATUS_PAYMENT_PENDING, STATUS_CONFIRMED, ROOM_STATUS_CHECKEDIN];
+  if (!allowedStatuses.includes(booking.status)) {
+    throw new ApiError(400, `Cannot change package for booking with status ${booking.status}`);
+  }
+
+  if (Number(booking.packageid) === Number(newPackageId)) {
+    throw new ApiError(400, 'Booking is already assigned to this package');
+  }
+
+  const oldPkg = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
+  const newPkg = await UtsavPackagesDb.findByPk(newPackageId, { transaction: t });
+
+  if (!newPkg) {
+    throw new ApiError(404, 'New package not found');
+  }
+
+  if (Number(newPkg.utsavid) !== Number(booking.utsavid)) {
+    throw new ApiError(400, 'New package does not belong to the same Utsav');
+  }
+
+  const utsav = await UtsavDb.findByPk(booking.utsavid, {
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  if (!utsav) {
+    throw new ApiError(404, 'Utsav not found');
+  }
+
+  const payerCardno = booking.bookedBy || booking.cardno;
+  await CardDb.findOne({
+    where: { cardno: payerCardno },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  const payerCard = await validateCard(payerCardno);
+
+  const wasCheckedIn = (booking.status === ROOM_STATUS_CHECKEDIN || booking.other?.includes('WAS_CHECKEDIN'));
+
+  // 1. Transaction cancellation and credit restoration
+  const existingTx = await Transactions.findOne({
+    where: { bookingid: booking.bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  const activeTxStatuses = [
+    STATUS_PAYMENT_PENDING,
+    STATUS_CASH_PENDING,
+    STATUS_PAYMENT_COMPLETED,
+    STATUS_CASH_COMPLETED,
+    STATUS_PAYMENT_FAILED,
+    STATUS_PAYMENT_AUTHORIZED
+  ];
+
+  let creditsRestored = 0;
+  if (existingTx && activeTxStatuses.includes(existingTx.status)) {
+    const totalAmount = (Number(existingTx.amount) || 0) + (Number(existingTx.discount) || 0);
+    creditsRestored = (existingTx.status === STATUS_PAYMENT_COMPLETED || existingTx.status === STATUS_CASH_COMPLETED)
+      ? totalAmount
+      : (Number(existingTx.discount) || 0);
+
+    await cancelTransaction(req.user, payerCard, existingTx, t, true);
+    req.log.info('change_utsav_package_cancelled_active_tx', {
+      bookingid: booking.bookingid,
+      existingTxId: existingTx.id,
+      status: existingTx.status,
+      creditsRestored
+    });
+  }
+
+  let newBookingStatus = booking.status;
+  let finalOther = booking.other;
+  let amountDue = 0;
+  let creditsUsed = 0;
+
+  // 2. New Transaction & Auto-Cover
+  if (booking.status === STATUS_WAITING) {
+    // Waiting participants do not have active financial transactions created
+    newBookingStatus = STATUS_WAITING;
+    amountDue = 0;
+    creditsUsed = 0;
+  } else if (Number(newPkg.amount) === 0) {
+    newBookingStatus = wasCheckedIn ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED;
+    if (wasCheckedIn && finalOther?.includes('WAS_CHECKEDIN')) {
+      finalOther = finalOther.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+    }
+    amountDue = 0;
+    creditsUsed = 0;
+  } else {
+    // Paid package
+    const { transaction: newTx } = await createPendingTransaction(
+      payerCard,
+      booking,
+      TYPE_UTSAV,
+      newPkg.amount,
+      req.user.username,
+      t
+    );
+
+    creditsUsed = Number(newTx.discount) || 0;
+    amountDue = Number(newTx.amount) || 0;
+
+    if (newTx.status === STATUS_PAYMENT_COMPLETED) {
+      newBookingStatus = wasCheckedIn ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED;
+      if (wasCheckedIn && finalOther?.includes('WAS_CHECKEDIN')) {
+        finalOther = finalOther.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+      }
+    } else {
+      newBookingStatus = STATUS_PAYMENT_PENDING;
+      if (wasCheckedIn && !finalOther?.includes('WAS_CHECKEDIN')) {
+        finalOther = finalOther ? `${finalOther},WAS_CHECKEDIN` : 'WAS_CHECKEDIN';
+      }
+    }
+  }
+
+  // 3. Room allocation handling
+  let finalRoomNo = booking.roomno;
+  if (newRoomNo !== undefined) {
+    finalRoomNo = (typeof newRoomNo === 'string' && newRoomNo.trim() !== '') ? newRoomNo.trim() : null;
+  }
+
+  // 4. Audit description update
+  const auditText = `Package changed from ${oldPkg?.name || 'Package #' + booking.packageid} to ${newPkg.name} by ${req.user.username}`;
+  const finalDescription = description
+    ? (booking.description ? `${booking.description} | ${auditText}. Remarks: ${description}` : `${auditText}. Remarks: ${description}`)
+    : (booking.description ? `${booking.description} | ${auditText}` : auditText);
+
+  // 5. Update booking record
+  await booking.update({
+    packageid: newPackageId,
+    status: newBookingStatus,
+    roomno: finalRoomNo,
+    other: finalOther,
+    description: finalDescription,
+    updatedBy: req.user.username
+  }, { transaction: t });
+
+  // 6. Food bookings delta adjustment (only if held seat)
+  if (utsavBookingHeldSeat(booking.status)) {
+    await adjustUtsavFoodForPackageChange(oldPkg, newPkg, utsav, booking.cardno, req.user.username, t);
+  }
+
+  // 7. Prune custom forms responses on downgrade
+  if (oldPkg && oldPkg.start_date && oldPkg.end_date && newPkg.start_date && newPkg.end_date) {
+    const oldDates = getDates(oldPkg.start_date, oldPkg.end_date);
+    const newDates = getDates(newPkg.start_date, newPkg.end_date);
+    const droppedDates = oldDates.filter((d) => !newDates.includes(d));
+    if (droppedDates.length > 0) {
+      await removeDroppedDatesFromCustomForms(booking.utsavid, booking.cardno, droppedDates, t);
+    }
+  }
+
+  // 8. Calculate surplus credits remaining on payerCard
+  const updatedPayerCard = await CardDb.findOne({
+    where: { cardno: payerCardno },
+    transaction: t
+  });
+  const parsedCredits = parseCredits(updatedPayerCard?.credits);
+  const surplusCredits = parsedCredits?.utsav || 0;
+
+  await t.commit();
+
+  // 9. Post-commit notifications
+  try {
+    await sendUtsavBookingUpdateEmail(booking, utsav);
+  } catch (emailErr) {
+    req.log.error('change_utsav_package_email_error', { error: emailErr.message, bookingid });
+  }
+
+  try {
+    await sendUtsavPackageChangeWhatsApp(booking, oldPkg, newPkg, { updatedBy: req.user.username });
+  } catch (waErr) {
+    req.log.error('change_utsav_package_whatsapp_error', { error: waErr.message, bookingid });
+  }
+
+  req.log.info('change_utsav_package_success', {
+    bookingid: booking.bookingid,
+    oldPackageId: oldPkg?.id,
+    newPackageId: newPkg.id,
+    status: newBookingStatus,
+    amountDue,
+    creditsRestored,
+    creditsUsed,
+    surplusCredits,
+    roomno: finalRoomNo
+  });
+
+  return res.status(200).send({
+    message: 'Package changed successfully',
+    data: {
+      bookingid: booking.bookingid,
+      oldPackage: {
+        id: oldPkg?.id,
+        name: oldPkg?.name,
+        amount: oldPkg?.amount
+      },
+      newPackage: {
+        id: newPkg.id,
+        name: newPkg.name,
+        amount: newPkg.amount
+      },
+      status: newBookingStatus,
+      amountDue,
+      creditsRestored,
+      creditsUsed,
+      surplusCredits,
+      roomno: finalRoomNo
+    }
+  });
 };
