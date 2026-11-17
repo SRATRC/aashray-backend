@@ -1003,7 +1003,10 @@ export const utsavStatusUpdate = async (req, res) => {
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
-  let transaction = await Transactions.findOne({ where: { bookingid } });
+  let transaction = await Transactions.findOne({
+    where: { bookingid },
+    order: [['id', 'DESC']]
+  });
 
   switch (status) {
     case STATUS_CONFIRMED:
@@ -1118,6 +1121,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
       transaction = await Transactions.findOne({
         where: { bookingid: booking.bookingid },
+        order: [['id', 'DESC']],
         transaction: t
       });
 
@@ -4361,13 +4365,6 @@ export const changeUtsavPackage = async (req, res) => {
 
   const wasCheckedIn = (booking.status === ROOM_STATUS_CHECKEDIN || booking.other?.includes('WAS_CHECKEDIN'));
 
-  // 1. Transaction cancellation and credit restoration
-  const existingTx = await Transactions.findOne({
-    where: { bookingid: booking.bookingid },
-    transaction: t,
-    lock: t.LOCK.UPDATE
-  });
-
   const activeTxStatuses = [
     STATUS_PAYMENT_PENDING,
     STATUS_CASH_PENDING,
@@ -4377,8 +4374,35 @@ export const changeUtsavPackage = async (req, res) => {
     STATUS_PAYMENT_AUTHORIZED
   ];
 
+  // 1. Transaction cancellation and credit restoration
+  // Query active transaction ordered by latest DESC so subsequent changes don't pick up old credited rows
+  const existingTx = await Transactions.findOne({
+    where: {
+      bookingid: booking.bookingid,
+      status: activeTxStatuses
+    },
+    order: [['id', 'DESC']],
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  if (existingTx && existingTx.status === STATUS_PAYMENT_AUTHORIZED) {
+    throw new ApiError(
+      400,
+      'Cannot change package while a payment is currently authorized. Please wait for payment confirmation or failure.'
+    );
+  }
+
+  if (existingTx?.order_id) {
+    req.log.info('cancelling_active_transaction_with_razorpay_order', {
+      bookingid: booking.bookingid,
+      existingTxId: existingTx.id,
+      orderId: existingTx.order_id
+    });
+  }
+
   let creditsRestored = 0;
-  if (existingTx && activeTxStatuses.includes(existingTx.status)) {
+  if (existingTx) {
     const totalAmount = (Number(existingTx.amount) || 0) + (Number(existingTx.discount) || 0);
     creditsRestored = (existingTx.status === STATUS_PAYMENT_COMPLETED || existingTx.status === STATUS_CASH_COMPLETED)
       ? totalAmount

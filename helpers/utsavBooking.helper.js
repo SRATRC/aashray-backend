@@ -915,8 +915,8 @@ export async function validateFeedbackEligibility(
 export async function adjustUtsavFoodForPackageChange(oldPkg, newPkg, utsav, cardno, updatedBy, t) {
   if (utsav.location !== RESEARCH_CENTRE) return;
 
-  const oldDates = getDates(oldPkg.start_date, oldPkg.end_date);
-  const newDates = getDates(newPkg.start_date, newPkg.end_date);
+  const oldDates = (oldPkg.start_date && oldPkg.end_date) ? getDates(oldPkg.start_date, oldPkg.end_date) : [];
+  const newDates = (newPkg.start_date && newPkg.end_date) ? getDates(newPkg.start_date, newPkg.end_date) : [];
 
   // 1. Cancel meals for dates that are in oldPkg but not in newPkg (downgrade delta)
   const droppedDates = oldDates.filter((d) => !newDates.includes(d));
@@ -925,22 +925,21 @@ export async function adjustUtsavFoodForPackageChange(oldPkg, newPkg, utsav, car
       cardno,
       droppedDates
     });
-    await FoodDb.update(
-      { breakfast: 0, lunch: 0, dinner: 0, updatedBy },
-      { where: { cardno, date: droppedDates }, transaction: t }
-    );
+    for (const d of droppedDates) {
+      await cancelAllMeals(d, d, cardno, updatedBy, t);
+    }
   }
 
   // 2. Book meals for dates in newPkg that were not in oldPkg (upgrade delta)
   const addedDates = newDates.filter((d) => !oldDates.includes(d));
+  const effectiveStartingMeal = newPkg.starting_meal || null;
+  const effectiveEndingMeal = newPkg.ending_meal || null;
+
   if (addedDates.length > 0) {
     logger.info('utsav_food_package_change_booking_added_dates', {
       cardno,
       addedDates
     });
-
-    const effectiveStartingMeal = newPkg.starting_meal || null;
-    const effectiveEndingMeal = newPkg.ending_meal || null;
 
     for (const d of addedDates) {
       const isStart = d === newPkg.start_date;
@@ -948,9 +947,45 @@ export async function adjustUtsavFoodForPackageChange(oldPkg, newPkg, utsav, car
       const startMeals = isStart ? effectiveStartingMeal : null;
       const endMeals = isEnd ? effectiveEndingMeal : null;
 
-      await bookFoodForAllMeals(d, d, startMeals, endMeals, cardno, updatedBy, t);
+      await bookFoodForAllMeals(d, d, startMeals, endMeals, cardno, t, updatedBy);
     }
   }
+
+  // 3. Re-apply boundary meal rules for new package start/end dates (even if overlapping)
+  if (newPkg.start_date) {
+    await bookFoodForAllMeals(newPkg.start_date, newPkg.start_date, effectiveStartingMeal, null, cardno, t, updatedBy);
+  }
+  if (newPkg.end_date) {
+    await bookFoodForAllMeals(newPkg.end_date, newPkg.end_date, null, effectiveEndingMeal, cardno, t, updatedBy);
+  }
+}
+
+/**
+ * Shared matcher to check if a custom form field/matrix key exactly matches any dropped date.
+ * Avoids false positives from loose substring matching (e.g. "1-Mar" matching "11-Mar").
+ */
+function keyMatchesAnyDroppedDate(key, droppedDates) {
+  if (!key || typeof key !== 'string') return false;
+  const trimmed = key.trim();
+
+  return droppedDates.some((d) => {
+    if (trimmed === d) return true;
+
+    const m = moment(d, 'YYYY-MM-DD', true);
+    if (!m.isValid()) return false;
+
+    const exactFormats = ['YYYY-MM-DD', 'D-MMM', 'DD-MMM', 'D-MMM-YYYY', 'DD-MMM-YYYY', 'DD-MM-YYYY', 'YYYY/MM/DD', 'D/M/YYYY', 'DD/MM/YYYY'];
+    for (const fmt of exactFormats) {
+      if (trimmed === m.format(fmt)) return true;
+    }
+
+    const parsedKey = moment(trimmed, exactFormats, true);
+    if (parsedKey.isValid()) {
+      return parsedKey.format('YYYY-MM-DD') === m.format('YYYY-MM-DD');
+    }
+
+    return false;
+  });
 }
 
 /**
@@ -966,7 +1001,7 @@ export async function removeDroppedDatesFromCustomForms(utsavid, cardno, datesTo
         status: 'active',
         [Sequelize.Op.or]: [
           { event_id: utsavid },
-          { title: { [Sequelize.Op.like]: '%Tapascharya%' } }
+          { event_id: null, title: { [Sequelize.Op.like]: '%Tapascharya%' } }
         ]
       },
       attributes: ['id'],
@@ -994,18 +1029,7 @@ export async function removeDroppedDatesFromCustomForms(utsavid, cardno, datesTo
       // 1. Check tapascharya_matrix
       if (respData.tapascharya_matrix && typeof respData.tapascharya_matrix === 'object') {
         for (const key of Object.keys(respData.tapascharya_matrix)) {
-          const matches = datesToCancel.some((d) => {
-            const m = moment(d);
-            return (
-              key === d ||
-              key.includes(d) ||
-              (m.isValid() &&
-                (key.includes(m.format('D-MMM')) ||
-                  key.includes(m.format('DD-MMM')) ||
-                  key.includes(m.format('YYYY-MM-DD'))))
-            );
-          });
-          if (matches) {
+          if (keyMatchesAnyDroppedDate(key, datesToCancel)) {
             delete respData.tapascharya_matrix[key];
             modified = true;
           }
@@ -1016,18 +1040,7 @@ export async function removeDroppedDatesFromCustomForms(utsavid, cardno, datesTo
       for (const [k, v] of Object.entries(respData)) {
         if (v && typeof v === 'object' && !Array.isArray(v) && k !== 'tapascharya_matrix') {
           for (const subKey of Object.keys(v)) {
-            const matches = datesToCancel.some((d) => {
-              const m = moment(d);
-              return (
-                subKey === d ||
-                subKey.includes(d) ||
-                (m.isValid() &&
-                  (subKey.includes(m.format('D-MMM')) ||
-                    subKey.includes(m.format('DD-MMM')) ||
-                    subKey.includes(m.format('YYYY-MM-DD'))))
-              );
-            });
-            if (matches) {
+            if (keyMatchesAnyDroppedDate(subKey, datesToCancel)) {
               delete v[subKey];
               modified = true;
             }
