@@ -26,7 +26,10 @@ import {
   UtsavPackagesDb,
   UtsavBooking,
   CardDb,
-  UtsavFeedback
+  UtsavFeedback,
+  FoodDb,
+  CustomForm,
+  CustomFormResponse
 } from '../models/associations.js';
 import {
   createPendingTransaction,
@@ -45,6 +48,7 @@ import {
 } from '../controllers/helper.js';
 import database from '../config/database.js';
 import sendMail from '../utils/sendMail.js';
+import getDates from '../utils/getDates.js';
 import { bookFoodForAllMeals, cancelAllMeals } from './foodBooking.helper.js';
 const SAMVATSARI_PACKAGE_ID = 21;
 const SAMVATSARI_OVERLAPPING_PACKAGE_IDS = [18, 20];
@@ -741,22 +745,26 @@ export async function sendUtsavBookingUpdateEmail(booking, utsav) {
     utsav || UtsavDb.findOne({ where: { id: booking.utsavid } })
   ]);
 
-  // Early return if no card or email
-  if (!card?.email) return;
+  const recipientEmail = card?.email || bookedByCard?.email;
+  if (!recipientEmail) return;
+
+  const ccEmail = (card?.email && bookedByCard?.email && card.email !== bookedByCard.email)
+    ? bookedByCard.email
+    : undefined;
 
   // Send email with optimized context
   sendMail({
-    email: card.email,
-    cc: bookedByCard?.email,
+    email: recipientEmail,
+    cc: ccEmail,
     subject: 'Utsav Booking Updated',
     template: 'utsavStatusUpdate',
     context: {
-      name: card.issuedto,
+      name: card?.issuedto || bookedByCard?.issuedto || '',
       bookingid: booking.bookingid,
       status: booking.status,
-      utsavName: utsavData.name,
-      utsavStartDate: utsavData.start_date,
-      utsavEndDate: utsavData.end_date
+      utsavName: utsavData?.name || '',
+      utsavStartDate: utsavData?.start_date,
+      utsavEndDate: utsavData?.end_date
     }
   });
 }
@@ -899,4 +907,202 @@ export async function validateFeedbackEligibility(
     booking
   };
 
+}
+
+/**
+ * Adjust food bookings when an Utsav participant changes packages.
+ * Only applies for Research Centre location.
+ * - Dropped days (downgrade): cancel meals (set to 0).
+ * - Added days (upgrade): book meals respecting package starting/ending meal config.
+ * - Overlapping days: left untouched so existing/custom choices remain intact.
+ */
+export async function adjustUtsavFoodForPackageChange(oldPkg, newPkg, utsav, cardno, updatedBy, t) {
+  if (utsav.location !== RESEARCH_CENTRE) return;
+
+  const oldDates = (oldPkg.start_date && oldPkg.end_date) ? getDates(oldPkg.start_date, oldPkg.end_date) : [];
+  const newDates = (newPkg.start_date && newPkg.end_date) ? getDates(newPkg.start_date, newPkg.end_date) : [];
+
+  // 1. Cancel meals for dates that are in oldPkg but not in newPkg (downgrade delta)
+  const droppedDates = oldDates.filter((d) => !newDates.includes(d));
+  if (droppedDates.length > 0) {
+    logger.info('utsav_food_package_change_cancelling_dropped_dates', {
+      cardno,
+      droppedDates
+    });
+    for (const d of droppedDates) {
+      await cancelAllMeals(d, d, cardno, updatedBy, t);
+    }
+  }
+
+  // 2. Book meals for dates in newPkg that were not in oldPkg (upgrade delta)
+  const addedDates = newDates.filter((d) => !oldDates.includes(d));
+  const effectiveStartingMeal = newPkg.starting_meal || null;
+  const effectiveEndingMeal = newPkg.ending_meal || null;
+
+  if (addedDates.length > 0) {
+    logger.info('utsav_food_package_change_booking_added_dates', {
+      cardno,
+      addedDates
+    });
+
+    for (const d of addedDates) {
+      const isStart = d === newPkg.start_date;
+      const isEnd = d === newPkg.end_date;
+      const startMeals = isStart ? effectiveStartingMeal : null;
+      const endMeals = isEnd ? effectiveEndingMeal : null;
+
+      await bookFoodForAllMeals(d, d, startMeals, endMeals, cardno, t, updatedBy);
+    }
+  }
+
+  // 3. Handle old boundary days that become interior middle days in the new package.
+  // If oldPkg.start_date falls strictly inside the new range, it was previously trimmed to oldPkg.starting_meal.
+  // Now it is a full middle day and needs all meals booked.
+  if (oldPkg.start_date && oldPkg.start_date > newPkg.start_date && oldPkg.start_date < newPkg.end_date) {
+    await bookFoodForAllMeals(oldPkg.start_date, oldPkg.start_date, null, null, cardno, t, updatedBy);
+  }
+  // Similarly, if oldPkg.end_date falls strictly inside the new range, it was previously trimmed to oldPkg.ending_meal.
+  // Now it is a full middle day and needs all meals booked.
+  if (oldPkg.end_date && oldPkg.end_date > newPkg.start_date && oldPkg.end_date < newPkg.end_date) {
+    await bookFoodForAllMeals(oldPkg.end_date, oldPkg.end_date, null, null, cardno, t, updatedBy);
+  }
+
+  // 4. Apply boundary meal rules for new package start & end dates (even if overlapping).
+  // If the new package is a single-day package (start_date === end_date), pass BOTH starting and ending meals
+  // in a single call so that one call does not overwrite the other.
+  if (newPkg.start_date && newPkg.start_date === newPkg.end_date) {
+    await bookFoodForAllMeals(newPkg.start_date, newPkg.end_date, effectiveStartingMeal, effectiveEndingMeal, cardno, t, updatedBy);
+  } else {
+    if (newPkg.start_date) {
+      await bookFoodForAllMeals(newPkg.start_date, newPkg.start_date, effectiveStartingMeal, null, cardno, t, updatedBy);
+    }
+    if (newPkg.end_date) {
+      await bookFoodForAllMeals(newPkg.end_date, newPkg.end_date, null, effectiveEndingMeal, cardno, t, updatedBy);
+    }
+  }
+}
+
+/**
+ * Unified WHERE condition to find custom forms attached to an Utsav.
+ * Used consistently across package fetch and response pruning.
+ */
+export function getUtsavCustomFormWhereCondition(utsavid) {
+  const parsedId = Number(utsavid);
+  if (!Number.isInteger(parsedId)) {
+    return { id: -1 };
+  }
+  return {
+    status: 'active',
+    [Sequelize.Op.or]: [
+      { event_id: parsedId },
+      Sequelize.literal(`JSON_CONTAINS(event_ids, '"${parsedId}"') OR JSON_CONTAINS(event_ids, '${parsedId}')`)
+    ]
+  };
+}
+
+/**
+ * Shared matcher to check if a custom form field/matrix key exactly matches any dropped date.
+ * Avoids false positives from loose substring matching (e.g. "1-Mar" matching "11-Mar").
+ */
+function keyMatchesAnyDroppedDate(key, droppedDates) {
+  if (!key || typeof key !== 'string') return false;
+  const trimmed = key.trim();
+
+  return droppedDates.some((d) => {
+    if (trimmed === d) return true;
+
+    const m = moment(d, 'YYYY-MM-DD', true);
+    if (!m.isValid()) return false;
+
+    const exactFormats = ['YYYY-MM-DD', 'D-MMM', 'DD-MMM', 'D-MMM-YYYY', 'DD-MMM-YYYY', 'DD-MM-YYYY', 'YYYY/MM/DD', 'D/M/YYYY', 'DD/MM/YYYY'];
+    for (const fmt of exactFormats) {
+      if (trimmed === m.format(fmt)) return true;
+    }
+
+    const parsedKey = moment(trimmed, exactFormats, true);
+    if (parsedKey.isValid()) {
+      return parsedKey.format('YYYY-MM-DD') === m.format('YYYY-MM-DD');
+    }
+
+    return false;
+  });
+}
+
+/**
+ * Clean up custom form responses (e.g. Tapascharya / Upvaas matrix choices)
+ * for dates that have been removed on an Utsav package downgrade.
+ */
+export async function removeDroppedDatesFromCustomForms(utsavid, cardno, datesToCancel = [], t) {
+  if (!utsavid || !cardno || !datesToCancel.length) return;
+
+  const parsedId = Number(utsavid);
+  if (!Number.isInteger(parsedId)) return;
+
+  const forms = await CustomForm.findAll({
+    where: getUtsavCustomFormWhereCondition(parsedId),
+    attributes: ['id'],
+    raw: true,
+    transaction: t
+  });
+
+  if (!forms.length) return;
+  const formIds = forms.map((f) => f.id);
+
+  const responses = await CustomFormResponse.findAll({
+    where: {
+      form_id: { [Sequelize.Op.in]: formIds },
+      cardno
+    },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
+
+  for (const resp of responses) {
+    if (!resp.responses || typeof resp.responses !== 'object') continue;
+    let modified = false;
+    const respData = JSON.parse(JSON.stringify(resp.responses));
+
+    // 1. Check tapascharya_matrix
+    if (respData.tapascharya_matrix && typeof respData.tapascharya_matrix === 'object') {
+      for (const key of Object.keys(respData.tapascharya_matrix)) {
+        if (keyMatchesAnyDroppedDate(key, datesToCancel)) {
+          delete respData.tapascharya_matrix[key];
+          modified = true;
+        }
+      }
+    }
+
+    // 2. Check other object fields
+    for (const [k, v] of Object.entries(respData)) {
+      if (v && typeof v === 'object' && !Array.isArray(v) && k !== 'tapascharya_matrix') {
+        for (const subKey of Object.keys(v)) {
+          if (keyMatchesAnyDroppedDate(subKey, datesToCancel)) {
+            delete v[subKey];
+            modified = true;
+          }
+        }
+      }
+    }
+
+    if (modified) {
+      logger.info('pruned_custom_form_responses_on_package_downgrade', {
+        responseId: resp.id,
+        cardno,
+        datesToCancel
+      });
+      await resp.update({ responses: respData }, { transaction: t });
+    }
+  }
+}
+
+/**
+ * Placeholder for WhatsApp notification when an Utsav package is changed by admin.
+ */
+export async function sendUtsavPackageChangeWhatsApp(booking, oldPackage, newPackage, options = {}) {
+  logger.info('send_utsav_package_change_whatsapp_triggered', {
+    bookingid: booking.bookingid,
+    oldPackageId: oldPackage?.id,
+    newPackageId: newPackage?.id,
+    updatedBy: options.updatedBy
+  });
 }
