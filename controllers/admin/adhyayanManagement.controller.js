@@ -1813,22 +1813,25 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
       const partialAttended = allParticipants.filter((p) => p.category === 'Partially Attended');
       const absent = allParticipants.filter((p) => p.category === 'Absent');
 
-      // Column headers and values based on active session_type
-      let activeSessionHeaders = [];
-      if (session_type === 'regular') {
-        activeSessionHeaders = (result.regularSessions || []).map(
-          (s) => `Session ${s.session_number}`
-        );
-      } else if (session_type === 'mv') {
-        activeSessionHeaders = (result.mvSessions || []).map(
-          (s) => `MV ${s.display_number}`
-        );
-      } else {
-        activeSessionHeaders = [
-          ...(result.regularSessions || []).map((s) => `Session ${s.session_number}`),
-          ...(result.mvSessions || []).map((s) => `MV ${s.display_number}`)
-        ];
-      }
+      // Column specs and headers based on active session_type
+      const regCols = session_type !== 'mv'
+        ? (result.regularSessions || []).map((s) => ({
+            header: `Session ${s.session_number}`,
+            session_number: s.session_number,
+            conducted: result.regularConducted,
+            key: 'attended_session_numbers'
+          }))
+        : [];
+      const mvCols = session_type !== 'regular'
+        ? (result.mvSessions || []).map((s) => ({
+            header: `MV ${s.display_number}`,
+            session_number: s.session_number,
+            conducted: result.mvConducted,
+            key: 'attended_mv_session_numbers'
+          }))
+        : [];
+      const activeCols = [...regCols, ...mvCols];
+      const activeSessionHeaders = activeCols.map((c) => c.header);
 
       const tableHeaders = [
         '#',
@@ -1853,7 +1856,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         sessionsValue = result.totalMvSessions;
       } else {
         sessionsLabel = 'Sessions';
-        sessionsValue = `Regular: ${result.totalRegularSessions} | MV: ${result.totalMvSessions} (Total: ${result.totalCombinedSessions})`;
+        sessionsValue = `Regular: ${result.totalRegularSessions} | MV: ${result.totalMvSessions} (Counted: ${result.totalCombinedSessions})`;
       }
 
       const modeLabel = session_type === 'mv' ? 'Morning Vanchan' : session_type === 'combined' ? 'Combined View' : 'Regular Lectures';
@@ -1869,32 +1872,10 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
       ];
 
       allParticipants.forEach((p, idx) => {
-        let activeSessionValues = [];
-        if (session_type === 'regular') {
-          activeSessionValues = (result.regularSessions || []).map((s) => {
-            if (!result.regularConducted) return '-';
-            const attended = (p.attended_session_numbers || []).includes(s.session_number);
-            return attended ? 'P' : 'A';
-          });
-        } else if (session_type === 'mv') {
-          activeSessionValues = (result.mvSessions || []).map((s) => {
-            if (!result.mvConducted) return '-';
-            const attended = (p.attended_mv_session_numbers || []).includes(s.session_number);
-            return attended ? 'P' : 'A';
-          });
-        } else {
-          const sessionValues = (result.regularSessions || []).map((s) => {
-            if (!result.regularConducted) return '-';
-            const attended = (p.attended_session_numbers || []).includes(s.session_number);
-            return attended ? 'P' : 'A';
-          });
-          const mvValues = (result.mvSessions || []).map((s) => {
-            if (!result.mvConducted) return '-';
-            const attended = (p.attended_mv_session_numbers || []).includes(s.session_number);
-            return attended ? 'P' : 'A';
-          });
-          activeSessionValues = [...sessionValues, ...mvValues];
-        }
+        const activeSessionValues = activeCols.map((c) => {
+          if (!c.conducted) return '-';
+          return (p[c.key] || []).includes(c.session_number) ? 'P' : 'A';
+        });
 
         sheetData.push([
           idx + 1,
