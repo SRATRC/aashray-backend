@@ -1813,13 +1813,22 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
       const partialAttended = allParticipants.filter((p) => p.category === 'Partially Attended');
       const absent = allParticipants.filter((p) => p.category === 'Absent');
 
-      // Single Sheet: Top Summary followed by Participant List with Session Matrix
-      const sessionHeaders = (result.regularSessions || []).map(
-        (s) => `Session ${s.session_number}`
-      );
-      const mvHeaders = (result.mvSessions || []).map(
-        (s) => `MV ${s.display_number}`
-      );
+      // Column headers and values based on active session_type
+      let activeSessionHeaders = [];
+      if (session_type === 'regular') {
+        activeSessionHeaders = (result.regularSessions || []).map(
+          (s) => `Session ${s.session_number}`
+        );
+      } else if (session_type === 'mv') {
+        activeSessionHeaders = (result.mvSessions || []).map(
+          (s) => `MV ${s.display_number}`
+        );
+      } else {
+        activeSessionHeaders = [
+          ...(result.regularSessions || []).map((s) => `Session ${s.session_number}`),
+          ...(result.mvSessions || []).map((s) => `MV ${s.display_number}`)
+        ];
+      }
 
       const tableHeaders = [
         '#',
@@ -1830,10 +1839,22 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         'Gender',
         'Resident Status',
         'Category',
-        ...sessionHeaders,
-        ...mvHeaders,
+        ...activeSessionHeaders,
         'Attendance Summary'
       ];
+
+      let sessionsLabel = 'Sessions';
+      let sessionsValue = '';
+      if (session_type === 'regular') {
+        sessionsLabel = 'Regular Sessions';
+        sessionsValue = result.totalRegularSessions;
+      } else if (session_type === 'mv') {
+        sessionsLabel = 'MV Days';
+        sessionsValue = result.totalMvSessions;
+      } else {
+        sessionsLabel = 'Sessions';
+        sessionsValue = `Regular: ${result.totalRegularSessions} | MV: ${result.totalMvSessions} (Total: ${result.totalCombinedSessions})`;
+      }
 
       const modeLabel = session_type === 'mv' ? 'Morning Vanchan' : session_type === 'combined' ? 'Combined View' : 'Regular Lectures';
       const sheetData = [
@@ -1842,22 +1863,38 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         ['Topic', result.shibir.name || '', '', 'Total Registered', allParticipants.length],
         ['Speaker', result.shibir.speaker || '', '', 'Full Attended', fullAttended.length],
         ['Dates', `${result.shibir.start_date} to ${result.shibir.end_date}`, '', 'Partially Attended', partialAttended.length],
-        ['Sessions', `Regular: ${result.totalRegularSessions} | MV: ${result.totalMvSessions}`, '', 'Absent', absent.length],
+        [sessionsLabel, sessionsValue, '', 'Absent', absent.length],
         [],
         tableHeaders
       ];
 
       allParticipants.forEach((p, idx) => {
-        const sessionValues = (result.regularSessions || []).map((s) => {
-          if (!result.regularConducted) return '-';
-          const attended = (p.attended_session_numbers || []).includes(s.session_number);
-          return attended ? 'P' : 'A';
-        });
-        const mvValues = (result.mvSessions || []).map((s) => {
-          if (!result.mvConducted) return '-';
-          const attended = (p.attended_mv_session_numbers || []).includes(s.session_number);
-          return attended ? 'P' : 'A';
-        });
+        let activeSessionValues = [];
+        if (session_type === 'regular') {
+          activeSessionValues = (result.regularSessions || []).map((s) => {
+            if (!result.regularConducted) return '-';
+            const attended = (p.attended_session_numbers || []).includes(s.session_number);
+            return attended ? 'P' : 'A';
+          });
+        } else if (session_type === 'mv') {
+          activeSessionValues = (result.mvSessions || []).map((s) => {
+            if (!result.mvConducted) return '-';
+            const attended = (p.attended_mv_session_numbers || []).includes(s.session_number);
+            return attended ? 'P' : 'A';
+          });
+        } else {
+          const sessionValues = (result.regularSessions || []).map((s) => {
+            if (!result.regularConducted) return '-';
+            const attended = (p.attended_session_numbers || []).includes(s.session_number);
+            return attended ? 'P' : 'A';
+          });
+          const mvValues = (result.mvSessions || []).map((s) => {
+            if (!result.mvConducted) return '-';
+            const attended = (p.attended_mv_session_numbers || []).includes(s.session_number);
+            return attended ? 'P' : 'A';
+          });
+          activeSessionValues = [...sessionValues, ...mvValues];
+        }
 
         sheetData.push([
           idx + 1,
@@ -1868,8 +1905,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
           p.gender || '',
           p.res_status || '',
           p.category || '',
-          ...sessionValues,
-          ...mvValues,
+          ...activeSessionValues,
           p.attendance_summary || ''
         ]);
       });
@@ -1885,7 +1921,7 @@ export const fetchPastAdhyayanParticipantsReport = async (req, res) => {
         { s: { r: 5, c: 1 }, e: { r: 5, c: 2 } }  // Sessions: B6 to C6
       ];
 
-      const allSessionCols = [...(result.regularSessions || []), ...(result.mvSessions || [])].map(() => ({ wch: 11 }));
+      const allSessionCols = activeSessionHeaders.map(() => ({ wch: 11 }));
       ws['!cols'] = [
         { wch: 5 },  // #
         { wch: 14 }, // Card No
