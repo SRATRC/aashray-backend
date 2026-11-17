@@ -57,7 +57,8 @@ import {
   STATUS_PAYMENT_COMPLETED,
   STATUS_PAYMENT_FAILED,
   STATUS_PAYMENT_AUTHORIZED,
-  ERR_BOOKING_ALREADY_CANCELLED
+  ERR_BOOKING_ALREADY_CANCELLED,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
@@ -4432,9 +4433,9 @@ export const changeUtsavPackage = async (req, res) => {
   }
 
   // Prevent lost payment if member has an active online checkout open on Razorpay
-  if (existingTx && existingTx.status === STATUS_PAYMENT_PENDING && existingTx.order_id) {
-    const txCreatedAt = moment(existingTx.createdAt);
-    if (txCreatedAt.isValid() && moment().diff(txCreatedAt, 'minutes') < 30) {
+  if (existingTx && existingTx.status === STATUS_PAYMENT_PENDING && existingTx.razorpay_order_id) {
+    const orderTime = moment(existingTx.updatedAt || existingTx.createdAt);
+    if (orderTime.isValid() && moment().diff(orderTime, 'minutes') < MAX_APP_PAYMENT_DURATION_MINUTES) {
       throw new ApiError(
         400,
         'Member has an active online payment checkout in progress on Razorpay. Please wait for payment to complete or expire before changing package.'
@@ -4442,11 +4443,11 @@ export const changeUtsavPackage = async (req, res) => {
     }
   }
 
-  if (existingTx?.order_id) {
+  if (existingTx?.razorpay_order_id) {
     req.log.info('cancelling_active_transaction_with_razorpay_order', {
       bookingid: booking.bookingid,
       existingTxId: existingTx.id,
-      orderId: existingTx.order_id
+      razorpayOrderId: existingTx.razorpay_order_id
     });
   }
 
