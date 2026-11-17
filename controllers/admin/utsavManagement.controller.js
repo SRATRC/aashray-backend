@@ -4403,22 +4403,43 @@ export const changeUtsavPackage = async (req, res) => {
   ];
 
   // 1. Transaction cancellation and credit restoration
-  // Query active transaction ordered by latest DESC so subsequent changes don't pick up old credited rows
-  const existingTx = await Transactions.findOne({
+  // Read transaction id first with plain read, then lock only that specific row by PK.
+  // This avoids scanning and locking the whole transactions table (bookingid is not indexed).
+  const existingTxRow = await Transactions.findOne({
     where: {
       bookingid: booking.bookingid,
+      category: TYPE_UTSAV,
       status: activeTxStatuses
     },
     order: [['id', 'DESC']],
-    transaction: t,
-    lock: t.LOCK.UPDATE
+    attributes: ['id'],
+    transaction: t
   });
+
+  const existingTx = existingTxRow
+    ? await Transactions.findOne({
+        where: { id: existingTxRow.id },
+        transaction: t,
+        lock: t.LOCK.UPDATE
+      })
+    : null;
 
   if (existingTx && existingTx.status === STATUS_PAYMENT_AUTHORIZED) {
     throw new ApiError(
       400,
       'Cannot change package while a payment is currently authorized. Please wait for payment confirmation or failure.'
     );
+  }
+
+  // Prevent lost payment if member has an active online checkout open on Razorpay
+  if (existingTx && existingTx.status === STATUS_PAYMENT_PENDING && existingTx.order_id) {
+    const txCreatedAt = moment(existingTx.createdAt);
+    if (txCreatedAt.isValid() && moment().diff(txCreatedAt, 'minutes') < 30) {
+      throw new ApiError(
+        400,
+        'Member has an active online payment checkout in progress on Razorpay. Please wait for payment to complete or expire before changing package.'
+      );
+    }
   }
 
   if (existingTx?.order_id) {
@@ -4464,26 +4485,28 @@ export const changeUtsavPackage = async (req, res) => {
     amountDue = 0;
     creditsUsed = 0;
   } else {
-    // Paid package
+    // Paid package: pass cashAllowed: true for admin-assisted changes so any pending balance
+    // is recorded as cash-pending and never auto-cancelled by the 30-minute online payment cron.
     const { transaction: newTx } = await createPendingTransaction(
       payerCard,
       booking,
       TYPE_UTSAV,
       newPkg.amount,
       req.user.username,
-      t
+      t,
+      true
     );
 
     creditsUsed = Number(newTx.discount) || 0;
     amountDue = Number(newTx.amount) || 0;
 
-    if (newTx.status === STATUS_PAYMENT_COMPLETED) {
+    if (newTx.status === STATUS_PAYMENT_COMPLETED || newTx.status === STATUS_CASH_COMPLETED) {
       newBookingStatus = wasCheckedIn ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED;
       if (wasCheckedIn && finalOther?.includes('WAS_CHECKEDIN')) {
         finalOther = finalOther.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
       }
     } else {
-      newBookingStatus = STATUS_PAYMENT_PENDING;
+      newBookingStatus = newTx.status === STATUS_CASH_PENDING ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING;
       if (wasCheckedIn && !finalOther?.includes('WAS_CHECKEDIN')) {
         finalOther = finalOther ? `${finalOther},WAS_CHECKEDIN` : 'WAS_CHECKEDIN';
       }

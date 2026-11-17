@@ -995,14 +995,7 @@ export function getUtsavCustomFormWhereCondition(utsavid) {
     status: 'active',
     [Sequelize.Op.or]: [
       { event_id: parsedId },
-      Sequelize.literal(`JSON_CONTAINS(event_ids, '"${parsedId}"') OR JSON_CONTAINS(event_ids, '${parsedId}')`),
-      {
-        event_id: null,
-        title: { [Sequelize.Op.like]: '%Tapascharya%' },
-        [Sequelize.Op.and]: [
-          Sequelize.literal(`(event_ids IS NULL OR event_ids = '[]' OR JSON_LENGTH(event_ids) = 0)`)
-        ]
-      }
+      Sequelize.literal(`JSON_CONTAINS(event_ids, '"${parsedId}"') OR JSON_CONTAINS(event_ids, '${parsedId}')`)
     ]
   };
 }
@@ -1045,68 +1038,60 @@ export async function removeDroppedDatesFromCustomForms(utsavid, cardno, datesTo
   const parsedId = Number(utsavid);
   if (!Number.isInteger(parsedId)) return;
 
-  try {
-    const forms = await CustomForm.findAll({
-      where: getUtsavCustomFormWhereCondition(parsedId),
-      attributes: ['id'],
-      raw: true,
-      transaction: t
-    });
+  const forms = await CustomForm.findAll({
+    where: getUtsavCustomFormWhereCondition(parsedId),
+    attributes: ['id'],
+    raw: true,
+    transaction: t
+  });
 
-    if (!forms.length) return;
-    const formIds = forms.map((f) => f.id);
+  if (!forms.length) return;
+  const formIds = forms.map((f) => f.id);
 
-    const responses = await CustomFormResponse.findAll({
-      where: {
-        form_id: { [Sequelize.Op.in]: formIds },
-        cardno
-      },
-      transaction: t,
-      lock: t ? t.LOCK.UPDATE : undefined
-    });
+  const responses = await CustomFormResponse.findAll({
+    where: {
+      form_id: { [Sequelize.Op.in]: formIds },
+      cardno
+    },
+    transaction: t,
+    lock: t ? t.LOCK.UPDATE : undefined
+  });
 
-    for (const resp of responses) {
-      if (!resp.responses || typeof resp.responses !== 'object') continue;
-      let modified = false;
-      const respData = JSON.parse(JSON.stringify(resp.responses));
+  for (const resp of responses) {
+    if (!resp.responses || typeof resp.responses !== 'object') continue;
+    let modified = false;
+    const respData = JSON.parse(JSON.stringify(resp.responses));
 
-      // 1. Check tapascharya_matrix
-      if (respData.tapascharya_matrix && typeof respData.tapascharya_matrix === 'object') {
-        for (const key of Object.keys(respData.tapascharya_matrix)) {
-          if (keyMatchesAnyDroppedDate(key, datesToCancel)) {
-            delete respData.tapascharya_matrix[key];
+    // 1. Check tapascharya_matrix
+    if (respData.tapascharya_matrix && typeof respData.tapascharya_matrix === 'object') {
+      for (const key of Object.keys(respData.tapascharya_matrix)) {
+        if (keyMatchesAnyDroppedDate(key, datesToCancel)) {
+          delete respData.tapascharya_matrix[key];
+          modified = true;
+        }
+      }
+    }
+
+    // 2. Check other object fields
+    for (const [k, v] of Object.entries(respData)) {
+      if (v && typeof v === 'object' && !Array.isArray(v) && k !== 'tapascharya_matrix') {
+        for (const subKey of Object.keys(v)) {
+          if (keyMatchesAnyDroppedDate(subKey, datesToCancel)) {
+            delete v[subKey];
             modified = true;
           }
         }
       }
-
-      // 2. Check other object fields
-      for (const [k, v] of Object.entries(respData)) {
-        if (v && typeof v === 'object' && !Array.isArray(v) && k !== 'tapascharya_matrix') {
-          for (const subKey of Object.keys(v)) {
-            if (keyMatchesAnyDroppedDate(subKey, datesToCancel)) {
-              delete v[subKey];
-              modified = true;
-            }
-          }
-        }
-      }
-
-      if (modified) {
-        logger.info('pruned_custom_form_responses_on_package_downgrade', {
-          responseId: resp.id,
-          cardno,
-          datesToCancel
-        });
-        await resp.update({ responses: respData }, { transaction: t });
-      }
     }
-  } catch (err) {
-    logger.error('error_removing_dropped_dates_from_custom_forms', {
-      error: err.message,
-      utsavid,
-      cardno
-    });
+
+    if (modified) {
+      logger.info('pruned_custom_form_responses_on_package_downgrade', {
+        responseId: resp.id,
+        cardno,
+        datesToCancel
+      });
+      await resp.update({ responses: respData }, { transaction: t });
+    }
   }
 }
 
