@@ -1005,14 +1005,30 @@ export const executeUtsavStatusUpdate = async ({
 
   const utsav = await validateUtsav(utsav_id);
 
-  // Lock order: utsav, then card, then meals, then booking row lock.
-  // Lock the utsav row first so concurrent updates for the same event serialize in consistent order.
+  // Lock order: utsav, then the payment row, then the booking - the same order
+  // as the payment confirmation and the member's cancel. The card and meal
+  // locks in the admin-cancel branch come after these.
   await UtsavDb.findOne({
     where: { id: utsav_id },
     attributes: ['id'],
     transaction: t,
     lock: t.LOCK.UPDATE
   });
+
+  // transactions.bookingid is unindexed: find the id with a plain read, then lock only that row.
+  const paymentRow = await Transactions.findOne({
+    where: { bookingid },
+    order: [['id', 'DESC']],
+    attributes: ['id']
+  });
+  let transaction = null;
+  if (paymentRow) {
+    transaction = await Transactions.findOne({
+      where: { id: paymentRow.id },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+  }
 
   const booking = await validateUtsavBooking(bookingid, utsav_id, t, true);
   const previousStatus = booking.status;
@@ -1027,12 +1043,6 @@ export const executeUtsavStatusUpdate = async ({
     req?.log?.warn?.('utsav_status_update_already_cancelled', { bookingid });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
-
-  let transaction = await Transactions.findOne({
-    where: { bookingid },
-    order: [['id', 'DESC']],
-    transaction: t
-  });
 
   const username = user?.username || 'admin';
 

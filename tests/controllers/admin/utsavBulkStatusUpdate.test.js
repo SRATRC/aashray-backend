@@ -241,8 +241,8 @@ describe('Utsav Bulk Status Update Controller', () => {
       const mockTx1 = { id: 1, bookingid: 'b1', status: STATUS_PAYMENT_PENDING, update: jest.fn().mockResolvedValue() };
       const mockTx2 = { id: 2, bookingid: 'b2', status: STATUS_PAYMENT_PENDING, update: jest.fn().mockResolvedValue() };
       Transactions.findOne.mockImplementation(({ where }) => {
-        if (where.bookingid === 'b1') return Promise.resolve(mockTx1);
-        if (where.bookingid === 'b2') return Promise.resolve(mockTx2);
+        if (where.bookingid === 'b1' || where.id === 1) return Promise.resolve(mockTx1);
+        if (where.bookingid === 'b2' || where.id === 2) return Promise.resolve(mockTx2);
       });
 
       req.body = {
@@ -652,7 +652,7 @@ describe('Utsav Bulk Status Update Controller', () => {
 
       const mockTx1 = { id: 1, bookingid: 'b1', status: STATUS_PAYMENT_PENDING, update: jest.fn().mockResolvedValue() };
       Transactions.findOne.mockImplementation(({ where }) => {
-        if (where.bookingid === 'b1') return Promise.resolve(mockTx1);
+        if (where.bookingid === 'b1' || where.id === 1) return Promise.resolve(mockTx1);
         return Promise.resolve(null);
       });
 
