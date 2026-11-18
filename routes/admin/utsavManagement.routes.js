@@ -17,6 +17,7 @@ import {
   fetchAllUtsav,
   activateUtsav,
   utsavStatusUpdate,
+  bulkUtsavStatusUpdate,
   fetchUtsav,
   updateUtsavPackage,
   fetchAllPackages,
@@ -138,6 +139,16 @@ utsavAdminRouter.get('/fetch/:id', CatchAsync(fetchUtsav));
 utsavAdminRouter.get('/fetchpackage/:id', CatchAsync(fetchPackage));
 utsavAdminRouter.put('/:id/:activate', CatchAsync(activateUtsav));
 utsavAdminRouter.put('/status', CatchAsync(utsavStatusUpdate));
+utsavAdminRouter.post(
+  '/booking/bulk-status',
+  authorizeRoles(
+    ROLE_UTSAV_ADMIN,
+    ROLE_SUPER_ADMIN,
+    ROLE_PRA_ACCOUNTS_ADMIN,
+    ROLE_ACCOUNTS_ADMIN
+  ),
+  CatchAsync(bulkUtsavStatusUpdate)
+);
 utsavAdminRouter.put(
   '/changePackage',
   authorizeRoles(
