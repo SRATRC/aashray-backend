@@ -12,7 +12,8 @@ const KIOSK_ROUTES = [
   ['GET', /^\/stay\/kiosk\/wifi\/fetch_temp_codes\/[^/]+$/],
   ['PUT', /^\/stay\/(flat_)?check(in|out)\/[^/]+$/],
   ['GET', /^\/offline\/kiosk\/today$/],
-  ['POST', /^\/offline\/kiosk\/sync$/]
+  ['POST', /^\/offline\/kiosk\/sync$/],
+  ['GET', /^\/offline\/pin-hash$/]
 ];
 
 const isKioskRoute = (req) => {

@@ -9,7 +9,8 @@ import {
   UtsavBooking,
   RoomBooking,
   FlatBooking,
-  WifiDb
+  WifiDb,
+  Transactions
 } from '../models/associations.js';
 import {
   STATUS_CONFIRMED,
@@ -17,24 +18,30 @@ import {
   STATUS_ACTIVE,
   STATUS_INACTIVE,
   ROOM_STATUS_CHECKEDIN,
-  ROOM_STATUS_PENDING_CHECKIN,
-  STATUS_PAYMENT_PENDING
+  ROOM_STATUS_PENDING_CHECKIN
 } from '../config/constants.js';
-import { findUnpaidBookingTransaction } from './transactions.helper.js';
-import { manualCheckin, manualCheckout } from '../controllers/admin/roomManagement.controller.js';
+import {
+  findUnpaidBookingTransaction,
+  UNPAID_TRANSACTION_STATUSES
+} from './transactions.helper.js';
+import {
+  executeRoomCheckout,
+  executeFlatCheckout
+} from '../controllers/admin/roomManagement.controller.js';
 import ApiError from '../utils/ApiError.js';
-import Sequelize, { Op } from 'sequelize';
+import { Op } from 'sequelize';
 import moment from 'moment-timezone';
 import crypto from 'crypto';
 
-// Default Station PIN if not configured in environment
-const DEFAULT_STATION_PIN = '1234';
-
 /**
  * Returns SHA-256 hash of the configured Station PIN.
+ * Fails closed if STATION_PIN is not configured.
  */
 export function getStationPinHash() {
-  const pin = process.env.STATION_PIN || DEFAULT_STATION_PIN;
+  const pin = process.env.STATION_PIN;
+  if (!pin) {
+    throw new ApiError(500, 'Station PIN is not configured on server');
+  }
   return crypto.createHash('sha256').update(pin).digest('hex');
 }
 
@@ -101,7 +108,7 @@ export async function getAdhyayanSnapshot(shibirId, req) {
       attributes: ['id', 'shibir_name', 'start_date', 'end_date']
     });
   } else {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
     shibir = await ShibirDb.findOne({
       where: {
         start_date: { [Op.lte]: today },
@@ -110,16 +117,10 @@ export async function getAdhyayanSnapshot(shibirId, req) {
       order: [['start_date', 'DESC']],
       attributes: ['id', 'shibir_name', 'start_date', 'end_date']
     });
-    if (!shibir) {
-      shibir = await ShibirDb.findOne({
-        order: [['start_date', 'DESC']],
-        attributes: ['id', 'shibir_name', 'start_date', 'end_date']
-      });
-    }
   }
 
   if (!shibir) {
-    throw new ApiError(404, 'Shibir not found');
+    throw new ApiError(404, 'No active Shibir found for today');
   }
 
   const targetShibirId = shibir.id;
@@ -188,6 +189,7 @@ export async function getGateCardsSnapshot(req) {
   req?.log?.info('offline_snapshot_gate_start');
 
   const cards = await CardDb.findAll({
+    where: { active: true },
     attributes: ['cardno', 'issuedto', 'res_status'],
     raw: true
   });
@@ -212,7 +214,7 @@ export async function getUtsavSnapshot(utsavId, req) {
       attributes: ['id', 'name', 'start_date', 'end_date']
     });
   } else {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
     utsav = await UtsavDb.findOne({
       where: {
         start_date: { [Op.lte]: today },
@@ -221,16 +223,10 @@ export async function getUtsavSnapshot(utsavId, req) {
       order: [['start_date', 'DESC']],
       attributes: ['id', 'name', 'start_date', 'end_date']
     });
-    if (!utsav) {
-      utsav = await UtsavDb.findOne({
-        order: [['start_date', 'DESC']],
-        attributes: ['id', 'name', 'start_date', 'end_date']
-      });
-    }
   }
 
   if (!utsav) {
-    throw new ApiError(404, 'Utsav not found');
+    throw new ApiError(404, 'No active Utsav found for today');
   }
 
   const targetUtsavId = utsav.id;
@@ -303,7 +299,6 @@ export async function getKioskTodaySnapshot(req) {
       include: [
         {
           model: CardDb,
-          as: 'cardDetails',
           required: false,
           attributes: ['cardno', 'issuedto']
         }
@@ -315,7 +310,6 @@ export async function getKioskTodaySnapshot(req) {
       include: [
         {
           model: CardDb,
-          as: 'cardDetails',
           required: false,
           attributes: ['cardno', 'issuedto']
         }
@@ -324,22 +318,37 @@ export async function getKioskTodaySnapshot(req) {
     WifiDb.findAll({
       where: { status: STATUS_ACTIVE },
       attributes: ['pwd_id', 'password'],
-      order: [['pwd_id', 'ASC']],
+      order: [['pwd_id', 'DESC']],
       limit: 50,
       raw: true
     })
   ]);
 
-  // Filter out any unpaid bookings
+  const allEligibleBookings = [
+    ...roomBookings.filter((b) => b.roomno),
+    ...flatBookings.filter((b) => b.flatno)
+  ];
+  const allBookingIds = allEligibleBookings.map((b) => b.bookingid);
+
+  const unpaidTxList = allBookingIds.length > 0 ? await Transactions.findAll({
+    where: {
+      bookingid: allBookingIds,
+      status: UNPAID_TRANSACTION_STATUSES,
+      amount: { [Op.gt]: 0 }
+    },
+    attributes: ['bookingid'],
+    raw: true
+  }) : [];
+  const unpaidBookingSet = new Set(unpaidTxList.map((t) => t.bookingid));
+
   const validRoomBookings = [];
   for (const b of roomBookings) {
     if (!b.roomno) continue; // Require pre-assigned room
-    const unpaid = await findUnpaidBookingTransaction(b.bookingid);
-    if (!unpaid) {
+    if (!unpaidBookingSet.has(b.bookingid)) {
       validRoomBookings.push({
         bookingid: b.bookingid,
         cardno: b.cardno,
-        name: b.cardDetails?.issuedto || 'Guest',
+        name: b.CardDb?.issuedto || 'Guest',
         roomno: b.roomno,
         roomtype: b.roomtype,
         isFlat: false,
@@ -353,12 +362,11 @@ export async function getKioskTodaySnapshot(req) {
   const validFlatBookings = [];
   for (const b of flatBookings) {
     if (!b.flatno) continue; // Require pre-assigned flat
-    const unpaid = await findUnpaidBookingTransaction(b.bookingid);
-    if (!unpaid) {
+    if (!unpaidBookingSet.has(b.bookingid)) {
       validFlatBookings.push({
         bookingid: b.bookingid,
         cardno: b.cardno,
-        name: b.cardDetails?.issuedto || 'Guest',
+        name: b.CardDb?.issuedto || 'Guest',
         roomno: b.flatno,
         roomtype: 'Flat',
         isFlat: true,
@@ -386,7 +394,10 @@ export async function getKioskTodaySnapshot(req) {
  * Reconciles offline room kiosk check-ins, check-outs, and Wi-Fi vouchers.
  */
 export async function syncKioskBatch(payload, req, t) {
-  const { checkins = [], checkouts = [], wifiAssignments = [] } = payload;
+  const checkins = Array.isArray(payload?.checkins) ? payload.checkins : [];
+  const checkouts = Array.isArray(payload?.checkouts) ? payload.checkouts : [];
+  const wifiAssignments = Array.isArray(payload?.wifiAssignments) ? payload.wifiAssignments : [];
+
   req?.log?.info('offline_sync_kiosk_batch_start', {
     checkinCount: checkins.length,
     checkoutCount: checkouts.length,
@@ -399,8 +410,11 @@ export async function syncKioskBatch(payload, req, t) {
     wifiAssignments: []
   };
 
+  const todayIST = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
   // Process check-ins
   for (const item of checkins) {
+    if (!item || !item.bookingid) continue;
     try {
       const model = item.isFlat ? FlatBooking : RoomBooking;
       const booking = await model.findOne({
@@ -408,22 +422,42 @@ export async function syncKioskBatch(payload, req, t) {
         transaction: t
       });
 
-      if (booking && booking.status === ROOM_STATUS_PENDING_CHECKIN) {
-        await booking.update(
-          {
-            status: ROOM_STATUS_CHECKEDIN,
-            updatedBy: req.user?.username || 'KIOSK_OFFLINE'
-          },
-          { transaction: t }
-        );
-        results.checkins.push({ bookingid: item.bookingid, status: 'success' });
-      } else {
+      if (!booking || booking.status !== ROOM_STATUS_PENDING_CHECKIN) {
         results.checkins.push({
           bookingid: item.bookingid,
           status: 'skipped',
           reason: booking?.status || 'not_found'
         });
+        continue;
       }
+
+      if (booking.checkin > todayIST) {
+        results.checkins.push({
+          bookingid: item.bookingid,
+          status: 'skipped',
+          reason: 'future_booking'
+        });
+        continue;
+      }
+
+      const unpaid = await findUnpaidBookingTransaction(booking.bookingid, t);
+      if (unpaid) {
+        results.checkins.push({
+          bookingid: item.bookingid,
+          status: 'skipped',
+          reason: 'unpaid_transaction'
+        });
+        continue;
+      }
+
+      await booking.update(
+        {
+          status: ROOM_STATUS_CHECKEDIN,
+          updatedBy: req.user?.username || 'KIOSK_OFFLINE'
+        },
+        { transaction: t }
+      );
+      results.checkins.push({ bookingid: item.bookingid, status: 'success' });
     } catch (err) {
       results.checkins.push({ bookingid: item.bookingid, status: 'error', error: err.message });
     }
@@ -431,29 +465,47 @@ export async function syncKioskBatch(payload, req, t) {
 
   // Process check-outs
   for (const item of checkouts) {
+    if (!item || !item.bookingid) continue;
     try {
       const model = item.isFlat ? FlatBooking : RoomBooking;
       const booking = await model.findOne({
         where: { bookingid: item.bookingid },
+        include: [
+          {
+            model: CardDb,
+            attributes: ['cardno', 'issuedto', 'token']
+          }
+        ],
         transaction: t
       });
 
-      if (booking && booking.status === ROOM_STATUS_CHECKEDIN) {
-        await booking.update(
-          {
-            status: 'checkedout',
-            updatedBy: req.user?.username || 'KIOSK_OFFLINE'
-          },
-          { transaction: t }
-        );
-        results.checkouts.push({ bookingid: item.bookingid, status: 'success' });
-      } else {
+      if (!booking || booking.status !== ROOM_STATUS_CHECKEDIN) {
         results.checkouts.push({
           bookingid: item.bookingid,
           status: 'skipped',
           reason: booking?.status || 'not_found'
         });
+        continue;
       }
+
+      const checkoutUser = req.user || { username: 'KIOSK_OFFLINE' };
+      if (item.isFlat) {
+        await executeFlatCheckout({
+          booking,
+          checkoutDateTime: item.scannedAt,
+          dbTransaction: t,
+          user: checkoutUser
+        });
+      } else {
+        await executeRoomCheckout({
+          booking,
+          checkoutDateTime: item.scannedAt,
+          dbTransaction: t,
+          user: checkoutUser
+        });
+      }
+
+      results.checkouts.push({ bookingid: item.bookingid, status: 'success' });
     } catch (err) {
       results.checkouts.push({ bookingid: item.bookingid, status: 'error', error: err.message });
     }
@@ -461,20 +513,29 @@ export async function syncKioskBatch(payload, req, t) {
 
   // Process Wi-Fi voucher allocations
   for (const item of wifiAssignments) {
+    if (!item || !item.pwd_id) continue;
     try {
-      if (item.pwd_id) {
-        await WifiDb.update(
-          {
-            cardno: item.cardno,
-            roombookingid: item.bookingid,
-            status: STATUS_INACTIVE
-          },
-          {
-            where: { pwd_id: item.pwd_id, status: STATUS_ACTIVE },
-            transaction: t
-          }
-        );
+      const [affectedRows] = await WifiDb.update(
+        {
+          cardno: item.cardno,
+          roombookingid: item.bookingid,
+          status: STATUS_INACTIVE,
+          updatedBy: req.user?.username || 'KIOSK_OFFLINE'
+        },
+        {
+          where: { pwd_id: item.pwd_id, status: STATUS_ACTIVE },
+          transaction: t
+        }
+      );
+
+      if (affectedRows > 0) {
         results.wifiAssignments.push({ pwd_id: item.pwd_id, status: 'success' });
+      } else {
+        results.wifiAssignments.push({
+          pwd_id: item.pwd_id,
+          status: 'error',
+          reason: 'already_assigned_or_inactive'
+        });
       }
     } catch (err) {
       results.wifiAssignments.push({ pwd_id: item.pwd_id, status: 'error', error: err.message });
