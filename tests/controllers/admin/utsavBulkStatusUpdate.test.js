@@ -165,6 +165,20 @@ describe('Utsav Bulk Status Update Controller', () => {
       });
     });
 
+    test('rejects when bookingids contains invalid entries like null or empty string', async () => {
+      req.body = { utsav_id: 1, bookingids: ['b1', null], status: STATUS_CONFIRMED };
+      await expect(bulkUtsavStatusUpdate(req, res)).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Each bookingid must be a non-empty string'
+      });
+
+      req.body = { utsav_id: 1, bookingids: ['b1', '  '], status: STATUS_CONFIRMED };
+      await expect(bulkUtsavStatusUpdate(req, res)).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'Each bookingid must be a non-empty string'
+      });
+    });
+
     test('rejects disallowed target status like waiting', async () => {
       req.body = { utsav_id: 1, bookingids: ['b1'], status: STATUS_WAITING };
       await expect(bulkUtsavStatusUpdate(req, res)).rejects.toMatchObject({

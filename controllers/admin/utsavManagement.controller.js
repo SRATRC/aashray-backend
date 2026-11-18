@@ -1016,6 +1016,7 @@ export const executeUtsavStatusUpdate = async ({
   });
 
   // transactions.bookingid is unindexed: find the id with a plain read, then lock only that row.
+  // Note: UtsavDb row lock above serializes flows that also lock utsav first.
   const paymentRow = await Transactions.findOne({
     where: { bookingid },
     order: [['id', 'DESC']],
@@ -1408,6 +1409,10 @@ export const bulkUtsavStatusUpdate = async (req, res) => {
 
   if (bookingids.length > 100) {
     throw new ApiError(400, 'Batch size exceeds maximum limit of 100');
+  }
+
+  if (!bookingids.every(id => typeof id === 'string' && id.trim() !== '')) {
+    throw new ApiError(400, 'Each bookingid must be a non-empty string');
   }
 
   const allowedStatuses = [STATUS_CONFIRMED, STATUS_PAYMENT_PENDING, STATUS_ADMIN_CANCELLED];
