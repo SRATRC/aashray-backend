@@ -1004,7 +1004,17 @@ export const executeUtsavStatusUpdate = async ({
   let newBookingStatus = status;
 
   const utsav = await validateUtsav(utsav_id);
-  const booking = await validateUtsavBooking(bookingid, utsav_id);
+
+  // Lock order: utsav, then card, then meals, then booking row lock.
+  // Lock the utsav row first so concurrent updates for the same event serialize in consistent order.
+  await UtsavDb.findOne({
+    where: { id: utsav_id },
+    attributes: ['id'],
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  const booking = await validateUtsavBooking(bookingid, utsav_id, t, true);
   const previousStatus = booking.status;
 
   if (status === booking.status) {
@@ -1207,7 +1217,11 @@ export const executeUtsavStatusUpdate = async ({
           'Admin Cancelled can only be set from waiting, payment pending, confirmed or cancelled'
         );
       }
-      // Lock order: utsav, then the member's card, then meals.
+      // Lock order: utsav, then the member's card, then meals. The credit
+      // restore below locks the card, and a member room booking with meals
+      // locks the card before the meal rows. Clearing the meals first and the
+      // card after (the old order) deadlocked with that booking. The member's
+      // own cancel takes the same order (utsav, then card).
       await UtsavDb.findOne({
         where: { id: booking.utsavid },
         attributes: ['id'],
@@ -1215,6 +1229,8 @@ export const executeUtsavStatusUpdate = async ({
         lock: t.LOCK.UPDATE
       });
       // Lock every card this cancel may touch: the attendee's, and the payer's
+      // (credits go back to transaction.cardno). Sorted so two cancels for the
+      // same pair take the locks in the same order.
       const cardsToLock = [
         ...new Set([booking.cardno, transaction?.cardno].filter(Boolean))
       ].sort();
@@ -1226,6 +1242,10 @@ export const executeUtsavStatusUpdate = async ({
           lock: t.LOCK.UPDATE
         });
       }
+      // Only a booking that held a seat was given utsav meals; waiting-list
+      // bookings never are. The cleanup clears every meal in the package dates,
+      // so running it for a booking that never had them wipes meals the member
+      // booked on their own for those days.
       if (utsavBookingHeldSeat(booking.status)) {
         await cancelUtsavFoodBookings(booking, username, t);
       }
@@ -1385,8 +1405,11 @@ export const bulkUtsavStatusUpdate = async (req, res) => {
     throw new ApiError(400, `Invalid target status. Allowed statuses: ${allowedStatuses.join(', ')}`);
   }
 
+  await validateUtsav(utsav_id);
+  const uniqueBookingIds = [...new Set(bookingids)];
+
   const results = {
-    total: bookingids.length,
+    total: uniqueBookingIds.length,
     successCount: 0,
     failedCount: 0,
     failures: []
@@ -1394,7 +1417,7 @@ export const bulkUtsavStatusUpdate = async (req, res) => {
 
   const notificationsToSend = [];
 
-  for (const bookingid of bookingids) {
+  for (const bookingid of uniqueBookingIds) {
     const t = await database.transaction();
     try {
       const updateResult = await executeUtsavStatusUpdate({
@@ -1418,12 +1441,16 @@ export const bulkUtsavStatusUpdate = async (req, res) => {
         transaction: updateResult.transaction
       });
     } catch (err) {
-      await t.rollback();
+      if (!t.finished) {
+        await t.rollback().catch((rbErr) =>
+          req.log.error('bulk_utsav_status_update_rollback_failed', { bookingid, error: rbErr.message })
+        );
+      }
       results.failedCount++;
       req.log.warn('bulk_utsav_status_update_item_failed', { bookingid, error: err.message });
       results.failures.push({
         bookingid,
-        reason: err.message || 'Update failed'
+        reason: err instanceof ApiError ? err.message : 'Update failed'
       });
     }
   }
@@ -1585,9 +1612,6 @@ export const fetchPackagesByUtsav = async (req, res) => {
     }),
     CustomForm.count({
       where: getUtsavCustomFormWhereCondition(parsedUtsavId)
-    }).catch((err) => {
-      req.log?.warn?.('fetch_packages_custom_form_count_failed', { error: err.message });
-      return 0;
     })
   ]);
 

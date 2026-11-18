@@ -171,6 +171,47 @@ describe('Utsav Bulk Status Update Controller', () => {
         statusCode: 400
       });
     });
+
+    test('rejects upfront with 404 when utsav is not found', async () => {
+      UtsavDb.findByPk.mockResolvedValue(null);
+      req.body = { utsav_id: 999, bookingids: ['b1'], status: STATUS_CONFIRMED };
+      await expect(bulkUtsavStatusUpdate(req, res)).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Utsav not found'
+      });
+    });
+
+    test('deduplicates duplicate booking IDs in input array', async () => {
+      const mockBooking = {
+        bookingid: 'b1',
+        utsavid: 1,
+        status: STATUS_PAYMENT_PENDING,
+        update: jest.fn().mockResolvedValue()
+      };
+      validateUtsavBooking.mockResolvedValue(mockBooking);
+      Transactions.findOne.mockResolvedValue({
+        id: 1,
+        status: STATUS_PAYMENT_PENDING,
+        update: jest.fn().mockResolvedValue()
+      });
+
+      req.body = {
+        utsav_id: 1,
+        bookingids: ['b1', 'b1', 'b1'],
+        status: STATUS_CONFIRMED
+      };
+
+      await bulkUtsavStatusUpdate(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.send).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          total: 1,
+          successCount: 1,
+          failedCount: 0
+        })
+      }));
+    });
   });
 
   describe('Scenario 1: Batch Confirmation', () => {
@@ -760,6 +801,33 @@ describe('Utsav Bulk Status Update Controller', () => {
             expect.objectContaining({
               bookingid: 'b1',
               reason: 'Status is same as before'
+            })
+          ]
+        })
+      }));
+    });
+
+    test('sanitizes raw unexpected database errors into Update failed', async () => {
+      validateUtsavBooking.mockRejectedValue(new Error('SequelizeDatabaseError: deadlock found'));
+
+      req.body = {
+        utsav_id: 1,
+        bookingids: ['b1'],
+        status: STATUS_CONFIRMED
+      };
+
+      await bulkUtsavStatusUpdate(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.send).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          total: 1,
+          successCount: 0,
+          failedCount: 1,
+          failures: [
+            expect.objectContaining({
+              bookingid: 'b1',
+              reason: 'Update failed'
             })
           ]
         })
