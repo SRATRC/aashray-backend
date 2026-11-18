@@ -382,13 +382,20 @@ export async function validateUtsavs(user, utsavid, mumukshus) {
   return utsavDetails;
 }
 
-export async function validateUtsavBooking(bookingId, utsavId) {
-  const booking = await UtsavBooking.findOne({
+export async function validateUtsavBooking(bookingId, utsavId, t, lock) {
+  const options = {
     where: {
       utsavid: utsavId,
       bookingid: bookingId
     }
-  });
+  };
+  if (t) {
+    options.transaction = t;
+    if (lock) {
+      options.lock = t.LOCK ? t.LOCK.UPDATE : 'UPDATE';
+    }
+  }
+  const booking = await UtsavBooking.findOne(options);
 
   if (!booking) {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
