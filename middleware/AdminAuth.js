@@ -10,7 +10,9 @@ const KIOSK_ROUTES = [
   ['GET', /^\/stay\/kiosk\/bookings\/[^/]+$/],
   ['POST', /^\/stay\/kiosk\/wifi\/generate_temp_code$/],
   ['GET', /^\/stay\/kiosk\/wifi\/fetch_temp_codes\/[^/]+$/],
-  ['PUT', /^\/stay\/(flat_)?check(in|out)\/[^/]+$/]
+  ['PUT', /^\/stay\/(flat_)?check(in|out)\/[^/]+$/],
+  ['GET', /^\/offline\/kiosk\/today$/],
+  ['POST', /^\/offline\/kiosk\/sync$/]
 ];
 
 const isKioskRoute = (req) => {
