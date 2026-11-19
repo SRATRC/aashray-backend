@@ -75,31 +75,27 @@ describe('Room Allocation Engine - Scenarios and Priority Hierarchy', () => {
   });
 
   describe('Admin Room Change (availableRooms) Logic', () => {
-    const resolveAdminChangeGenders = (cardDob, checkinDate, bookingGender) => {
-      const isSenior = isSeniorCitizen(cardDob, checkinDate);
-      return isSenior && ['M', 'F'].includes(bookingGender)
-        ? ['SC' + bookingGender, bookingGender]
-        : [bookingGender];
-    };
-
     test('Scenario 6: Senior citizen booking offers both dedicated SC and regular rooms', () => {
       const seniorDob = moment().subtract(65, 'years').format('YYYY-MM-DD');
       const checkin = moment().add(5, 'days').format('YYYY-MM-DD');
-      expect(resolveAdminChangeGenders(seniorDob, checkin, 'M')).toEqual(['SCM', 'M']);
-      expect(resolveAdminChangeGenders(seniorDob, checkin, 'F')).toEqual(['SCF', 'F']);
+      const isSenior = isSeniorCitizen(seniorDob, checkin);
+      expect(resolveSearchGenders('M', isSenior)).toEqual(['SCM', 'M']);
+      expect(resolveSearchGenders('F', isSenior)).toEqual(['SCF', 'F']);
     });
 
     test('Scenario 7: Non-senior booking offers ONLY regular rooms', () => {
       const youngDob = moment().subtract(30, 'years').format('YYYY-MM-DD');
       const checkin = moment().add(5, 'days').format('YYYY-MM-DD');
-      expect(resolveAdminChangeGenders(youngDob, checkin, 'M')).toEqual(['M']);
-      expect(resolveAdminChangeGenders(youngDob, checkin, 'F')).toEqual(['F']);
+      const isSenior = isSeniorCitizen(youngDob, checkin);
+      expect(resolveSearchGenders('M', isSenior)).toEqual(['M']);
+      expect(resolveSearchGenders('F', isSenior)).toEqual(['F']);
     });
 
     test('Missing DOB offers ONLY regular rooms', () => {
       const checkin = moment().add(5, 'days').format('YYYY-MM-DD');
-      expect(resolveAdminChangeGenders(null, checkin, 'M')).toEqual(['M']);
-      expect(resolveAdminChangeGenders(undefined, checkin, 'F')).toEqual(['F']);
+      const isSenior = isSeniorCitizen(null, checkin);
+      expect(resolveSearchGenders('M', isSenior)).toEqual(['M']);
+      expect(resolveSearchGenders('F', isSenior)).toEqual(['F']);
     });
   });
 });

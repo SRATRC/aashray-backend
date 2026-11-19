@@ -65,7 +65,8 @@ import {
   fetchActiveRoomBlocks,
   getOverlappingRoomBookings,
   getPriorityOrderForMonth,
-  isSeniorCitizen
+  isSeniorCitizen,
+  resolveSearchGenders
 } from '../../helpers/roomBooking.helper.js';
 import { findUtsavOnBoundaryDates } from '../../helpers/utsavBooking.helper.js';
 import {
@@ -1412,10 +1413,8 @@ export const availableRooms = async (req, res) => {
     where: { cardno: booking.cardno },
     attributes: ['dob']
   });
-  const genders =
-    isSeniorCitizen(card?.dob, booking.checkin) && ['M', 'F'].includes(booking.gender)
-      ? ['SC' + booking.gender, booking.gender]
-      : [booking.gender];
+  const isSenior = isSeniorCitizen(card?.dob, booking.checkin);
+  const genders = resolveSearchGenders(booking.gender, isSenior);
 
   const rooms = await findAllRoomsUnfiltered(booking.roomtype, genders);
 

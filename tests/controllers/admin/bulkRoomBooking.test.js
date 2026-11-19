@@ -139,14 +139,14 @@ describe('Admin Bulk Room Booking (/api/v1/admin/stay/bulk_book)', () => {
       });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.results).toHaveLength(2);
-    const room1 = res.body.data.results[0].roomno;
-    const room2 = res.body.data.results[1].roomno;
+    expect(res.body.data).toHaveLength(2);
+    const room1 = res.body.data[0].roomno;
+    const room2 = res.body.data[1].roomno;
     expect(room1).toBeTruthy();
     expect(room2).toBeTruthy();
     expect(room1).not.toBe(room2);
-    expect(res.body.data.results[0].status).toBe('booked');
-    expect(res.body.data.results[1].status).toBe('booked');
+    expect(res.body.data[0].status).toBe('booked');
+    expect(res.body.data[1].status).toBe('booked');
   });
 
   it('rejects duplicate booking when guest already has an active booking for dates', async () => {
@@ -189,7 +189,59 @@ describe('Admin Bulk Room Booking (/api/v1/admin/stay/bulk_book)', () => {
       });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.results[0].warning).toBeDefined();
-    expect(res.body.data.results[0].warning.windowNights).toBe(11);
+    expect(res.body.data[0].warning).toBeDefined();
+    expect(res.body.data[0].warning.windowNights).toBe(11);
+  });
+
+  it('available_rooms endpoint: offers SCM and M for seniors, and only M for non-seniors', async () => {
+    // Also seed a dedicated SCM room
+    await RoomDb.findOrCreate({
+      where: { roomno: '99A' },
+      defaults: { roomno: '99A', roomtype: 'ac', gender: 'SCM', roomstatus: 'available', updatedBy: 'admin' }
+    });
+
+    // Senior booking (TEST_CARD_1 has DOB 1960-01-01)
+    const seniorBooking = await RoomBooking.create({
+      bookingid: 'test-senior-booking',
+      cardno: TEST_CARD_1,
+      checkin: fmt(moment().add(1, 'day')),
+      checkout: fmt(moment().add(3, 'day')),
+      nights: 2,
+      roomtype: 'ac',
+      roomno: '1A',
+      gender: 'M',
+      status: 'pending checkin'
+    });
+
+    const seniorRes = await request(app)
+      .get(`/api/v1/admin/stay/available_rooms/${seniorBooking.bookingid}`)
+      .set(ADMIN_AUTH);
+
+    expect(seniorRes.status).toBe(200);
+    const seniorRoomGenders = seniorRes.body.data.map((r) => r.gender);
+    expect(seniorRoomGenders).toContain('SCM');
+    expect(seniorRoomGenders).toContain('M');
+
+    // Non-senior booking (TEST_CARD_2 has DOB 1995-05-05)
+    const youngBooking = await RoomBooking.create({
+      bookingid: 'test-young-booking',
+      cardno: TEST_CARD_2,
+      checkin: fmt(moment().add(1, 'day')),
+      checkout: fmt(moment().add(3, 'day')),
+      nights: 2,
+      roomtype: 'ac',
+      roomno: '2A',
+      gender: 'M',
+      status: 'pending checkin'
+    });
+
+    const youngRes = await request(app)
+      .get(`/api/v1/admin/stay/available_rooms/${youngBooking.bookingid}`)
+      .set(ADMIN_AUTH);
+
+    expect(youngRes.status).toBe(200);
+    const youngRoomGenders = youngRes.body.data.map((r) => r.gender);
+    expect(youngRoomGenders).not.toContain('SCM');
+    expect(youngRoomGenders).toContain('M');
   });
 });
