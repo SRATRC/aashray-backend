@@ -9,24 +9,17 @@ describe('Room Allocation - Senior Citizen Detection and Logic', () => {
     expect(isSeniorCitizen(dob60)).toBe(true);
   });
 
-  test('isSeniorCitizen: age < 60 returns false even if floorPref is SC', () => {
+  test('isSeniorCitizen: age < 60 returns false', () => {
     const dob25 = moment().subtract(25, 'years').format('YYYY-MM-DD');
     const dob59 = moment().subtract(59, 'years').format('YYYY-MM-DD');
     expect(isSeniorCitizen(dob25)).toBe(false);
     expect(isSeniorCitizen(dob59)).toBe(false);
-    // Non-senior selecting 'SC' in dropdown must NOT be classified as verified senior
-    expect(isSeniorCitizen(dob25, 'SC')).toBe(false);
   });
 
-  test('isSeniorCitizen: null or empty DOB falls back to floorPref', () => {
-    expect(isSeniorCitizen(null, 'SC')).toBe(true);
-    expect(isSeniorCitizen(undefined, 'SC')).toBe(true);
-    expect(isSeniorCitizen(null, '')).toBe(false);
-    expect(isSeniorCitizen(null, null)).toBe(false);
-  });
-
-  test('isSeniorCitizen: invalid DOB string falls back to floorPref', () => {
-    expect(isSeniorCitizen('invalid-date', 'SC')).toBe(true);
-    expect(isSeniorCitizen('invalid-date', '')).toBe(false);
+  test('isSeniorCitizen: null, empty or invalid DOB returns false (treated as non-senior for SCM/SCF)', () => {
+    expect(isSeniorCitizen(null)).toBe(false);
+    expect(isSeniorCitizen(undefined)).toBe(false);
+    expect(isSeniorCitizen('')).toBe(false);
+    expect(isSeniorCitizen('invalid-date')).toBe(false);
   });
 });

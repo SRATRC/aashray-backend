@@ -330,14 +330,14 @@ function buildPriorityOrderClause(priorityList, isGroundPref = false) {
   ];
 }
 
-export function isSeniorCitizen(dob, floorPref = null) {
+export function isSeniorCitizen(dob) {
   if (dob) {
     const parsed = moment(dob);
     if (parsed.isValid()) {
       return moment().diff(parsed, 'years') >= SENIOR_CITIZEN_MIN_AGE;
     }
   }
-  return floorPref === 'SC';
+  return false;
 }
 
 const resolveSearchGenders = (gender, isSenior = false) => {
@@ -424,7 +424,7 @@ export async function findRoom(
 
   const senior = isSenior !== null && isSenior !== undefined
     ? Boolean(isSenior)
-    : (gender === 'SCM' || gender === 'SCF' || floorPref === 'SC');
+    : (gender === 'SCM' || gender === 'SCF');
 
   const isGroundPref = senior || floorPref === 'ground' || floorPref === '1st' || floorPref === 'SC' || floorPref === true;
   const searchGenders = resolveSearchGenders(gender, senior);
@@ -546,7 +546,7 @@ export async function findAllRooms(checkin, checkout, room_type, gender, floorPr
   const priority = priorityList || (await getPriorityOrderForMonth(checkin));
   const senior = isSenior !== null && isSenior !== undefined
     ? Boolean(isSenior)
-    : (gender === 'SCM' || gender === 'SCF' || floorPref === 'SC');
+    : (gender === 'SCM' || gender === 'SCF');
   const isGroundPref = senior || floorPref === 'ground' || floorPref === '1st' || floorPref === true;
   const orderClause = buildPriorityOrderClause(priority, isGroundPref);
 
@@ -692,7 +692,7 @@ export async function createRoomBooking(
   boundaryUtsav = undefined,
   activeRoomBlocks = null
 ) {
-  const isSenior = isSeniorCitizen(user?.dob, floor_pref);
+  const isSenior = isSeniorCitizen(user?.dob);
   const baseGender = user_gender.endsWith('M') ? 'M' : user_gender.endsWith('F') ? 'F' : user_gender;
   const gender = isSenior ? 'SC' + baseGender : baseGender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
@@ -1058,7 +1058,7 @@ export async function checkRoomAvailabilityForMumukshus(
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
-      const isSenior = isSeniorCitizen(card?.dob, floorType);
+      const isSenior = isSeniorCitizen(card?.dob);
       const baseGender = card.gender.endsWith('M') ? 'M' : card.gender.endsWith('F') ? 'F' : card.gender;
       const gender = isSenior ? 'SC' + baseGender : baseGender;
       const wantsGround = isSenior || floorType === 'SC' || floorType === 'ground' || floorType === '1st' || floorType === true;
