@@ -2586,7 +2586,11 @@ export const createRoomBlock = async (req, res) => {
   if (end_date && end_date < start_date) {
     throw new ApiError(400, 'end_date must be on or after start_date');
   }
+  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const effectiveEndDate = end_date || null;
+  if (!effectiveEndDate && start_date > today) {
+    throw new ApiError(400, 'Permanent blocks must start today or earlier; use an end_date for scheduled blocks');
+  }
 
   let roomsToBlock = [];
   if (Array.isArray(targetRoomNos)) {
@@ -2620,7 +2624,6 @@ export const createRoomBlock = async (req, res) => {
   const t = await database.transaction();
   req.transaction = t;
 
-  const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
   const windowEnd = effectiveEndDate || '9999-12-31';
 
   // Check for active room bookings overlapping this block range for warning
@@ -2689,7 +2692,7 @@ export const createRoomBlock = async (req, res) => {
 
 export const cancelRoomBlock = async (req, res) => {
   const { id } = req.params;
-  const { cancelAllBeds = false } = req.body;
+  const cancelAllBeds = req.body?.cancelAllBeds ?? (req.query?.allBeds === 'true' || req.query?.cancelAllBeds === 'true');
   req.log.info('cancel_room_block_start', { id, cancelAllBeds });
 
   const block = await RoomBlock.findByPk(id);
@@ -2701,7 +2704,7 @@ export const cancelRoomBlock = async (req, res) => {
     const baseRoomNo = /^[0-9]+[a-zA-Z]$/.test(block.roomno) ? block.roomno.slice(0, -1) : block.roomno;
     const blocks = await RoomBlock.findAll({
       where: {
-        status: 'active',
+        status: ROOM_BLOCK_ACTIVE,
         start_date: block.start_date,
         end_date: block.end_date,
         roomno: { [Op.like]: `${baseRoomNo}%` }

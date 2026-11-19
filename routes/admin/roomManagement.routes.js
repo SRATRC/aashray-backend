@@ -74,6 +74,7 @@ router.put('/unblock_room/:roomno', CatchAsync(unblockRoom));
 router.post('/room_block', CatchAsync(createRoomBlock));
 router.post('/room_block/bulk', CatchAsync(createRoomBlock));
 router.put('/room_block/:id/cancel', CatchAsync(cancelRoomBlock));
+router.delete('/room_block/:id', CatchAsync(cancelRoomBlock));
 router.post('/room_block/bulk_cancel', CatchAsync(bulkCancelRoomBlocks));
 
 router.put('/update_room/:roomno', CatchAsync(updateRoom));

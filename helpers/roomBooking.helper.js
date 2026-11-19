@@ -254,7 +254,7 @@ export async function findRoom(
   const queryCheckout = checkin === checkout
     ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
-  const blockedRoomnos = await fetchBlockedRoomnos(checkin, queryCheckout);
+  const blockedRoomnos = await fetchBlockedRoomnos(checkin, queryCheckout, t);
   const combinedExclude = [...new Set([...excludeRooms, ...blockedRoomnos])];
 
   if (combinedExclude.length > 0) {
@@ -998,7 +998,7 @@ export async function checkFlatAvailabilityForMumukshus(
 
 // Rooms with an active block on any night of [checkin, queryCheckout). A block's
 // end_date is its LAST blocked day (inclusive); NULL = permanent.
-export async function fetchBlockedRoomnos(checkin, queryCheckout) {
+export async function fetchBlockedRoomnos(checkin, queryCheckout, transaction = null) {
   const blocks = await RoomBlock.findAll({
     attributes: ['roomno'],
     where: {
@@ -1008,7 +1008,8 @@ export async function fetchBlockedRoomnos(checkin, queryCheckout) {
         { end_date: null },
         { end_date: { [Sequelize.Op.gte]: checkin } }
       ]
-    }
+    },
+    transaction
   });
   return blocks.map((b) => b.roomno);
 }
