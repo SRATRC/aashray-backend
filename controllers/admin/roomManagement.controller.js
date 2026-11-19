@@ -36,6 +36,7 @@ import {
   AC_ROOM_PRICE,
   STATUS_CREDITED,
   STATUS_PAYMENT_COMPLETED,
+  STATUS_CASH_COMPLETED,
   ERR_TRANSACTION_NOT_FOUND,
   AMT_TYPE_LATE_CHECKOUT_ROOM,
   STATUS_CONFIRMED,
@@ -74,7 +75,11 @@ import {
 } from '../../helpers/rollingWindow.helper.js';
 import {
   adminCancelTransaction,
-  createPendingTransaction
+  createPendingTransaction,
+  findUnpaidBookingTransaction,
+  getPrimaryCheckoutTransaction,
+  pickPrimaryCheckoutTransaction,
+  UNPAID_TRANSACTION_STATUSES
 } from '../../helpers/transactions.helper.js';
 import { sendDualUserNotifications } from '../../helpers/notification.helper.js';
 import { sendRoomStatusChangeWhatsApp, sendFlatStatusChangeWhatsApp, sendUnifiedWhatsApp, sendLateCheckoutFeeWaivedWhatsApp } from '../../helpers/whatsapp.helper.js';
@@ -94,6 +99,9 @@ import sequelize from '../../config/database.js';
 
 const CHECKOUT_DEADLINE = '11:00:00';
 const LATE_CHECKOUT_HALF = '15:00:00';
+// Stays more than 14 days overdue are excluded from kiosk self-checkout
+// to prevent stale zombie bookings; staff handles them via the overdue report.
+const KIOSK_CHECKEDIN_LOOKBACK_DAYS = 14;
 
 const calcLateCheckoutFee = (roomType, isHalfDay) => {
   if (roomType === 'nac') {
@@ -325,15 +333,13 @@ export const manualCheckin = async (req, res) => {
     );
   }
 
-  var transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
-  });
-
-  if (
-    transaction &&
-    [STATUS_PAYMENT_PENDING, STATUS_CASH_PENDING].includes(transaction.status)
-  ) {
-    req.log.warn('manual_checkin_payment_pending', { bookingid: booking.bookingid, transactionStatus: transaction.status });
+  const unpaidTransaction = await findUnpaidBookingTransaction(booking.bookingid, t);
+  if (unpaidTransaction) {
+    req.log.warn('manual_checkin_payment_pending', {
+      bookingid: booking.bookingid,
+      transactionStatus: unpaidTransaction.status,
+      amount: unpaidTransaction.amount
+    });
     throw new ApiError(400, 'Cannot check-in until payment is completed.');
   }
 
@@ -385,8 +391,8 @@ export const manualCheckout = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const transaction = await Transactions.findOne({
-    where: { bookingid: booking.bookingid }
+  const transaction = await getPrimaryCheckoutTransaction(booking.bookingid, false, {
+    transaction: dbTransaction
   });
 
   const previousStatus = booking.status;
@@ -566,6 +572,16 @@ export const flatCheckin = async (req, res) => {
     throw new ApiError(404, `Cannot check-in until ${booking.checkin}.`);
   }
 
+  const unpaidTransaction = await findUnpaidBookingTransaction(booking.bookingid, t);
+  if (unpaidTransaction) {
+    req.log.warn('flat_checkin_payment_pending', {
+      bookingid: booking.bookingid,
+      transactionStatus: unpaidTransaction.status,
+      amount: unpaidTransaction.amount
+    });
+    throw new ApiError(400, 'Cannot check-in until payment is completed.');
+  }
+
   const originalStatus = booking.status;
   await booking.update(
     {
@@ -617,8 +633,8 @@ export const flatCheckout = async (req, res) => {
     const nights = await calculateNights(booking.checkin, today);
 
     // Handle early checkout credit adjustment if a paid transaction exists
-    const transaction = await Transactions.findOne({
-      where: { bookingid: booking.bookingid, category: TYPE_FLAT }
+    const transaction = await getPrimaryCheckoutTransaction(booking.bookingid, true, {
+      transaction: t
     });
 
     if (transaction) {
@@ -971,6 +987,231 @@ export const fetchAllFlatBookings = async (req, res) => {
 
   req.log.info('fetch_all_flat_bookings_success', { count: bookings.length });
   return res.status(200).send({ message: 'Fetched bookings', data: bookings });
+};
+
+const kioskCheckoutPreview = async (booking, isFlat, today, nowTime, transaction, bookerNameMap) => {
+  if (booking.status !== ROOM_STATUS_CHECKEDIN) return null;
+
+  if (today === booking.checkout) {
+    if (!isFlat && nowTime > CHECKOUT_DEADLINE && booking.nights >= 1) {
+      return {
+        late_fee: calcLateCheckoutFee(booking.roomtype, nowTime <= LATE_CHECKOUT_HALF)
+      };
+    }
+    return null;
+  }
+
+  if (today < booking.checkout) {
+    if (!transaction) return null;
+    const nights = await calculateNights(booking.checkin, today);
+    const newAmount = roomCharge(isFlat ? 'nac' : booking.roomtype) * nights;
+    const paid =
+      transaction.status === STATUS_PAYMENT_COMPLETED ||
+      transaction.status === STATUS_CASH_COMPLETED;
+    const refund = paid
+      ? Number(transaction.amount) + Number(transaction.discount)
+      : Number(transaction.discount);
+    const credit = refund - newAmount;
+    if (credit <= 0) return null;
+
+    const payerCardno = transaction.cardno || booking.bookedBy || booking.cardno;
+    const isSelfBooked = !payerCardno || payerCardno === booking.cardno;
+    const payerName = !isSelfBooked
+      ? (bookerNameMap?.get(payerCardno) || null)
+      : null;
+
+    return {
+      credit,
+      is_self_booked: isSelfBooked,
+      payer_name: payerName
+    };
+  }
+
+  return null;
+};
+
+export const fetchKioskBookingsByCard = async (req, res) => {
+  const cardno = req.params.cardno?.trim();
+  if (!cardno) {
+    throw new ApiError(400, 'Card number is required');
+  }
+
+  req.log.info('fetch_kiosk_bookings_by_card_start', { cardno });
+
+  const nowIST = moment().tz('Asia/Kolkata');
+  const today = nowIST.format('YYYY-MM-DD');
+  const nowTime = nowIST.format('HH:mm:ss');
+  const kioskLookbackCutoff = moment(today).subtract(KIOSK_CHECKEDIN_LOOKBACK_DAYS, 'days').format('YYYY-MM-DD');
+  const activeStayWhere = {
+    cardno,
+    [Sequelize.Op.or]: [
+      {
+        status: ROOM_STATUS_CHECKEDIN,
+        checkout: { [Sequelize.Op.gte]: kioskLookbackCutoff }
+      },
+      {
+        status: ROOM_STATUS_PENDING_CHECKIN,
+        checkout: { [Sequelize.Op.gte]: today }
+      },
+      {
+        status: STATUS_PAYMENT_PENDING,
+        checkout: { [Sequelize.Op.gte]: today }
+      }
+    ]
+  };
+
+  const bookingAttributes = [
+    'bookingid',
+    'cardno',
+    'bookedBy',
+    'checkin',
+    'checkout',
+    'nights',
+    'status',
+    'updatedAt'
+  ];
+
+  // Batch 1: Query CardDb, RoomBooking, and FlatBooking in parallel
+  const [cardDetails, roomBookings, flatBookings] = await Promise.all([
+    CardDb.findOne({
+      where: { cardno },
+      attributes: ['cardno', 'issuedto']
+    }),
+    RoomBooking.findAll({
+      where: activeStayWhere,
+      attributes: [...bookingAttributes, 'roomno', 'roomtype'],
+      include: [
+        {
+          model: CardDb,
+          as: 'bookedByCard',
+          attributes: ['cardno', 'issuedto']
+        }
+      ],
+      order: [['checkin', 'ASC']]
+    }),
+    FlatBooking.findAll({
+      where: activeStayWhere,
+      attributes: [...bookingAttributes, 'flatno'],
+      include: [
+        {
+          model: CardDb,
+          as: 'bookedByCard',
+          attributes: ['cardno', 'issuedto']
+        },
+        {
+          model: FlatDb,
+          attributes: ['flatno', 'owner'],
+          include: [
+            {
+              model: CardDb,
+              attributes: ['cardno', 'issuedto']
+            }
+          ]
+        }
+      ],
+      order: [['checkin', 'ASC']]
+    })
+  ]);
+
+  if (!cardDetails) {
+    throw new ApiError(404, 'Card not found');
+  }
+
+  const allBookings = [...roomBookings, ...flatBookings];
+  const allBookingIds = allBookings.map((b) => b.bookingid);
+
+  // Batch 2: Fetch transactions for all active bookings (ordered earliest first to match checkout resolution)
+  const transactions = allBookingIds.length
+    ? await Transactions.findAll({
+        where: {
+          bookingid: allBookingIds
+        },
+        order: [['createdAt', 'ASC']]
+      })
+    : [];
+
+  const txListMap = new Map();
+  for (const t of transactions) {
+    if (!txListMap.has(t.bookingid)) txListMap.set(t.bookingid, []);
+    txListMap.get(t.bookingid).push(t);
+  }
+
+  // Collect distinct payer cards from transactions to resolve payer names for checkout preview
+  const relevantCardnos = transactions
+    .map((t) => t.cardno)
+    .filter((c) => c && c !== cardno);
+
+  const uniqueCardnos = [...new Set(relevantCardnos)];
+
+  const bookerCards = uniqueCardnos.length
+    ? await CardDb.findAll({
+        where: { cardno: uniqueCardnos },
+        attributes: ['cardno', 'issuedto']
+      })
+    : [];
+
+  const bookerNameMap = new Map(bookerCards.map((c) => [c.cardno, c.issuedto]));
+
+  const withPreview = (isFlat) => async (booking) => {
+    const plain = booking.get({ plain: true });
+    const { bookedBy, bookedByCard, FlatDb: flatInfo, ...publicFields } = plain;
+
+    const ownerCardno = flatInfo?.owner;
+    const ownerName = flatInfo?.CardDb?.issuedto || null;
+    const isOwner = Boolean(
+      isFlat &&
+      ownerCardno &&
+      String(ownerCardno).trim() === String(booking.cardno).trim()
+    );
+
+    const isThirdParty = Boolean(
+      bookedBy &&
+      String(bookedBy).trim() !== '' &&
+      String(bookedBy).trim() !== String(booking.cardno).trim()
+    );
+
+    const bookerName = isThirdParty ? (bookedByCard?.issuedto || null) : null;
+
+    const bTxs = txListMap.get(publicFields.bookingid) || [];
+    const tx = pickPrimaryCheckoutTransaction(bTxs, isFlat);
+    const pendingTx = bTxs.find(
+      (t) => UNPAID_TRANSACTION_STATUSES.includes(t.status) && Number(t.amount) > 0
+    );
+    const hasUnpaidPayment = Boolean(pendingTx || publicFields.status === STATUS_PAYMENT_PENDING);
+    const unpaidAmount = pendingTx ? Number(pendingTx.amount) : 0;
+
+    return {
+      ...publicFields,
+      is_flat: isFlat,
+      is_owner: isOwner,
+      is_third_party: isThirdParty,
+      owner_name: isOwner ? null : ownerName,
+      booker_name: bookerName,
+      has_unpaid_payment: hasUnpaidPayment,
+      unpaid_amount: unpaidAmount,
+      checkout_preview: await kioskCheckoutPreview(booking, isFlat, today, nowTime, tx, bookerNameMap)
+    };
+  };
+
+  const [roomBookingsOut, flatBookingsOut] = await Promise.all([
+    Promise.all(roomBookings.map(withPreview(false))),
+    Promise.all(flatBookings.map(withPreview(true)))
+  ]);
+
+  req.log.info('fetch_kiosk_bookings_by_card_success', {
+    cardno,
+    roomBookingsCount: roomBookings.length,
+    flatBookingsCount: flatBookings.length
+  });
+
+  return res.status(200).send({
+    message: 'Fetched bookings',
+    data: {
+      room_booking: roomBookingsOut,
+      flat_booking: flatBookingsOut,
+      card_details: cardDetails
+    }
+  });
 };
 
 export const fetchRoomBookingsByCard = async (req, res) => {
@@ -2355,6 +2596,109 @@ export const updateFlatBookingStatus = async (req, res) => {
 export const fetchLateCheckoutFees = async (req, res) => {
   const { payment_type } = req.query;
   req.log.info('fetch_late_checkout_fees_start', { payment_type });
+
+  if (payment_type === 'overdue_checkouts') {
+    const nowIST = moment().tz('Asia/Kolkata');
+    const today = nowIST.format('YYYY-MM-DD');
+    const nowTime = nowIST.format('HH:mm:ss');
+    const isPastDeadline = nowTime > CHECKOUT_DEADLINE;
+
+    // Overdue condition:
+    // Past checkout date is always overdue.
+    // If today is checkout date and past 11:00:00 AM, it's overdue today.
+    const overdueCondition = isPastDeadline
+      ? { checkout: { [Sequelize.Op.lte]: today } }
+      : { checkout: { [Sequelize.Op.lt]: today } };
+
+    const [overdueRooms, overdueFlats] = await Promise.all([
+      RoomBooking.findAll({
+        where: {
+          status: ROOM_STATUS_CHECKEDIN,
+          ...overdueCondition
+        },
+        include: [
+          {
+            model: CardDb,
+            attributes: ['cardno', 'issuedto', 'mobno']
+          }
+        ],
+        order: [['checkout', 'ASC']]
+      }),
+      FlatBooking.findAll({
+        where: {
+          status: ROOM_STATUS_CHECKEDIN,
+          ...overdueCondition
+        },
+        include: [
+          {
+            model: CardDb,
+            attributes: ['cardno', 'issuedto', 'mobno']
+          }
+        ],
+        order: [['checkout', 'ASC']]
+      })
+    ]);
+
+    const formattedRooms = overdueRooms.map((rb) => {
+      const isToday = rb.checkout === today;
+      const isHalfDay = nowTime <= LATE_CHECKOUT_HALF;
+      // Day visits (nights < 1) are never charged a late fee per handleSameDayCheckout
+      const estLateFee = (isToday && rb.nights >= 1) ? calcLateCheckoutFee(rb.roomtype, isHalfDay) : null;
+      const daysOverdue = moment(today).diff(moment(rb.checkout), 'days');
+
+      return {
+        id: null,
+        amount: estLateFee,
+        est_late_fee: estLateFee,
+        days_overdue: Math.max(0, daysOverdue),
+        bookingid: rb.bookingid,
+        roomno: rb.roomno || '—',
+        roomtype: rb.roomtype || '—',
+        checkin: rb.checkin,
+        checkout: rb.checkout,
+        nights: rb.nights,
+        guest_name: rb.CardDb?.issuedto || '—',
+        mobile: rb.CardDb?.mobno || '—',
+        is_flat: false,
+        is_overdue: true
+      };
+    });
+
+    const formattedFlats = overdueFlats.map((fb) => {
+      const daysOverdue = moment(today).diff(moment(fb.checkout), 'days');
+
+      return {
+        id: null,
+        amount: null,
+        est_late_fee: null,
+        days_overdue: Math.max(0, daysOverdue),
+        bookingid: fb.bookingid,
+        roomno: fb.flatno ? `Flat ${fb.flatno}` : 'Flat',
+        roomtype: 'Flat',
+        checkin: fb.checkin,
+        checkout: fb.checkout,
+        nights: fb.nights,
+        guest_name: fb.CardDb?.issuedto || '—',
+        mobile: fb.CardDb?.mobno || '—',
+        is_flat: true,
+        is_overdue: true
+      };
+    });
+
+    const combined = [...formattedRooms, ...formattedFlats].sort((a, b) =>
+      String(a.checkout).localeCompare(String(b.checkout))
+    );
+
+    req.log.info('fetch_overdue_checkouts_success', { count: combined.length });
+    return res.status(200).json({
+      success: true,
+      data: combined,
+      meta: {
+        count: combined.length,
+        payment_type
+      }
+    });
+  }
 
   const statusMap = {
     payment_pending: ['cash pending'],

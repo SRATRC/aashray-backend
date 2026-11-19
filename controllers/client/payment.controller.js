@@ -15,7 +15,8 @@ import {
   TYPE_UTSAV,
   STATUS_CANCELLED,
   STATUS_ADMIN_CANCELLED,
-  STATUS_CASH_COMPLETED
+  STATUS_CASH_COMPLETED,
+  ROOM_STATUS_CHECKEDIN
 } from '../../config/constants.js';
 import { Transactions, RazorpayWebhook } from '../../models/associations.js';
 import { sendUnifiedEmail } from '../helper.js';
@@ -227,6 +228,10 @@ export const verifyPayment = async (req, res) => {
               const updateFields = {
                 updatedBy
               };
+              if (bookingType === TYPE_UTSAV && booking.other?.includes('WAS_CHECKEDIN')) {
+                bookingStatus = ROOM_STATUS_CHECKEDIN;
+                updateFields.other = booking.other.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+              }
               if (bookingType !== TYPE_FOOD) {
                 updateFields.status = bookingStatus;
               }

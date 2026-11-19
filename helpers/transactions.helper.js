@@ -70,7 +70,7 @@ export async function createPendingTransaction(
 export async function userCancelBooking(user, booking, t) {
   var transaction = await Transactions.findOne({
     where: { bookingid: booking.bookingid },
-    order: [['id', 'ASC']]
+    order: [['id', 'DESC']]
   });
 
   if (transaction) {
@@ -356,7 +356,46 @@ const isReallyPaid = (txn) =>
   [STATUS_PAYMENT_COMPLETED, STATUS_CASH_COMPLETED].includes(txn.status) &&
   !String(txn.description || '').startsWith(SETTLED_AT_ZERO);
 
-const UNPAID_TOP_UP_STATUSES = [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED];
+export const UNPAID_TRANSACTION_STATUSES = [STATUS_CASH_PENDING, STATUS_PAYMENT_PENDING, STATUS_PAYMENT_FAILED];
+export const UNPAID_TOP_UP_STATUSES = UNPAID_TRANSACTION_STATUSES;
+
+export async function findUnpaidBookingTransaction(bookingid, t) {
+  return await Transactions.findOne({
+    where: {
+      bookingid,
+      status: UNPAID_TRANSACTION_STATUSES,
+      amount: { [Sequelize.Op.gt]: 0 }
+    },
+    transaction: t
+  });
+}
+
+/**
+ * Pick the primary booking transaction from an in-memory list of transactions
+ * (ordered by createdAt ASC). For flats, looks for category === TYPE_FLAT first.
+ */
+export function pickPrimaryCheckoutTransaction(transactionsList = [], isFlat = false) {
+  if (isFlat) {
+    return transactionsList.find((t) => t.category === TYPE_FLAT) || null;
+  }
+  return transactionsList[0] || null;
+}
+
+/**
+ * Fetch the primary booking transaction from the database for checkout / refund calculations.
+ * Always orders by createdAt ASC to consistently target the main booking charge.
+ */
+export async function getPrimaryCheckoutTransaction(bookingid, isFlat = false, options = {}) {
+  const where = { bookingid };
+  if (isFlat) {
+    where.category = TYPE_FLAT;
+  }
+  return Transactions.findOne({
+    where,
+    order: [['createdAt', 'ASC']],
+    ...options
+  });
+}
 
 // A top-up that has not received money yet. Never the main charge (rows[0]).
 const isPendingTopUp = (r) =>
