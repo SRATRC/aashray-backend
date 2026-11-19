@@ -17,7 +17,8 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  SENIOR_CITIZEN_MIN_AGE
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -329,8 +330,23 @@ function buildPriorityOrderClause(priorityList, isGroundPref = false) {
   ];
 }
 
-const gendersToTry = (gender) =>
-  gender === 'SCM' ? ['SCM', 'M'] : gender === 'SCF' ? ['SCF', 'F'] : [gender];
+export function isSeniorCitizen(dob, floorPref = null) {
+  if (dob) {
+    const parsed = moment(dob);
+    if (parsed.isValid()) {
+      return moment().diff(parsed, 'years') >= SENIOR_CITIZEN_MIN_AGE;
+    }
+  }
+  return floorPref === 'SC';
+}
+
+const resolveSearchGenders = (gender, isSenior = false) => {
+  const baseGender = gender.endsWith('M') ? 'M' : gender.endsWith('F') ? 'F' : gender;
+  if (isSenior) {
+    return baseGender === 'M' ? ['SCM', 'M'] : baseGender === 'F' ? ['SCF', 'F'] : [gender];
+  }
+  return [baseGender];
+};
 
 async function fetchBlockedRoomnos(checkin, queryCheckout) {
   try {
@@ -397,16 +413,25 @@ export async function findRoom(
   t = null,
   floorPref = null,
   priorityList = null,
-  adminBlockedRooms = null
+  adminBlockedRooms = null,
+  isSenior = null
 ) {
   const queryCheckout = checkin === checkout
     ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
   const blocked = adminBlockedRooms ?? (await fetchBlockedRoomnos(checkin, queryCheckout));
   const priority = priorityList || (await getPriorityOrderForMonth(checkin));
-  for (const g of gendersToTry(gender)) {
+
+  const senior = isSenior !== null && isSenior !== undefined
+    ? Boolean(isSenior)
+    : (gender === 'SCM' || gender === 'SCF' || floorPref === 'SC');
+
+  const isGroundPref = senior || floorPref === 'ground' || floorPref === '1st' || floorPref === 'SC' || floorPref === true;
+  const searchGenders = resolveSearchGenders(gender, senior);
+
+  for (const g of searchGenders) {
     const room = await findRoomOfGender(
-      checkin, checkout, room_type, g, gender, excludeRooms, t, floorPref, priority, blocked
+      checkin, checkout, room_type, g, gender, excludeRooms, t, isGroundPref, priority, blocked
     );
     if (room) return room;
   }
@@ -425,7 +450,9 @@ async function findRoomOfGender(
   priorityList,
   adminBlockedRooms
 ) {
-  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || requestedGender === 'SCM' || requestedGender === 'SCF';
+  const isGroundPref = typeof floorPref === 'boolean'
+    ? floorPref
+    : (floorPref === 'ground' || floorPref === '1st' || floorPref === true || requestedGender === 'SCM' || requestedGender === 'SCF');
   const normalizedGender = roomGender;
 
   const queryCheckout = checkin === checkout
@@ -483,7 +510,7 @@ async function findRoomOfGender(
   return RoomDb.findOne(queryOptions);
 }
 
-export async function findAllRooms(checkin, checkout, room_type, gender, floorPref = null, priorityList = null) {
+export async function findAllRooms(checkin, checkout, room_type, gender, floorPref = null, priorityList = null, isSenior = null) {
   const windowCheckout = checkin === checkout
     ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
     : checkout;
@@ -517,7 +544,10 @@ export async function findAllRooms(checkin, checkout, room_type, gender, floorPr
   });
   const bookedRooms = [...new Set([...bookings.map((x) => x.roomno), ...blockedRooms])];
   const priority = priorityList || (await getPriorityOrderForMonth(checkin));
-  const isGroundPref = floorPref === 'ground' || floorPref === '1st' || floorPref === true || gender === 'SCM' || gender === 'SCF';
+  const senior = isSenior !== null && isSenior !== undefined
+    ? Boolean(isSenior)
+    : (gender === 'SCM' || gender === 'SCF' || floorPref === 'SC');
+  const isGroundPref = senior || floorPref === 'ground' || floorPref === '1st' || floorPref === true;
   const orderClause = buildPriorityOrderClause(priority, isGroundPref);
 
   return RoomDb.findAll({
@@ -662,8 +692,11 @@ export async function createRoomBooking(
   boundaryUtsav = undefined,
   activeRoomBlocks = null
 ) {
-  const gender = floor_pref ? floor_pref + user_gender : user_gender;
+  const isSenior = isSeniorCitizen(user?.dob, floor_pref);
+  const baseGender = user_gender.endsWith('M') ? 'M' : user_gender.endsWith('F') ? 'F' : user_gender;
+  const gender = isSenior ? 'SC' + baseGender : baseGender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
+  const wantsGround = isSenior || floor_pref === 'SC' || floor_pref === 'ground' || floor_pref === '1st' || floor_pref === true;
 
   // If this is a single-night booking that begins on the Utsav end date
   // OR ends on the Utsav start date,
@@ -700,9 +733,10 @@ export async function createRoomBooking(
     gender,
     excludeRooms,
     t,
-    floor_pref,
+    wantsGround,
     priorityList,
-    activeRoomBlocks ? blockedRoomsInRange(activeRoomBlocks, checkin, checkout) : null
+    activeRoomBlocks ? blockedRoomsInRange(activeRoomBlocks, checkin, checkout) : null,
+    isSenior
   );
 
   if (!roomno) {
@@ -1024,7 +1058,10 @@ export async function checkRoomAvailabilityForMumukshus(
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
-      const gender = floorType ? floorType + card.gender : card.gender;
+      const isSenior = isSeniorCitizen(card?.dob, floorType);
+      const baseGender = card.gender.endsWith('M') ? 'M' : card.gender.endsWith('F') ? 'F' : card.gender;
+      const gender = isSenior ? 'SC' + baseGender : baseGender;
+      const wantsGround = isSenior || floorType === 'SC' || floorType === 'ground' || floorType === '1st' || floorType === true;
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
       for (const range of dateRanges) {
@@ -1066,7 +1103,12 @@ export async function checkRoomAvailabilityForMumukshus(
             range.end,
             roomType,
             gender,
-            assignedRooms
+            assignedRooms,
+            null,
+            wantsGround,
+            null,
+            null,
+            isSenior
           );
           if (roomno) {
             status = STATUS_AVAILABLE;

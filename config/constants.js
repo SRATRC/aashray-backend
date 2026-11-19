@@ -81,6 +81,7 @@ export const ROOM_STATUS_CHECKEDIN = 'checkedin';
 export const ROOM_STATUS_CHECKEDOUT = 'checkedout';
 export const ROOM_STATUS_AVAILABLE = 'available';
 export const ROOM_BLOCKED = 'blocked';
+export const SENIOR_CITIZEN_MIN_AGE = 60;
 
 // TRAVEL
 export const TRAVEL_DETAIL = 'Travel Booking';
