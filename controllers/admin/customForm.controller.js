@@ -10,7 +10,7 @@ import sendMail from '../../utils/sendMail.js';
 import crypto from 'crypto';
 import Sequelize from 'sequelize';
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8000';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://aashray.vitraagvigyaan.org';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const mapDeptToShortLinkType = (deptName) => {
