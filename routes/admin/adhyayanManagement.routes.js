@@ -24,7 +24,13 @@ import {
   createAttendanceEntryManually,
   bulkToggleAttendance,
   adhyayanGroupAudit,
-  sendAdhyayanGroupReminder
+  sendAdhyayanGroupReminder,
+  fetchPastAdhyayanAttendanceReport,
+  fetchPastAdhyayanParticipantsReport,
+  fetchShibirSessionsManagement,
+  deleteShibirSession,
+  fetchAllPastAdhyayanAbsentees,
+  restoreShibirSessions
 } from '../../controllers/admin/adhyayanManagement.controller.js';
 import {
   ROLE_SUPER_ADMIN,
@@ -83,5 +89,63 @@ router.get('/attendance/summary/:shibir_id', CatchAsync(fetchAdhyayanAttendanceS
 router.post('/booking/admin', CatchAsync(createAdhyayanBookingByAdmin));
 router.post('/attendance/create', CatchAsync(createAttendanceEntryManually));
 router.get('/group-audit', CatchAsync(adhyayanGroupAudit));
+router.get(
+  '/reports/past-attendance',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_OFFICE_ADMIN,
+    ROLE_ADHYAYAN_READ_ONLY
+  ),
+  CatchAsync(fetchPastAdhyayanAttendanceReport)
+);
+router.get(
+  '/reports/:shibir_id/participants',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_OFFICE_ADMIN,
+    ROLE_ADHYAYAN_READ_ONLY
+  ),
+  CatchAsync(fetchPastAdhyayanParticipantsReport)
+);
+router.get(
+  '/reports/:shibir_id/sessions',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_OFFICE_ADMIN,
+    ROLE_ADHYAYAN_READ_ONLY
+  ),
+  CatchAsync(fetchShibirSessionsManagement)
+);
+router.delete(
+  '/reports/:shibir_id/sessions/:session_number',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_OFFICE_ADMIN
+  ),
+  CatchAsync(deleteShibirSession)
+);
+router.post(
+  '/reports/:shibir_id/sessions/restore',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_OFFICE_ADMIN
+  ),
+  CatchAsync(restoreShibirSessions)
+);
+router.get(
+  '/reports/all-absentees',
+  authorizeRoles(
+    ROLE_SUPER_ADMIN,
+    ROLE_ADHYAYAN_ADMIN,
+    ROLE_OFFICE_ADMIN,
+    ROLE_ADHYAYAN_READ_ONLY
+  ),
+  CatchAsync(fetchAllPastAdhyayanAbsentees)
+);
 
 export default router;

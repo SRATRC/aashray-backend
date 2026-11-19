@@ -23,15 +23,20 @@ import {
   bookUtsavForMumukshus,
   cancelUtsavFoodBookings,
   bookFoodForUtsav,
-  bookUtsavForMumukshusAdmin
+  bookUtsavForMumukshusAdmin,
+  sendUtsavBookingUpdateEmail,
+  adjustUtsavFoodForPackageChange,
+  removeDroppedDatesFromCustomForms,
+  sendUtsavPackageChangeWhatsApp,
+  getUtsavCustomFormWhereCondition
 } from '../../helpers/utsavBooking.helper.js';
-import { sendUtsavBookingUpdateEmail } from '../../helpers/utsavBooking.helper.js';
 import Sequelize, { QueryTypes } from 'sequelize';
 import {
   adminCancelTransaction,
   createPendingTransaction,
   cancelTransaction,
-  useCredit
+  useCredit,
+  parseCredits
 } from '../../helpers/transactions.helper.js';
 
 import {
@@ -50,12 +55,16 @@ import {
   RESEARCH_CENTRE,
   STATUS_OPEN,
   STATUS_PAYMENT_COMPLETED,
-  ERR_BOOKING_ALREADY_CANCELLED
+  STATUS_PAYMENT_FAILED,
+  STATUS_PAYMENT_AUTHORIZED,
+  ERR_BOOKING_ALREADY_CANCELLED,
+  MAX_APP_PAYMENT_DURATION_MINUTES
 } from '../../config/constants.js';
 import { validateCard } from '../../helpers/card.helper.js';
 import Transactions from '../../models/transactions.model.js';
 import database from '../../config/database.js';
 import moment from 'moment';
+import getDates from '../../utils/getDates.js';
 import ApiError from '../../utils/ApiError.js';
 import XLSX from 'xlsx';
 import {
@@ -727,6 +736,9 @@ export const fetchUtsavBookings = async (req, res) => {
       t1.status,
       t5.status AS transaction_status,
       t1.bookedby,
+      t6.issuedto AS booker_name,
+      t2.credits AS attendee_credits,
+      t6.credits AS booker_credits,
       t1.utsavid,
       t1.packageid,
       t2.dob,
@@ -736,7 +748,12 @@ export const fetchUtsavBookings = async (req, res) => {
     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
     LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
-    LEFT JOIN transactions AS t5 ON t1.bookingid = t5.bookingid
+    LEFT JOIN transactions AS t5 ON t5.id = (
+      SELECT id FROM transactions
+      WHERE bookingid = t1.bookingid AND category = 'utsav'
+      ORDER BY id DESC LIMIT 1
+    )
+    LEFT JOIN card_db AS t6 ON t1.bookedby = t6.cardno
     WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
     `,
     {
@@ -974,31 +991,61 @@ export const activateUtsav = async (req, res) => {
   res.status(200).send({ message: 'Utsav status updated' });
 };
 
-export const utsavStatusUpdate = async (req, res) => {
-  const { utsav_id, bookingid, status, description, issueCredits } = req.body;
-
+export const executeUtsavStatusUpdate = async ({
+  utsav_id,
+  bookingid,
+  status,
+  description,
+  issueCredits,
+  user,
+  req,
+  t
+}) => {
   let newBookingStatus = status;
-  req.log.info('utsav_status_update_start', { utsav_id, bookingid, status, issueCredits });
-
-  const t = await database.transaction();
-  req.transaction = t;
 
   const utsav = await validateUtsav(utsav_id);
-  const booking = await validateUtsavBooking(bookingid, utsav_id);
+
+  // Lock order: utsav, then the payment row, then the booking - the same order
+  // as the payment confirmation and the member's cancel. The card and meal
+  // locks in the admin-cancel branch come after these.
+  await UtsavDb.findOne({
+    where: { id: utsav_id },
+    attributes: ['id'],
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  // transactions.bookingid is unindexed: find the id with a plain read, then lock only that row.
+  // Note: UtsavDb row lock above serializes flows that also lock utsav first.
+  const paymentRow = await Transactions.findOne({
+    where: { bookingid },
+    order: [['id', 'DESC']],
+    attributes: ['id']
+  });
+  let transaction = null;
+  if (paymentRow) {
+    transaction = await Transactions.findOne({
+      where: { id: paymentRow.id },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+  }
+
+  const booking = await validateUtsavBooking(bookingid, utsav_id, t, true);
   const previousStatus = booking.status;
 
   if (status === booking.status) {
-    req.log.warn('utsav_status_update_same_status', { bookingid, status });
+    req?.log?.warn?.('utsav_status_update_same_status', { bookingid, status });
     throw new ApiError(400, 'Status is same as before');
   }
 
   // Cannot change any status if already admin cancelled
   if (booking.status === STATUS_ADMIN_CANCELLED) {
-    req.log.warn('utsav_status_update_already_cancelled', { bookingid });
+    req?.log?.warn?.('utsav_status_update_already_cancelled', { bookingid });
     throw new ApiError(400, ERR_BOOKING_ALREADY_CANCELLED);
   }
 
-  let transaction = await Transactions.findOne({ where: { bookingid } });
+  const username = user?.username || 'admin';
 
   switch (status) {
     case STATUS_CONFIRMED:
@@ -1011,6 +1058,10 @@ export const utsavStatusUpdate = async (req, res) => {
           400,
           'Confirmed status can only be set from payment pending or cancelled'
         );
+      }
+
+      if (booking.other?.includes('WAS_CHECKEDIN')) {
+        newBookingStatus = ROOM_STATUS_CHECKEDIN;
       }
 
       if (booking.status === STATUS_WAITING) {
@@ -1026,30 +1077,33 @@ export const utsavStatusUpdate = async (req, res) => {
           booking,
           TYPE_UTSAV,
           utsav.amount,
-          req.user.username,
+          username,
           t,
           true
         );
-        let utsav_packages_db = await UtsavPackagesDb.findOne({ where: { id: booking.packageid, utsavid: utsav.id } });
-        await bookFoodForUtsav(utsav_packages_db, utsav, card, t, req.user.username);
+        let utsav_packages_db = await UtsavPackagesDb.findOne({
+          where: { id: booking.packageid, utsavid: utsav.id },
+          transaction: t
+        });
+        await bookFoodForUtsav(utsav_packages_db, utsav, card, t, username);
       } else {
         if (transaction.status === STATUS_CANCELLED) {
           await transaction.update(
             {
               status: STATUS_PAYMENT_PENDING,
-              updatedBy: req.user.username,
+              updatedBy: username,
               description: description || 'Reopened after cancellation'
             },
             { transaction: t }
           );
         } else if (transaction.status === STATUS_CONFIRMED) {
-          req.log.info('utsav_status_update_tx_already_confirmed', { bookingid });
+          req?.log?.info?.('utsav_status_update_tx_already_confirmed', { bookingid });
         } else if (transaction.status === STATUS_PAYMENT_PENDING) {
           await transaction.update(
             {
               status: STATUS_PAYMENT_COMPLETED,
               description: description,
-              updatedBy: req.user.username
+              updatedBy: username
             },
             { transaction: t }
           );
@@ -1068,33 +1122,41 @@ export const utsavStatusUpdate = async (req, res) => {
       });
       if (!pkg) throw new Error('Utsav Package not found');
 
-      // ⭐ NEW: If amount = 0 → auto-confirm, skip transaction
+      // ⭐ If amount = 0 → auto-confirm, skip transaction
       if (Number(pkg.amount) === 0) {
-        req.log.info('utsav_status_update_zero_amount_auto_confirm', { bookingid, packageid: booking.packageid });
+        req?.log?.info?.('utsav_status_update_zero_amount_auto_confirm', { bookingid, packageid: booking.packageid });
 
         // Reserve seat
         await reserveUtsavSeat(utsav, t);
 
-        newBookingStatus = STATUS_CONFIRMED;
+        newBookingStatus = booking.other?.includes('WAS_CHECKEDIN')
+          ? ROOM_STATUS_CHECKEDIN
+          : STATUS_CONFIRMED;
+
+        const zeroUpdateData = {
+          status: newBookingStatus,
+          updatedBy: username,
+          description:
+            `Since package amount is 0, updating the status to ${newBookingStatus}.`
+        };
+        if (newBookingStatus === ROOM_STATUS_CHECKEDIN && booking.other?.includes('WAS_CHECKEDIN')) {
+          zeroUpdateData.other = booking.other.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+        }
 
         await booking.update(
-          {
-            status: newBookingStatus,
-            updatedBy: req.user.username,
-            description:
-              'Since package amount is 0, updating the status to confirmed.'
-          },
+          zeroUpdateData,
           { transaction: t }
         );
-        await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
-        await t.commit();
+        await bookFoodForUtsav(pkg, utsav, booking, t, username);
 
-        await sendUtsavBookingUpdateEmail(booking, utsav);
-
-        return res.status(200).send({
-          message:
-            'Since package amount is 0, updating the status to confirmed.'
-        });
+        return {
+          booking,
+          utsav,
+          transaction: null,
+          previousStatus,
+          newBookingStatus,
+          autoConfirmedZeroAmount: true
+        };
       }
 
       // ⭐ Original flow for paid packages
@@ -1102,6 +1164,7 @@ export const utsavStatusUpdate = async (req, res) => {
 
       transaction = await Transactions.findOne({
         where: { bookingid: booking.bookingid },
+        order: [['id', 'DESC']],
         transaction: t
       });
 
@@ -1118,7 +1181,7 @@ export const utsavStatusUpdate = async (req, res) => {
             booking,
             TYPE_UTSAV,
             pkg.amount,
-            req.user.username || 'admin',
+            username,
             t
           );
           transaction = result.transaction;
@@ -1128,7 +1191,7 @@ export const utsavStatusUpdate = async (req, res) => {
               amount: pkg.amount,
               discount: 0,
               status: STATUS_PAYMENT_PENDING,
-              updatedBy: req.user.username || 'admin',
+              updatedBy: username,
               description: description || 'Payment pending for Utsav'
             },
             { transaction: t }
@@ -1138,21 +1201,21 @@ export const utsavStatusUpdate = async (req, res) => {
             booking,
             transaction,
             pkg.amount,
-            req.user.username || 'admin',
+            username,
             t
           );
         }
-        await bookFoodForUtsav(pkg, utsav, booking, t, req.user.username);
+        await bookFoodForUtsav(pkg, utsav, booking, t, username);
       }
 
       newBookingStatus =
         transaction.status === STATUS_PAYMENT_COMPLETED
-          ? STATUS_CONFIRMED
+          ? (booking.other?.includes('WAS_CHECKEDIN') ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED)
           : STATUS_PAYMENT_PENDING;
       break;
 
     case STATUS_ADMIN_CANCELLED:
-      req.log.info('utsav_status_update_admin_cancelling', { bookingid, issueCredits });
+      req?.log?.info?.('utsav_status_update_admin_cancelling', { bookingid, issueCredits });
 
       if (
         booking.status !== STATUS_WAITING &&
@@ -1195,7 +1258,7 @@ export const utsavStatusUpdate = async (req, res) => {
       // so running it for a booking that never had them wipes meals the member
       // booked on their own for those days.
       if (utsavBookingHeldSeat(booking.status)) {
-        await cancelUtsavFoodBookings(booking, req.user.username, t);
+        await cancelUtsavFoodBookings(booking, username, t);
       }
       // 🪑 Free seat if applicable
       if (
@@ -1206,19 +1269,19 @@ export const utsavStatusUpdate = async (req, res) => {
           transaction: t
         });
         if (!utsavRecord) throw new ApiError(404, 'Utsav not found');
-        await openUtsavSeat(utsavRecord, booking.cardno, req.user.username, t);
+        await openUtsavSeat(utsavRecord, booking.cardno, username, t);
       }
 
       if (transaction) {
         if (transaction.status === STATUS_CANCELLED) {
           // user had cancelled earlier, now admin upgrades it
           if (issueCredits === true || issueCredits === 'yes') {
-            req.log.info('utsav_status_update_issuing_credits_prev_cancelled', { bookingid });
-            await cancelTransaction(req.user, null, transaction, t, true);
+            req?.log?.info?.('utsav_status_update_issuing_credits_prev_cancelled', { bookingid });
+            await cancelTransaction(user, null, transaction, t, true);
           } else {
-            req.log.info('utsav_status_update_marking_admin_cancelled_no_credits', { bookingid });
+            req?.log?.info?.('utsav_status_update_marking_admin_cancelled_no_credits', { bookingid });
             await transaction.update(
-              { status: STATUS_ADMIN_CANCELLED, updatedBy: req.user.username },
+              { status: STATUS_ADMIN_CANCELLED, updatedBy: username },
               { transaction: t }
             );
           }
@@ -1229,8 +1292,8 @@ export const utsavStatusUpdate = async (req, res) => {
         ) {
           // Normal admin cancel
           if (issueCredits === true || issueCredits === 'yes') {
-            req.log.info('utsav_status_update_issuing_credits', { bookingid, amount: transaction.amount });
-            await cancelTransaction(req.user, null, transaction, t, true);
+            req?.log?.info?.('utsav_status_update_issuing_credits', { bookingid, amount: transaction.amount });
+            await cancelTransaction(user, null, transaction, t, true);
           } else {
             // issueCredits = "no" — same as user cancel:
             // paid transactions stay as-is (non-refundable), pending/failed restore discount
@@ -1243,18 +1306,18 @@ export const utsavStatusUpdate = async (req, res) => {
             ].includes(transaction.status);
 
             if (isCompletedStatus) {
-              req.log.info('utsav_status_update_tx_already_completed_leaving_as_is', { bookingid, transactionStatus: transaction.status });
+              req?.log?.info?.('utsav_status_update_tx_already_completed_leaving_as_is', { bookingid, transactionStatus: transaction.status });
             } else {
-              req.log.info('utsav_status_update_admin_cancelled_no_credits_restoring_discount', { bookingid });
+              req?.log?.info?.('utsav_status_update_admin_cancelled_no_credits_restoring_discount', { bookingid });
               // Pending/failed: restore any previously applied credits (discount) back to card
-              await cancelTransaction(req.user, null, transaction, t, false);
+              await cancelTransaction(user, null, transaction, t, false);
             }
           }
         } else {
-          req.log.info('utsav_status_update_tx_already_cancelled_skipping', { bookingid });
+          req?.log?.info?.('utsav_status_update_tx_already_cancelled_skipping', { bookingid });
         }
       } else {
-        req.log.info('utsav_status_update_no_transaction', { bookingid });
+        req?.log?.info?.('utsav_status_update_no_transaction', { bookingid });
       }
 
       newBookingStatus = STATUS_ADMIN_CANCELLED;
@@ -1267,27 +1330,179 @@ export const utsavStatusUpdate = async (req, res) => {
       throw new ApiError(400, 'Invalid status provided');
   }
 
+  const generalUpdateData = { status: newBookingStatus, updatedBy: username };
+  if (newBookingStatus === ROOM_STATUS_CHECKEDIN && booking.other?.includes('WAS_CHECKEDIN')) {
+    generalUpdateData.other = booking.other.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+  }
+
   await booking.update(
-    { status: newBookingStatus, updatedBy: req.user.username },
+    generalUpdateData,
     { transaction: t }
   );
 
+  return {
+    booking,
+    utsav,
+    transaction,
+    previousStatus,
+    newBookingStatus,
+    autoConfirmedZeroAmount: false
+  };
+};
+
+export const utsavStatusUpdate = async (req, res) => {
+  const { utsav_id, bookingid, status, description, issueCredits } = req.body;
+
+  req.log.info('utsav_status_update_start', { utsav_id, bookingid, status, issueCredits });
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const result = await executeUtsavStatusUpdate({
+    utsav_id,
+    bookingid,
+    status,
+    description,
+    issueCredits,
+    user: req.user,
+    req,
+    t
+  });
+
   await t.commit();
 
-  await sendUtsavBookingUpdateEmail(booking, utsav);
+  await sendUtsavBookingUpdateEmail(result.booking, result.utsav);
 
   try {
     let waOptions = { updatedBy: req.user.username };
-    if (status === STATUS_ADMIN_CANCELLED && (issueCredits === 'yes' || issueCredits === true) && transaction) {
-      waOptions.credits = (transaction.amount || 0) + (transaction.discount || 0);
+    if (status === STATUS_ADMIN_CANCELLED && (issueCredits === 'yes' || issueCredits === true) && result.transaction) {
+      waOptions.credits = (result.transaction.amount || 0) + (result.transaction.discount || 0);
     }
-    await sendUtsavStatusChangeWhatsApp(booking, previousStatus, waOptions);
+    await sendUtsavStatusChangeWhatsApp(result.booking, result.previousStatus, waOptions);
   } catch (waErr) {
     console.error("Error sending utsav status change WhatsApp in utsavStatusUpdate:", waErr);
   }
 
-  req.log.info('utsav_status_update_transition', { bookingid, utsav_id, fromStatus: booking.status, toStatus: newBookingStatus });
+  req.log.info('utsav_status_update_transition', { bookingid, utsav_id, fromStatus: result.previousStatus, toStatus: result.newBookingStatus });
+
+  if (result.autoConfirmedZeroAmount) {
+    return res.status(200).send({
+      message: 'Since package amount is 0, updating the status to confirmed.'
+    });
+  }
+
   return res.status(200).send({ message: 'Updated booking status' });
+};
+
+export const bulkUtsavStatusUpdate = async (req, res) => {
+  const { utsav_id, bookingids, status, description, issueCredits } = req.body;
+
+  req.log.info('bulk_utsav_status_update_start', { utsav_id, count: bookingids?.length, status, issueCredits });
+
+  if (!utsav_id) {
+    throw new ApiError(400, 'utsav_id is required');
+  }
+
+  if (!Array.isArray(bookingids) || bookingids.length === 0) {
+    throw new ApiError(400, 'bookingids must be a non-empty array');
+  }
+
+  if (bookingids.length > 100) {
+    throw new ApiError(400, 'Batch size exceeds maximum limit of 100');
+  }
+
+  if (!bookingids.every(id => typeof id === 'string' && id.trim() !== '')) {
+    throw new ApiError(400, 'Each bookingid must be a non-empty string');
+  }
+
+  const allowedStatuses = [STATUS_CONFIRMED, STATUS_PAYMENT_PENDING, STATUS_ADMIN_CANCELLED];
+  if (!allowedStatuses.includes(status)) {
+    throw new ApiError(400, `Invalid target status. Allowed statuses: ${allowedStatuses.join(', ')}`);
+  }
+
+  await validateUtsav(utsav_id);
+  const uniqueBookingIds = [...new Set(bookingids)];
+
+  const results = {
+    total: uniqueBookingIds.length,
+    successCount: 0,
+    failedCount: 0,
+    failures: []
+  };
+
+  const notificationsToSend = [];
+
+  for (const bookingid of uniqueBookingIds) {
+    const t = await database.transaction();
+    try {
+      const updateResult = await executeUtsavStatusUpdate({
+        utsav_id,
+        bookingid,
+        status,
+        description,
+        issueCredits,
+        user: req.user,
+        req,
+        t
+      });
+
+      await t.commit();
+      results.successCount++;
+
+      notificationsToSend.push({
+        booking: updateResult.booking,
+        utsav: updateResult.utsav,
+        previousStatus: updateResult.previousStatus,
+        transaction: updateResult.transaction
+      });
+    } catch (err) {
+      if (!t.finished) {
+        await t.rollback().catch((rbErr) =>
+          req.log.error('bulk_utsav_status_update_rollback_failed', { bookingid, error: rbErr.message })
+        );
+      }
+      results.failedCount++;
+      req.log.warn('bulk_utsav_status_update_item_failed', { bookingid, error: err.message });
+      results.failures.push({
+        bookingid,
+        reason: err instanceof ApiError ? err.message : 'Update failed'
+      });
+    }
+  }
+
+  // Fire-and-forget post-commit notifications
+  (async () => {
+    for (const notif of notificationsToSend) {
+      try {
+        await sendUtsavBookingUpdateEmail(notif.booking, notif.utsav);
+      } catch (emailErr) {
+        req.log?.error?.('bulk_utsav_status_update_email_error', { bookingid: notif.booking?.bookingid, error: emailErr.message });
+      }
+
+      try {
+        let waOptions = { updatedBy: req.user.username };
+        if (status === STATUS_ADMIN_CANCELLED && (issueCredits === 'yes' || issueCredits === true) && notif.transaction) {
+          waOptions.credits = (notif.transaction.amount || 0) + (notif.transaction.discount || 0);
+        }
+        await sendUtsavStatusChangeWhatsApp(notif.booking, notif.previousStatus, waOptions);
+      } catch (waErr) {
+        req.log?.error?.('bulk_utsav_status_update_whatsapp_error', { bookingid: notif.booking?.bookingid, error: waErr.message });
+      }
+    }
+  })().catch(bgErr => {
+    req.log?.error?.('bulk_utsav_status_update_bg_notifications_failed', { error: bgErr.message });
+  });
+
+  req.log.info('bulk_utsav_status_update_complete', {
+    total: results.total,
+    successCount: results.successCount,
+    failedCount: results.failedCount
+  });
+
+  return res.status(200).send({
+    message: `Bulk status update completed: ${results.successCount} succeeded, ${results.failedCount} failed`,
+    data: results
+  });
 };
 
 export const fetchUtsav = async (req, res) => {
@@ -1399,15 +1614,28 @@ export const fetchPackagesByUtsav = async (req, res) => {
     return res.status(400).send({ message: 'utsavid is required' });
   }
 
-  const packages = await UtsavPackagesDb.findAll({
-    where: { utsavid },
-    order: [['start_date', 'ASC']]
-  });
+  const parsedUtsavId = Number(utsavid);
+  if (!Number.isInteger(parsedUtsavId)) {
+    req.log.warn('fetch_packages_by_utsav_invalid_id', { utsavid });
+    return res.status(400).send({ message: 'utsavid must be an integer' });
+  }
 
-  req.log.info('fetch_packages_by_utsav_success', { utsavid, count: packages.length });
+  const [packages, hasCustomFormsCount] = await Promise.all([
+    UtsavPackagesDb.findAll({
+      where: { utsavid: parsedUtsavId },
+      order: [['start_date', 'ASC']]
+    }),
+    CustomForm.count({
+      where: getUtsavCustomFormWhereCondition(parsedUtsavId)
+    })
+  ]);
+
+  const hasCustomForms = Number(hasCustomFormsCount) > 0;
+
+  req.log.info('fetch_packages_by_utsav_success', { utsavid: parsedUtsavId, count: packages.length, hasCustomForms });
   return res
     .status(200)
-    .send({ message: 'Fetched packages for utsav', data: packages });
+    .send({ message: 'Fetched packages for utsav', data: packages, has_custom_forms: hasCustomForms });
 };
 
 export const fetchPackage = async (req, res) => {
@@ -2027,7 +2255,11 @@ export const getSystemRoomAllocations = async (req, res) => {
     LEFT JOIN card_db AS t2 ON t1.cardno = t2.cardno
     LEFT JOIN utsav_db AS t3 ON t1.utsavid = t3.id
     LEFT JOIN utsav_packages_db AS t4 ON t1.packageid = t4.id AND t1.utsavid = t4.utsavid
-    LEFT JOIN transactions AS t5 ON t1.bookingid = t5.bookingid
+    LEFT JOIN transactions AS t5 ON t5.id = (
+      SELECT id FROM transactions
+      WHERE bookingid = t1.bookingid AND category = 'utsav'
+      ORDER BY id DESC LIMIT 1
+    )
     WHERE t1.utsavid = :utsavid AND t1.status IN (:status)
     ORDER BY t1.createdAt ASC`,
     {
@@ -4267,4 +4499,291 @@ export const utsavParticipantHistoryReport = async (req, res) => {
       error: err.message
     });
   }
+};
+
+export const changeUtsavPackage = async (req, res) => {
+  const { bookingid, newPackageId, newRoomNo, description } = req.body;
+
+  req.log.info('change_utsav_package_start', {
+    bookingid,
+    newPackageId,
+    newRoomNo,
+    description,
+    adminUser: req.user?.username
+  });
+
+  if (!bookingid || !newPackageId) {
+    throw new ApiError(400, 'Booking ID and New Package ID are required');
+  }
+
+  const t = await database.transaction();
+  req.transaction = t;
+
+  const booking = await UtsavBooking.findOne({
+    where: { bookingid },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  if (!booking) {
+    throw new ApiError(404, 'Booking not found');
+  }
+
+  if ([STATUS_CANCELLED, STATUS_ADMIN_CANCELLED].includes(booking.status)) {
+    throw new ApiError(400, 'Cannot change package for a cancelled booking');
+  }
+
+  const allowedStatuses = [STATUS_WAITING, STATUS_PAYMENT_PENDING, STATUS_CONFIRMED, ROOM_STATUS_CHECKEDIN];
+  if (!allowedStatuses.includes(booking.status)) {
+    throw new ApiError(400, `Cannot change package for booking with status ${booking.status}`);
+  }
+
+  if (Number(booking.packageid) === Number(newPackageId)) {
+    throw new ApiError(400, 'Booking is already assigned to this package');
+  }
+
+  const oldPkg = await UtsavPackagesDb.findByPk(booking.packageid, { transaction: t });
+  const newPkg = await UtsavPackagesDb.findByPk(newPackageId, { transaction: t });
+
+  if (!newPkg) {
+    throw new ApiError(404, 'New package not found');
+  }
+
+  if (Number(newPkg.utsavid) !== Number(booking.utsavid)) {
+    throw new ApiError(400, 'New package does not belong to the same Utsav');
+  }
+
+  const utsav = await UtsavDb.findByPk(booking.utsavid, {
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+
+  if (!utsav) {
+    throw new ApiError(404, 'Utsav not found');
+  }
+
+  const payerCardno = booking.bookedBy || booking.cardno;
+  await CardDb.findOne({
+    where: { cardno: payerCardno },
+    transaction: t,
+    lock: t.LOCK.UPDATE
+  });
+  const payerCard = await validateCard(payerCardno);
+
+  const wasCheckedIn = (booking.status === ROOM_STATUS_CHECKEDIN || booking.other?.includes('WAS_CHECKEDIN'));
+
+  const activeTxStatuses = [
+    STATUS_PAYMENT_PENDING,
+    STATUS_CASH_PENDING,
+    STATUS_PAYMENT_COMPLETED,
+    STATUS_CASH_COMPLETED,
+    STATUS_PAYMENT_FAILED,
+    STATUS_PAYMENT_AUTHORIZED
+  ];
+
+  // 1. Transaction cancellation and credit restoration
+  // Read transaction id first with plain read, then lock only that specific row by PK.
+  // This avoids scanning and locking the whole transactions table (bookingid is not indexed).
+  const existingTxRow = await Transactions.findOne({
+    where: {
+      bookingid: booking.bookingid,
+      category: TYPE_UTSAV,
+      status: activeTxStatuses
+    },
+    order: [['id', 'DESC']],
+    attributes: ['id'],
+    transaction: t
+  });
+
+  const existingTx = existingTxRow
+    ? await Transactions.findOne({
+        where: { id: existingTxRow.id },
+        transaction: t,
+        lock: t.LOCK.UPDATE
+      })
+    : null;
+
+  if (existingTx && existingTx.status === STATUS_PAYMENT_AUTHORIZED) {
+    throw new ApiError(
+      400,
+      'Cannot change package while a payment is currently authorized. Please wait for payment confirmation or failure.'
+    );
+  }
+
+  // Prevent lost payment if member has an active online checkout open on Razorpay
+  if (existingTx && existingTx.status === STATUS_PAYMENT_PENDING && existingTx.razorpay_order_id) {
+    const orderTime = moment(existingTx.updatedAt || existingTx.createdAt);
+    if (orderTime.isValid() && moment().diff(orderTime, 'minutes') < MAX_APP_PAYMENT_DURATION_MINUTES) {
+      throw new ApiError(
+        400,
+        'Member has an active online payment checkout in progress on Razorpay. Please wait for payment to complete or expire before changing package.'
+      );
+    }
+  }
+
+  if (existingTx?.razorpay_order_id) {
+    req.log.info('cancelling_active_transaction_with_razorpay_order', {
+      bookingid: booking.bookingid,
+      existingTxId: existingTx.id,
+      razorpayOrderId: existingTx.razorpay_order_id
+    });
+  }
+
+  let creditsRestored = 0;
+  if (existingTx) {
+    const totalAmount = (Number(existingTx.amount) || 0) + (Number(existingTx.discount) || 0);
+    creditsRestored = (existingTx.status === STATUS_PAYMENT_COMPLETED || existingTx.status === STATUS_CASH_COMPLETED)
+      ? totalAmount
+      : (Number(existingTx.discount) || 0);
+
+    await cancelTransaction(req.user, payerCard, existingTx, t, true);
+    req.log.info('change_utsav_package_cancelled_active_tx', {
+      bookingid: booking.bookingid,
+      existingTxId: existingTx.id,
+      status: existingTx.status,
+      creditsRestored
+    });
+  }
+
+  let newBookingStatus = booking.status;
+  let finalOther = booking.other;
+  let amountDue = 0;
+  let creditsUsed = 0;
+
+  // 2. New Transaction & Auto-Cover
+  if (booking.status === STATUS_WAITING) {
+    // Waiting participants do not have active financial transactions created
+    newBookingStatus = STATUS_WAITING;
+    amountDue = 0;
+    creditsUsed = 0;
+  } else if (Number(newPkg.amount) === 0) {
+    newBookingStatus = wasCheckedIn ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED;
+    if (wasCheckedIn && finalOther?.includes('WAS_CHECKEDIN')) {
+      finalOther = finalOther.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+    }
+    amountDue = 0;
+    creditsUsed = 0;
+  } else {
+    // Paid package: pass cashAllowed: true for admin-assisted changes so any pending balance
+    // is recorded as cash-pending and never auto-cancelled by the 30-minute online payment cron.
+    const { transaction: newTx } = await createPendingTransaction(
+      payerCard,
+      booking,
+      TYPE_UTSAV,
+      newPkg.amount,
+      req.user.username,
+      t,
+      true
+    );
+
+    creditsUsed = Number(newTx.discount) || 0;
+    amountDue = Number(newTx.amount) || 0;
+
+    if (newTx.status === STATUS_PAYMENT_COMPLETED || newTx.status === STATUS_CASH_COMPLETED) {
+      newBookingStatus = wasCheckedIn ? ROOM_STATUS_CHECKEDIN : STATUS_CONFIRMED;
+      if (wasCheckedIn && finalOther?.includes('WAS_CHECKEDIN')) {
+        finalOther = finalOther.replace(/,WAS_CHECKEDIN|WAS_CHECKEDIN,?/g, '').trim() || null;
+      }
+    } else {
+      newBookingStatus = newTx.status === STATUS_CASH_PENDING ? STATUS_CASH_PENDING : STATUS_PAYMENT_PENDING;
+      if (wasCheckedIn && !finalOther?.includes('WAS_CHECKEDIN')) {
+        finalOther = finalOther ? `${finalOther},WAS_CHECKEDIN` : 'WAS_CHECKEDIN';
+      }
+    }
+  }
+
+  // 3. Room allocation handling
+  let finalRoomNo = booking.roomno;
+  if (newRoomNo !== undefined) {
+    finalRoomNo = (typeof newRoomNo === 'string' && newRoomNo.trim() !== '') ? newRoomNo.trim() : null;
+  }
+
+  // 4. Audit description update
+  const auditText = `Package changed from ${oldPkg?.name || 'Package #' + booking.packageid} to ${newPkg.name} by ${req.user.username}`;
+  const finalDescription = description
+    ? (booking.description ? `${booking.description} | ${auditText}. Remarks: ${description}` : `${auditText}. Remarks: ${description}`)
+    : (booking.description ? `${booking.description} | ${auditText}` : auditText);
+
+  // 5. Update booking record
+  await booking.update({
+    packageid: newPackageId,
+    status: newBookingStatus,
+    roomno: finalRoomNo,
+    other: finalOther,
+    description: finalDescription,
+    updatedBy: req.user.username
+  }, { transaction: t });
+
+  // 6. Food bookings delta adjustment (only if held seat)
+  if (utsavBookingHeldSeat(booking.status)) {
+    await adjustUtsavFoodForPackageChange(oldPkg, newPkg, utsav, booking.cardno, req.user.username, t);
+  }
+
+  // 7. Prune custom forms responses on downgrade
+  if (oldPkg && oldPkg.start_date && oldPkg.end_date && newPkg.start_date && newPkg.end_date) {
+    const oldDates = getDates(oldPkg.start_date, oldPkg.end_date);
+    const newDates = getDates(newPkg.start_date, newPkg.end_date);
+    const droppedDates = oldDates.filter((d) => !newDates.includes(d));
+    if (droppedDates.length > 0) {
+      await removeDroppedDatesFromCustomForms(booking.utsavid, booking.cardno, droppedDates, t);
+    }
+  }
+
+  // 8. Calculate surplus credits remaining on payerCard
+  const updatedPayerCard = await CardDb.findOne({
+    where: { cardno: payerCardno },
+    transaction: t
+  });
+  const parsedCredits = parseCredits(updatedPayerCard?.credits);
+  const surplusCredits = parsedCredits?.utsav || 0;
+
+  await t.commit();
+
+  // 9. Post-commit notifications
+  try {
+    await sendUtsavBookingUpdateEmail(booking, utsav);
+  } catch (emailErr) {
+    req.log.error('change_utsav_package_email_error', { error: emailErr.message, bookingid });
+  }
+
+  try {
+    await sendUtsavPackageChangeWhatsApp(booking, oldPkg, newPkg, { updatedBy: req.user.username });
+  } catch (waErr) {
+    req.log.error('change_utsav_package_whatsapp_error', { error: waErr.message, bookingid });
+  }
+
+  req.log.info('change_utsav_package_success', {
+    bookingid: booking.bookingid,
+    oldPackageId: oldPkg?.id,
+    newPackageId: newPkg.id,
+    status: newBookingStatus,
+    amountDue,
+    creditsRestored,
+    creditsUsed,
+    surplusCredits,
+    roomno: finalRoomNo
+  });
+
+  return res.status(200).send({
+    message: 'Package changed successfully',
+    data: {
+      bookingid: booking.bookingid,
+      oldPackage: {
+        id: oldPkg?.id,
+        name: oldPkg?.name,
+        amount: oldPkg?.amount
+      },
+      newPackage: {
+        id: newPkg.id,
+        name: newPkg.name,
+        amount: newPkg.amount
+      },
+      status: newBookingStatus,
+      amountDue,
+      creditsRestored,
+      creditsUsed,
+      surplusCredits,
+      roomno: finalRoomNo
+    }
+  });
 };

@@ -11,6 +11,7 @@ import {
   getAllocationPriorities,
   updateAllocationPriority,
   deleteAllocationPriority,
+  fetchKioskBookingsByCard,
   fetchFlatBookingsByCard,
   updateRoomBooking,
   roomList,
@@ -37,20 +38,32 @@ import {
   revokeLateCheckoutFee
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
-import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN } from '../../config/constants.js';
+import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN, ROLE_KIOSK_ADMIN } from '../../config/constants.js';
 import CatchAsync, { catchAsyncRetry } from '../../utils/CatchAsync.js';
+import {
+  generateTempCodeForAdmin,
+  fetchTempCodesForAdmin
+} from '../../controllers/wifi/wifi.controller.js';
 
 router.use(auth);
 
 // Allowed for housekeepingAdmin, officeAdmin, superAdmin, and roomAdmin
 router.get('/occupancyReport', authorizeRoles(ROLE_HOUSEKEEPING_ADMIN, ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN), CatchAsync(occupancyReport));
 
+// Kiosk endpoints: accessible to kioskAdmin, officeAdmin, superAdmin, and roomAdmin
+const kioskRoles = authorizeRoles(ROLE_KIOSK_ADMIN, ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN);
+router.get('/kiosk/bookings/:cardno', kioskRoles, CatchAsync(fetchKioskBookingsByCard));
+router.put('/checkin/:bookingid', kioskRoles, CatchAsync(manualCheckin));
+router.put('/checkout/:bookingid', kioskRoles, CatchAsync(manualCheckout));
+router.put('/flat_checkin/:bookingid', kioskRoles, CatchAsync(flatCheckin));
+router.put('/flat_checkout/:bookingid', kioskRoles, CatchAsync(flatCheckout));
+router.post('/kiosk/wifi/generate_temp_code', kioskRoles, CatchAsync(generateTempCodeForAdmin));
+router.get('/kiosk/wifi/fetch_temp_codes/:cardno', kioskRoles, CatchAsync(fetchTempCodesForAdmin));
+
 router.use(authorizeRoles(ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN));
 
 // room routes
 router.post('/bookForMumukshu', CatchAsync(roomBooking));
-router.put('/checkin/:bookingid', CatchAsync(manualCheckin));
-router.put('/checkout/:bookingid', CatchAsync(manualCheckout));
 router.put('/update_room_booking', CatchAsync(updateRoomBooking));
 router.put('/update_booking_status', CatchAsync(updateBookingStatus));
 router.get('/room_list', CatchAsync(roomList));
@@ -69,8 +82,6 @@ router.post('/bulk_book', catchAsyncRetry(bulkRoomBooking));
 
 // flat routes
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));
-router.put('/flat_checkin/:bookingid', CatchAsync(flatCheckin));
-router.put('/flat_checkout/:bookingid', CatchAsync(flatCheckout));
 router.put('/flat_cancel/:bookingid', CatchAsync(cancelFlatBooking));
 router.get('/flat_list', CatchAsync(flatList));
 router.get('/fetch_flat_bookings/:cardno', CatchAsync(fetchFlatBookingsByCard));

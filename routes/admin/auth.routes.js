@@ -12,6 +12,11 @@ router.post(
   authorizeRoles(ROLE_SUPER_ADMIN),
   CatchAsync(createAdmin)
 );
-router.post('/reset-password', CatchAsync(resetPassword));
+router.post(
+  '/reset-password',
+  auth,
+  authorizeRoles(ROLE_SUPER_ADMIN),
+  CatchAsync(resetPassword)
+);
 
 export default router;
