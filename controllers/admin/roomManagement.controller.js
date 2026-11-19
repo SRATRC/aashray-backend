@@ -64,7 +64,8 @@ import {
   roomCharge,
   fetchActiveRoomBlocks,
   getOverlappingRoomBookings,
-  getPriorityOrderForMonth
+  getPriorityOrderForMonth,
+  isSeniorCitizen
 } from '../../helpers/roomBooking.helper.js';
 import { findUtsavOnBoundaryDates } from '../../helpers/utsavBooking.helper.js';
 import {
@@ -1407,7 +1408,16 @@ export const availableRooms = async (req, res) => {
     throw new ApiError(404, ERR_BOOKING_NOT_FOUND);
   }
 
-  const rooms = await findAllRoomsUnfiltered(booking.roomtype, booking.gender);
+  const card = await CardDb.findOne({
+    where: { cardno: booking.cardno },
+    attributes: ['dob']
+  });
+  const genders =
+    isSeniorCitizen(card?.dob, booking.checkin) && ['M', 'F'].includes(booking.gender)
+      ? ['SC' + booking.gender, booking.gender]
+      : [booking.gender];
+
+  const rooms = await findAllRoomsUnfiltered(booking.roomtype, genders);
 
   req.log.info('available_rooms_success', { bookingid, roomtype: booking.roomtype, count: rooms.length });
   return res
@@ -2298,6 +2308,10 @@ export const guestsByDateAndRoomtype = async (req, res) => {
 };
 
 export async function findAllRoomsUnfiltered(room_type, gender) {
+  const genderCondition = Array.isArray(gender)
+    ? { [Sequelize.Op.in]: gender }
+    : gender;
+
   return RoomDb.findAll({
     where: {
       roomno: {
@@ -2306,7 +2320,7 @@ export async function findAllRoomsUnfiltered(room_type, gender) {
       },
       roomstatus: ROOM_STATUS_AVAILABLE,
       roomtype: room_type,
-      ...(gender && { gender })
+      ...(gender && { gender: genderCondition })
     },
     order: [
       Sequelize.literal(

@@ -694,8 +694,7 @@ export async function createRoomBooking(
   activeRoomBlocks = null
 ) {
   const isSenior = isSeniorCitizen(user?.dob, checkin);
-  const baseGender = user_gender.endsWith('M') ? 'M' : user_gender.endsWith('F') ? 'F' : user_gender;
-  const gender = baseGender;
+  const gender = user_gender.endsWith('M') ? 'M' : user_gender.endsWith('F') ? 'F' : user_gender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
   const wantsGround = isSenior || floor_pref === 'SC' || floor_pref === 'ground' || floor_pref === '1st' || floor_pref === true;
 
@@ -1060,8 +1059,7 @@ export async function checkRoomAvailabilityForMumukshus(
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
       const isSenior = isSeniorCitizen(card?.dob, checkin_date);
-      const baseGender = card.gender.endsWith('M') ? 'M' : card.gender.endsWith('F') ? 'F' : card.gender;
-      const gender = baseGender;
+      const gender = card.gender.endsWith('M') ? 'M' : card.gender.endsWith('F') ? 'F' : card.gender;
       const wantsGround = isSenior || floorType === 'SC' || floorType === 'ground' || floorType === '1st' || floorType === true;
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
