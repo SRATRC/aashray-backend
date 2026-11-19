@@ -330,11 +330,12 @@ function buildPriorityOrderClause(priorityList, isGroundPref = false) {
   ];
 }
 
-export function isSeniorCitizen(dob) {
+export function isSeniorCitizen(dob, referenceDate = null) {
   if (dob) {
     const parsed = moment(dob);
     if (parsed.isValid()) {
-      return moment().diff(parsed, 'years') >= SENIOR_CITIZEN_MIN_AGE;
+      const ref = referenceDate ? moment(referenceDate) : moment();
+      return (ref.isValid() ? ref : moment()).diff(parsed, 'years') >= SENIOR_CITIZEN_MIN_AGE;
     }
   }
   return false;
@@ -692,9 +693,9 @@ export async function createRoomBooking(
   boundaryUtsav = undefined,
   activeRoomBlocks = null
 ) {
-  const isSenior = isSeniorCitizen(user?.dob);
+  const isSenior = isSeniorCitizen(user?.dob, checkin);
   const baseGender = user_gender.endsWith('M') ? 'M' : user_gender.endsWith('F') ? 'F' : user_gender;
-  const gender = isSenior ? 'SC' + baseGender : baseGender;
+  const gender = baseGender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
   const wantsGround = isSenior || floor_pref === 'SC' || floor_pref === 'ground' || floor_pref === '1st' || floor_pref === true;
 
@@ -1058,9 +1059,9 @@ export async function checkRoomAvailabilityForMumukshus(
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
-      const isSenior = isSeniorCitizen(card?.dob);
+      const isSenior = isSeniorCitizen(card?.dob, checkin_date);
       const baseGender = card.gender.endsWith('M') ? 'M' : card.gender.endsWith('F') ? 'F' : card.gender;
-      const gender = isSenior ? 'SC' + baseGender : baseGender;
+      const gender = baseGender;
       const wantsGround = isSenior || floorType === 'SC' || floorType === 'ground' || floorType === '1st' || floorType === true;
 
       const dateRanges = dateRangesByMumukshu[mumukshu];

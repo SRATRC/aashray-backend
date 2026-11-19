@@ -16,6 +16,16 @@ describe('Room Allocation - Senior Citizen Detection and Logic', () => {
     expect(isSeniorCitizen(dob59)).toBe(false);
   });
 
+  test('isSeniorCitizen: age calculated against referenceDate (check-in date)', () => {
+    // Guest turns 60 in 10 days
+    const dob = moment().subtract(60, 'years').add(10, 'days').format('YYYY-MM-DD');
+    const futureCheckin = moment().add(15, 'days').format('YYYY-MM-DD');
+    // Today they are 59:
+    expect(isSeniorCitizen(dob)).toBe(false);
+    // On future check-in date they will be 60:
+    expect(isSeniorCitizen(dob, futureCheckin)).toBe(true);
+  });
+
   test('isSeniorCitizen: null, empty or invalid DOB returns false (treated as non-senior for SCM/SCF)', () => {
     expect(isSeniorCitizen(null)).toBe(false);
     expect(isSeniorCitizen(undefined)).toBe(false);
