@@ -299,7 +299,7 @@ export async function getPriorityOrderForMonth(checkinDate) {
   }
 }
 
-function buildPriorityOrderClause(priorityList, isGroundPref = false) {
+export function buildPriorityOrderClause(priorityList, isGroundPref = false) {
   let orderedList = [...priorityList];
 
   if (isGroundPref) {
@@ -341,7 +341,7 @@ export function isSeniorCitizen(dob, referenceDate = null) {
   return false;
 }
 
-const resolveSearchGenders = (gender, isSenior = false) => {
+export const resolveSearchGenders = (gender, isSenior = false) => {
   const baseGender = gender.endsWith('M') ? 'M' : gender.endsWith('F') ? 'F' : gender;
   if (isSenior) {
     return baseGender === 'M' ? ['SCM', 'M'] : baseGender === 'F' ? ['SCF', 'F'] : [gender];
