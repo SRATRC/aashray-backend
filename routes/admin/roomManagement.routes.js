@@ -7,6 +7,10 @@ import {
   roomBooking,
   flatBooking,
   fetchRoomBookingsByCard,
+  bulkRoomBooking,
+  getAllocationPriorities,
+  updateAllocationPriority,
+  deleteAllocationPriority,
   fetchKioskBookingsByCard,
   fetchFlatBookingsByCard,
   updateRoomBooking,
@@ -35,7 +39,7 @@ import {
 } from '../../controllers/admin/roomManagement.controller.js';
 import { auth, authorizeRoles } from '../../middleware/AdminAuth.js';
 import { ROLE_OFFICE_ADMIN, ROLE_SUPER_ADMIN, ROLE_ROOM_ADMIN, ROLE_HOUSEKEEPING_ADMIN, ROLE_KIOSK_ADMIN } from '../../config/constants.js';
-import CatchAsync from '../../utils/CatchAsync.js';
+import CatchAsync, { catchAsyncRetry } from '../../utils/CatchAsync.js';
 import {
   generateTempCodeForAdmin,
   fetchTempCodesForAdmin
@@ -66,6 +70,15 @@ router.get('/room_list', CatchAsync(roomList));
 router.get('/available_rooms/:bookingid', CatchAsync(availableRooms));
 router.get('/available_rooms_for_day', CatchAsync(availableRoomsForDay))
 router.get('/fetch_room_bookings/:cardno', CatchAsync(fetchRoomBookingsByCard));
+
+// room allocation priority routes
+router.get('/allocation_priority', CatchAsync(getAllocationPriorities));
+router.put('/allocation_priority', CatchAsync(updateAllocationPriority));
+router.delete('/allocation_priority/:month', CatchAsync(deleteAllocationPriority));
+
+// bulk room booking route
+router.post('/bulk_book', catchAsyncRetry(bulkRoomBooking));
+
 
 // flat routes
 router.post('/bookFlat/:mobno', CatchAsync(flatBooking));

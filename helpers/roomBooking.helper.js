@@ -17,7 +17,8 @@ import {
   ERR_FLAT_ALREADY_BOOKED,
   HOLD_REASON,
   ROLLING_WINDOW_NIGHT_LIMIT,
-  RESEARCH_CENTRE
+  RESEARCH_CENTRE,
+  SENIOR_CITIZEN_MIN_AGE
 } from '../config/constants.js';
 import {
   RoomBooking,
@@ -62,6 +63,58 @@ function requireMumukshuGroup(mumukshuGroup) {
   if (!Array.isArray(mumukshuGroup) || mumukshuGroup.length === 0) {
     throw new ApiError(400, 'mumukshuGroup is required for a room booking');
   }
+}
+
+// Room bookings held by these cards that overlap [checkin, checkout), grouped by
+// cardno. The preview path needs WHICH card clashes and on WHAT dates so it can
+// name the clash per person, instead of failing the whole request with one
+// message. checkRoomAlreadyBooked keeps its boolean contract on top of this.
+export async function getOverlappingRoomBookings(checkin, checkout, cardnos, transaction = null) {
+  const queryCheckout = checkin === checkout
+    ? moment(checkin).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
+  const result = await RoomBooking.findAll({
+    attributes: ['cardno', 'checkin', 'checkout', 'nights', 'status'],
+    where: {
+      [Sequelize.Op.or]: [
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.gte]: checkin } },
+            { checkin: { [Sequelize.Op.lt]: queryCheckout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkout: { [Sequelize.Op.gt]: checkin } },
+            { checkout: { [Sequelize.Op.lte]: queryCheckout } }
+          ]
+        },
+        {
+          [Sequelize.Op.and]: [
+            { checkin: { [Sequelize.Op.lte]: checkin } },
+            { checkout: { [Sequelize.Op.gte]: queryCheckout } }
+          ]
+        }
+      ],
+      cardno: cardnos,
+      status: [
+        STATUS_WAITING,
+        STATUS_PAYMENT_PENDING,
+        ROOM_STATUS_CHECKEDIN,
+        ROOM_STATUS_PENDING_CHECKIN
+      ]
+    },
+    transaction
+  });
+
+  const byCard = {};
+  for (const booking of result) {
+    const key = String(booking.cardno);
+    if (!byCard[key]) byCard[key] = [];
+    byCard[key].push(booking);
+  }
+  return byCard;
 }
 
 export async function checkRoomAlreadyBooked(checkin, checkout, ...cardnos) {
@@ -221,81 +274,267 @@ async function bookAvailableRoom(
   return { t, discountedAmount, bookingId, bookedRoomNo: roomno };
 }
 
+export async function getPriorityOrderForMonth(checkinDate) {
+  const defaultList = ['OAG_1st', 'OAG_2nd', 'NAG_1st', 'NAG_2nd'];
+  try {
+    const parsed = checkinDate
+      ? moment(checkinDate, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY'])
+      : null;
+    const monthNum = parsed && parsed.isValid() ? parsed.month() + 1 : null;
+    let rec = null;
+    if (monthNum) {
+      rec = await RoomAllocationPriority.findOne({ where: { month: monthNum } });
+    }
+    if (!rec) {
+      rec = await RoomAllocationPriority.findOne({ where: { month: null } });
+    }
+    if (!rec || !rec.priority_order) {
+      return defaultList;
+    }
+    const list = rec.priority_order.split(',').map((s) => s.trim()).filter(Boolean);
+    return list.length > 0 ? list : defaultList;
+  } catch (err) {
+    logger.warn('get_priority_order_failed', { checkinDate, error: err.message });
+    return defaultList;
+  }
+}
+
+export function buildPriorityOrderClause(priorityList, isGroundPref = false) {
+  let orderedList = [...priorityList];
+
+  if (isGroundPref) {
+    const firstFloor = priorityList.filter((item) => item.endsWith('_1st'));
+    const secondFloor = priorityList.filter((item) => item.endsWith('_2nd'));
+    orderedList = [...firstFloor, ...secondFloor];
+  }
+
+  const oag1Index = orderedList.indexOf('OAG_1st') !== -1 ? orderedList.indexOf('OAG_1st') + 1 : 99;
+  const oag2Index = orderedList.indexOf('OAG_2nd') !== -1 ? orderedList.indexOf('OAG_2nd') + 1 : 99;
+  const nag1Index = orderedList.indexOf('NAG_1st') !== -1 ? orderedList.indexOf('NAG_1st') + 1 : 99;
+  const nag2Index = orderedList.indexOf('NAG_2nd') !== -1 ? orderedList.indexOf('NAG_2nd') + 1 : 99;
+
+  const ROOMNO_SHAPE = "roomno REGEXP '^[0-9]+[A-Za-z]$'";
+  return [
+    Sequelize.literal(`
+      CASE
+        WHEN NOT (${ROOMNO_SHAPE}) THEN 99
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 1 AND 18 THEN ${oag1Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 19 AND 36 THEN ${oag2Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 37 AND 48 THEN ${nag1Index}
+        WHEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) BETWEEN 49 AND 60 THEN ${nag2Index}
+        ELSE 99
+      END ASC
+    `),
+    Sequelize.literal(`CASE WHEN ${ROOMNO_SHAPE} THEN CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED) ELSE 999999 END ASC`),
+    Sequelize.literal('SUBSTRING(roomno, LENGTH(roomno)) ASC')
+  ];
+}
+
+export function isSeniorCitizen(dob, referenceDate = null) {
+  if (dob) {
+    const parsed = moment(dob);
+    if (parsed.isValid()) {
+      const ref = referenceDate ? moment(referenceDate) : moment();
+      return (ref.isValid() ? ref : moment()).diff(parsed, 'years') >= SENIOR_CITIZEN_MIN_AGE;
+    }
+  }
+  return false;
+}
+
+export const resolveSearchGenders = (gender, isSenior = false) => {
+  const baseGender = gender.endsWith('M') ? 'M' : gender.endsWith('F') ? 'F' : gender;
+  if (isSenior) {
+    return baseGender === 'M' ? ['SCM', 'M'] : baseGender === 'F' ? ['SCF', 'F'] : [gender];
+  }
+  return [baseGender];
+};
+
+async function fetchBlockedRoomnos(checkin, queryCheckout) {
+  try {
+    const blocks = await RoomBlock.findAll({
+      attributes: ['roomno'],
+      where: {
+        status: 'active',
+        start_date: { [Sequelize.Op.lt]: queryCheckout },
+        [Sequelize.Op.or]: [
+          { end_date: null },
+          { end_date: { [Sequelize.Op.gte]: checkin } }
+        ]
+      }
+    });
+    return blocks.map((b) => b.roomno);
+  } catch (err) {
+    logger.warn('fetch_blocked_rooms_failed', { error: err.message });
+    return [];
+  }
+}
+
+export async function fetchActiveRoomBlocks(checkin, checkout) {
+  try {
+    const windowCheckout = checkin === checkout
+      ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+      : checkout;
+    return await RoomBlock.findAll({
+      attributes: ['roomno', 'start_date', 'end_date'],
+      where: {
+        status: 'active',
+        start_date: { [Sequelize.Op.lt]: windowCheckout },
+        [Sequelize.Op.or]: [
+          { end_date: null },
+          { end_date: { [Sequelize.Op.gte]: checkin } }
+        ]
+      }
+    });
+  } catch (err) {
+    logger.warn('fetch_active_room_blocks_failed', { error: err.message });
+    return [];
+  }
+}
+
+export function blockedRoomsInRange(activeRoomBlocks, start, end) {
+  if (!Array.isArray(activeRoomBlocks) || activeRoomBlocks.length === 0) return [];
+  const rangeEnd = start === end
+    ? moment(start, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : end;
+  return activeRoomBlocks
+    .filter(
+      (b) =>
+        b.start_date < rangeEnd &&
+        (b.end_date === null || b.end_date >= start)
+    )
+    .map((b) => b.roomno);
+}
+
 export async function findRoom(
   checkin,
   checkout,
   room_type,
   gender,
   excludeRooms = [],
-  t = null
+  t = null,
+  floorPref = null,
+  priorityList = null,
+  adminBlockedRooms = null,
+  isSenior = null
 ) {
+  const queryCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  const blocked = adminBlockedRooms ?? (await fetchBlockedRoomnos(checkin, queryCheckout));
+  const priority = priorityList || (await getPriorityOrderForMonth(checkin));
+
+  const senior = isSenior !== null && isSenior !== undefined
+    ? Boolean(isSenior)
+    : (gender === 'SCM' || gender === 'SCF');
+
+  const isGroundPref = senior || floorPref === 'ground' || floorPref === '1st' || floorPref === 'SC' || floorPref === true;
+  const searchGenders = resolveSearchGenders(gender, senior);
+
+  for (const g of searchGenders) {
+    const room = await findRoomOfGender(
+      checkin, checkout, room_type, g, gender, excludeRooms, t, isGroundPref, priority, blocked
+    );
+    if (room) return room;
+  }
+  return null;
+}
+
+async function findRoomOfGender(
+  checkin,
+  checkout,
+  room_type,
+  roomGender,
+  requestedGender,
+  excludeRooms,
+  t,
+  floorPref,
+  priorityList,
+  adminBlockedRooms
+) {
+  const isGroundPref = typeof floorPref === 'boolean'
+    ? floorPref
+    : (floorPref === 'ground' || floorPref === '1st' || floorPref === true || requestedGender === 'SCM' || requestedGender === 'SCF');
+  const normalizedGender = roomGender;
+
+  const queryCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+
+  const blockedRooms = Array.isArray(adminBlockedRooms) ? adminBlockedRooms : [];
+  const allExcluded = [...new Set([...excludeRooms, ...blockedRooms])];
+
+  const orderClause = buildPriorityOrderClause(priorityList, isGroundPref);
+
   const whereConditions = {
     roomstatus: STATUS_AVAILABLE,
     roomtype: room_type,
-    gender: gender,
+    gender: normalizedGender,
     [Sequelize.Op.and]: [
       { roomno: { [Sequelize.Op.notLike]: 'NA%' } },
       { roomno: { [Sequelize.Op.notLike]: 'WL%' } },
       {
         roomno: {
-          [Sequelize.Op.notIn]: Sequelize.literal(`(
-            SELECT roomno 
-            FROM room_booking 
-            WHERE (checkout > :reqCheckin AND checkin < :reqCheckout)
-          AND status NOT IN (:excludeStatus1, :excludeStatus2)
-          )`)
+          [Sequelize.Op.notIn]: Sequelize.literal(
+            '(' +
+            'SELECT roomno ' +
+            'FROM room_booking ' +
+            'WHERE (checkout > :reqCheckin AND checkin < :reqCheckout) ' +
+            'AND status NOT IN (:excludeStatus1, :excludeStatus2)' +
+            ')'
+          )
         }
       }
     ]
   };
-
-  if (excludeRooms.length > 0) {
+  if (allExcluded.length > 0) {
     whereConditions[Sequelize.Op.and].push({
-      roomno: { [Sequelize.Op.notIn]: excludeRooms }
+      roomno: { [Sequelize.Op.notIn]: allExcluded }
     });
   }
- 
-  return RoomDb.findOne({
-    attributes: ['roomno'],
+
+  const queryOptions = {
     where: whereConditions,
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ],
     replacements: {
-      reqCheckin: checkin,    // Your variable for the requested check-in
-      reqCheckout: checkout,  // Your variable for the requested check-out
-      excludeStatus1: 'cancelled',           // Statuses that mean the room is actually free
-      excludeStatus2: 'admin cancelled'
+      reqCheckin: checkin,
+      reqCheckout: queryCheckout,
+      excludeStatus1: STATUS_CANCELLED,
+      excludeStatus2: STATUS_ADMIN_CANCELLED
     },
-    transaction: t,
-    lock: t ? t.LOCK.UPDATE : undefined,
-    limit: 1
-  });
+    order: orderClause
+  };
+
+  if (t) {
+    queryOptions.transaction = t;
+    queryOptions.lock = t.LOCK.UPDATE;
+  }
+
+  return RoomDb.findOne(queryOptions);
 }
 
-export async function findAllRooms(checkin, checkout, room_type, gender) {
+export async function findAllRooms(checkin, checkout, room_type, gender, floorPref = null, priorityList = null, isSenior = null) {
+  const windowCheckout = checkin === checkout
+    ? moment(checkin, ['YYYY-MM-DD', 'DD-MM-YYYY', 'YYYY/MM/DD', 'DD/MM/YYYY']).add(1, 'day').format('YYYY-MM-DD')
+    : checkout;
+  const blockedRooms = await fetchBlockedRoomnos(checkin, windowCheckout);
   const bookings = await RoomBooking.findAll({
     where: {
       [Sequelize.Op.or]: [
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.gte]: checkin } },
-            { checkin: { [Sequelize.Op.lt]: checkout } }
+            { checkin: { [Sequelize.Op.lt]: windowCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkout: { [Sequelize.Op.gt]: checkin } },
-            { checkout: { [Sequelize.Op.lte]: checkout } }
+            { checkout: { [Sequelize.Op.lte]: windowCheckout } }
           ]
         },
         {
           [Sequelize.Op.and]: [
             { checkin: { [Sequelize.Op.lte]: checkin } },
-            { checkout: { [Sequelize.Op.gte]: checkout } }
+            { checkout: { [Sequelize.Op.gte]: windowCheckout } }
           ]
         }
       ],
@@ -304,7 +543,13 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
       }
     }
   });
-  const bookedRooms = bookings.map((x) => x.roomno);
+  const bookedRooms = [...new Set([...bookings.map((x) => x.roomno), ...blockedRooms])];
+  const priority = priorityList || (await getPriorityOrderForMonth(checkin));
+  const senior = isSenior !== null && isSenior !== undefined
+    ? Boolean(isSenior)
+    : (gender === 'SCM' || gender === 'SCF');
+  const isGroundPref = senior || floorPref === 'ground' || floorPref === '1st' || floorPref === true;
+  const orderClause = buildPriorityOrderClause(priority, isGroundPref);
 
   return RoomDb.findAll({
     where: {
@@ -317,12 +562,7 @@ export async function findAllRooms(checkin, checkout, room_type, gender) {
       roomtype: room_type,
       ...(gender && { gender })
     },
-    order: [
-      Sequelize.literal(
-        `CAST(SUBSTRING(roomno, 1, LENGTH(roomno) - 1) AS UNSIGNED)`
-      ),
-      Sequelize.literal(`SUBSTRING(roomno, LENGTH(roomno))`)
-    ]
+    order: orderClause
   });
 }
 
@@ -446,10 +686,17 @@ export async function createRoomBooking(
   user,
   t,
   cashAllowed = false,
-  excludeRooms = []
+  excludeRooms = [],
+  customAmount = null,
+  priorityList = null,
+  skipCap = false,
+  boundaryUtsav = undefined,
+  activeRoomBlocks = null
 ) {
-  const gender = floor_pref ? floor_pref + user_gender : user_gender;
+  const isSenior = isSeniorCitizen(user?.dob, checkin);
+  const gender = user_gender.endsWith('M') ? 'M' : user_gender.endsWith('F') ? 'F' : user_gender;
   const bookedBy = user.cardno !== cardno ? user.cardno : null;
+  const wantsGround = isSenior || floor_pref === 'SC' || floor_pref === 'ground' || floor_pref === '1st' || floor_pref === true;
 
   // If this is a single-night booking that begins on the Utsav end date
   // OR ends on the Utsav start date,
@@ -485,7 +732,11 @@ export async function createRoomBooking(
     roomtype,
     gender,
     excludeRooms,
-    t
+    t,
+    wantsGround,
+    priorityList,
+    activeRoomBlocks ? blockedRoomsInRange(activeRoomBlocks, checkin, checkout) : null,
+    isSenior
   );
 
   if (!roomno) {
@@ -807,7 +1058,9 @@ export async function checkRoomAvailabilityForMumukshus(
 
     for (const mumukshu of mumukshus) {
       const card = cardDb.filter((item) => item.cardno == mumukshu)[0];
-      const gender = floorType ? floorType + card.gender : card.gender;
+      const isSenior = isSeniorCitizen(card?.dob, checkin_date);
+      const gender = card.gender.endsWith('M') ? 'M' : card.gender.endsWith('F') ? 'F' : card.gender;
+      const wantsGround = isSenior || floorType === 'SC' || floorType === 'ground' || floorType === '1st' || floorType === true;
 
       const dateRanges = dateRangesByMumukshu[mumukshu];
       for (const range of dateRanges) {
@@ -849,7 +1102,12 @@ export async function checkRoomAvailabilityForMumukshus(
             range.end,
             roomType,
             gender,
-            assignedRooms
+            assignedRooms,
+            null,
+            wantsGround,
+            null,
+            null,
+            isSenior
           );
           if (roomno) {
             status = STATUS_AVAILABLE;

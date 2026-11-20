@@ -508,7 +508,7 @@ export const resetPasswordDefault = async (req, res) => {
 };
 
 
-const CARD_LOOKUP_ATTRIBUTES = ['cardno', 'issuedto', 'center', 'mobno', 'res_status', 'gender', 'status'];
+const CARD_LOOKUP_ATTRIBUTES = ['cardno', 'issuedto', 'center', 'mobno', 'res_status', 'gender', 'dob', 'status'];
 
 const findCardBy = async (req, res, field, logName) => {
   const value = req.params[field];
